@@ -1,0 +1,60 @@
+import Link from 'next/link'
+import { notFound } from 'next/navigation'
+import { createClient } from '@/lib/supabase/server'
+import { createVehicle } from '../actions'
+import { VehicleForm, type VehicleFormValues } from '../VehicleForm'
+
+type Permission = 'worker' | 'foreman' | 'admin' | 'ceo'
+
+const defaults: VehicleFormValues = {
+  id: null,
+  plate_number: '',
+  name: '',
+  is_active: true,
+  notes: null,
+}
+
+export default async function NewVehiclePage({
+  searchParams,
+}: {
+  searchParams: Promise<{ error?: string }>
+}) {
+  const { error } = await searchParams
+  const supabase = await createClient()
+
+  const {
+    data: { user },
+  } = await supabase.auth.getUser()
+  if (!user) return null
+
+  const { data: meRow } = await supabase
+    .from('employees')
+    .select('permission')
+    .eq('auth_user_id', user.id)
+    .maybeSingle()
+  const me = meRow as { permission: Permission } | null
+  if (!me || (me.permission !== 'admin' && me.permission !== 'ceo')) {
+    notFound()
+  }
+
+  return (
+    <main className="min-h-screen p-4 sm:p-6">
+      <div className="mx-auto max-w-md space-y-5">
+        <header>
+          <Link href="/vehicles" className="text-xs text-slate-500 hover:text-slate-900">
+            ← 차량 목록
+          </Link>
+          <h1 className="mt-1 text-2xl font-bold text-slate-900">차량 등록</h1>
+        </header>
+
+        {error && (
+          <p className="text-sm text-red-600 bg-red-50 border border-red-200 rounded-lg p-3">
+            {error}
+          </p>
+        )}
+
+        <VehicleForm defaults={defaults} action={createVehicle} submitLabel="차량 등록" />
+      </div>
+    </main>
+  )
+}

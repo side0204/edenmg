@@ -1,0 +1,177 @@
+'use server'
+
+import { redirect } from 'next/navigation'
+import { revalidatePath } from 'next/cache'
+import { createClient } from '@/lib/supabase/server'
+import type { LeaveAction, LeaveStage, LeaveStatus } from '@/lib/leave'
+
+type Permission = 'worker' | 'foreman' | 'admin' | 'ceo'
+
+async function requireApprover() {
+  const supabase = await createClient()
+  const {
+    data: { user },
+  } = await supabase.auth.getUser()
+  if (!user) redirect('/login')
+
+  const { data: meRow } = await supabase
+    .from('employees')
+    .select('id, company_id, permission, is_active')
+    .eq('auth_user_id', user.id)
+    .maybeSingle()
+  const me = meRow as
+    | { id: string; company_id: string; permission: Permission; is_active: boolean }
+    | null
+  if (!me || !me.is_active) redirect('/?error=' + encodeURIComponent('계정이 활성 상태가 아닙니다'))
+  if (me.permission === 'worker') {
+    redirect('/?error=' + encodeURIComponent('결재 권한이 없습니다'))
+  }
+  return { supabase, me }
+}
+
+// 본인이 이 신청에 대해 어떤 결재 액션이 가능한지 판단.
+// 반환: { canAct: boolean, isAdmin: boolean, currentStage: 'foreman'|'admin' }
+function decideAuthority(
+  me: { id: string; permission: Permission },
+  lr: { assigned_foreman_id: string | null; pending_stage: LeaveStage | null; status: LeaveStatus },
+): { canAct: boolean; isAdmin: boolean } {
+  if (lr.status !== '대기' || lr.pending_stage === null) return { canAct: false, isAdmin: false }
+  const isAdmin = me.permission === 'admin' || me.permission === 'ceo'
+  if (isAdmin) return { canAct: true, isAdmin }
+  if (me.permission === 'foreman' && lr.pending_stage === 'foreman' && lr.assigned_foreman_id === me.id) {
+    return { canAct: true, isAdmin: false }
+  }
+  return { canAct: false, isAdmin: false }
+}
+
+async function loadRequest(supabase: Awaited<ReturnType<typeof createClient>>, id: string) {
+  const { data } = await supabase
+    .from('leave_requests')
+    .select('id, company_id, assigned_foreman_id, pending_stage, status')
+    .eq('id', id)
+    .maybeSingle()
+  return data as
+    | { id: string; company_id: string; assigned_foreman_id: string | null; pending_stage: LeaveStage | null; status: LeaveStatus }
+    | null
+}
+
+function parseActionForm(formData: FormData) {
+  const id = String(formData.get('id') ?? '').trim()
+  const commentRaw = String(formData.get('comment') ?? '').trim()
+  return { id, comment: commentRaw || null }
+}
+
+export async function approveRequest(formData: FormData) {
+  const { id, comment } = parseActionForm(formData)
+  if (!id) redirect('/approvals?error=' + encodeURIComponent('신청 id 가 없습니다'))
+
+  const { supabase, me } = await requireApprover()
+  const lr = await loadRequest(supabase, id)
+  if (!lr) redirect('/approvals?error=' + encodeURIComponent('신청을 찾을 수 없습니다'))
+  if (lr.company_id !== me.company_id) {
+    redirect('/approvals?error=' + encodeURIComponent('다른 회사 신청입니다'))
+  }
+
+  const authority = decideAuthority(me, lr)
+  if (!authority.canAct) {
+    redirect(`/approvals/${id}?error=` + encodeURIComponent('이 신청을 결재할 권한이 없습니다'))
+  }
+
+  const now = new Date().toISOString()
+  let nextStatus: LeaveStatus = lr.status
+  let nextStage: LeaveStage | null = lr.pending_stage
+  let action: LeaveAction = '승인'
+  let finalActorId: string | null = null
+  let finalActedAt: string | null = null
+
+  if (authority.isAdmin) {
+    // 관리자/대표는 어느 단계든 단독 종결. foreman 단계였으면 '전결' 로 기록.
+    if (lr.pending_stage === 'foreman') {
+      action = '전결'
+    } else {
+      action = '승인'
+    }
+    nextStatus = '승인'
+    nextStage = null
+    finalActorId = me.id
+    finalActedAt = now
+  } else {
+    // 소장 승인 — 다음 단계로 이동
+    action = '승인'
+    nextStatus = '대기'
+    nextStage = 'admin'
+  }
+
+  const { error: upErr } = await supabase
+    .from('leave_requests')
+    .update({
+      status: nextStatus,
+      pending_stage: nextStage,
+      final_actor_id: finalActorId ?? undefined,
+      final_acted_at: finalActedAt ?? undefined,
+    })
+    .eq('id', id)
+
+  if (upErr) {
+    redirect(`/approvals/${id}?error=` + encodeURIComponent('처리 실패: ' + upErr.message))
+  }
+
+  await supabase.from('leave_request_approvals').insert({
+    leave_request_id: id,
+    actor_employee_id: me.id,
+    action,
+    comment,
+  })
+
+  revalidatePath('/approvals')
+  revalidatePath(`/approvals/${id}`)
+  revalidatePath('/requests')
+  revalidatePath(`/requests/${id}`)
+  revalidatePath('/')
+  redirect('/approvals?done=' + encodeURIComponent(action))
+}
+
+export async function rejectRequest(formData: FormData) {
+  const { id, comment } = parseActionForm(formData)
+  if (!id) redirect('/approvals?error=' + encodeURIComponent('신청 id 가 없습니다'))
+
+  const { supabase, me } = await requireApprover()
+  const lr = await loadRequest(supabase, id)
+  if (!lr) redirect('/approvals?error=' + encodeURIComponent('신청을 찾을 수 없습니다'))
+  if (lr.company_id !== me.company_id) {
+    redirect('/approvals?error=' + encodeURIComponent('다른 회사 신청입니다'))
+  }
+  const authority = decideAuthority(me, lr)
+  if (!authority.canAct) {
+    redirect(`/approvals/${id}?error=` + encodeURIComponent('이 신청을 결재할 권한이 없습니다'))
+  }
+
+  const now = new Date().toISOString()
+  const { error: upErr } = await supabase
+    .from('leave_requests')
+    .update({
+      status: '반려',
+      pending_stage: null,
+      final_actor_id: me.id,
+      final_acted_at: now,
+    })
+    .eq('id', id)
+
+  if (upErr) {
+    redirect(`/approvals/${id}?error=` + encodeURIComponent('반려 실패: ' + upErr.message))
+  }
+
+  await supabase.from('leave_request_approvals').insert({
+    leave_request_id: id,
+    actor_employee_id: me.id,
+    action: '반려',
+    comment,
+  })
+
+  revalidatePath('/approvals')
+  revalidatePath(`/approvals/${id}`)
+  revalidatePath('/requests')
+  revalidatePath(`/requests/${id}`)
+  revalidatePath('/')
+  redirect('/approvals?done=' + encodeURIComponent('반려'))
+}
