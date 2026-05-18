@@ -1,16 +1,21 @@
 'use client'
 
 import { useEffect, useState } from 'react'
-import { ChevronDown, Plus, Search, X } from 'lucide-react'
+import { Check, ChevronDown, Plus, Search, X } from 'lucide-react'
 import type { EmployeeOption } from '../requests/new/EmployeeCombobox'
 
 /**
  * 작업 등록 시 여러 작업자 선택용 multi-select.
- * - 「+ 작업자 추가」 버튼 → 풀스크린 모달 검색 (EmployeeCombobox 패턴 재사용)
- * - 선택 시 리스트에 추가, 모달 닫힘
- * - 각 항목 X 버튼으로 제거
- * - hidden input `worker_ids` 에 선택된 id 들을 JSON 직렬화
- * - 모바일 ghost click 회피: 모달 닫는 backdrop 은 onPointerDown + preventDefault
+ *
+ * 핵심 패턴 (모바일 ghost-click 안전):
+ *  - 「+ 작업자 추가」 → 풀스크린 모달
+ *  - 모달의 직원 항목은 toggle 동작 (이미 추가된 직원이면 제거, 아니면 추가)
+ *  - 추가 후 리스트에서 항목을 제거하지 않음 → 화면 reorder 안 됨 → 손가락 위치의
+ *    항목이 바뀌지 않아 ghost click 으로 다른 직원이 잘못 선택되는 일 없음
+ *  - 모달이 자동으로 닫히지 않음. 사용자가 「완료」 또는 X 로 명시 종료
+ *  - 모달 상단에 추가된 직원 칩 리스트 표시 — 사용자가 모달 안에서 즉시 확인 가능
+ *
+ * hidden input `worker_ids` 에 선택된 id 들을 JSON 배열로 직렬화.
  */
 export function WorkersMultiSelect({
   name = 'worker_ids',
@@ -26,9 +31,6 @@ export function WorkersMultiSelect({
   const [selected, setSelected] = useState<EmployeeOption[]>(initialSelected)
   const [open, setOpen] = useState(false)
   const [query, setQuery] = useState('')
-  // ghost click 차단: 모달 닫은 직후 잠시 (300ms) fixed overlay 로 click 흡수.
-  // 한 페이지에 다른 모달(담당자 EmployeeCombobox) 트리거가 있을 때 좌표가 겹쳐
-  // 모달이 다시 열리거나 다른 선택이 변경되는 안드로이드 크롬 ghost-click 버그 방어.
   const [ghostBlock, setGhostBlock] = useState(false)
 
   useEffect(() => {
@@ -43,27 +45,29 @@ export function WorkersMultiSelect({
   const closeWithBlock = () => {
     setOpen(false)
     setGhostBlock(true)
-    setTimeout(() => setGhostBlock(false), 300)
+    setTimeout(() => setGhostBlock(false), 500)
   }
 
-  const selectedIds = new Set(selected.map((s) => s.id))
+  const selectedIdSet = new Set(selected.map((s) => s.id))
   const q = query.trim().toLowerCase()
-  const filtered = candidates
-    .filter((c) => !selectedIds.has(c.id))
-    .filter((c) => {
-      if (!q) return true
-      const hay = [c.name, c.position, c.team, c.work_type]
-        .filter(Boolean)
-        .join(' ')
-        .toLowerCase()
-      return hay.includes(q)
-    })
+  // 중요: filtered 에서 selected 항목을 제거하지 않는다.
+  // → 항목 위치가 바뀌지 않아 ghost click 안전. 이미 선택된 항목은 체크 표시.
+  const filtered = candidates.filter((c) => {
+    if (!q) return true
+    const hay = [c.name, c.position, c.team, c.work_type]
+      .filter(Boolean)
+      .join(' ')
+      .toLowerCase()
+    return hay.includes(q)
+  })
 
-  const onPick = (emp: EmployeeOption) => {
-    // 선택 후 모달을 닫지 않음 — 여러 명 연속 추가 가능.
-    // 모달이 안 닫히므로 ghost click 자체가 발생 안 함 (담당자 모달 오작동 차단의 근본 해결).
-    setSelected((prev) => [...prev, emp])
-    setQuery('')
+  const onToggle = (emp: EmployeeOption) => {
+    setSelected((prev) => {
+      if (prev.some((s) => s.id === emp.id)) {
+        return prev.filter((s) => s.id !== emp.id)
+      }
+      return [...prev, emp]
+    })
   }
 
   const onRemove = (id: string) => {
@@ -74,6 +78,8 @@ export function WorkersMultiSelect({
     setQuery('')
     setOpen(true)
   }
+
+  const noWorkTypeCount = candidates.filter((c) => !c.work_type).length
 
   return (
     <>
@@ -90,7 +96,7 @@ export function WorkersMultiSelect({
               const sub = [
                 s.position,
                 s.team ? `${s.team}팀` : null,
-                s.work_type ? `${s.work_type}` : null,
+                s.work_type ? `${s.work_type} 분야` : null,
               ]
                 .filter(Boolean)
                 .join(' · ')
@@ -150,17 +156,44 @@ export function WorkersMultiSelect({
           <div className="rounded-t-2xl bg-white shadow-xl max-h-[85vh] flex flex-col">
             <div className="flex items-center justify-between gap-2 border-b border-slate-100 px-4 py-2.5">
               <p className="text-xs text-slate-500">
-                추가됨 <span className="font-semibold text-slate-900 tabular-nums">{selected.length}</span>명
-                · 직원을 탭하면 바로 추가됩니다
+                추가됨{' '}
+                <span className="font-semibold text-slate-900 tabular-nums">
+                  {selected.length}
+                </span>
+                명 · 직원을 탭하면 추가, 다시 탭하면 제거
               </p>
               <button
                 type="button"
                 onClick={() => closeWithBlock()}
-                className="rounded-md bg-slate-900 px-3 py-1 text-xs font-medium text-white hover:bg-slate-800"
+                className="rounded-md bg-slate-900 px-3 py-1.5 text-xs font-medium text-white hover:bg-slate-800"
               >
                 완료
               </button>
             </div>
+
+            {/* 추가된 직원 칩 리스트 — 모달 안에서 즉시 확인 + 빠른 제거 */}
+            {selected.length > 0 && (
+              <div className="border-b border-slate-100 bg-slate-50 px-3 py-2">
+                <ul className="flex flex-wrap gap-1">
+                  {selected.map((s) => (
+                    <li key={s.id}>
+                      <button
+                        type="button"
+                        onClick={() => onRemove(s.id)}
+                        className="inline-flex items-center gap-1 rounded-full border border-slate-300 bg-white px-2 py-0.5 text-xs text-slate-700 hover:bg-rose-50 hover:border-rose-300 hover:text-rose-700"
+                      >
+                        {s.name}
+                        {s.work_type && (
+                          <span className="text-[10px] text-slate-500">· {s.work_type}</span>
+                        )}
+                        <X className="h-3 w-3" />
+                      </button>
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            )}
+
             <div className="flex items-center gap-2 border-b border-slate-200 px-4 py-3">
               <Search className="h-5 w-5 shrink-0 text-slate-400" />
               <input
@@ -181,22 +214,27 @@ export function WorkersMultiSelect({
                 <X className="h-5 w-5" />
               </button>
             </div>
+
+            {noWorkTypeCount > 0 && (
+              <p className="border-b border-amber-100 bg-amber-50 px-4 py-2 text-[11px] text-amber-800">
+                ※ 분야(접속/외선/공무) 미지정 직원 {noWorkTypeCount}명. 「관리 → 직원 관리」에서
+                분야를 설정하면 여기에 배지로 표시됩니다.
+              </p>
+            )}
+
             <div className="flex-1 overflow-y-auto">
               {filtered.length === 0 ? (
                 <p className="px-4 py-8 text-center text-sm text-slate-500">
-                  {q
-                    ? '일치하는 직원이 없습니다.'
-                    : selected.length === candidates.length
-                      ? '모든 직원이 이미 추가되었습니다.'
-                      : '추가할 수 있는 직원이 없습니다.'}
+                  {q ? '일치하는 직원이 없습니다.' : '등록된 직원이 없습니다.'}
                 </p>
               ) : (
                 <ul className="divide-y divide-slate-100">
                   {filtered.map((c) => {
+                    const isSel = selectedIdSet.has(c.id)
                     const sub = [
                       c.position,
                       c.team ? `${c.team}팀` : null,
-                      c.work_type ? `${c.work_type}` : null,
+                      c.work_type ? `${c.work_type} 분야` : null,
                     ]
                       .filter(Boolean)
                       .join(' · ')
@@ -205,24 +243,45 @@ export function WorkersMultiSelect({
                         <div
                           role="button"
                           tabIndex={0}
+                          aria-pressed={isSel}
                           onPointerDown={(e) => {
                             e.preventDefault()
                             e.stopPropagation()
-                            onPick(c)
+                            onToggle(c)
                           }}
                           onKeyDown={(e) => {
                             if (e.key === 'Enter' || e.key === ' ') {
                               e.preventDefault()
-                              onPick(c)
+                              onToggle(c)
                             }
                           }}
-                          className="flex w-full items-center gap-3 px-4 py-3 text-left hover:bg-slate-50 active:bg-slate-100 cursor-pointer"
+                          className={
+                            'flex w-full items-center gap-3 px-4 py-3 text-left cursor-pointer ' +
+                            (isSel
+                              ? 'bg-emerald-50 hover:bg-emerald-100 active:bg-emerald-200'
+                              : 'hover:bg-slate-50 active:bg-slate-100')
+                          }
                         >
+                          <span
+                            className={
+                              'shrink-0 flex h-5 w-5 items-center justify-center rounded border ' +
+                              (isSel
+                                ? 'bg-emerald-600 border-emerald-600 text-white'
+                                : 'border-slate-300 bg-white')
+                            }
+                          >
+                            {isSel && <Check className="h-3.5 w-3.5" />}
+                          </span>
                           <div className="min-w-0 flex-1">
                             <p className="truncate text-base text-slate-900 inline-flex items-center gap-1.5">
                               {c.name}
                               {c.work_type && (
-                                <span className="inline-flex rounded-full border border-slate-200 bg-slate-50 px-1.5 py-0.5 text-[10px] font-medium text-slate-600">
+                                <span
+                                  className={
+                                    'inline-flex rounded-full border px-1.5 py-0.5 text-[10px] font-medium ' +
+                                    workTypeBadgeClass(c.work_type)
+                                  }
+                                >
                                   {c.work_type}
                                 </span>
                               )}
@@ -242,7 +301,7 @@ export function WorkersMultiSelect({
         </div>
       )}
 
-      {/* ghost click 흡수 overlay — 모달 닫힌 직후 300ms 만 표시 */}
+      {/* ghost click 흡수 overlay — 모달 닫힌 직후 500ms */}
       {ghostBlock && (
         <div
           className="fixed inset-0 z-[60]"
@@ -259,4 +318,11 @@ export function WorkersMultiSelect({
       )}
     </>
   )
+}
+
+function workTypeBadgeClass(workType: string): string {
+  if (workType === '접속') return 'border-blue-200 bg-blue-50 text-blue-700'
+  if (workType === '외선') return 'border-orange-200 bg-orange-50 text-orange-700'
+  if (workType === '공무') return 'border-violet-200 bg-violet-50 text-violet-700'
+  return 'border-slate-200 bg-slate-50 text-slate-600'
 }
