@@ -43,11 +43,6 @@ export function WorkersMultiSelect({
   const [selected, setSelected] = useState<SelectedWorker[]>(initialSelected)
   const [open, setOpen] = useState(false)
   const [query, setQuery] = useState('')
-  // 모달 닫힌 직후 잠시 fixed overlay 로 모든 클릭 흡수.
-  // 「완료」 탭 등으로 모달을 닫으면 그 좌표 아래에 있던 메인 form 의 작업자 카드
-  // X 버튼이 ghost-tap 으로 발화하여 작업자가 자동 제거되는 안드로이드 크롬 버그
-  // 방어. 800ms 정도가 안정적.
-  const [ghostBlock, setGhostBlock] = useState(false)
 
   useEffect(() => {
     if (!open) return
@@ -59,24 +54,7 @@ export function WorkersMultiSelect({
   }, [open])
 
   const closeModal = () => {
-    // 강력한 ghost-tap 차단 패턴 (다단계):
-    //  1) document.body 의 pointer-events 를 'none' 으로 잠그기 → 모든 클릭 흡수
-    //  2) 100ms 뒤에 모달 unmount (그 동안 모달이 click 이벤트 흡수)
-    //  3) 추가 600ms 동안 overlay 유지 (총 700ms body lock + overlay)
-    //  4) body 풀기
-    if (typeof document !== 'undefined') {
-      document.body.style.pointerEvents = 'none'
-    }
-    setGhostBlock(true)
-    setTimeout(() => {
-      setOpen(false)
-    }, 100)
-    setTimeout(() => {
-      if (typeof document !== 'undefined') {
-        document.body.style.pointerEvents = ''
-      }
-      setGhostBlock(false)
-    }, 700)
+    setOpen(false)
   }
 
   const selectedIdSet = useMemo(() => new Set(selected.map((s) => s.id)), [selected])
@@ -240,8 +218,14 @@ export function WorkersMultiSelect({
         </button>
       </div>
 
-      {open && (
-        <div className="fixed inset-0 z-50 flex flex-col bg-black/40">
+      {/* 모달을 항상 mount 한 채 hidden 으로만 토글. unmount 시 컴포넌트 재마운트
+          로 인한 state 리셋 위험을 원천 차단. */}
+      <div
+        className={
+          'fixed inset-0 z-50 flex flex-col bg-black/40 ' +
+          (open ? '' : 'hidden pointer-events-none')
+        }
+      >
           <button
             type="button"
             className="flex-1"
@@ -373,24 +357,6 @@ export function WorkersMultiSelect({
             </div>
           </div>
         </div>
-      )}
-
-      {/* ghost click 흡수 overlay — 모달 닫힌 직후 800ms.
-          메인 form 의 작업자 X 버튼·추가 버튼이 ghost-tap 으로 클릭되는 것 차단. */}
-      {ghostBlock && (
-        <div
-          className="fixed inset-0 z-[60]"
-          onPointerDown={(e) => {
-            e.preventDefault()
-            e.stopPropagation()
-          }}
-          onClick={(e) => {
-            e.preventDefault()
-            e.stopPropagation()
-          }}
-          aria-hidden
-        />
-      )}
     </>
   )
 }
