@@ -48,7 +48,7 @@ export default async function NewSitePage() {
           <Link href="/admin/sites" className="text-xs text-slate-500 hover:text-slate-900">
             ← 현장 목록
           </Link>
-          <h1 className="mt-1 text-2xl font-bold text-slate-900">현장 등록</h1>
+          <h1 className="mt-1 text-3xl font-bold text-slate-900 tracking-tight">현장 등록</h1>
         </header>
 
 

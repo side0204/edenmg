@@ -45,7 +45,7 @@ export default async function ReportsPage() {
           <Link href="/" className="text-xs text-slate-500 hover:text-slate-900">
             ← 홈
           </Link>
-          <h1 className="mt-1 text-2xl font-bold text-slate-900">월별 리포트</h1>
+          <h1 className="mt-1 text-3xl font-bold text-slate-900 tracking-tight">월별 리포트</h1>
           <p className="mt-1 text-sm text-slate-600">
             대상 월을 선택한 뒤 출퇴근·신청서 CSV 를 받아 엑셀에서 여세요.
           </p>

@@ -35,7 +35,7 @@ export default async function InviteEmployeePage() {
           <Link href="/admin/employees" className="text-xs text-slate-500 hover:text-slate-900">
             ← 직원 목록
           </Link>
-          <h1 className="mt-1 text-2xl font-bold text-slate-900">직원 초대</h1>
+          <h1 className="mt-1 text-3xl font-bold text-slate-900 tracking-tight">직원 초대</h1>
           <p className="mt-1 text-sm text-slate-500">
             이메일로 초대 링크를 보냅니다. 사용자가 링크를 클릭해 비밀번호를 설정하면 가입이 완료됩니다.
           </p>

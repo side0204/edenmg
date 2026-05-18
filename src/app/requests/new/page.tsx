@@ -49,11 +49,11 @@ export default async function NewRequestPage() {
     <main className="min-h-screen p-4 sm:p-6">
       <div className="mx-auto max-w-md space-y-5">
         <header>
-          <Link href="/requests" className="text-xs text-slate-500 hover:text-slate-900">
+          <Link href="/requests" className="text-sm text-slate-500 hover:text-slate-900">
             ← 내 신청
           </Link>
-          <h1 className="mt-1 text-2xl font-bold text-slate-900">신청 작성</h1>
-          <p className="mt-1 text-xs text-slate-500">휴가·외근·기타 결재 신청서를 작성합니다.</p>
+          <h1 className="mt-1 text-3xl font-bold text-slate-900 tracking-tight">신청 작성</h1>
+          <p className="mt-1 text-sm text-slate-500">휴가·외근·기타 결재 신청서를 작성합니다.</p>
         </header>
 
 

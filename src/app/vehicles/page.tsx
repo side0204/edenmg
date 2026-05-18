@@ -121,11 +121,11 @@ export default async function VehiclesPage() {
       <div className="mx-auto max-w-3xl space-y-5">
         <header className="flex items-center justify-between gap-3">
           <div>
-            <Link href="/" className="text-xs text-slate-500 hover:text-slate-900">
+            <Link href="/" className="text-sm text-slate-500 hover:text-slate-900">
               ← 홈
             </Link>
-            <h1 className="mt-1 text-2xl font-bold text-slate-900">업무용 차량</h1>
-            <p className="mt-0.5 text-xs text-slate-500">
+            <h1 className="mt-1 text-3xl font-bold text-slate-900 tracking-tight">업무용 차량</h1>
+            <p className="mt-1 text-sm text-slate-500">
               {isAdmin ? '회사 전체 차량 · 운행 현황' : '회사 차량 출고·반납'}
             </p>
           </div>
@@ -151,7 +151,7 @@ export default async function VehiclesPage() {
 
         {/* 차량 카드 리스트 */}
         <section className="space-y-3">
-          <h2 className="text-sm font-medium text-slate-700">차량 목록</h2>
+          <h2 className="text-base font-semibold text-slate-700 tracking-tight">차량 목록</h2>
           {vehicles.length === 0 ? (
             <p className="rounded-xl bg-white border border-dashed border-slate-300 p-8 text-center text-sm text-slate-500">
               등록된 차량이 없습니다.
@@ -272,7 +272,7 @@ export default async function VehiclesPage() {
         {recent.length > 0 && (
           <section className="space-y-3">
             <div className="flex items-center justify-between">
-              <h2 className="text-sm font-medium text-slate-700">최근 운행 (10건)</h2>
+              <h2 className="text-base font-semibold text-slate-700 tracking-tight">최근 운행 (10건)</h2>
               <Link
                 href="/vehicles/trips"
                 className="text-xs font-medium text-slate-600 hover:text-slate-900"

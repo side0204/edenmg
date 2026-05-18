@@ -76,11 +76,11 @@ export default async function AttendancePage() {
     <main className="min-h-screen p-4 sm:p-6">
       <div className="mx-auto max-w-md space-y-5">
         <header>
-          <Link href="/" className="text-xs text-slate-500 hover:text-slate-900">
+          <Link href="/" className="text-sm text-slate-500 hover:text-slate-900">
             ← 홈
           </Link>
-          <h1 className="mt-1 text-2xl font-bold text-slate-900">출퇴근</h1>
-          <p className="mt-1 text-xs text-slate-500">{me.name} · {formatWorkDate(workDate)}</p>
+          <h1 className="mt-1 text-3xl font-bold text-slate-900 tracking-tight">출퇴근</h1>
+          <p className="mt-1 text-sm text-slate-500">{me.name} · {formatWorkDate(workDate)}</p>
         </header>
 
         {sites.length === 0 && (

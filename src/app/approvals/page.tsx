@@ -78,11 +78,11 @@ export default async function ApprovalsPage() {
     <main className="min-h-screen p-4 sm:p-6">
       <div className="mx-auto max-w-2xl space-y-5">
         <header>
-          <Link href="/" className="text-xs text-slate-500 hover:text-slate-900">
+          <Link href="/" className="text-sm text-slate-500 hover:text-slate-900">
             ← 홈
           </Link>
-          <h1 className="mt-1 text-2xl font-bold text-slate-900">결재함</h1>
-          <p className="mt-1 text-xs text-slate-500">
+          <h1 className="mt-1 text-3xl font-bold text-slate-900 tracking-tight">결재함</h1>
+          <p className="mt-1 text-sm text-slate-500">
             {isAdmin ? '회사의 모든 대기 신청을 처리할 수 있습니다.' : '본인이 1차 결재자로 지정된 대기 신청만 표시됩니다.'}
           </p>
         </header>

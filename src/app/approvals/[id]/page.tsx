@@ -128,10 +128,10 @@ export default async function ApprovalDetailPage({
     <main className="min-h-screen p-4 sm:p-6">
       <div className="mx-auto max-w-md space-y-5">
         <header>
-          <Link href="/approvals" className="text-xs text-slate-500 hover:text-slate-900">
+          <Link href="/approvals" className="text-sm text-slate-500 hover:text-slate-900">
             ← 결재함
           </Link>
-          <h1 className="mt-1 text-2xl font-bold text-slate-900 flex items-center gap-2">
+          <h1 className="mt-1 text-3xl font-bold text-slate-900 tracking-tight flex items-center gap-2">
             {nameById.get(req.employee_id) ?? '?'} · {LEAVE_TYPE_LABEL[req.type]}
             {req.is_urgent && (
               <span className="rounded bg-red-100 text-red-700 text-xs font-bold px-2 py-0.5">

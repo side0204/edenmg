@@ -67,7 +67,7 @@ export default async function SitesPage() {
             <Link href="/" className="text-xs text-slate-500 hover:text-slate-900">
               ← 홈
             </Link>
-            <h1 className="mt-1 text-2xl font-bold text-slate-900">현장 관리</h1>
+            <h1 className="mt-1 text-3xl font-bold text-slate-900 tracking-tight">현장 관리</h1>
           </div>
           <Link
             href="/admin/sites/new"

@@ -50,7 +50,7 @@ export default function VehicleStatusList({
 
   return (
     <div className="space-y-1.5">
-      <p className="text-xs text-slate-500">운행 현황 (탭하여 자세히 보기·출고)</p>
+      <p className="text-sm text-slate-500">운행 현황 (탭하여 자세히 보기·출고)</p>
       <ul className="divide-y divide-slate-100 rounded-lg border border-slate-200">
         {rows.map((r) => {
           const isExpanded = expandedId === r.vehicleId

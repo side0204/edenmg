@@ -8,7 +8,7 @@ export default function LoginPage() {
         className="w-full max-w-sm space-y-5 bg-white p-6 sm:p-8 rounded-2xl shadow-sm border border-slate-200"
       >
         <div>
-          <h1 className="text-2xl font-bold text-slate-900">로그인</h1>
+          <h1 className="text-3xl font-bold text-slate-900 tracking-tight">로그인</h1>
           <p className="mt-1 text-sm text-slate-500">(주)이든정보기술 통합관리</p>
         </div>
 

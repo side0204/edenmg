@@ -84,7 +84,7 @@ export default async function ReturnPage({
           <Link href="/vehicles" className="text-xs text-slate-500 hover:text-slate-900">
             ← 차량 목록
           </Link>
-          <h1 className="mt-1 text-2xl font-bold text-slate-900">반납</h1>
+          <h1 className="mt-1 text-3xl font-bold text-slate-900 tracking-tight">반납</h1>
           <p className="mt-1 text-sm text-slate-600">
             <span className="font-medium">{vehicle.plate_number}</span> · {vehicle.name}
           </p>

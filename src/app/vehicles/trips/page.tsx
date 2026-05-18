@@ -207,7 +207,7 @@ export default async function VehicleTripsPage({
             <Link href="/vehicles" className="text-xs text-slate-500 hover:text-slate-900">
               ← 차량 관리
             </Link>
-            <h1 className="mt-1 text-2xl font-bold text-slate-900">운행일지 검색</h1>
+            <h1 className="mt-1 text-3xl font-bold text-slate-900 tracking-tight">운행일지 검색</h1>
             <p className="mt-0.5 text-xs text-slate-500">기간·차량·운전자·주유 여부로 필터링 후 CSV 다운로드</p>
           </div>
           <a

@@ -30,11 +30,11 @@ export default async function WelcomePage() {
         className="w-full max-w-sm space-y-5 bg-white p-6 sm:p-8 rounded-2xl shadow-sm border border-slate-200"
       >
         <div>
-          <p className="text-xs text-slate-500">{me?.companies?.name ?? '(주)이든정보기술'}</p>
-          <h1 className="mt-1 text-2xl font-bold text-slate-900">
+          <p className="text-sm text-slate-500">{me?.companies?.name ?? '(주)이든정보기술'}</p>
+          <h1 className="mt-1 text-3xl font-bold text-slate-900 tracking-tight">
             환영합니다{me?.name ? `, ${me.name}님` : ''}
           </h1>
-          <p className="mt-2 text-sm text-slate-600">
+          <p className="mt-2 text-base text-slate-600">
             비밀번호를 설정하면 가입이 완료됩니다.
           </p>
         </div>

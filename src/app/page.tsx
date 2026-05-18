@@ -223,38 +223,38 @@ export default async function Home() {
       <div className="mx-auto max-w-2xl space-y-6">
         <header className="flex items-start justify-between gap-3">
           <div>
-            <p className="text-xs text-slate-500">{employee.companies?.name ?? '회사 미지정'}</p>
-            <h1 className="text-2xl font-bold text-slate-900">
+            <p className="text-sm text-slate-600">{employee.companies?.name ?? '회사 미지정'}</p>
+            <h1 className="text-3xl font-bold text-slate-900 tracking-tight">
               {employee.name}
-              <span className="ml-2 text-sm font-medium text-slate-500">
+              <span className="ml-2 text-base font-medium text-slate-500">
                 {PERMISSION_LABEL[employee.permission]}
               </span>
             </h1>
             {subtitleParts.length > 0 && (
-              <p className="mt-0.5 text-xs text-slate-500">{subtitleParts.join(' · ')}</p>
+              <p className="mt-1 text-sm text-slate-500">{subtitleParts.join(' · ')}</p>
             )}
           </div>
           <form action={signOut}>
-            <button className="rounded-lg border border-slate-300 px-3 py-1.5 text-xs font-medium text-slate-700 hover:bg-slate-50">
+            <button className="rounded-lg border border-slate-300 px-3 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50">
               로그아웃
             </button>
           </form>
         </header>
 
         <section className="rounded-2xl bg-white shadow-sm border border-slate-200 p-6 space-y-4">
-          <h2 className="text-sm font-medium text-slate-500 uppercase tracking-wider">
+          <h2 className="text-base font-semibold text-slate-700 tracking-tight">
             오늘 근태
           </h2>
 
           {checkedIn && (
-            <div className="text-sm space-y-1">
+            <div className="text-base space-y-1">
               <p className="text-slate-900">
-                <span className="font-medium">{fmtHourMin(today!.check_in_at!)}</span> 출근
+                <span className="font-semibold">{fmtHourMin(today!.check_in_at!)}</span> 출근
                 {todaySiteName && <span className="text-slate-500"> · {todaySiteName}</span>}
               </p>
               {checkedOut && (
                 <p className="text-slate-900">
-                  <span className="font-medium">{fmtHourMin(today!.check_out_at!)}</span> 퇴근
+                  <span className="font-semibold">{fmtHourMin(today!.check_out_at!)}</span> 퇴근
                 </p>
               )}
             </div>
@@ -264,10 +264,10 @@ export default async function Home() {
             href="/attendance"
             className={
               checkedOut
-                ? 'block rounded-lg border border-slate-200 hover:border-slate-900 px-4 py-3 text-sm font-medium text-slate-700 text-center'
+                ? 'block rounded-lg border border-slate-200 hover:border-slate-900 px-4 py-3 text-base font-medium text-slate-700 text-center'
                 : checkedIn
-                  ? 'block rounded-xl bg-slate-900 hover:bg-slate-800 active:bg-slate-700 px-4 py-4 text-base font-bold text-white text-center'
-                  : 'block rounded-xl bg-emerald-600 hover:bg-emerald-700 active:bg-emerald-800 px-4 py-4 text-base font-bold text-white text-center'
+                  ? 'block rounded-xl bg-slate-900 hover:bg-slate-800 active:bg-slate-700 px-4 py-4 text-lg font-bold text-white text-center'
+                  : 'block rounded-xl bg-emerald-600 hover:bg-emerald-700 active:bg-emerald-800 px-4 py-4 text-lg font-bold text-white text-center'
             }
           >
             {checkedOut ? '근무 마감 — 기록 보기' : checkedIn ? '퇴근하기 →' : '출근하기 →'}
@@ -275,21 +275,21 @@ export default async function Home() {
         </section>
 
         <section className="rounded-2xl bg-white shadow-sm border border-slate-200 p-6 space-y-4">
-          <h2 className="text-sm font-medium text-slate-500 uppercase tracking-wider">
+          <h2 className="text-base font-semibold text-slate-700 tracking-tight">
             업무용 차량
           </h2>
 
           {myVehicleTrip && (
             <div className="space-y-2">
-              <p className="text-sm text-slate-900">
-                사용 중: <span className="font-medium">{myVehicleName ?? '?'}</span>
-                <span className="ml-2 text-xs text-slate-500">
+              <p className="text-base text-slate-900">
+                사용 중: <span className="font-semibold">{myVehicleName ?? '?'}</span>
+                <span className="ml-2 text-sm text-slate-500">
                   출고 {fmtHourMin(myVehicleTrip.departed_at)}
                 </span>
               </p>
               <Link
                 href={`/vehicles/${myVehicleTrip.vehicle_id}/return`}
-                className="block rounded-xl bg-emerald-600 hover:bg-emerald-700 active:bg-emerald-800 px-4 py-3 text-base font-bold text-white text-center"
+                className="block rounded-xl bg-emerald-600 hover:bg-emerald-700 active:bg-emerald-800 px-4 py-4 text-lg font-bold text-white text-center"
               >
                 반납하기 →
               </Link>
@@ -314,19 +314,19 @@ export default async function Home() {
 
           <Link
             href="/vehicles"
-            className="block rounded-lg border border-slate-200 hover:border-slate-900 px-4 py-3 text-sm font-medium text-slate-900 text-center"
+            className="block rounded-lg border border-slate-200 hover:border-slate-900 px-4 py-3 text-base font-medium text-slate-900 text-center"
           >
             전체 차량 관리 →
           </Link>
         </section>
 
         <section className="rounded-2xl bg-white shadow-sm border border-slate-200 p-6 space-y-3">
-          <h2 className="text-sm font-medium text-slate-500 uppercase tracking-wider">
+          <h2 className="text-base font-semibold text-slate-700 tracking-tight">
             결재
           </h2>
           <Link
             href="/requests"
-            className="flex items-center justify-between rounded-lg border border-slate-200 hover:border-slate-900 px-4 py-3 text-sm font-medium text-slate-900"
+            className="flex items-center justify-between rounded-lg border border-slate-200 hover:border-slate-900 px-4 py-3 text-base font-medium text-slate-900"
           >
             <span>내 신청 (휴가·외근 등)</span>
             {(myPendingCount ?? 0) > 0 && (
@@ -338,7 +338,7 @@ export default async function Home() {
           {canApprove && (
             <Link
               href="/approvals"
-              className="flex items-center justify-between rounded-lg border border-slate-200 hover:border-slate-900 px-4 py-3 text-sm font-medium text-slate-900"
+              className="flex items-center justify-between rounded-lg border border-slate-200 hover:border-slate-900 px-4 py-3 text-base font-medium text-slate-900"
             >
               <span>결재함</span>
               {approvalsPendingCount > 0 && (
@@ -352,24 +352,24 @@ export default async function Home() {
 
         {isAdmin && (
           <section className="rounded-2xl bg-white shadow-sm border border-slate-200 p-6 space-y-3">
-            <h2 className="text-sm font-medium text-slate-500 uppercase tracking-wider">
+            <h2 className="text-base font-semibold text-slate-700 tracking-tight">
               관리
             </h2>
             <Link
               href="/admin/employees"
-              className="block rounded-lg border border-slate-200 hover:border-slate-900 px-4 py-3 text-sm font-medium text-slate-900"
+              className="block rounded-lg border border-slate-200 hover:border-slate-900 px-4 py-3 text-base font-medium text-slate-900"
             >
               직원 관리 →
             </Link>
             <Link
               href="/admin/sites"
-              className="block rounded-lg border border-slate-200 hover:border-slate-900 px-4 py-3 text-sm font-medium text-slate-900"
+              className="block rounded-lg border border-slate-200 hover:border-slate-900 px-4 py-3 text-base font-medium text-slate-900"
             >
               현장 관리 →
             </Link>
             <Link
               href="/admin/reports"
-              className="block rounded-lg border border-slate-200 hover:border-slate-900 px-4 py-3 text-sm font-medium text-slate-900"
+              className="block rounded-lg border border-slate-200 hover:border-slate-900 px-4 py-3 text-base font-medium text-slate-900"
             >
               월별 리포트 →
             </Link>
@@ -378,12 +378,12 @@ export default async function Home() {
 
         {!isAdmin && employee.permission === 'foreman' && (
           <section className="rounded-2xl bg-white shadow-sm border border-slate-200 p-6 space-y-3">
-            <h2 className="text-sm font-medium text-slate-500 uppercase tracking-wider">
+            <h2 className="text-base font-semibold text-slate-700 tracking-tight">
               리포트
             </h2>
             <Link
               href="/admin/reports"
-              className="block rounded-lg border border-slate-200 hover:border-slate-900 px-4 py-3 text-sm font-medium text-slate-900"
+              className="block rounded-lg border border-slate-200 hover:border-slate-900 px-4 py-3 text-base font-medium text-slate-900"
             >
               내 현장 월별 리포트 →
             </Link>
