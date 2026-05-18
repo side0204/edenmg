@@ -47,6 +47,9 @@ export async function GET(req: Request) {
   const typeRaw = url.searchParams.get('type')
   const type: Type =
     typeRaw === 'materials' ? 'materials' : typeRaw === 'table' ? 'table' : 'tasks'
+  const metricRaw = url.searchParams.get('metric')
+  const metric: 'all' | 'tasks' | 'materials' =
+    metricRaw === 'tasks' ? 'tasks' : metricRaw === 'materials' ? 'materials' : 'all'
   const fromRaw = url.searchParams.get('from')
   const toRaw = url.searchParams.get('to')
   const from = fromRaw && /^\d{4}-\d{2}-\d{2}$/.test(fromRaw) ? fromRaw : null
@@ -123,13 +126,17 @@ export async function GET(req: Request) {
       reports,
       new Map(works.map((w) => [w.id, { name: w.name, order_id: w.order_id }])),
     )
+    const showTasks = metric === 'all' || metric === 'tasks'
+    const showMaterials = metric === 'all' || metric === 'materials'
+    const taskCols = showTasks ? tableData.taskColumns : []
+    const matCols = showMaterials ? tableData.materialColumns : []
     const headers = [
       '일자',
       '작업자',
       '공사번호',
       '작업명',
-      ...tableData.taskColumns.map((c) => c.label),
-      ...tableData.materialColumns.map((c) => {
+      ...taskCols.map((c) => c.label),
+      ...matCols.map((c) => {
         const parts = [c.name]
         if (c.spec) parts.push(`(${c.spec})`)
         if (c.unit) parts.push(c.unit)
@@ -141,23 +148,24 @@ export async function GET(req: Request) {
       r.workerName,
       r.orderId ?? '',
       r.workName,
-      ...tableData.taskColumns.map((c) => r.taskCounts.get(c.key) ?? ''),
-      ...tableData.materialColumns.map((c) => r.materialQtys.get(c.key) ?? ''),
+      ...taskCols.map((c) => r.taskCounts.get(c.key) ?? ''),
+      ...matCols.map((c) => r.materialQtys.get(c.key) ?? ''),
     ])
-    // 마지막 합계 행
     if (tableData.rows.length > 0) {
       rowsCsv.push([
         '합계',
         '',
         '',
         `(${tableData.rows.length}건)`,
-        ...tableData.taskColumns.map((c) => c.totalCount),
-        ...tableData.materialColumns.map((c) => c.totalQuantity),
+        ...taskCols.map((c) => c.totalCount),
+        ...matCols.map((c) => c.totalQuantity),
       ])
     }
     const body = buildCsv(headers, rowsCsv)
     const periodSuffix = from || to ? `_${from ?? ''}_${to ?? ''}` : ''
-    const filename = `작업통계_일보표${periodSuffix}.csv`
+    const metricSuffix =
+      metric === 'tasks' ? '_공종만' : metric === 'materials' ? '_자재만' : ''
+    const filename = `작업통계_일보표${metricSuffix}${periodSuffix}.csv`
     return csvResponse(body, filename)
   }
 

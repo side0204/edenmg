@@ -25,6 +25,13 @@ const DEFAULT_DIM: Dim = 'worker'
 const LIMIT_OPTIONS = [10, 30, 100, 0] // 0 = 전체
 
 type View = 'cards' | 'table'
+type Metric = 'all' | 'tasks' | 'materials'
+
+const METRIC_TABS: { key: Metric; label: string }[] = [
+  { key: 'all', label: '전체 통계' },
+  { key: 'tasks', label: '공종 통계' },
+  { key: 'materials', label: '자재 통계' },
+]
 
 export default async function StatsPage({
   searchParams,
@@ -35,6 +42,7 @@ export default async function StatsPage({
     to?: string
     limit?: string
     view?: string
+    metric?: string
   }>
 }) {
   const {
@@ -43,10 +51,13 @@ export default async function StatsPage({
     to: toParam,
     limit: limitParam,
     view: viewParam,
+    metric: metricParam,
   } = await searchParams
   const dimEntry = DIM_TABS.find((t) => t.key === dimParam) ?? DIM_TABS.find((t) => t.key === DEFAULT_DIM)!
   const dim: Dim = dimEntry.key
   const view: View = viewParam === 'table' ? 'table' : 'cards'
+  const metric: Metric =
+    metricParam === 'tasks' ? 'tasks' : metricParam === 'materials' ? 'materials' : 'all'
 
   const from = fromParam && /^\d{4}-\d{2}-\d{2}$/.test(fromParam) ? fromParam : null
   const to = toParam && /^\d{4}-\d{2}-\d{2}$/.test(toParam) ? toParam : null
@@ -224,6 +235,7 @@ export default async function StatsPage({
     to?: string | null
     limit?: number
     view?: View
+    metric?: Metric
   }) => {
     const params = new URLSearchParams()
     const fd = next.dim ?? dim
@@ -231,10 +243,12 @@ export default async function StatsPage({
     const fto = next.to === undefined ? to : next.to
     const flimit = next.limit === undefined ? limitNum : next.limit
     const fview = next.view ?? view
+    const fmetric = next.metric ?? metric
     if (fd !== DEFAULT_DIM) params.set('dim', fd)
     if (ffrom) params.set('from', ffrom)
     if (fto) params.set('to', fto)
     if (fview !== 'cards') params.set('view', fview)
+    if (fmetric !== 'all') params.set('metric', fmetric)
     // 차원의 defaultLimit 와 다를 때만 URL 에 표시
     const defaultForDim = DIM_TABS.find((t) => t.key === fd)?.defaultLimit ?? 0
     if (flimit !== defaultForDim) {
@@ -249,6 +263,7 @@ export default async function StatsPage({
   if (from) csvBaseParams.set('from', from)
   if (to) csvBaseParams.set('to', to)
   if (limitNum > 0) csvBaseParams.set('limit', String(limitNum))
+  if (metric !== 'all') csvBaseParams.set('metric', metric)
 
   return (
     <main className="min-h-screen p-4 sm:p-6">
@@ -304,6 +319,27 @@ export default async function StatsPage({
           >
             일보 표
           </Link>
+        </nav>
+
+        {/* metric 토글 — 전체 / 공종 / 자재 */}
+        <nav className="flex gap-1 rounded-xl bg-slate-100 p-1 text-sm">
+          {METRIC_TABS.map((t) => {
+            const active = metric === t.key
+            return (
+              <Link
+                key={t.key}
+                href={buildHref({ metric: t.key })}
+                className={
+                  'flex-1 rounded-lg px-3 py-1.5 text-center font-medium transition-colors ' +
+                  (active
+                    ? 'bg-white text-slate-900 shadow-sm'
+                    : 'text-slate-600 hover:text-slate-900')
+                }
+              >
+                {t.label}
+              </Link>
+            )
+          })}
         </nav>
 
         {/* 차원 탭 — 카드 모드에서만 의미 */}
@@ -402,20 +438,24 @@ export default async function StatsPage({
           <div className="flex flex-wrap gap-1.5 justify-end">
             {view === 'cards' ? (
               <>
-                <a
-                  href={`/api/reports/work-stats?type=tasks&${csvBaseParams.toString()}`}
-                  className="inline-flex items-center gap-1 rounded-md border border-slate-300 bg-white px-2.5 py-1.5 text-xs font-medium text-slate-700 hover:bg-slate-50"
-                >
-                  <Download className="h-3.5 w-3.5" />
-                  공종 CSV
-                </a>
-                <a
-                  href={`/api/reports/work-stats?type=materials&${csvBaseParams.toString()}`}
-                  className="inline-flex items-center gap-1 rounded-md border border-slate-300 bg-white px-2.5 py-1.5 text-xs font-medium text-slate-700 hover:bg-slate-50"
-                >
-                  <Download className="h-3.5 w-3.5" />
-                  자재 CSV
-                </a>
+                {metric !== 'materials' && (
+                  <a
+                    href={`/api/reports/work-stats?type=tasks&${csvBaseParams.toString()}`}
+                    className="inline-flex items-center gap-1 rounded-md border border-slate-300 bg-white px-2.5 py-1.5 text-xs font-medium text-slate-700 hover:bg-slate-50"
+                  >
+                    <Download className="h-3.5 w-3.5" />
+                    공종 CSV
+                  </a>
+                )}
+                {metric !== 'tasks' && (
+                  <a
+                    href={`/api/reports/work-stats?type=materials&${csvBaseParams.toString()}`}
+                    className="inline-flex items-center gap-1 rounded-md border border-slate-300 bg-white px-2.5 py-1.5 text-xs font-medium text-slate-700 hover:bg-slate-50"
+                  >
+                    <Download className="h-3.5 w-3.5" />
+                    자재 CSV
+                  </a>
+                )}
               </>
             ) : (
               <a
@@ -437,7 +477,7 @@ export default async function StatsPage({
         )}
 
         {view === 'table' && tableData ? (
-          <StatsTable data={tableData} />
+          <StatsTable data={tableData} metric={metric} />
         ) : entries.length === 0 ? (
           <div className="rounded-2xl bg-white border border-slate-200 p-8 text-center">
             <p className="text-sm text-slate-500">
@@ -484,6 +524,7 @@ export default async function StatsPage({
                         subtitle={entry.label}
                         aggregation={entry.aggregation}
                         showBars
+                        metric={metric}
                       />
                     </div>
                   </details>

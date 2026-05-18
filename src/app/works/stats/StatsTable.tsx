@@ -2,12 +2,23 @@ import type { StatsTableData } from '@/lib/connection-aggregate'
 
 /**
  * 일보 단위 wide 표.
- * 좌측 메타 (일자/연/월/작업자/공사번호/작업명) 고정 컬럼.
+ * 좌측 메타 (일자/작업자/공사번호/작업명) 고정 컬럼.
  * 우측: 공종 컬럼들 + 자재 컬럼들 (총량 내림차순).
  *
  * 모바일: 가로 스크롤. 첫 컬럼(일자) sticky left-0.
+ * metric: 'all' 둘 다 / 'tasks' 공종만 / 'materials' 자재만
  */
-export function StatsTable({ data }: { data: StatsTableData }) {
+export function StatsTable({
+  data,
+  metric = 'all',
+}: {
+  data: StatsTableData
+  metric?: 'all' | 'tasks' | 'materials'
+}) {
+  const showTasks = metric === 'all' || metric === 'tasks'
+  const showMaterials = metric === 'all' || metric === 'materials'
+  const taskColumns = showTasks ? data.taskColumns : []
+  const materialColumns = showMaterials ? data.materialColumns : []
   if (data.rows.length === 0) {
     return (
       <div className="rounded-2xl bg-white border border-slate-200 p-8 text-center">
@@ -36,7 +47,7 @@ export function StatsTable({ data }: { data: StatsTableData }) {
               <th className="border-b border-slate-200 px-2 py-2 font-semibold text-slate-700 whitespace-nowrap">
                 작업명
               </th>
-              {data.taskColumns.map((c) => (
+              {taskColumns.map((c) => (
                 <th
                   key={c.key}
                   className="border-b border-l border-slate-200 px-2 py-2 font-semibold text-blue-700 whitespace-nowrap text-right"
@@ -45,7 +56,7 @@ export function StatsTable({ data }: { data: StatsTableData }) {
                   {c.label}
                 </th>
               ))}
-              {data.materialColumns.map((c) => (
+              {materialColumns.map((c) => (
                 <th
                   key={c.key}
                   className="border-b border-l border-slate-200 px-2 py-2 font-semibold text-emerald-700 whitespace-nowrap text-right"
@@ -73,7 +84,7 @@ export function StatsTable({ data }: { data: StatsTableData }) {
                 <td className="border-b border-slate-200 px-2 py-1.5 text-slate-700 whitespace-nowrap">
                   {r.workName}
                 </td>
-                {data.taskColumns.map((c) => {
+                {taskColumns.map((c) => {
                   const v = r.taskCounts.get(c.key)
                   return (
                     <td
@@ -84,7 +95,7 @@ export function StatsTable({ data }: { data: StatsTableData }) {
                     </td>
                   )
                 })}
-                {data.materialColumns.map((c) => {
+                {materialColumns.map((c) => {
                   const v = r.materialQtys.get(c.key)
                   return (
                     <td
@@ -110,7 +121,7 @@ export function StatsTable({ data }: { data: StatsTableData }) {
               >
                 합계 ({data.rows.length}건)
               </td>
-              {data.taskColumns.map((c) => (
+              {taskColumns.map((c) => (
                 <td
                   key={c.key}
                   className="border-t border-l border-slate-200 px-2 py-2 tabular-nums whitespace-nowrap text-blue-700"
@@ -118,7 +129,7 @@ export function StatsTable({ data }: { data: StatsTableData }) {
                   {c.totalCount}
                 </td>
               ))}
-              {data.materialColumns.map((c) => (
+              {materialColumns.map((c) => (
                 <td
                   key={c.key}
                   className="border-t border-l border-slate-200 px-2 py-2 tabular-nums whitespace-nowrap text-emerald-700"

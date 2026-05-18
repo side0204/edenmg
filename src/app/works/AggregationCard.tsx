@@ -7,19 +7,26 @@ import type { Aggregation } from '@/lib/connection-aggregate'
  * 작업별 / 공사번호별 / 작업통계 양쪽에서 재사용.
  *
  * showBars: 각 항목 옆에 해당 그룹 내 max 대비 가로 막대 표시 (통계 페이지용).
+ * metric: 'all' 둘 다 / 'tasks' 공종만 / 'materials' 자재만 (통계 페이지 필터)
  */
 export function AggregationCard({
   title,
   subtitle,
   aggregation,
   showBars = false,
+  metric = 'all',
 }: {
   title: string
   subtitle?: string
   aggregation: Aggregation
   showBars?: boolean
+  metric?: 'all' | 'tasks' | 'materials'
 }) {
-  const hasAny = aggregation.materials.length > 0 || aggregation.tasks.length > 0
+  const showTasks = metric === 'all' || metric === 'tasks'
+  const showMaterials = metric === 'all' || metric === 'materials'
+  const hasAny =
+    (showTasks && aggregation.tasks.length > 0) ||
+    (showMaterials && aggregation.materials.length > 0)
   const maxTaskCount = aggregation.tasks.reduce((m, t) => Math.max(m, t.totalCount), 0)
   const maxMaterialQty = aggregation.materials.reduce(
     (m, x) => Math.max(m, x.totalQuantity),
@@ -44,7 +51,7 @@ export function AggregationCard({
         </p>
       ) : (
         <div className="space-y-4">
-          {aggregation.tasks.length > 0 && (
+          {showTasks && aggregation.tasks.length > 0 && (
             <div>
               <p className="text-xs font-medium text-slate-600 mb-1.5">공종 합계</p>
               <ul className="space-y-1.5">
@@ -80,7 +87,7 @@ export function AggregationCard({
             </div>
           )}
 
-          {aggregation.materials.length > 0 && (
+          {showMaterials && aggregation.materials.length > 0 && (
             <div>
               <p className="text-xs font-medium text-slate-600 mb-1.5">자재 합계</p>
               <ul className="space-y-1.5">
