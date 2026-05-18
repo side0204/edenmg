@@ -25,16 +25,18 @@ export function EmployeeCombobox({
   required = false,
   placeholder = '이름·직급·팀으로 검색',
   emptyLabel = '일치하는 직원이 없습니다',
+  defaultSelected = null,
 }: {
   candidates: EmployeeOption[]
   name: string
   required?: boolean
   placeholder?: string
   emptyLabel?: string
+  defaultSelected?: EmployeeOption | null
 }) {
   const [open, setOpen] = useState(false)
   const [query, setQuery] = useState('')
-  const [selected, setSelected] = useState<EmployeeOption | null>(null)
+  const [selected, setSelected] = useState<EmployeeOption | null>(defaultSelected)
 
   // 모달 열린 동안 body 스크롤 잠금
   useEffect(() => {

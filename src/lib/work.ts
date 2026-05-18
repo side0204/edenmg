@@ -15,6 +15,9 @@ export type WorkSubcategory =
   | '일반'
   | '원인자'
 export type WorkStatus = '예정' | '진행중' | '완료' | '취소'
+export type WorkWorkerType = '접속팀' | '외선팀' | '기타'
+export type WorkReportProgress = '시작전' | '진행중' | '완료'
+export type WorkReportStatus = '대기' | '승인' | '반려'
 
 export const WORK_CATEGORY_VALUES: readonly WorkCategory[] = [
   '청약',
@@ -24,6 +27,16 @@ export const WORK_CATEGORY_VALUES: readonly WorkCategory[] = [
 ]
 
 export const WORK_STATUS_VALUES: readonly WorkStatus[] = ['예정', '진행중', '완료', '취소']
+
+export const WORKER_TYPE_VALUES: readonly WorkWorkerType[] = ['접속팀', '외선팀', '기타']
+
+export const REPORT_PROGRESS_VALUES: readonly WorkReportProgress[] = [
+  '시작전',
+  '진행중',
+  '완료',
+]
+
+export const REPORT_STATUS_VALUES: readonly WorkReportStatus[] = ['대기', '승인', '반려']
 
 // 카테고리별 소분류. owner 결정 사항 (CLAUDE.md 표 참조).
 export const SUBCATEGORY_BY_CATEGORY: Record<WorkCategory, readonly WorkSubcategory[]> = {
@@ -38,6 +51,27 @@ export const STATUS_COLOR: Record<WorkStatus, string> = {
   진행중: 'text-emerald-700 bg-emerald-50 border-emerald-200',
   완료: 'text-indigo-700 bg-indigo-50 border-indigo-200',
   취소: 'text-slate-400 bg-slate-50 border-slate-200',
+}
+
+export const REPORT_STATUS_COLOR: Record<WorkReportStatus, string> = {
+  대기: 'text-amber-700 bg-amber-50 border-amber-200',
+  승인: 'text-emerald-700 bg-emerald-50 border-emerald-200',
+  반려: 'text-rose-700 bg-rose-50 border-rose-200',
+}
+
+export const REPORT_PROGRESS_COLOR: Record<WorkReportProgress, string> = {
+  시작전: 'text-slate-600 bg-slate-100 border-slate-200',
+  진행중: 'text-emerald-700 bg-emerald-50 border-emerald-200',
+  완료: 'text-indigo-700 bg-indigo-50 border-indigo-200',
+}
+
+export function formatWorkerType(
+  workerType: WorkWorkerType | null,
+  custom: string | null,
+): string {
+  if (!workerType) return '미지정'
+  if (workerType === '기타') return custom || '기타'
+  return workerType
 }
 
 export function formatWorkPeriod(start: string | null, end: string | null): string {

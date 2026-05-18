@@ -1,14 +1,19 @@
 import Link from 'next/link'
 import { notFound, redirect } from 'next/navigation'
-import { ChevronLeft, Pencil, X } from 'lucide-react'
+import { ChevronLeft, FileText, Pencil, Plus, X } from 'lucide-react'
 import { createClient } from '@/lib/supabase/server'
 import {
+  REPORT_STATUS_COLOR,
   STATUS_COLOR,
   formatWorkLabel,
   formatWorkPeriod,
+  formatWorkerType,
   type WorkCategory,
+  type WorkReportProgress,
+  type WorkReportStatus,
   type WorkStatus,
   type WorkSubcategory,
+  type WorkWorkerType,
 } from '@/lib/work'
 import { assignEmployee, unassignEmployee } from '../actions'
 
@@ -21,12 +26,23 @@ type WorkRow = {
   category: WorkCategory
   subcategory: WorkSubcategory | null
   order_id: string | null
+  worker_type: WorkWorkerType | null
+  worker_type_custom: string | null
+  assignee_employee_id: string | null
   expected_volume: string | null
   start_date: string | null
   end_date: string | null
   status: WorkStatus
   notes: string | null
   is_active: boolean
+}
+
+type ReportRow = {
+  id: string
+  report_date: string
+  author_employee_id: string
+  progress: WorkReportProgress
+  status: WorkReportStatus
 }
 
 type AssignmentRow = {
@@ -69,7 +85,7 @@ export default async function WorkDetailPage({
   const { data: workData } = await supabase
     .from('works')
     .select(
-      'id, company_id, name, client, address, category, subcategory, order_id, expected_volume, start_date, end_date, status, notes, is_active',
+      'id, company_id, name, client, address, category, subcategory, order_id, worker_type, worker_type_custom, assignee_employee_id, expected_volume, start_date, end_date, status, notes, is_active',
     )
     .eq('id', id)
     .maybeSingle()
@@ -83,17 +99,30 @@ export default async function WorkDetailPage({
     .order('assigned_start', { ascending: true, nullsFirst: true })
   const assignments = (assignmentsData ?? []) as AssignmentRow[]
 
-  // 직원 이름·메타 매핑
-  const assignedIds = assignments.map((a) => a.employee_id)
+  // 일보 (최근 10건)
+  const { data: reportsData } = await supabase
+    .from('work_daily_reports')
+    .select('id, report_date, author_employee_id, progress, status')
+    .eq('work_id', id)
+    .order('report_date', { ascending: false })
+    .limit(10)
+  const reports = (reportsData ?? []) as ReportRow[]
+
+  // 직원 이름·메타 매핑 — 배정자 + 일보 작성자 + 담당자 모두 묶어서 1회 조회
+  const employeeIds = new Set<string>()
+  for (const a of assignments) employeeIds.add(a.employee_id)
+  for (const r of reports) employeeIds.add(r.author_employee_id)
+  if (work.assignee_employee_id) employeeIds.add(work.assignee_employee_id)
+
   const employeeMap = new Map<
     string,
     { name: string; position: string | null; team: string | null; is_active: boolean }
   >()
-  if (assignedIds.length > 0) {
+  if (employeeIds.size > 0) {
     const { data: emps } = await supabase
       .from('employees')
       .select('id, name, position, team, is_active')
-      .in('id', assignedIds)
+      .in('id', Array.from(employeeIds))
     for (const e of (emps ?? []) as {
       id: string
       name: string
@@ -109,6 +138,22 @@ export default async function WorkDetailPage({
       })
     }
   }
+
+  const assignee = work.assignee_employee_id
+    ? (employeeMap.get(work.assignee_employee_id) ?? null)
+    : null
+
+  // 일보 작성 권한: 본인이 이 작업에 배정됐거나 admin/ceo
+  const isAdminLike = me.permission === 'admin' || me.permission === 'ceo'
+  const isAssigned = assignments.some((a) => a.employee_id === me.id)
+  const canWriteReport = isAdminLike || isAssigned
+
+  // 오늘 일보가 이미 있는지 (자기 자신 작성건)
+  const today = new Date()
+  const todayKST = new Date(today.getTime() + 9 * 60 * 60 * 1000).toISOString().slice(0, 10)
+  const myTodayReport = reports.find(
+    (r) => r.author_employee_id === me.id && r.report_date === todayKST,
+  )
 
   // 배정 후보 (활성 직원, 이미 배정된 사람은 제외 안 함 — 다른 기간 추가 배정 가능)
   let candidates: { id: string; name: string; position: string | null; team: string | null }[] = []
@@ -164,12 +209,90 @@ export default async function WorkDetailPage({
           </div>
           <InfoRow label="기간">{formatWorkPeriod(work.start_date, work.end_date)}</InfoRow>
           {work.order_id && <InfoRow label="ID">{work.order_id}</InfoRow>}
+          <InfoRow label="작업자">
+            {formatWorkerType(work.worker_type, work.worker_type_custom)}
+          </InfoRow>
+          <InfoRow label="담당자">
+            {assignee ? (
+              <>
+                <span>{assignee.name}</span>
+                {!assignee.is_active && (
+                  <span className="ml-1.5 text-xs text-slate-400">(비활성)</span>
+                )}
+              </>
+            ) : (
+              <span className="text-slate-400">미지정</span>
+            )}
+          </InfoRow>
           {work.address && <InfoRow label="주소">{work.address}</InfoRow>}
           {work.expected_volume && <InfoRow label="예상물량">{work.expected_volume}</InfoRow>}
           {work.notes && (
             <InfoRow label="비고">
               <span className="whitespace-pre-wrap">{work.notes}</span>
             </InfoRow>
+          )}
+        </section>
+
+        <section className="rounded-2xl bg-white border border-slate-200 p-5 space-y-3">
+          <div className="flex items-center justify-between gap-3">
+            <h2 className="text-base font-semibold text-slate-700 tracking-tight inline-flex items-center gap-1.5">
+              <FileText className="h-4 w-4 text-slate-500" />
+              작업일보 ({reports.length})
+            </h2>
+            {canWriteReport && !myTodayReport && (
+              <Link
+                href={`/works/${work.id}/reports/new`}
+                className="shrink-0 inline-flex items-center gap-1 rounded-lg bg-slate-900 px-3 py-1.5 text-xs font-medium text-white hover:bg-slate-800"
+              >
+                <Plus className="h-3.5 w-3.5" />
+                오늘 일보 작성
+              </Link>
+            )}
+            {myTodayReport && (
+              <Link
+                href={`/works/${work.id}/reports/${myTodayReport.id}`}
+                className="shrink-0 inline-flex items-center gap-1 rounded-lg border border-slate-300 px-3 py-1.5 text-xs font-medium text-slate-700 hover:bg-slate-50"
+              >
+                오늘 일보 보기
+              </Link>
+            )}
+          </div>
+
+          {reports.length === 0 ? (
+            <p className="rounded-lg bg-slate-50 px-4 py-6 text-center text-sm text-slate-500">
+              아직 작성된 일보가 없습니다.
+            </p>
+          ) : (
+            <ul className="divide-y divide-slate-100 rounded-lg border border-slate-200">
+              {reports.map((r) => {
+                const emp = employeeMap.get(r.author_employee_id)
+                return (
+                  <li key={r.id}>
+                    <Link
+                      href={`/works/${work.id}/reports/${r.id}`}
+                      className="flex items-center justify-between gap-2 px-3 py-2.5 text-sm hover:bg-slate-50"
+                    >
+                      <div className="min-w-0 flex-1">
+                        <p className="text-slate-900">
+                          <span className="font-medium">{r.report_date}</span>
+                          <span className="ml-2 text-xs text-slate-500">
+                            {emp?.name ?? '?'} · {r.progress}
+                          </span>
+                        </p>
+                      </div>
+                      <span
+                        className={
+                          'shrink-0 rounded-full border px-2 py-0.5 text-xs font-medium ' +
+                          REPORT_STATUS_COLOR[r.status]
+                        }
+                      >
+                        {r.status}
+                      </span>
+                    </Link>
+                  </li>
+                )
+              })}
+            </ul>
           )}
         </section>
 

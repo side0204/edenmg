@@ -3,13 +3,16 @@
 import { useState } from 'react'
 import {
   SUBCATEGORY_BY_CATEGORY,
+  WORKER_TYPE_VALUES,
   WORK_CATEGORY_VALUES,
   WORK_STATUS_VALUES,
   type WorkCategory,
   type WorkStatus,
   type WorkSubcategory,
+  type WorkWorkerType,
 } from '@/lib/work'
 import { AddressInput } from './AddressInput'
+import { EmployeeCombobox, type EmployeeOption } from '../requests/new/EmployeeCombobox'
 
 export type WorkFormValues = {
   id: string | null
@@ -19,6 +22,9 @@ export type WorkFormValues = {
   category: WorkCategory
   subcategory: WorkSubcategory | null
   order_id: string | null
+  worker_type: WorkWorkerType | null
+  worker_type_custom: string | null
+  assignee_employee_id: string | null
   expected_volume: string | null
   start_date: string | null
   end_date: string | null
@@ -40,10 +46,14 @@ export function WorkForm({
   initial,
   action,
   submitLabel,
+  candidates,
+  initialAssignee,
 }: {
   initial: WorkFormValues
   action: (formData: FormData) => void
   submitLabel: string
+  candidates: EmployeeOption[]
+  initialAssignee: EmployeeOption | null
 }) {
   const [category, setCategory] = useState<WorkCategory>(initial.category)
   const [subcategory, setSubcategory] = useState<WorkSubcategory | ''>(initial.subcategory ?? '')
@@ -51,6 +61,8 @@ export function WorkForm({
   const initialClient = deriveClientChoice(initial.client)
   const [clientChoice, setClientChoice] = useState<ClientChoice>(initialClient.choice)
   const [clientCustom, setClientCustom] = useState<string>(initialClient.custom)
+
+  const [workerType, setWorkerType] = useState<WorkWorkerType | ''>(initial.worker_type ?? '')
 
   // 대분류 바뀌면 소분류 reset (기타는 빈 값으로)
   const handleCategory = (next: WorkCategory) => {
@@ -155,6 +167,48 @@ export function WorkForm({
           defaultValue={initial.address ?? ''}
           placeholder="예: 서울 강남구 …"
         />
+      </Field>
+
+      <Field label="작업자 구분 *">
+        <select
+          name="worker_type"
+          value={workerType}
+          onChange={(e) => setWorkerType(e.currentTarget.value as WorkWorkerType | '')}
+          required
+          className={inputClass}
+        >
+          <option value="" disabled>
+            선택
+          </option>
+          {WORKER_TYPE_VALUES.map((w) => (
+            <option key={w} value={w}>
+              {w}
+            </option>
+          ))}
+        </select>
+        {workerType === '기타' && (
+          <input
+            name="worker_type_custom"
+            defaultValue={initial.worker_type_custom ?? ''}
+            maxLength={30}
+            required
+            placeholder="구분명 입력"
+            className={`${inputClass} mt-2`}
+          />
+        )}
+      </Field>
+
+      <Field label="담당자 *">
+        <EmployeeCombobox
+          name="assignee_employee_id"
+          candidates={candidates}
+          defaultSelected={initialAssignee}
+          required
+          placeholder="담당자 선택 — 일보 결재자"
+        />
+        <p className="mt-1 text-xs text-slate-500">
+          이 작업의 일일 작업일보는 담당자가 결재합니다.
+        </p>
       </Field>
 
       <Field label="예상물량 (선택)">

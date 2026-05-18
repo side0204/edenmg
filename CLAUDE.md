@@ -218,12 +218,43 @@ owner 결정사항:
   - `/works/[id]` — 상세 + N:M 배정 UI. 직원 선택 + 기간 + 배정/해제 (X 버튼).
 - **하단 탭**: BottomNav 에 "작업" 탭 추가 (Hammer 아이콘). 홈 / 사무 / **작업** 3탭. M4 자재·M5 안전이 추가될 자리.
 
+### ✅ 완료 (M3 Phase 2 — 일일 작업일보, 2026-05-18)
+
+owner 결정사항:
+
+| 항목 | 결정 | 비고 |
+|---|---|---|
+| **결재 모델** | 작업당 담당자 1명 (works.assignee_employee_id) — 일보 자동 라우팅 | 휴가 결재선과 별개. 1단 결재 |
+| **결재 단계** | 1단 (작성자 → 담당자 승인/반려) | 본사 확인 단계 생략 |
+| **작업자 구분** | works.worker_type enum: 접속팀 / 외선팀 / 기타(직접입력) | 기타는 worker_type_custom text 컬럼 (CHECK 제약으로 정합성 강제) |
+| **작성 단위** | 작업+날짜+작성자 unique | 같은 작업·같은 날 여러 명이 각자 1장씩 |
+| **작성 권한** | 해당 작업 배정자 + admin/ceo | RLS + server action 이중 검증 |
+| **사용 자재** | 자유 텍스트 1000자 | M4 자재 모듈 들어오면 연결 검토 |
+| **사진** | 이번 단계 미포함 | 디자인·용량 정리 후 추후 도입 |
+| **진행률** | enum (시작전/진행중/완료) | 숫자 % 대신 단순 단계로 시작 |
+| **EXIF·워터마크 (M3-06)** | 사진 미포함이라 함께 보류 | P1 그대로 |
+
+- **DB 마이그레이션**: [`0010_work_daily_reports.sql`](./supabase/migrations/0010_work_daily_reports.sql)
+  - works 확장: `worker_type` (enum 접속팀/외선팀/기타) + `worker_type_custom` + `assignee_employee_id`
+  - `work_daily_reports` 테이블 + `work_report_progress`·`work_report_status` enum + RLS 3개 (select/insert/update). delete GRANT 미부여 (append-only)
+  - RLS update 정책은 본인 작성+대기 OR 담당자/admin/ceo — 회사 스코프 강제
+- **공통 상수**: [`src/lib/work.ts`](./src/lib/work.ts) 에 `WORKER_TYPE_VALUES`·`REPORT_PROGRESS_VALUES`·`REPORT_STATUS_VALUES`·색상 매핑·`formatWorkerType` 추가.
+- **server actions**: [`src/app/works/report-actions.ts`](./src/app/works/report-actions.ts) — submitReport/updateReport/approveReport/rejectReport. 결재는 `reviewReport(formData, '승인'|'반려')` 공용 함수로 묶음.
+- **화면**
+  - `/works/new`·`/works/[id]/edit` — 작업자 구분 + 담당자 (EmployeeCombobox 풀스크린 모달 재사용) 필수 입력 추가
+  - `/works/[id]` — 작업자/담당자 표시 + 일보 섹션 (최근 10건 + 상태 배지 + 오늘 일보 작성/보기 액션)
+  - `/works/[id]/reports/new` — 일보 작성
+  - `/works/[id]/reports/[reportId]` — 상세 + (작성자+대기 시) 인라인 수정 + (담당자 시) 승인·반려 액션
+- **EmployeeCombobox**: `defaultSelected` prop 추가로 편집 모드 prefill 지원 (휴가 신청과 공유).
+
 ### 🟡 미완 / 후속
 
 - **운영 작업 (owner 가 Supabase Dashboard 에서 SQL 실행 필요)**
   - [`0007_leave_substitute.sql`](./supabase/migrations/0007_leave_substitute.sql) — 휴가 대무자 컬럼
   - [`0008_works.sql`](./supabase/migrations/0008_works.sql) — M3 작업관리 테이블·enum·권한 컬럼
-- **M3 Phase 2 (일일 작업일보)** — PRD M3-03/04/06: 작업내역·진행률·사진·특이사항 + 결재 (현장소장 → 본사 확인) + EXIF·워터마크(P1). 분량 큰 별도 작업.
+  - [`0009_works_order_id.sql`](./supabase/migrations/0009_works_order_id.sql) — 작업 ID 컬럼 (청약·지장이설)
+  - [`0010_work_daily_reports.sql`](./supabase/migrations/0010_work_daily_reports.sql) — works 확장 + 일일 작업일보
+- **M3 Phase 2 후속** — 사진 첨부 + EXIF·워터마크 (PRD M3-06), 일보 결재함 통합 (현재는 작업 상세에서 진입), 일보 월별 CSV 리포트
 - **M3 Phase 3 (대시보드)** — PRD M3-05: 현장별 진행률·누적 인시·자재 사용량.
 - **`/admin/sites` 수정사항** — owner 가 별도로 보강 예정 (현장 등록 폼·목록 UX).
 - **알림** — 의도적으로 인앱 토스트만. PWA 푸시는 M3 들어갈 때 같이 도입 검토.
