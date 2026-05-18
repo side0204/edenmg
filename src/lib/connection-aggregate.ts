@@ -373,8 +373,6 @@ export type StatsTableMaterialColumn = {
 export type StatsTableRow = {
   reportId: string
   date: string // YYYY-MM-DD
-  year: string
-  month: string // YYYY-MM
   workerName: string
   orderId: string | null
   workName: string
@@ -557,8 +555,6 @@ export async function buildStatsTable(
       return {
         reportId: r.id,
         date: r.report_date,
-        year: r.report_date.slice(0, 4),
-        month: r.report_date.slice(0, 7),
         workerName: employeeNameById.get(r.author_employee_id) ?? '?',
         orderId: w?.order_id ?? null,
         workName: w?.name ?? '?',

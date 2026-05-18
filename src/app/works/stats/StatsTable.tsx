@@ -28,12 +28,6 @@ export function StatsTable({ data }: { data: StatsTableData }) {
                 일자
               </th>
               <th className="border-b border-slate-200 px-2 py-2 font-semibold text-slate-700 whitespace-nowrap">
-                연
-              </th>
-              <th className="border-b border-slate-200 px-2 py-2 font-semibold text-slate-700 whitespace-nowrap">
-                월
-              </th>
-              <th className="border-b border-slate-200 px-2 py-2 font-semibold text-slate-700 whitespace-nowrap">
                 작업자
               </th>
               <th className="border-b border-slate-200 px-2 py-2 font-semibold text-slate-700 whitespace-nowrap">
@@ -69,12 +63,6 @@ export function StatsTable({ data }: { data: StatsTableData }) {
               <tr key={r.reportId} className="even:bg-slate-50/40 hover:bg-slate-50">
                 <td className="sticky left-0 z-10 bg-white border-b border-r border-slate-200 px-2 py-1.5 font-medium text-slate-900 whitespace-nowrap">
                   {r.date}
-                </td>
-                <td className="border-b border-slate-200 px-2 py-1.5 text-slate-700 whitespace-nowrap">
-                  {r.year}
-                </td>
-                <td className="border-b border-slate-200 px-2 py-1.5 text-slate-700 whitespace-nowrap">
-                  {r.month}
                 </td>
                 <td className="border-b border-slate-200 px-2 py-1.5 text-slate-700 whitespace-nowrap">
                   {r.workerName}
@@ -117,7 +105,7 @@ export function StatsTable({ data }: { data: StatsTableData }) {
           <tfoot className="bg-slate-50">
             <tr className="text-right text-slate-700 font-semibold">
               <td
-                colSpan={6}
+                colSpan={4}
                 className="sticky left-0 z-10 bg-slate-50 border-t border-r border-slate-200 px-2 py-2 text-left whitespace-nowrap"
               >
                 합계 ({data.rows.length}건)

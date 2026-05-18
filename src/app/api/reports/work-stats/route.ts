@@ -125,8 +125,6 @@ export async function GET(req: Request) {
     )
     const headers = [
       '일자',
-      '연',
-      '월',
       '작업자',
       '공사번호',
       '작업명',
@@ -140,8 +138,6 @@ export async function GET(req: Request) {
     ]
     const rowsCsv: unknown[][] = tableData.rows.map((r) => [
       r.date,
-      r.year,
-      r.month,
       r.workerName,
       r.orderId ?? '',
       r.workName,
@@ -152,8 +148,6 @@ export async function GET(req: Request) {
     if (tableData.rows.length > 0) {
       rowsCsv.push([
         '합계',
-        '',
-        '',
         '',
         '',
         `(${tableData.rows.length}건)`,
