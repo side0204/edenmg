@@ -15,11 +15,16 @@ export default async function NewWorkPage() {
 
   const { data: meRow } = await supabase
     .from('employees')
-    .select('company_id, permission, can_manage_works, is_active')
+    .select('id, name, position, team, work_type, company_id, permission, can_manage_works, is_active')
     .eq('auth_user_id', user.id)
     .maybeSingle()
   const me = meRow as
     | {
+        id: string
+        name: string
+        position: string | null
+        team: string | null
+        work_type: string | null
         company_id: string
         permission: 'worker' | 'foreman' | 'admin' | 'ceo'
         can_manage_works: boolean
@@ -38,6 +43,15 @@ export default async function NewWorkPage() {
     .order('name')
   const candidates = (candidatesData ?? []) as EmployeeOption[]
 
+  // 등록자를 기본 담당자로 prefill (다르면 변경 가능)
+  const initialAssignee: EmployeeOption = {
+    id: me.id,
+    name: me.name,
+    position: me.position,
+    team: me.team,
+    work_type: me.work_type,
+  }
+
   const initial: WorkFormValues = {
     id: null,
     name: '',
@@ -48,7 +62,7 @@ export default async function NewWorkPage() {
     order_id: null,
     worker_type: null,
     worker_type_custom: null,
-    assignee_employee_id: null,
+    assignee_employee_id: me.id,
     expected_volume: null,
     start_date: null,
     end_date: null,
@@ -68,6 +82,9 @@ export default async function NewWorkPage() {
             작업 목록
           </Link>
           <h1 className="mt-1 text-3xl font-bold text-slate-900 tracking-tight">작업 등록</h1>
+          <p className="mt-1 text-sm text-slate-500">
+            담당자는 본인으로 자동 설정됩니다. 필요하면 다른 직원으로 변경하세요.
+          </p>
         </header>
 
         <WorkForm
@@ -75,7 +92,7 @@ export default async function NewWorkPage() {
           action={createWork}
           submitLabel="등록"
           candidates={candidates}
-          initialAssignee={null}
+          initialAssignee={initialAssignee}
         />
       </div>
     </main>

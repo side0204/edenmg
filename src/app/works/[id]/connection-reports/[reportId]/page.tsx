@@ -323,7 +323,7 @@ export default async function ConnectionReportDetailPage({
         {/* 트리 시각화: 노드 라인 + indented cable 카드 */}
         {root && (
           <section className="rounded-2xl bg-white border border-slate-200 p-5 space-y-1.5">
-            <h2 className="text-base font-semibold text-slate-700 tracking-tight">chain</h2>
+            <h2 className="text-base font-semibold text-slate-700 tracking-tight">작업구간</h2>
             <div className="pt-2 space-y-1.5">
               <FlatTree
                 root={root}

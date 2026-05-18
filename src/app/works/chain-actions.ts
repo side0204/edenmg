@@ -54,7 +54,7 @@ async function ensureChainManager(
   const isAdmin = me.permission === 'admin' || me.permission === 'ceo'
   const isAssignee = work.assignee_employee_id === me.id
   if (!isAdmin && !me.can_manage_works && !isAssignee) {
-    redirect(`/works/${workId}?err=` + encodeURIComponent('chain 관리 권한이 없습니다'))
+    redirect(`/works/${workId}?err=` + encodeURIComponent('작업구간 관리 권한이 없습니다'))
   }
   return work
 }
@@ -158,7 +158,7 @@ export async function createChain(formData: FormData) {
   if (chainErr || !chain) {
     redirect(
       `/works/${workId}/chains/new?err=` +
-        encodeURIComponent('chain 등록 실패: ' + (chainErr?.message ?? '')),
+        encodeURIComponent('작업구간 등록 실패: ' + (chainErr?.message ?? '')),
     )
   }
 
@@ -229,8 +229,8 @@ export async function createChain(formData: FormData) {
   revalidatePath(`/works/${workId}`)
   const ok =
     cleanBoxes.length > 0
-      ? `chain 을 등록했습니다 (함체 ${cleanBoxes.length}개)`
-      : 'chain 을 등록했습니다. 필요 시 함체를 추가하세요'
+      ? `작업구간을 등록했습니다 (함체 ${cleanBoxes.length}개)`
+      : '작업구간을 등록했습니다. 필요 시 함체를 추가하세요'
   redirect(`/works/${workId}/chains/${chain.id}/edit?ok=` + encodeURIComponent(ok))
 }
 
@@ -245,7 +245,7 @@ export async function updateChain(formData: FormData) {
   const workId = String(formData.get('work_id') ?? '').trim()
   const name = String(formData.get('name') ?? '').trim() || null
   const notes = String(formData.get('notes') ?? '').trim() || null
-  if (!id || !workId) redirect('/works?err=' + encodeURIComponent('chain id 가 없습니다'))
+  if (!id || !workId) redirect('/works?err=' + encodeURIComponent('작업구간 id 가 없습니다'))
 
   const { supabase, me } = await requireUser()
   await ensureChainManager(supabase, me, workId)
@@ -257,29 +257,29 @@ export async function updateChain(formData: FormData) {
   if (error) {
     redirect(
       `/works/${workId}/chains/${id}/edit?err=` +
-        encodeURIComponent('chain 수정 실패: ' + error.message),
+        encodeURIComponent('작업구간 수정 실패: ' + error.message),
     )
   }
 
   revalidatePath(`/works/${workId}`)
-  redirect(`/works/${workId}/chains/${id}/edit?ok=` + encodeURIComponent('chain 을 수정했습니다'))
+  redirect(`/works/${workId}/chains/${id}/edit?ok=` + encodeURIComponent('작업구간을 수정했습니다'))
 }
 
 export async function deleteChain(formData: FormData) {
   const id = String(formData.get('id') ?? '').trim()
   const workId = String(formData.get('work_id') ?? '').trim()
-  if (!id || !workId) redirect('/works?err=' + encodeURIComponent('chain id 가 없습니다'))
+  if (!id || !workId) redirect('/works?err=' + encodeURIComponent('작업구간 id 가 없습니다'))
 
   const { supabase, me } = await requireUser()
   await ensureChainManager(supabase, me, workId)
 
   const { error } = await supabase.from('connection_chains').delete().eq('id', id)
   if (error) {
-    redirect(`/works/${workId}?err=` + encodeURIComponent('chain 삭제 실패: ' + error.message))
+    redirect(`/works/${workId}?err=` + encodeURIComponent('작업구간 삭제 실패: ' + error.message))
   }
 
   revalidatePath(`/works/${workId}`)
-  redirect(`/works/${workId}?ok=` + encodeURIComponent('chain 을 삭제했습니다'))
+  redirect(`/works/${workId}?ok=` + encodeURIComponent('작업구간을 삭제했습니다'))
 }
 
 // ===== 노드 CRUD ========================================================
@@ -319,7 +319,7 @@ export async function createNode(formData: FormData) {
   const returnTo = sanitizeReturnTo(String(formData.get('return_to') ?? '').trim())
 
   const p = parseNodeForm(formData)
-  if (!chainId || !workId) redirect('/works?err=' + encodeURIComponent('chain id 가 없습니다'))
+  if (!chainId || !workId) redirect('/works?err=' + encodeURIComponent('작업구간 id 가 없습니다'))
   if (!p.name) {
     redirect(
       `/works/${workId}/chains/${chainId}/edit?err=` + encodeURIComponent('노드 이름을 입력하세요'),
@@ -473,7 +473,7 @@ export async function deleteNode(formData: FormData) {
   if ((nodeRow as { node_type: PlanNodeType } | null)?.node_type === 'upper_station') {
     redirect(
       `/works/${workId}/chains/${chainId}/edit?err=` +
-        encodeURIComponent('상위국은 삭제할 수 없습니다 (chain 자체를 삭제하세요)'),
+        encodeURIComponent('상위국은 삭제할 수 없습니다 (작업구간 자체를 삭제하세요)'),
     )
   }
 

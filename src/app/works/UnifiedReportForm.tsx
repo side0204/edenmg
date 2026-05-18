@@ -68,7 +68,8 @@ export function UnifiedReportForm({
   defaultReportDate,
   action,
   returnTo,
-  canEditChain,
+  canEditNode,
+  canAddNode,
 }: {
   workId: string
   chainId: string
@@ -80,7 +81,10 @@ export function UnifiedReportForm({
   defaultReportDate: string
   action: (formData: FormData) => void
   returnTo: string
-  canEditChain: boolean
+  /** 노드 수정 권한: admin/ceo/담당자 */
+  canEditNode: boolean
+  /** 사이끼우기(노드 추가) 권한: admin/ceo/담당자 + 배정 작업자 */
+  canAddNode: boolean
 }) {
   const [tasksByNode, setTasksByNode] = useState<Record<string, TaskRow[]>>(() => {
     const init: Record<string, TaskRow[]> = {}
@@ -165,12 +169,12 @@ export function UnifiedReportForm({
 
       {flatList.length === 0 ? (
         <p className="rounded-lg bg-slate-50 px-4 py-6 text-center text-sm text-slate-500">
-          chain 이 없습니다. 먼저 chain 에 함체·하위국을 추가하세요.
+          작업구간이 없습니다. 먼저 작업구간에 함체·하위국을 추가하세요.
         </p>
       ) : (
         <section className="rounded-2xl bg-white border border-slate-200 p-5 space-y-2">
           <h2 className="text-base font-semibold text-slate-700 tracking-tight">
-            {chainName ? `「${chainName}」` : 'chain'}
+            {chainName ? `「${chainName}」` : '작업구간'}
           </h2>
           <p className="text-xs text-slate-500">
             노드 사이 cable 카드에 케이블·선번·자재·공종을 입력하세요. 빈 cable 은 미작업 처리.
@@ -186,7 +190,7 @@ export function UnifiedReportForm({
                     workId={workId}
                     chainId={chainId}
                     returnTo={returnTo}
-                    canEditChain={canEditChain}
+                    canEditNode={canEditNode}
                   />
                 )
               }
@@ -210,7 +214,7 @@ export function UnifiedReportForm({
                   }
                   masters={masters}
                   cableMasters={cableMasters}
-                  canEditChain={canEditChain}
+                  canAddNode={canAddNode}
                 />
               )
             })}
@@ -234,17 +238,17 @@ function NodeRow({
   workId,
   chainId,
   returnTo,
-  canEditChain,
+  canEditNode,
 }: {
   node: UnifiedNode
   workId: string
   chainId: string
   returnTo: string
-  canEditChain: boolean
+  canEditNode: boolean
 }) {
   const returnToParam = encodeURIComponent(returnTo)
   const editNodeHref =
-    node.parent_id // 상위국은 수정 페이지 진입 불가 (chain edit 으로만)
+    node.parent_id // 상위국은 수정 페이지 진입 불가 (작업구간 edit 으로만)
       ? `/works/${workId}/chains/${chainId}/nodes/${node.id}/edit?return_to=${returnToParam}`
       : null
   const meta = [node.code && `ID: ${node.code}`, node.spec_enum].filter(Boolean).join(' · ')
@@ -260,7 +264,7 @@ function NodeRow({
         </p>
         {meta && <p className="mt-0.5 text-xs text-slate-500">{meta}</p>}
       </div>
-      {canEditChain && editNodeHref && (
+      {canEditNode && editNodeHref && (
         <Link
           href={editNodeHref}
           className="shrink-0 inline-flex items-center gap-0.5 rounded border border-slate-300 px-1.5 py-0.5 text-[11px] text-slate-600 hover:bg-slate-50"
@@ -289,7 +293,7 @@ function CableCard({
   setMaterials,
   masters,
   cableMasters,
-  canEditChain,
+  canAddNode,
 }: {
   nodeId: string
   parentId: string
@@ -304,7 +308,8 @@ function CableCard({
   setMaterials: (rows: MaterialRow[]) => void
   masters: MaterialMaster[]
   cableMasters: CableMaster[]
-  canEditChain: boolean
+  /** 사이끼우기 노출 권한 — admin/ceo/담당자 + 배정 작업자 */
+  canAddNode: boolean
 }) {
   const [lineNumbers, setLineNumbers] = useState('')
   const [cableCode, setCableCode] = useState('')
@@ -356,7 +361,7 @@ function CableCard({
             <span className="mx-1 text-slate-400">→</span>
             <span>{childName}</span>
           </p>
-          {canEditChain && (
+          {canAddNode && (
             <Link
               href={insertBetweenHref}
               className="shrink-0 inline-flex items-center gap-0.5 rounded border border-dashed border-slate-300 px-1.5 py-0.5 text-[11px] text-slate-500 hover:border-slate-900 hover:text-slate-900"

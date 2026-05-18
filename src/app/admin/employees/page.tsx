@@ -3,7 +3,7 @@ import { notFound } from 'next/navigation'
 import { ChevronLeft, UserPlus, Users } from 'lucide-react'
 import { createClient } from '@/lib/supabase/server'
 import { EmptyState } from '@/components/EmptyState'
-import { toggleCanManageWorks } from './actions'
+import { toggleCanDeleteWorks, toggleCanManageWorks } from './actions'
 import { FieldSelect } from './FieldSelect'
 import {
   PERMISSION_LABEL,
@@ -24,6 +24,7 @@ type EmployeeRow = {
   team: string | null
   work_type: string | null
   can_manage_works: boolean
+  can_delete_works: boolean
   is_active: boolean
   invited_at: string | null
   accepted_at: string | null
@@ -51,7 +52,7 @@ export default async function EmployeesPage() {
 
   const { data, error: listError } = await supabase
     .from('employees')
-    .select('id, name, email, phone, permission, position, team, work_type, can_manage_works, is_active, invited_at, accepted_at, created_at')
+    .select('id, name, email, phone, permission, position, team, work_type, can_manage_works, can_delete_works, is_active, invited_at, accepted_at, created_at')
     .order('created_at', { ascending: false })
 
   const rows = (data ?? []) as EmployeeRow[]
@@ -189,6 +190,30 @@ export default async function EmployeesPage() {
                       }
                     >
                       {emp.can_manage_works ? '✓ 부여됨' : '미부여'}
+                    </button>
+                  </form>
+                </div>
+
+                <div className="flex items-center justify-between gap-3 rounded-lg bg-rose-50/40 px-3 py-2">
+                  <div className="min-w-0">
+                    <p className="text-xs font-medium text-rose-700">작업 삭제 권한</p>
+                    <p className="text-[11px] text-rose-600/80">
+                      배정·일보·작업구간 cascade 삭제. 신중히 부여 (admin/ceo 는 자동)
+                    </p>
+                  </div>
+                  <form action={toggleCanDeleteWorks}>
+                    <input type="hidden" name="id" value={emp.id} />
+                    <input type="hidden" name="next" value={emp.can_delete_works ? '0' : '1'} />
+                    <button
+                      type="submit"
+                      className={
+                        'shrink-0 rounded-full px-3 py-1 text-xs font-bold ' +
+                        (emp.can_delete_works
+                          ? 'bg-rose-100 text-rose-800 hover:bg-rose-200'
+                          : 'bg-slate-200 text-slate-600 hover:bg-slate-300')
+                      }
+                    >
+                      {emp.can_delete_works ? '✓ 부여됨' : '미부여'}
                     </button>
                   </form>
                 </div>

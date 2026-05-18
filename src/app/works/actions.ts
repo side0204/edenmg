@@ -187,7 +187,17 @@ export async function createWork(formData: FormData) {
   }
 
   revalidatePath('/works')
-  redirect('/works?ok=' + encodeURIComponent(`${parsed.name} 작업을 등록했습니다`))
+
+  // 접속팀 작업이면 작업구간(=chain) 등록 화면으로 자동 진입.
+  // 등록자가 골격을 미리 만들어두고, 일보 작성 시 작업자가 사이끼우기로 보강.
+  if (parsed.worker_type === '접속팀') {
+    redirect(
+      `/works/${inserted.id}/chains/new?ok=` +
+        encodeURIComponent(`${parsed.name} 등록 완료. 이어서 작업구간을 등록하세요.`),
+    )
+  }
+
+  redirect(`/works/${inserted.id}?ok=` + encodeURIComponent(`${parsed.name} 작업을 등록했습니다`))
 }
 
 export async function updateWork(formData: FormData) {
@@ -216,6 +226,66 @@ export async function updateWork(formData: FormData) {
   revalidatePath(`/works/${id}`)
   redirect(`/works/${id}?ok=` + encodeURIComponent('작업 정보를 수정했습니다'))
 }
+
+// ===== 작업 삭제 ========================================================
+
+// admin/ceo OR employees.can_delete_works=true 만 삭제 가능.
+// works.id FK 가 모두 ON DELETE CASCADE 이므로:
+//   - work_assignments, work_daily_reports, connection_chains,
+//     connection_plan_nodes, connection_reports, segments, tasks, materials
+//   모두 함께 사라진다.
+export async function deleteWork(formData: FormData) {
+  const workId = String(formData.get('work_id') ?? '').trim()
+  if (!workId) redirect('/works?err=' + encodeURIComponent('작업 id 가 없습니다'))
+
+  const supabase = await createClient()
+  const {
+    data: { user },
+  } = await supabase.auth.getUser()
+  if (!user) redirect('/login')
+
+  const { data: meRow } = await supabase
+    .from('employees')
+    .select('id, company_id, permission, can_delete_works, is_active')
+    .eq('auth_user_id', user.id)
+    .maybeSingle()
+  const me = meRow as
+    | {
+        id: string
+        company_id: string
+        permission: Permission
+        can_delete_works: boolean
+        is_active: boolean
+      }
+    | null
+  if (!me || !me.is_active) {
+    redirect('/?err=' + encodeURIComponent('계정이 활성 상태가 아닙니다'))
+  }
+  const isAdmin = me.permission === 'admin' || me.permission === 'ceo'
+  if (!isAdmin && !me.can_delete_works) {
+    redirect('/works?err=' + encodeURIComponent('작업 삭제 권한이 없습니다'))
+  }
+
+  // 회사 스코프 + 작업명 확보 (성공 메시지용)
+  const { data: workRow } = await supabase
+    .from('works')
+    .select('id, company_id, name')
+    .eq('id', workId)
+    .maybeSingle()
+  const work = workRow as { id: string; company_id: string; name: string } | null
+  if (!work || work.company_id !== me.company_id) {
+    redirect('/works?err=' + encodeURIComponent('잘못된 작업입니다'))
+  }
+
+  const { error } = await supabase.from('works').delete().eq('id', workId)
+  if (error) {
+    redirect('/works?err=' + encodeURIComponent('삭제 실패: ' + error.message))
+  }
+
+  revalidatePath('/works')
+  redirect('/works?ok=' + encodeURIComponent(`${work.name} 작업을 삭제했습니다`))
+}
+
 
 // ===== 작업자 배정 ======================================================
 

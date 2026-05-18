@@ -300,12 +300,12 @@ export default async function WorkDetailPage({
 
         {isConnectionTeam ? (
           <>
-            {/* chain 관리 (접속팀 전용) */}
+            {/* 작업구간 관리 (접속팀 전용) */}
             <section className="rounded-2xl bg-white border border-slate-200 p-5 space-y-3">
               <div className="flex items-center justify-between gap-3">
                 <h2 className="text-base font-semibold text-slate-700 tracking-tight inline-flex items-center gap-1.5">
                   <Cable className="h-4 w-4 text-slate-500" />
-                  chain 관리 ({chains.length})
+                  작업구간 관리 ({chains.length})
                 </h2>
                 {canManage && (
                   <Link
@@ -313,13 +313,13 @@ export default async function WorkDetailPage({
                     className="shrink-0 inline-flex items-center gap-1 rounded-lg bg-slate-900 px-3 py-1.5 text-xs font-medium text-white hover:bg-slate-800"
                   >
                     <Plus className="h-3.5 w-3.5" />
-                    chain 등록
+                    작업구간 등록
                   </Link>
                 )}
               </div>
               {chains.length === 0 ? (
                 <p className="rounded-lg bg-slate-50 px-4 py-6 text-center text-sm text-slate-500">
-                  등록된 chain 이 없습니다. chain 을 등록한 뒤 함체를 추가하면 접속일보를 작성할 수 있습니다.
+                  등록된 작업구간이 없습니다. 작업구간을 등록한 뒤 함체를 추가하면 접속일보를 작성할 수 있습니다.
                 </p>
               ) : (
                 <ul className="divide-y divide-slate-100 rounded-lg border border-slate-200">
@@ -331,7 +331,7 @@ export default async function WorkDetailPage({
                       >
                         <div className="min-w-0 flex-1">
                           <p className="font-medium text-slate-900 truncate">
-                            {c.name || 'chain'}
+                            {c.name || '작업구간'}
                           </p>
                           <p className="text-xs text-slate-500">노드 {c.node_count}개</p>
                         </div>

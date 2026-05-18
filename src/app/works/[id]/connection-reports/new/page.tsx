@@ -94,7 +94,7 @@ export default async function NewConnectionReportPage({
   const chains = (chainsData ?? []) as ChainRow[]
   if (chains.length === 0) {
     redirect(
-      `/works/${id}?err=` + encodeURIComponent('chain 이 등록되지 않았습니다. 먼저 chain 을 추가하세요'),
+      `/works/${id}?err=` + encodeURIComponent('작업구간이 등록되지 않았습니다. 먼저 작업구간을 추가하세요'),
     )
   }
 
@@ -145,12 +145,15 @@ export default async function NewConnectionReportPage({
     .order('code')
   const cableMasters = (cableMastersData ?? []) as CableMaster[]
 
-  // chain 편집 권한: admin/ceo OR can_manage_works(데이터 부족하나 권한 체크는 server action 에서) OR work.assignee
-  // 일단 admin/ceo/assignee 만 노출 (가장 보수적)
-  const canEditChain =
-    me.permission === 'admin' ||
-    me.permission === 'ceo' ||
-    work.assignee_employee_id === me.id
+  // 권한 분리:
+  //  - canEditNode: 기존 노드의 정보(이름·규격·메모 등) 수정 — admin/ceo/담당자
+  //  - canAddNode : 작업구간 사이에 새 함체 끼우기 — admin/ceo/담당자 + 배정 작업자
+  //                 (owner: "일보작성자는 등록된 작업구간에서 추가되는 부분만 추가하도록")
+  const isAdminLike = me.permission === 'admin' || me.permission === 'ceo'
+  const isAssignee = work.assignee_employee_id === me.id
+  const canEditNode = isAdminLike || isAssignee
+  // assigned 여부는 위 권한 체크에서 redirect 로 컷팅된 상태 — 여기 도달했다는 건 isAdminLike OR 배정자
+  const canAddNode = true
 
   const today = new Date()
   const todayKST = new Date(today.getTime() + 9 * 60 * 60 * 1000).toISOString().slice(0, 10)
@@ -186,7 +189,7 @@ export default async function NewConnectionReportPage({
                     : 'text-slate-600 hover:text-slate-900')
                 }
               >
-                {c.name || 'chain'}
+                {c.name || '작업구간'}
               </Link>
             ))}
           </nav>
@@ -203,7 +206,8 @@ export default async function NewConnectionReportPage({
           defaultReportDate={reportDate}
           action={submitConnectionReport}
           returnTo={`/works/${work.id}/connection-reports/new?chain=${activeChain.id}`}
-          canEditChain={canEditChain}
+          canEditNode={canEditNode}
+          canAddNode={canAddNode}
         />
       </div>
     </main>

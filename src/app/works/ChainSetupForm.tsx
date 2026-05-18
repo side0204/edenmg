@@ -47,8 +47,8 @@ export function ChainSetupForm({
       <input type="hidden" name="boxes_json" value={boxesJson} />
 
       <section className="rounded-2xl bg-white border border-slate-200 p-5 space-y-3">
-        <h2 className="text-base font-semibold text-slate-700 tracking-tight">chain 정보</h2>
-        <Field label="chain 이름 (선택)">
+        <h2 className="text-base font-semibold text-slate-700 tracking-tight">작업구간 정보</h2>
+        <Field label="작업구간 이름 (선택)">
           <input
             name="name"
             maxLength={100}
@@ -86,7 +86,7 @@ export function ChainSetupForm({
           </button>
         </div>
         <p className="text-xs text-slate-500">
-          상위국과 하위국 사이에 들어갈 함체들을 순서대로 추가하세요. 함체 없이 상위국 → 하위국 직선 chain 도 가능.
+          상위국과 하위국 사이에 들어갈 함체들을 순서대로 추가하세요. 함체 없이 상위국 → 하위국 직선 작업구간도 가능.
         </p>
 
         {boxes.length === 0 ? (
@@ -211,7 +211,7 @@ export function ChainSetupForm({
         type="submit"
         className="w-full rounded-lg bg-slate-900 px-4 py-3 text-base font-medium text-white hover:bg-slate-800"
       >
-        chain 등록
+        작업구간 등록
       </button>
     </form>
   )

@@ -101,7 +101,7 @@ export default async function ChainEditPage({
     canEditNodes = (assigned ?? []).length > 0
   }
   if (!canEditNodes) {
-    redirect(`/works/${id}?err=` + encodeURIComponent('chain 편집 권한이 없습니다'))
+    redirect(`/works/${id}?err=` + encodeURIComponent('작업구간 편집 권한이 없습니다'))
   }
 
   const { data: chainData } = await supabase
@@ -145,19 +145,19 @@ export default async function ChainEditPage({
             {work.name}
           </Link>
           <h1 className="mt-1 text-3xl font-bold text-slate-900 tracking-tight">
-            chain 편집
+            작업구간 편집
             {chain.name && <span className="ml-2 text-slate-500 text-base">「{chain.name}」</span>}
           </h1>
         </header>
 
-        {/* chain 메타 편집 */}
+        {/* 작업구간 메타 편집 */}
         <section className="rounded-2xl bg-white border border-slate-200 p-5 space-y-3">
-          <h2 className="text-base font-semibold text-slate-700 tracking-tight">chain 정보</h2>
+          <h2 className="text-base font-semibold text-slate-700 tracking-tight">작업구간 정보</h2>
           <form action={updateChain} className="space-y-3">
             <input type="hidden" name="id" value={chain.id} />
             <input type="hidden" name="work_id" value={work.id} />
             <label className="block">
-              <span className="block text-sm font-medium text-slate-700">chain 이름</span>
+              <span className="block text-sm font-medium text-slate-700">작업구간 이름</span>
               <input
                 name="name"
                 defaultValue={chain.name ?? ''}
@@ -318,12 +318,12 @@ export default async function ChainEditPage({
           </form>
         </section>
 
-        {/* chain 삭제 */}
+        {/* 작업구간 삭제 */}
         {isManager && (
           <section className="rounded-2xl border border-rose-200 bg-rose-50/40 p-5">
             <h2 className="text-base font-semibold text-rose-700 tracking-tight">위험 구역</h2>
             <p className="mt-1 text-xs text-rose-600">
-              chain 삭제 시 노드·일보 segment 모두 cascade 삭제됩니다.
+              작업구간 삭제 시 노드·일보 segment 모두 cascade 삭제됩니다.
             </p>
             <form action={deleteChain} className="mt-3">
               <input type="hidden" name="id" value={chain.id} />
@@ -332,7 +332,7 @@ export default async function ChainEditPage({
                 type="submit"
                 className="rounded-lg border border-rose-300 bg-white px-4 py-2 text-sm font-medium text-rose-700 hover:bg-rose-50"
               >
-                chain 삭제
+                작업구간 삭제
               </button>
             </form>
           </section>
