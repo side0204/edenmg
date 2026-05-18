@@ -1,8 +1,9 @@
 import Link from 'next/link'
 import { redirect } from 'next/navigation'
-import { ChevronLeft } from 'lucide-react'
+import { ChevronLeft, CalendarDays } from 'lucide-react'
 import { createClient } from '@/lib/supabase/server'
 import { LEAVE_TYPE_LABEL, formatPeriod, type LeaveType } from '@/lib/leave'
+import { EmptyState } from '@/components/EmptyState'
 
 function todayInSeoul(): string {
   return new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Seoul' }).format(new Date())
@@ -101,9 +102,11 @@ export default async function LeavesPage() {
         </header>
 
         {leaves.length === 0 ? (
-          <p className="rounded-2xl bg-white border border-dashed border-slate-300 p-8 text-center text-sm text-slate-500">
-            이번 달 승인된 휴가·외근이 없습니다.
-          </p>
+          <EmptyState
+            icon={CalendarDays}
+            title="이번 달 휴가·외근 없음"
+            description="승인된 휴가·외근이 아직 없습니다."
+          />
         ) : (
           <>
             {ongoing.length > 0 && (

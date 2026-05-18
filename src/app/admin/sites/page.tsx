@@ -1,7 +1,8 @@
 import Link from 'next/link'
 import { notFound } from 'next/navigation'
-import { ChevronLeft, Plus } from 'lucide-react'
+import { ChevronLeft, Plus, MapPin } from 'lucide-react'
 import { createClient } from '@/lib/supabase/server'
+import { EmptyState } from '@/components/EmptyState'
 
 type Permission = 'worker' | 'foreman' | 'admin' | 'ceo'
 
@@ -125,12 +126,23 @@ export default async function SitesPage() {
             )
           })}
 
-          {rows.length === 0 && !listError && (
-            <li className="rounded-xl bg-white border border-dashed border-slate-300 p-8 text-center text-sm text-slate-500">
-              아직 등록된 현장이 없습니다. 우측 상단 <span className="font-medium">+ 현장 등록</span> 으로 시작하세요.
-            </li>
-          )}
         </ul>
+        {rows.length === 0 && !listError && (
+          <EmptyState
+            icon={MapPin}
+            title="등록된 현장 없음"
+            description="현장을 등록하면 GPS 기반 출퇴근이 가능합니다."
+            cta={
+              <Link
+                href="/admin/sites/new"
+                className="inline-flex items-center gap-1 rounded-lg bg-slate-900 px-4 py-2 text-sm font-medium text-white hover:bg-slate-800"
+              >
+                <Plus className="h-4 w-4" />
+                현장 등록
+              </Link>
+            }
+          />
+        )}
       </div>
     </main>
   )

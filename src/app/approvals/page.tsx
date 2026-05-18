@@ -1,7 +1,8 @@
 import Link from 'next/link'
 import { notFound, redirect } from 'next/navigation'
-import { ChevronLeft } from 'lucide-react'
+import { ChevronLeft, Inbox } from 'lucide-react'
 import { createClient } from '@/lib/supabase/server'
+import { EmptyState } from '@/components/EmptyState'
 import {
   LEAVE_TYPE_LABEL,
   formatPeriod,
@@ -131,12 +132,14 @@ export default async function ApprovalsPage() {
             </li>
           ))}
 
-          {rows.length === 0 && !listError && (
-            <li className="rounded-xl bg-white border border-dashed border-slate-300 p-8 text-center text-sm text-slate-500">
-              대기 중인 결재가 없습니다.
-            </li>
-          )}
         </ul>
+        {rows.length === 0 && !listError && (
+          <EmptyState
+            icon={Inbox}
+            title="대기 중인 결재 없음"
+            description={isAdmin ? '회사 내 대기 신청이 없습니다.' : '본인이 결재할 대기 신청이 없습니다.'}
+          />
+        )}
       </div>
     </main>
   )

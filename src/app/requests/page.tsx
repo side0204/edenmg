@@ -1,7 +1,8 @@
 import Link from 'next/link'
 import { redirect } from 'next/navigation'
-import { ChevronLeft, Plus } from 'lucide-react'
+import { ChevronLeft, Plus, FileText } from 'lucide-react'
 import { createClient } from '@/lib/supabase/server'
+import { EmptyState } from '@/components/EmptyState'
 import {
   LEAVE_TYPE_LABEL,
   STATUS_COLOR,
@@ -104,12 +105,23 @@ export default async function MyRequestsPage() {
             </li>
           ))}
 
-          {rows.length === 0 && !listError && (
-            <li className="rounded-xl bg-white border border-dashed border-slate-300 p-8 text-center text-sm text-slate-500">
-              아직 신청 내역이 없습니다. 우측 상단 <span className="font-medium">+ 신청</span> 으로 시작하세요.
-            </li>
-          )}
         </ul>
+        {rows.length === 0 && !listError && (
+          <EmptyState
+            icon={FileText}
+            title="신청 내역 없음"
+            description="휴가·외근·기타 결재가 필요할 때 신청서를 작성하세요."
+            cta={
+              <Link
+                href="/requests/new"
+                className="inline-flex items-center gap-1 rounded-lg bg-slate-900 px-4 py-2 text-sm font-medium text-white hover:bg-slate-800"
+              >
+                <Plus className="h-4 w-4" />
+                신청 작성
+              </Link>
+            }
+          />
+        )}
       </div>
     </main>
   )

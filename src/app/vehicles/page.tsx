@@ -1,6 +1,7 @@
 import Link from 'next/link'
-import { Search, Fuel, Plus, ChevronLeft } from 'lucide-react'
+import { Search, Fuel, Plus, ChevronLeft, Car } from 'lucide-react'
 import { createClient } from '@/lib/supabase/server'
+import { EmptyState } from '@/components/EmptyState'
 
 type Permission = 'worker' | 'foreman' | 'admin' | 'ceo'
 
@@ -157,15 +158,22 @@ export default async function VehiclesPage() {
         <section className="space-y-3">
           <h2 className="text-base font-semibold text-slate-700 tracking-tight">차량 목록</h2>
           {vehicles.length === 0 ? (
-            <p className="rounded-xl bg-white border border-dashed border-slate-300 p-8 text-center text-sm text-slate-500">
-              등록된 차량이 없습니다.
-              {isAdmin && (
-                <>
-                  {' '}
-                  우측 상단 <span className="font-medium">+ 차량 등록</span> 으로 시작하세요.
-                </>
-              )}
-            </p>
+            <EmptyState
+              icon={Car}
+              title="등록된 차량 없음"
+              description={isAdmin ? '회사 업무용 차량을 등록하면 출고·반납 기록이 시작됩니다.' : '관리자에게 차량 등록을 요청하세요.'}
+              cta={
+                isAdmin ? (
+                  <Link
+                    href="/vehicles/new"
+                    className="inline-flex items-center gap-1 rounded-lg bg-slate-900 px-4 py-2 text-sm font-medium text-white hover:bg-slate-800"
+                  >
+                    <Plus className="h-4 w-4" />
+                    차량 등록
+                  </Link>
+                ) : null
+              }
+            />
           ) : (
             <ul className="space-y-3">
               {vehicles.map((v) => {

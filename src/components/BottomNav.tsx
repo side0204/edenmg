@@ -41,7 +41,7 @@ export default function BottomNav() {
 
   return (
     <nav
-      className="fixed inset-x-0 bottom-0 z-40 border-t border-slate-200 bg-white/95 backdrop-blur"
+      className="fixed inset-x-0 bottom-0 z-40 border-t border-slate-200 bg-white/95 backdrop-blur dark:border-slate-800 dark:bg-slate-900/95"
       style={{ paddingBottom: 'env(safe-area-inset-bottom)' }}
     >
       <ul className="mx-auto flex max-w-2xl">
@@ -57,8 +57,8 @@ export default function BottomNav() {
                 className={
                   'flex flex-col items-center justify-center gap-0.5 px-2 py-2.5 text-xs ' +
                   (active
-                    ? 'text-slate-900 font-semibold'
-                    : 'text-slate-400 hover:text-slate-700')
+                    ? 'text-slate-900 font-semibold dark:text-slate-100'
+                    : 'text-slate-400 hover:text-slate-700 dark:text-slate-500 dark:hover:text-slate-300')
                 }
               >
                 <Icon

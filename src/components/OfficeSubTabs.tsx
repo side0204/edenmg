@@ -28,7 +28,7 @@ export default function OfficeSubTabs() {
   if (!isOffice) return null
 
   return (
-    <div className="sticky top-0 z-30 border-b border-slate-200 bg-white/95 backdrop-blur">
+    <div className="sticky top-0 z-30 border-b border-slate-200 bg-white/95 backdrop-blur dark:border-slate-800 dark:bg-slate-900/95">
       <ul className="mx-auto flex max-w-2xl">
         {SUB_TABS.map((tab) => {
           const active = tab.matchPrefixes.some((p) => pathname.startsWith(p))
@@ -39,8 +39,8 @@ export default function OfficeSubTabs() {
                 className={
                   'block py-3 text-center text-sm font-medium border-b-2 transition-colors ' +
                   (active
-                    ? 'border-slate-900 text-slate-900'
-                    : 'border-transparent text-slate-400 hover:text-slate-700')
+                    ? 'border-slate-900 text-slate-900 dark:border-slate-100 dark:text-slate-100'
+                    : 'border-transparent text-slate-400 hover:text-slate-700 dark:text-slate-500 dark:hover:text-slate-300')
                 }
               >
                 {tab.label}

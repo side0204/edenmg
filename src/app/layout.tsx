@@ -39,7 +39,7 @@ export default function RootLayout({
   return (
     <html lang="ko" className="h-full antialiased">
       <body
-        className="min-h-full flex flex-col bg-slate-50 text-slate-900"
+        className="min-h-full flex flex-col bg-slate-50 text-slate-900 dark:bg-slate-950 dark:text-slate-100"
         style={{ paddingBottom: 'calc(4rem + env(safe-area-inset-bottom))' }}
       >
         <OfficeSubTabs />

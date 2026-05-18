@@ -1,7 +1,8 @@
 import Link from 'next/link'
-import { Download, Fuel, ChevronLeft } from 'lucide-react'
+import { Download, Fuel, ChevronLeft, Search } from 'lucide-react'
 import { createClient } from '@/lib/supabase/server'
 import { monthRangeKST } from '@/lib/csv'
+import { EmptyState } from '@/components/EmptyState'
 
 type SearchParams = {
   mode?: string
@@ -342,9 +343,11 @@ export default async function VehicleTripsPage({
             검색 결과 ({totalCount.toLocaleString()} 건{totalCount >= 500 && ' · 최대 500건'})
           </h2>
           {totalCount === 0 ? (
-            <p className="rounded-xl bg-white border border-dashed border-slate-300 p-8 text-center text-sm text-slate-500">
-              해당 조건에 맞는 운행 기록이 없습니다.
-            </p>
+            <EmptyState
+              icon={Search}
+              title="운행 기록 없음"
+              description="기간·차량·운전자 조건을 바꿔서 다시 검색해보세요."
+            />
           ) : (
             <div className="overflow-x-auto rounded-xl border border-slate-200 bg-white shadow-sm">
               <table className="w-full text-xs">

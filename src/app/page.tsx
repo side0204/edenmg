@@ -267,26 +267,26 @@ export default async function Home() {
       <div className="mx-auto max-w-2xl space-y-6">
         <header className="flex items-start justify-between gap-3">
           <div>
-            <p className="text-sm text-slate-600">{employee.companies?.name ?? '회사 미지정'}</p>
-            <h1 className="text-3xl font-bold text-slate-900 tracking-tight">
+            <p className="text-sm text-slate-600 dark:text-slate-400">{employee.companies?.name ?? '회사 미지정'}</p>
+            <h1 className="text-3xl font-bold text-slate-900 tracking-tight dark:text-slate-100">
               {employee.name}
-              <span className="ml-2 text-base font-medium text-slate-500">
+              <span className="ml-2 text-base font-medium text-slate-500 dark:text-slate-400">
                 {PERMISSION_LABEL[employee.permission]}
               </span>
             </h1>
             {subtitleParts.length > 0 && (
-              <p className="mt-1 text-sm text-slate-500">{subtitleParts.join(' · ')}</p>
+              <p className="mt-1 text-sm text-slate-500 dark:text-slate-400">{subtitleParts.join(' · ')}</p>
             )}
           </div>
           <form action={signOut}>
-            <button className="rounded-lg border border-slate-300 px-3 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50">
+            <button className="rounded-lg border border-slate-300 px-3 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50 dark:border-slate-700 dark:text-slate-300 dark:hover:bg-slate-800">
               로그아웃
             </button>
           </form>
         </header>
 
-        <section className="rounded-2xl bg-white shadow-sm border border-slate-200 p-6 space-y-4">
-          <h2 className="flex items-center gap-2 text-base font-semibold text-slate-700 tracking-tight">
+        <section className="rounded-2xl bg-white shadow-sm border border-slate-200 dark:bg-slate-900 dark:border-slate-800 p-6 space-y-4">
+          <h2 className="flex items-center gap-2 text-base font-semibold text-slate-700 tracking-tight dark:text-slate-300">
             <Clock className="h-5 w-5 text-slate-400" />
             오늘 근태
           </h2>
@@ -319,8 +319,8 @@ export default async function Home() {
           </Link>
         </section>
 
-        <section className="rounded-2xl bg-white shadow-sm border border-slate-200 p-6 space-y-4">
-          <h2 className="flex items-center gap-2 text-base font-semibold text-slate-700 tracking-tight">
+        <section className="rounded-2xl bg-white shadow-sm border border-slate-200 dark:bg-slate-900 dark:border-slate-800 p-6 space-y-4">
+          <h2 className="flex items-center gap-2 text-base font-semibold text-slate-700 tracking-tight dark:text-slate-300">
             <Car className="h-5 w-5 text-slate-400" />
             업무용 차량
           </h2>
@@ -360,20 +360,20 @@ export default async function Home() {
 
           <Link
             href="/vehicles"
-            className="block rounded-lg border border-slate-200 hover:border-slate-900 px-4 py-3 text-base font-medium text-slate-900 text-center"
+            className="block rounded-lg border border-slate-200 hover:border-slate-900 px-4 py-3 text-base font-medium text-slate-900 dark:border-slate-800 dark:hover:border-slate-100 dark:text-slate-100 text-center"
           >
             전체 차량 관리 →
           </Link>
         </section>
 
-        <section className="rounded-2xl bg-white shadow-sm border border-slate-200 p-6 space-y-3">
-          <h2 className="flex items-center gap-2 text-base font-semibold text-slate-700 tracking-tight">
+        <section className="rounded-2xl bg-white shadow-sm border border-slate-200 dark:bg-slate-900 dark:border-slate-800 p-6 space-y-3">
+          <h2 className="flex items-center gap-2 text-base font-semibold text-slate-700 tracking-tight dark:text-slate-300">
             <ClipboardCheck className="h-5 w-5 text-slate-400" />
             결재
           </h2>
           <Link
             href="/requests"
-            className="flex items-center justify-between rounded-lg border border-slate-200 hover:border-slate-900 px-4 py-3 text-base font-medium text-slate-900"
+            className="flex items-center justify-between rounded-lg border border-slate-200 hover:border-slate-900 px-4 py-3 text-base font-medium text-slate-900 dark:border-slate-800 dark:hover:border-slate-100 dark:text-slate-100"
           >
             <span>내 신청 (휴가·외근 등)</span>
             {(myPendingCount ?? 0) > 0 && (
@@ -385,7 +385,7 @@ export default async function Home() {
           {canApprove && (
             <Link
               href="/approvals"
-              className="flex items-center justify-between rounded-lg border border-slate-200 hover:border-slate-900 px-4 py-3 text-base font-medium text-slate-900"
+              className="flex items-center justify-between rounded-lg border border-slate-200 hover:border-slate-900 px-4 py-3 text-base font-medium text-slate-900 dark:border-slate-800 dark:hover:border-slate-100 dark:text-slate-100"
             >
               <span>결재함</span>
               {approvalsPendingCount > 0 && (
@@ -397,8 +397,8 @@ export default async function Home() {
           )}
         </section>
 
-        <section className="rounded-2xl bg-white shadow-sm border border-slate-200 p-6 space-y-3">
-          <h2 className="flex items-center gap-2 text-base font-semibold text-slate-700 tracking-tight">
+        <section className="rounded-2xl bg-white shadow-sm border border-slate-200 dark:bg-slate-900 dark:border-slate-800 p-6 space-y-3">
+          <h2 className="flex items-center gap-2 text-base font-semibold text-slate-700 tracking-tight dark:text-slate-300">
             <CalendarDays className="h-5 w-5 text-slate-400" />
             휴가·외근 현황
             <span className="ml-auto text-xs font-normal text-slate-400">오늘</span>
@@ -440,33 +440,33 @@ export default async function Home() {
           )}
           <Link
             href="/leaves"
-            className="block rounded-lg border border-slate-200 hover:border-slate-900 px-4 py-3 text-base font-medium text-slate-900 text-center"
+            className="block rounded-lg border border-slate-200 hover:border-slate-900 px-4 py-3 text-base font-medium text-slate-900 dark:border-slate-800 dark:hover:border-slate-100 dark:text-slate-100 text-center"
           >
             이번 달 전체 보기 →
           </Link>
         </section>
 
         {isAdmin && (
-          <section className="rounded-2xl bg-white shadow-sm border border-slate-200 p-6 space-y-3">
-            <h2 className="flex items-center gap-2 text-base font-semibold text-slate-700 tracking-tight">
+          <section className="rounded-2xl bg-white shadow-sm border border-slate-200 dark:bg-slate-900 dark:border-slate-800 p-6 space-y-3">
+            <h2 className="flex items-center gap-2 text-base font-semibold text-slate-700 tracking-tight dark:text-slate-300">
               <Settings className="h-5 w-5 text-slate-400" />
               관리
             </h2>
             <Link
               href="/admin/employees"
-              className="block rounded-lg border border-slate-200 hover:border-slate-900 px-4 py-3 text-base font-medium text-slate-900"
+              className="block rounded-lg border border-slate-200 hover:border-slate-900 px-4 py-3 text-base font-medium text-slate-900 dark:border-slate-800 dark:hover:border-slate-100 dark:text-slate-100"
             >
               직원 관리 →
             </Link>
             <Link
               href="/admin/sites"
-              className="block rounded-lg border border-slate-200 hover:border-slate-900 px-4 py-3 text-base font-medium text-slate-900"
+              className="block rounded-lg border border-slate-200 hover:border-slate-900 px-4 py-3 text-base font-medium text-slate-900 dark:border-slate-800 dark:hover:border-slate-100 dark:text-slate-100"
             >
               현장 관리 →
             </Link>
             <Link
               href="/admin/reports"
-              className="block rounded-lg border border-slate-200 hover:border-slate-900 px-4 py-3 text-base font-medium text-slate-900"
+              className="block rounded-lg border border-slate-200 hover:border-slate-900 px-4 py-3 text-base font-medium text-slate-900 dark:border-slate-800 dark:hover:border-slate-100 dark:text-slate-100"
             >
               월별 리포트 →
             </Link>
@@ -474,14 +474,14 @@ export default async function Home() {
         )}
 
         {!isAdmin && employee.permission === 'foreman' && (
-          <section className="rounded-2xl bg-white shadow-sm border border-slate-200 p-6 space-y-3">
-            <h2 className="flex items-center gap-2 text-base font-semibold text-slate-700 tracking-tight">
+          <section className="rounded-2xl bg-white shadow-sm border border-slate-200 dark:bg-slate-900 dark:border-slate-800 p-6 space-y-3">
+            <h2 className="flex items-center gap-2 text-base font-semibold text-slate-700 tracking-tight dark:text-slate-300">
               <FileText className="h-5 w-5 text-slate-400" />
               리포트
             </h2>
             <Link
               href="/admin/reports"
-              className="block rounded-lg border border-slate-200 hover:border-slate-900 px-4 py-3 text-base font-medium text-slate-900"
+              className="block rounded-lg border border-slate-200 hover:border-slate-900 px-4 py-3 text-base font-medium text-slate-900 dark:border-slate-800 dark:hover:border-slate-100 dark:text-slate-100"
             >
               내 현장 월별 리포트 →
             </Link>

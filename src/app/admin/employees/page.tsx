@@ -1,7 +1,8 @@
 import Link from 'next/link'
 import { notFound } from 'next/navigation'
-import { ChevronLeft, UserPlus } from 'lucide-react'
+import { ChevronLeft, UserPlus, Users } from 'lucide-react'
 import { createClient } from '@/lib/supabase/server'
+import { EmptyState } from '@/components/EmptyState'
 import { FieldSelect } from './FieldSelect'
 import {
   PERMISSION_LABEL,
@@ -169,12 +170,23 @@ export default async function EmployeesPage() {
             )
           })}
 
-          {rows.length === 0 && !listError && (
-            <li className="rounded-xl bg-white border border-dashed border-slate-300 p-8 text-center text-sm text-slate-500">
-              아직 등록된 직원이 없습니다.
-            </li>
-          )}
         </ul>
+        {rows.length === 0 && !listError && (
+          <EmptyState
+            icon={Users}
+            title="등록된 직원 없음"
+            description="직원을 초대하면 이메일 링크로 가입됩니다."
+            cta={
+              <Link
+                href="/admin/employees/invite"
+                className="inline-flex items-center gap-1 rounded-lg bg-slate-900 px-4 py-2 text-sm font-medium text-white hover:bg-slate-800"
+              >
+                <UserPlus className="h-4 w-4" />
+                직원 초대
+              </Link>
+            }
+          />
+        )}
       </div>
     </main>
   )
