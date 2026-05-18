@@ -16,10 +16,10 @@
 | **케이블규격** | enum 고정: `1C, 1C(드랍), 2C, 2C(드랍), 12C, 36C, 72C, 144C, 288C, 576C` | round 1 + 3 |
 | **사용선번** | 자유 텍스트 ("1-6", "1,3,5", "1-6,12-18") | round 1 |
 | **분기** | 함체에서 갈래길 가능 — 트리 구조 | round 2 |
-| **함체 식별** | 함체명 + 함체규격 + GPS + 고유 식별번호(함체 코드/관리번호) | round 2 |
+| **함체 식별** | 함체명 + 함체규격 + GPS + 함체ID(고유 식별번호) | round 2 + 후속 정정 |
 | **엑셀 출력** | 일보별 1행 + 세그먼트별 1행 — 둘 다 다운로드 가능 | round 2 |
-| **국사 마스터** | 없음. 작업지시 담당자가 작업 등록 시 chain 미리 입력 | round 3 |
-| **함체 마스터** | 없음. plan 트리 노드로 직접 입력. 예정 외 함체는 작업 중 추가 | round 3 |
+| **국사·함체 마스터** | 회사 현실로는 존재하지만 **수량이 많아 일괄 등록 시간 부담**. MVP는 마스터 테이블 없이 작업지시 시 직접 입력. 마스터 테이블화는 v2 후순위 | round 3 + 후속 정정 |
+| **계획 외 함체 추가** | 작업자가 일보 작성 중 **트리의 원하는 위치에 끼워넣기 가능** (parent 선택). plan_nodes 에 그대로 들어가 chain 이 자라남 | round 3 + 후속 정정 |
 | **멀티 작업자** | 각자 일보 작성 (UNIQUE work+date+author). 비고에 협업 메모. segment-level 작업자 태그는 **v2** | round 3 |
 | **Plan/Actual 분리** | **B안** — Plan 에는 함체·구조만, 일보(Actual)에 케이블규격·선번 입력 | round 4 |
 | **chain 입력 위치** | 작업 상세 페이지 `/works/[id]` 에 "chain 관리" 섹션 (별도) | round 4 |
@@ -59,20 +59,23 @@ create table public.connection_chains (
 #### `connection_plan_nodes` — chain 트리 (상위국 + 함체들 + 하위국들)
 ```sql
 create table public.connection_plan_nodes (
-  id          uuid primary key default gen_random_uuid(),
-  chain_id    uuid not null references public.connection_chains(id) on delete cascade,
-  parent_id   uuid references public.connection_plan_nodes(id) on delete cascade,
-  position    int not null default 0,  -- 같은 parent 안에서 형제 순서 (분기 시 정렬)
-  node_type   public.plan_node_type not null,
-  name        text not null,           -- 상위국명 / 함체명 / 하위국명
-  code        text,                    -- 함체 코드 (node_type='box' 일 때만 사용)
-  spec        text,                    -- 함체 규격 (box 만)
-  lat         numeric(10, 7),          -- GPS 위도 (box 만)
-  lng         numeric(10, 7),          -- GPS 경도 (box 만)
-  address     text,                    -- 주소 (box 만)
-  notes       text,
-  created_at  timestamptz not null default now(),
-  updated_at  timestamptz not null default now(),
+  id                   uuid primary key default gen_random_uuid(),
+  chain_id             uuid not null references public.connection_chains(id) on delete cascade,
+  parent_id            uuid references public.connection_plan_nodes(id) on delete cascade,
+  position             int not null default 0,  -- 같은 parent 안에서 형제 순서 (분기 시 정렬)
+  node_type            public.plan_node_type not null,
+  name                 text not null,            -- 상위국명 / 함체명 / 하위국명
+  code                 text,                     -- 함체ID (고유 식별번호 / 관리번호) — node_type='box' 일 때만. UI 라벨은 "함체ID"
+  spec                 text,                     -- 함체 규격 (box 만)
+  lat                  numeric(10, 7),           -- GPS 위도 (box 만)
+  lng                  numeric(10, 7),           -- GPS 경도 (box 만)
+  address              text,                     -- 주소 (box 만)
+  notes                text,
+  -- ad-hoc 추가 추적 (작업자가 일보 중 끼워넣은 함체 표시용)
+  created_by_employee_id  uuid references public.employees(id) on delete set null,
+  added_during_report_id  uuid references public.connection_reports(id) on delete set null,
+  created_at           timestamptz not null default now(),
+  updated_at           timestamptz not null default now(),
   -- 각 chain 은 정확히 1개의 upper_station (root, parent_id IS NULL)
   -- leaf 노드는 lower_station 으로 끝맺음 (분기 시 leaf 여러 개 가능)
   check (node_type = 'upper_station' or parent_id is not null),
@@ -150,7 +153,7 @@ create table public.connection_report_segments (
 ```
 chain 1: 「강남 A동 ↔ B동」
   ┌─ 강남A국 (상위국)
-  ├─ 1번 함체 [함체코드: H001, 36C 함체, GPS: 37.49,127.02]
+  ├─ 1번 함체 [함체ID: H001, 36C 함체, GPS: 37.49,127.02]
   │  ├─ 2번 함체 [H002, 12C 함체]
   │  │  └─ B동 1층 (하위국)
   │  └─ B동 2층 (하위국)
@@ -175,7 +178,11 @@ chain 1: 「강남 A동 ↔ B동」
 - chain 선택 — chain 이 1개면 자동 선택, 2개 이상이면 select 보임
 - 트리 시각화 + 각 cable 옆에 cable_spec/line_numbers 입력 폼
 - 작업자가 해당 cable 클릭 → 인라인 입력: 케이블규격(드롭다운) + 선번(텍스트) + 완료 토글 + 메모
-- 트리 상단 [+ 함체 추가] — 예정 외 함체. 모달에서 parent 선택 후 노드 입력 → plan_nodes 에 새 노드 추가 + 자동으로 입력 폼 활성
+- **계획 외 함체 추가 (작업자 권한)**:
+  - 트리 안 각 노드 옆에 [+ 자식으로 추가] 버튼 — 그 노드를 parent 로 새 함체 끼워넣기
+  - 또는 cable 중간에 [⋯ 사이에 끼우기] — 부모-자식 사이에 함체 삽입 (기존 자식 노드들이 새 함체의 자식이 됨)
+  - 모달에서 함체명·함체ID·규격·GPS·주소·메모 입력 → plan_nodes 에 즉시 insert + 트리 갱신 + 새 cable 입력 폼 자동 활성
+  - 추가된 노드는 시각적으로 "★ 작업 중 추가" 배지 표시 (단순 metadata 로 created_by 비교)
 - 비고 (전체 일보 메모) + 진행률 enum
 
 ### 4-4. 접속일보 상세 `/works/[id]/connection-reports/[reportId]`
@@ -193,15 +200,18 @@ chain 1: 「강남 A동 ↔ B동」
 
 ### 5-2. 세그먼트별 1행 (`/api/reports/connection-reports?mode=segment&...`)
 
-| 일자 | 작성자 | 작업명 | chain명 | 출발노드 | 도착노드 | 도착노드 타입 | 함체코드 | 함체규격 | GPS | 케이블규격 | 사용선번 | 완료여부 | segment 메모 | 일보 진행률 | 일보 상태 |
-|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|
+| 일자 | 작성자 | 작업명 | chain명 | 출발노드 | 도착노드 | 도착노드 타입 | 함체ID | 함체규격 | GPS | 케이블규격 | 사용선번 | 완료여부 | 계획외추가 | segment 메모 | 일보 진행률 | 일보 상태 |
+|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|
+
+> "계획외추가" 컬럼 = 해당 노드가 작업자 ad-hoc 추가인지 (Y/N). `plan_nodes.added_during_report_id IS NOT NULL` 로 판단.
 
 CSV 빌더는 기존 `src/lib/csv.ts` 재사용. UTF-8+BOM, CRLF, RFC 5987 Content-Disposition.
 
 ## 6. 일반 작업일보(`work_daily_reports`) 와의 관계
 
 - worker_type='접속팀' 인 작업: **접속일보만 작성**. 작업 상세에서 일반 일보 섹션 숨김, 접속일보 섹션 노출.
-- worker_type='외선팀' / '기타': 기존 일반 일보 그대로.
+- worker_type='외선팀' / '기타': **이번 phase 에서는 기존 일반 일보 그대로 유지**.
+- ⚠️ **외선팀은 차후 별도 entity (외선일보) 로 분리 예정** — 접속일보와 동일한 패턴(별도 테이블·별도 페이지). 외선 작업 특성에 맞는 구조(케이블 포설구간·전주번호 등)를 별도 설계 후 도입.
 - 결재 라인은 동일 (작업의 `assignee_employee_id`).
 
 `/works/[id]` 페이지의 분기:
@@ -214,32 +224,35 @@ CSV 빌더는 기존 `src/lib/csv.ts` 재사용. UTF-8+BOM, CRLF, RFC 5987 Conte
 ## 7. 마이그레이션 순서
 
 ```
-0011_connection_chains.sql          -- chains + plan_nodes + enum cable_spec + plan_node_type
-0012_connection_reports.sql         -- reports + report_segments + RLS + GRANT
+0011_connection_chains.sql      -- enum (cable_spec, plan_node_type) + chains + plan_nodes (created_by_employee_id 포함, added_during_report_id 는 미포함) + RLS + GRANT
+0012_connection_reports.sql     -- reports + report_segments + RLS + GRANT
+                                -- + ALTER plan_nodes ADD COLUMN added_during_report_id (forward FK 회피용)
 ```
 
 (0010 의 `work_report_progress`·`work_report_status` enum 재사용)
 
 ## 8. 추후 (v2 후순위)
 
+- **외선일보 별도 entity** — 접속일보처럼 worker_type='외선팀' 작업도 별도 모듈로. 구조는 외선 작업 특성에 맞게 별도 설계 (예: 케이블 포설구간·전주번호·인입선 등).
 - **segment-level 작업자 태그** — 누가 어느 cable 작업했는지 (멀티 작업자 디테일)
 - **사진 첨부** — 함체·접속 사진 (EXIF 보존 포함, PRD M3-06)
-- **함체 마스터 테이블** — 자주 쓰는 함체 자동 완성
-- **국사 마스터 테이블** — 자주 쓰는 국사 자동 완성
-- **재접속 이력 조회** — 같은 함체코드로 검색해서 이력 보기
+- **국사 마스터 테이블** — 자주 쓰는 국사 자동 완성. 회사 현실에는 마스터가 있으나 수량이 많아 일괄 등록 시간 부담 → MVP 이후 점진 등록
+- **함체 마스터 테이블** — 같은 사유로 v2. 함체ID 검색으로 자동완성
+- **재접속 이력 조회** — 같은 함체ID 로 검색해서 시계열 이력 보기
 - **체인 시각화 지도** — GPS 좌표로 chain 경로 지도 그리기
-- **plan 변경 이력 audit** — 누가 언제 함체 추가·삭제했는지
+- **plan 변경 이력 audit** — 누가 언제 함체 추가·삭제했는지 (Phase 1 의 created_by_employee_id 만으로는 추적 부족)
 
 ## 9. owner 가 확인할 항목
 
 코드 들어가기 전에 한 번만 더 검토 부탁드립니다:
 
 - [ ] **3-2 의 테이블 4개 구조** 가 실제 업무 흐름과 맞나?
-- [ ] **케이블 규격 enum 10개** 가 빠진 거 / 잘못된 거 없나?
+- [ ] **케이블 규격 enum 10개** 가 빠진 거 / 잘못된 거 없나? (1C·1C드랍·2C·2C드랍·12C·36C·72C·144C·288C·576C)
 - [ ] **chain 명** 자유 텍스트로 충분한가? (자동 생성 vs 사용자 입력)
 - [ ] **하위국이 여러 개** 가능 (분기 leaf) 한 가정이 맞나?
-- [ ] **일반 일보와 자동 분기** (접속팀 → 접속일보, 외선팀/기타 → 일반 일보) 동의?
-- [ ] **chain 관리 권한** = admin/ceo/can_manage_works/담당자 — 다른 권한 필요?
-- [ ] **predefined 함체와 ad-hoc 함체 차이** 를 일보·엑셀에서 시각적으로 구분할 필요? 아니면 동일 처리?
+- [ ] **chain 관리 권한** = admin/ceo/can_manage_works/담당자 — 작업자도 함체 추가는 가능 (4-3 참조). 다른 권한 조정 필요?
+- [ ] **계획외 추가 함체 표시** — 엑셀 "계획외추가 Y/N" 컬럼 + 트리 UI "★ 작업 중 추가" 배지로 구분. 이 정도면 충분?
 
-위 7개 확인되면 마이그레이션·구현 들어갑니다.
+> 6번 (외선일보 별도 entity v2) · 7번 (국사·함체 마스터 v2) 은 후속 약속으로 표기됨.
+
+위 6개 확인되면 마이그레이션·구현 들어갑니다.
