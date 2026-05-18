@@ -119,6 +119,7 @@ export async function createChain(formData: FormData) {
     lng?: string | number
     address?: string
     notes?: string
+    master_id?: string
   }> = []
   if (boxesRaw) {
     try {
@@ -143,8 +144,12 @@ export async function createChain(formData: FormData) {
       lng: parseNumberOrNull(b.lng),
       address: String(b.address ?? '').trim() || null,
       notes: String(b.notes ?? '').trim() || null,
+      master_id: String(b.master_id ?? '').trim() || null,
     }))
     .filter((b) => b.name)
+
+  const upperMasterId = String(formData.get('upper_station_master_id') ?? '').trim() || null
+  const lowerMasterId = String(formData.get('lower_station_master_id') ?? '').trim() || null
 
   const { supabase, me } = await requireUser()
   await ensureChainManager(supabase, me, workId)
@@ -162,7 +167,27 @@ export async function createChain(formData: FormData) {
     )
   }
 
-  // 상위국 (root)
+  // 상위국 (root) — 마스터 선택 시 추가 메타 prefill
+  let upperPrefill: {
+    code: string | null
+    spec_enum: CableSpec | null
+    address: string | null
+    lat: number | null
+    lng: number | null
+  } = { code: null, spec_enum: null, address: null, lat: null, lng: null }
+  if (upperMasterId) {
+    const { data: m } = await supabase
+      .from('connection_facilities')
+      .select('code, spec_enum, address, lat, lng')
+      .eq('id', upperMasterId)
+      .eq('company_id', me.company_id)
+      .maybeSingle()
+    if (m) {
+      const row = m as typeof upperPrefill
+      upperPrefill = row
+    }
+  }
+
   const { data: upper, error: upperErr } = await supabase
     .from('connection_plan_nodes')
     .insert({
@@ -170,6 +195,12 @@ export async function createChain(formData: FormData) {
       parent_id: null,
       node_type: 'upper_station' as PlanNodeType,
       name: upperStationName,
+      code: upperPrefill.code,
+      spec_enum: upperPrefill.spec_enum,
+      address: upperPrefill.address,
+      lat: upperPrefill.lat,
+      lng: upperPrefill.lng,
+      master_id: upperMasterId,
       position: 0,
     })
     .select('id')
@@ -198,6 +229,7 @@ export async function createChain(formData: FormData) {
         lng: b.lng,
         address: b.address,
         notes: b.notes,
+        master_id: b.master_id,
         position: 0,
       })
       .select('id')
@@ -211,12 +243,35 @@ export async function createChain(formData: FormData) {
     prevId = ins.id
   }
 
-  // 하위국 — 마지막 함체(또는 상위국)의 자식
+  // 하위국 — 마지막 함체(또는 상위국)의 자식. 마스터 선택 시 prefill.
+  let lowerPrefill: {
+    code: string | null
+    spec_enum: CableSpec | null
+    address: string | null
+    lat: number | null
+    lng: number | null
+  } = { code: null, spec_enum: null, address: null, lat: null, lng: null }
+  if (lowerMasterId) {
+    const { data: m } = await supabase
+      .from('connection_facilities')
+      .select('code, spec_enum, address, lat, lng')
+      .eq('id', lowerMasterId)
+      .eq('company_id', me.company_id)
+      .maybeSingle()
+    if (m) lowerPrefill = m as typeof lowerPrefill
+  }
+
   const { error: lowerErr } = await supabase.from('connection_plan_nodes').insert({
     chain_id: chain.id,
     parent_id: prevId,
     node_type: 'lower_station' as PlanNodeType,
     name: lowerStationName,
+    code: lowerPrefill.code,
+    spec_enum: lowerPrefill.spec_enum,
+    address: lowerPrefill.address,
+    lat: lowerPrefill.lat,
+    lng: lowerPrefill.lng,
+    master_id: lowerMasterId,
     position: 0,
   })
   if (lowerErr) {

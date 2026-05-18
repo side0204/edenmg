@@ -2,8 +2,9 @@ import Link from 'next/link'
 import { notFound, redirect } from 'next/navigation'
 import { ChevronLeft } from 'lucide-react'
 import { createClient } from '@/lib/supabase/server'
+import type { CableSpec } from '@/lib/connection'
 import { createChain } from '../../../chain-actions'
-import { ChainSetupForm } from '../../../ChainSetupForm'
+import { ChainSetupForm, type FacilityMaster } from '../../../ChainSetupForm'
 
 export default async function NewChainPage({
   params,
@@ -57,6 +58,36 @@ export default async function NewChainPage({
     redirect(`/works/${id}?err=` + encodeURIComponent('작업구간 관리 권한이 없습니다'))
   }
 
+  // 함체·국사 마스터 (활성)
+  const { data: mastersData } = await supabase
+    .from('connection_facilities')
+    .select('id, facility_type, name, code, spec_enum, address, lat, lng')
+    .eq('company_id', me.company_id)
+    .eq('is_active', true)
+    .order('name')
+  type FacilityRow = {
+    id: string
+    facility_type: 'station' | 'box'
+    name: string
+    code: string | null
+    spec_enum: CableSpec | null
+    address: string | null
+    lat: number | null
+    lng: number | null
+  }
+  const allMasters = (mastersData ?? []) as FacilityRow[]
+  const toMaster = (m: FacilityRow): FacilityMaster => ({
+    id: m.id,
+    name: m.name,
+    code: m.code,
+    spec_enum: m.spec_enum,
+    address: m.address,
+    lat: m.lat,
+    lng: m.lng,
+  })
+  const stationMasters = allMasters.filter((m) => m.facility_type === 'station').map(toMaster)
+  const boxMasters = allMasters.filter((m) => m.facility_type === 'box').map(toMaster)
+
   return (
     <main className="min-h-screen p-4 sm:p-6">
       <div className="mx-auto max-w-2xl space-y-5">
@@ -74,7 +105,12 @@ export default async function NewChainPage({
           </p>
         </header>
 
-        <ChainSetupForm workId={work.id} action={createChain} />
+        <ChainSetupForm
+          workId={work.id}
+          action={createChain}
+          stationMasters={stationMasters}
+          boxMasters={boxMasters}
+        />
       </div>
     </main>
   )

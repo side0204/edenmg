@@ -34,6 +34,13 @@ type NodeRow = {
   added_during_report_id: string | null
 }
 
+type FacilityMasterRow = {
+  id: string
+  facility_type: 'station' | 'box'
+  name: string
+  code: string | null
+}
+
 export default async function ChainEditPage({
   params,
   searchParams,
@@ -120,6 +127,21 @@ export default async function ChainEditPage({
     .eq('chain_id', chainId)
     .order('position')
   const nodes = (nodesData ?? []) as NodeRow[]
+
+  // 함체·국사 마스터 — 자동완성 datalist
+  const { data: mastersData } = await supabase
+    .from('connection_facilities')
+    .select('id, facility_type, name, code')
+    .eq('company_id', me.company_id)
+    .eq('is_active', true)
+    .order('name')
+  const masters = (mastersData ?? []) as FacilityMasterRow[]
+  const boxMasterNames = masters
+    .filter((m) => m.facility_type === 'box')
+    .map((m) => (m.code ? `${m.name} (${m.code})` : m.name))
+  const stationMasterNames = masters
+    .filter((m) => m.facility_type === 'station')
+    .map((m) => (m.code ? `${m.name} (${m.code})` : m.name))
 
   // 트리 빌드
   const childrenMap = new Map<string | null, NodeRow[]>()
@@ -242,9 +264,13 @@ export default async function ChainEditPage({
                 name="name"
                 required
                 maxLength={100}
+                list="node-name-suggestions"
                 placeholder="예: 1번 함체 / B동 2층"
                 className={inputClass}
               />
+              {(boxMasterNames.length > 0 || stationMasterNames.length > 0) && (
+                <p className="mt-1 text-xs text-slate-500">등록된 함체·국사 자동완성 가능</p>
+              )}
             </Field>
 
             <div className="grid grid-cols-2 gap-3">
@@ -316,6 +342,18 @@ export default async function ChainEditPage({
               노드 추가
             </button>
           </form>
+
+          {/* 자동완성 datalist */}
+          {(boxMasterNames.length > 0 || stationMasterNames.length > 0) && (
+            <datalist id="node-name-suggestions">
+              {boxMasterNames.map((label) => (
+                <option key={`b-${label}`} value={label} />
+              ))}
+              {stationMasterNames.map((label) => (
+                <option key={`s-${label}`} value={label} />
+              ))}
+            </datalist>
+          )}
         </section>
 
         {/* 작업구간 삭제 */}

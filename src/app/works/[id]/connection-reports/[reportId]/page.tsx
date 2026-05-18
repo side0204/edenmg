@@ -1,12 +1,13 @@
 import Link from 'next/link'
 import { notFound, redirect } from 'next/navigation'
-import { ChevronLeft, Trash2 } from 'lucide-react'
+import { ChevronLeft, MapPin, Trash2 } from 'lucide-react'
 import { createClient } from '@/lib/supabase/server'
 import {
   CONNECTION_TASK_TYPE_VALUES,
   PLAN_NODE_TYPE_LABEL,
   TASK_TYPE_COLOR,
   formatTaskLabel,
+  isBrowserViewable,
   type CableSpec,
   type ConnectionTaskType,
   type PlanNodeType,
@@ -18,11 +19,14 @@ import {
   addMaterial,
   addTask,
   approveConnectionReport,
+  getConnectionPhotoViewUrls,
   rejectConnectionReport,
+  removeConnectionPhoto,
   removeMaterial,
   removeTask,
   updateConnectionReportMeta,
 } from '../../../connection-report-actions'
+import PhotoUploader from '../../../PhotoUploader'
 
 type ReportRow = {
   id: string
@@ -84,6 +88,19 @@ type MaterialMaster = {
   name: string
   spec: string | null
   unit: string | null
+}
+
+type PhotoRow = {
+  id: string
+  path: string
+  filename: string
+  mime_type: string
+  file_size: number
+  taken_at: string | null
+  gps_lat: number | null
+  gps_lng: number | null
+  uploaded_by: string
+  created_at: string
 }
 
 export default async function ConnectionReportDetailPage({
@@ -256,6 +273,36 @@ export default async function ConnectionReportDetailPage({
   const masters = (mastersData ?? []) as MaterialMaster[]
   const masterMap = new Map<string, MaterialMaster>(masters.map((m) => [m.id, m]))
 
+  // 사진
+  const { data: photosData } = await supabase
+    .from('connection_report_photos')
+    .select('id, path, filename, mime_type, file_size, taken_at, gps_lat, gps_lng, uploaded_by, created_at')
+    .eq('report_id', reportId)
+    .order('taken_at', { ascending: true, nullsFirst: false })
+    .order('created_at', { ascending: true })
+  const photos = (photosData ?? []) as PhotoRow[]
+  const viewablePaths = photos.filter((p) => isBrowserViewable(p.mime_type)).map((p) => p.path)
+  const viewUrls = viewablePaths.length > 0 ? await getConnectionPhotoViewUrls(viewablePaths) : new Map<string, string>()
+
+  // 업로더 이름 (empMap 에 없는 ID 만 추가 조회)
+  const missingUploaderIds = Array.from(
+    new Set(photos.map((p) => p.uploaded_by).filter((id) => !empMap.has(id))),
+  )
+  if (missingUploaderIds.length > 0) {
+    const { data: extraEmpsData } = await supabase
+      .from('employees')
+      .select('id, name, position, team')
+      .in('id', missingUploaderIds)
+    for (const e of (extraEmpsData ?? []) as {
+      id: string
+      name: string
+      position: string | null
+      team: string | null
+    }[]) {
+      empMap.set(e.id, { name: e.name, position: e.position, team: e.team })
+    }
+  }
+
   const isAdmin = me.permission === 'admin'
   const isAuthor = report.author_employee_id === me.id
   const isAssignee = work.assignee_employee_id === me.id
@@ -361,6 +408,78 @@ export default async function ConnectionReportDetailPage({
             </div>
           </section>
         )}
+
+        {/* 사진 */}
+        <section className="rounded-2xl bg-white border border-slate-200 p-5 space-y-3">
+          <div className="flex items-center justify-between gap-2">
+            <h2 className="text-base font-semibold text-slate-700 tracking-tight">
+              사진 {photos.length > 0 && <span className="text-slate-400">({photos.length})</span>}
+            </h2>
+          </div>
+
+          {photos.length === 0 ? (
+            <p className="text-sm text-slate-400">첨부된 사진이 없습니다</p>
+          ) : (
+            <div className="grid grid-cols-2 gap-2 sm:grid-cols-3">
+              {photos.map((p) => {
+                const url = viewUrls.get(p.path)
+                const uploader = empMap.get(p.uploaded_by)
+                return (
+                  <div key={p.id} className="group relative overflow-hidden rounded-lg border border-slate-200 bg-slate-50">
+                    {url ? (
+                      <a href={url} target="_blank" rel="noopener noreferrer" className="block">
+                        {/* eslint-disable-next-line @next/next/no-img-element */}
+                        <img
+                          src={url}
+                          alt={p.filename}
+                          className="aspect-square w-full object-cover"
+                          loading="lazy"
+                        />
+                      </a>
+                    ) : (
+                      <div className="flex aspect-square w-full items-center justify-center text-xs text-slate-500">
+                        {p.mime_type.includes('heic') || p.mime_type.includes('heif')
+                          ? 'HEIC (모바일에서 확인)'
+                          : '미리보기 불가'}
+                      </div>
+                    )}
+                    <div className="absolute inset-x-0 bottom-0 bg-gradient-to-t from-black/70 to-transparent p-1.5 text-[10px] text-white">
+                      {p.taken_at ? formatDateTime(p.taken_at) : formatDateTime(p.created_at)}
+                      {p.gps_lat !== null && p.gps_lng !== null && (
+                        <a
+                          href={`https://maps.google.com/?q=${p.gps_lat},${p.gps_lng}`}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="ml-1 inline-flex items-center gap-0.5 underline"
+                        >
+                          <MapPin className="h-2.5 w-2.5" />
+                          GPS
+                        </a>
+                      )}
+                      {uploader?.name && <span className="ml-1">· {uploader.name}</span>}
+                    </div>
+                    {(canEdit || isAdmin) && (
+                      <form action={removeConnectionPhoto} className="absolute right-1 top-1">
+                        <input type="hidden" name="photo_id" value={p.id} />
+                        <input type="hidden" name="report_id" value={report.id} />
+                        <input type="hidden" name="work_id" value={work.id} />
+                        <button
+                          type="submit"
+                          className="rounded-full bg-black/50 p-1 text-white opacity-0 hover:bg-rose-600 group-hover:opacity-100 focus:opacity-100"
+                          aria-label="삭제"
+                        >
+                          <Trash2 className="h-3 w-3" />
+                        </button>
+                      </form>
+                    )}
+                  </div>
+                )
+              })}
+            </div>
+          )}
+
+          {canEdit && <PhotoUploader reportId={report.id} workId={work.id} />}
+        </section>
 
         {/* 결재 결과 */}
         {report.status !== '대기' && (

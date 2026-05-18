@@ -82,6 +82,24 @@ export const CONNECTION_TASK_TYPE_VALUES: readonly ConnectionTaskType[] = [
 export type WorkReportProgress = '시작전' | '진행중' | '완료'
 export type WorkReportStatus = '대기' | '승인' | '반려'
 
+// ===== 사진 첨부 ======================================================
+
+export const PHOTO_MAX_BYTES = 10 * 1024 * 1024 // 10MB
+export const PHOTO_MIME_WHITELIST: readonly string[] = [
+  'image/jpeg',
+  'image/png',
+  'image/webp',
+  'image/heic',
+  'image/heif',
+]
+export const PHOTO_BUCKET = 'connection-photos'
+
+// HEIC 는 모든 브라우저가 미리보기를 렌더링하지 못함 (Safari/iOS 정도만 OK).
+// 다운로드는 가능하지만 그리드 썸네일은 placeholder 표시.
+export function isBrowserViewable(mime: string): boolean {
+  return mime === 'image/jpeg' || mime === 'image/png' || mime === 'image/webp'
+}
+
 // ===== 사용선번 파서 ==================================================
 
 export type ParseResult =

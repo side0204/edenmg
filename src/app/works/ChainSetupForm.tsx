@@ -12,6 +12,29 @@ type BoxRow = {
   lng: string
   address: string
   notes: string
+  master_id: string
+}
+
+export type FacilityMaster = {
+  id: string
+  name: string
+  code: string | null
+  spec_enum: CableSpec | null
+  address: string | null
+  lat: number | null
+  lng: number | null
+}
+
+// 마스터 옵션 라벨 — 같은 이름 여러 개일 때 코드로 구분
+function labelOfMaster(m: FacilityMaster): string {
+  return m.code ? `${m.name} (${m.code})` : m.name
+}
+
+// 입력값이 마스터 라벨과 일치하는지 lookup
+function findMasterByLabel(masters: FacilityMaster[], value: string): FacilityMaster | null {
+  const trimmed = value.trim()
+  if (!trimmed) return null
+  return masters.find((m) => labelOfMaster(m) === trimmed) ?? null
 }
 
 /**
@@ -24,20 +47,53 @@ type BoxRow = {
 export function ChainSetupForm({
   workId,
   action,
+  stationMasters = [],
+  boxMasters = [],
 }: {
   workId: string
   action: (formData: FormData) => void
+  stationMasters?: FacilityMaster[]
+  boxMasters?: FacilityMaster[]
 }) {
   const [boxes, setBoxes] = useState<BoxRow[]>([])
+  const [upperMasterId, setUpperMasterId] = useState('')
+  const [lowerMasterId, setLowerMasterId] = useState('')
 
   const addBox = () =>
     setBoxes([
       ...boxes,
-      { name: '', code: '', spec_enum: '', lat: '', lng: '', address: '', notes: '' },
+      {
+        name: '',
+        code: '',
+        spec_enum: '',
+        lat: '',
+        lng: '',
+        address: '',
+        notes: '',
+        master_id: '',
+      },
     ])
   const updateBox = (idx: number, patch: Partial<BoxRow>) =>
     setBoxes(boxes.map((b, i) => (i === idx ? { ...b, ...patch } : b)))
   const removeBox = (idx: number) => setBoxes(boxes.filter((_, i) => i !== idx))
+
+  // 함체 이름 입력 시 마스터 매칭 → 자동 채움
+  const handleBoxNameChange = (idx: number, value: string) => {
+    const match = findMasterByLabel(boxMasters, value)
+    if (match) {
+      updateBox(idx, {
+        name: match.name,
+        code: match.code ?? '',
+        spec_enum: match.spec_enum ?? '',
+        address: match.address ?? '',
+        lat: match.lat !== null ? String(match.lat) : '',
+        lng: match.lng !== null ? String(match.lng) : '',
+        master_id: match.id,
+      })
+    } else {
+      updateBox(idx, { name: value, master_id: '' })
+    }
+  }
 
   const boxesJson = useMemo(() => JSON.stringify(boxes), [boxes])
 
@@ -58,6 +114,7 @@ export function ChainSetupForm({
         </Field>
       </section>
 
+      <input type="hidden" name="upper_station_master_id" value={upperMasterId} />
       <section className="rounded-2xl bg-white border border-slate-200 p-5 space-y-3">
         <h2 className="text-base font-semibold text-slate-700 tracking-tight">상위국 *</h2>
         <Field label="이름 *">
@@ -65,9 +122,18 @@ export function ChainSetupForm({
             name="upper_station_name"
             required
             maxLength={100}
-            placeholder="예: 강남A국"
+            list="station-masters"
+            placeholder={stationMasters.length > 0 ? '입력 시 등록된 국사 자동완성' : '예: 강남A국'}
+            onChange={(e) => {
+              const m = findMasterByLabel(stationMasters, e.currentTarget.value)
+              setUpperMasterId(m?.id ?? '')
+              if (m) e.currentTarget.value = m.name
+            }}
             className={inputClass}
           />
+          {stationMasters.length > 0 && (
+            <p className="mt-1 text-xs text-slate-500">등록된 국사 {stationMasters.length}개 자동완성</p>
+          )}
         </Field>
       </section>
 
@@ -112,11 +178,15 @@ export function ChainSetupForm({
                 <Field label="함체명 *">
                   <input
                     value={b.name}
-                    onChange={(e) => updateBox(idx, { name: e.currentTarget.value })}
+                    onChange={(e) => handleBoxNameChange(idx, e.currentTarget.value)}
                     maxLength={100}
-                    placeholder="예: 1번 함체"
+                    list="box-masters"
+                    placeholder={boxMasters.length > 0 ? '입력 시 등록된 함체 자동완성' : '예: 1번 함체'}
                     className={inputClass}
                   />
+                  {b.master_id && (
+                    <p className="mt-1 text-[11px] text-emerald-700">★ 마스터에서 자동 채움</p>
+                  )}
                 </Field>
 
                 <div className="grid grid-cols-2 gap-3">
@@ -194,6 +264,7 @@ export function ChainSetupForm({
         )}
       </section>
 
+      <input type="hidden" name="lower_station_master_id" value={lowerMasterId} />
       <section className="rounded-2xl bg-white border border-slate-200 p-5 space-y-3">
         <h2 className="text-base font-semibold text-slate-700 tracking-tight">하위국 *</h2>
         <Field label="이름 *">
@@ -201,11 +272,33 @@ export function ChainSetupForm({
             name="lower_station_name"
             required
             maxLength={100}
-            placeholder="예: B동 1층"
+            list="station-masters"
+            placeholder={stationMasters.length > 0 ? '입력 시 등록된 국사 자동완성' : '예: B동 1층'}
+            onChange={(e) => {
+              const m = findMasterByLabel(stationMasters, e.currentTarget.value)
+              setLowerMasterId(m?.id ?? '')
+              if (m) e.currentTarget.value = m.name
+            }}
             className={inputClass}
           />
         </Field>
       </section>
+
+      {/* 자동완성용 datalist (한 form 에 공통) */}
+      {stationMasters.length > 0 && (
+        <datalist id="station-masters">
+          {stationMasters.map((m) => (
+            <option key={m.id} value={labelOfMaster(m)} />
+          ))}
+        </datalist>
+      )}
+      {boxMasters.length > 0 && (
+        <datalist id="box-masters">
+          {boxMasters.map((m) => (
+            <option key={m.id} value={labelOfMaster(m)} />
+          ))}
+        </datalist>
+      )}
 
       <button
         type="submit"

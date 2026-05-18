@@ -359,6 +359,45 @@ owner 요청 (일보 작성 우선·작업자별 흐름·진입 단순화):
 - 가설: `{open && <Modal>}` conditional 렌더링 시 모달 unmount → 어떤 식으로든 부모 useState 리셋되는 React reconciliation 이슈.
 - 해결: 모달을 **항상 mount + `hidden pointer-events-none` 클래스로만 visibility 토글**. element unmount 자체 회피.
 
+### ✅ 완료 (접속일보 사진 첨부 + EXIF, 2026-05-19)
+
+| 항목 | 결정 | 비고 |
+|---|---|---|
+| **다중성** | 1:N 별도 테이블 `connection_report_photos`. 한 일보에 여러 장 | 휴가 첨부는 1장이었지만 현장 사진은 여러 장 |
+| **형식·크기** | JPG/PNG/WEBP/HEIC, 10MB/장 | PDF 제외 |
+| **권한** | 업로드/삭제: 작성자+대기 OR admin. 다운로드: 같은 회사 누구나 | RLS 가 분기 |
+| **EXIF 추출** | 클라이언트 `exifr` 라이브러리로 `taken_at`·`gps_lat`/`gps_lng` 추출 → DB 컬럼 | 서버는 metadata 받아 저장만 |
+| **워터마크** | v2 — 촬영시각·작업명 합성 | 이번 단계는 EXIF 표시만 |
+| **업로드 시점** | 일보 작성 후 상세 페이지에서만 | 작성 폼 X — 작성 흐름 단순화 |
+| **노드별 태깅** | v2 | 현재는 일보 단위만 |
+
+- **마이그** [`0020_connection_report_photos.sql`](./supabase/migrations/0020_connection_report_photos.sql) — connection_report_photos 테이블 + connection-photos 버킷(private, 10MB, 이미지 화이트리스트) + RLS 3개(select/insert/delete) + storage.objects 3개 정책.
+- **공통**: [`src/lib/connection.ts`](./src/lib/connection.ts) — PHOTO_BUCKET/PHOTO_MAX_BYTES/PHOTO_MIME_WHITELIST·`isBrowserViewable()` 추가.
+- **클라이언트**: [`PhotoUploader.tsx`](./src/app/works/PhotoUploader.tsx) — `<input type="file" multiple capture="environment">` + exifr 추출 + 순차 server action 호출. 진행 표시(`업로드 중 N/M`) + 토스트.
+- **server actions** ([`connection-report-actions.ts`](./src/app/works/connection-report-actions.ts)): `uploadConnectionPhoto(formData) → { ok | error }`, `removeConnectionPhoto(formData)` (RLS 가 권한 분기), `getConnectionPhotoViewUrls(paths[])` (30분 signedUrl 일괄 발급).
+- **갤러리** (일보 상세 페이지): 2/3-col grid + 정사각 썸네일 + 하단 오버레이(촬영시각·GPS map link·업로더). canEdit 시 우상단 hover 휴지통.
+
+### ✅ 완료 (일반 일보 월별 CSV, 2026-05-19)
+
+owner 결정: 외선·기타 일보 단일 CSV (접속일보는 별도 4모드 유지). 컬럼: 일자·작성자·권한·직급·팀·분야·작업명·공사번호·카테고리·작업자구분·작업내역·사용자재·진행률·상태·처리자·처리시각·처리의견·특이사항.
+
+- **Route Handler**: [`/api/reports/work-daily-reports`](./src/app/api/reports/work-daily-reports/route.ts) — `?month=YYYY-MM&work_id=옵션`. 접속팀 work 의 일보는 자동 제외 (정의상 별도 entity). foreman 은 본인 담당 작업만.
+- **/admin/reports**: 「일반 일보 (외선·기타)」 섹션 추가. 단일 다운로드 버튼.
+
+### ✅ 완료 (함체·국사 마스터, 2026-05-19)
+
+| 항목 | 결정 | 비고 |
+|---|---|---|
+| **통합 vs 분리** | 단일 테이블 `connection_facilities` + `facility_type` enum-like CHECK ('station'/'box') | 두 타입이 같은 필드 셋 (이름·ID·주소·GPS·메모) 공유. spec_enum 만 함체용 |
+| **권한** | 같은 회사 누구나 SELECT (자동완성용). admin 만 CUD | RLS |
+| **plan_node 연결** | optional FK `master_id` (NULL=자유 입력). ON DELETE SET NULL — 마스터 삭제 시 plan_node 의 텍스트 snapshot 유지 | 통계 정확도 향상용 — 미사용 시에도 비파괴 |
+| **자동완성 UX** | datalist + 이름 매칭 시 client-side prefill (code·spec·address·lat·lng) + master_id hidden field 저장 | chain new 폼에서 동작. chain edit 의 노드 추가 폼은 datalist 만(name 제안) — server form |
+
+- **마이그** [`0021_connection_facilities.sql`](./supabase/migrations/0021_connection_facilities.sql) — connection_facilities + RLS 2개 + `connection_plan_nodes.master_id` 컬럼.
+- **관리 페이지** [`/admin/facilities`](./src/app/admin/facilities/page.tsx) — 탭(국사/함체) + 검색 + 활성 토글 + new/[id] edit. admin only.
+- **chain 등록 폼** [`ChainSetupForm.tsx`](./src/app/works/ChainSetupForm.tsx): 상위국·하위국·함체 모든 이름 input 에 datalist 자동완성. 매칭 시 onChange 가 master 필드 prefill + hidden master_id 채움.
+- **chain-actions** [`createChain`](./src/app/works/chain-actions.ts): `upper_station_master_id`/`lower_station_master_id` + boxes_json 의 `master_id` 받아 plan_node insert 시 master_id 함께 저장. 상·하위국은 마스터 매칭 시 메타(code·spec·주소·GPS)도 DB 에서 재조회해 prefill.
+
 ### ✅ 완료 (권한 enum 재구성, 2026-05-18)
 
 - **마이그** [`0018_permission_rename.sql`](./supabase/migrations/0018_permission_rename.sql):
@@ -387,6 +426,8 @@ owner 요청 (일보 작성 우선·작업자별 흐름·진입 단순화):
   - [`0017_view_stats_permission.sql`](./supabase/migrations/0017_view_stats_permission.sql) — 통계 조회 권한
   - [`0018_permission_rename.sql`](./supabase/migrations/0018_permission_rename.sql) — 권한 enum 재구성 (소장→팀장, 대표→관리자 통합, 팀원 신규)
   - [`0019_assignment_worker_type.sql`](./supabase/migrations/0019_assignment_worker_type.sql) — 작업자별 worker_type
+  - [`0020_connection_report_photos.sql`](./supabase/migrations/0020_connection_report_photos.sql) — 접속일보 사진 첨부 (테이블·버킷·RLS)
+  - [`0021_connection_facilities.sql`](./supabase/migrations/0021_connection_facilities.sql) — 함체·국사 마스터 + plan_node 의 master_id
 - **외선일보 별도 entity (v2)** — 접속일보와 동일 패턴으로 외선팀 전용 모듈. 외선 작업 특성(케이블 포설구간·전주번호 등)에 맞는 구조 별도 설계.
 - **접속일보 후속 (v2)** — segment-level 작업자 태그, 사진 첨부 + EXIF, 국사·함체 마스터 테이블화, 재접속 이력 조회, 지도 시각화
 - **M3 Phase 2 후속** — 사진 첨부 + EXIF·워터마크 (PRD M3-06), 일보 결재함 통합 (현재는 작업 상세에서 진입), 일반 일보 월별 CSV 리포트

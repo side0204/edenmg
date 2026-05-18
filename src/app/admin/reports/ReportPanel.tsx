@@ -19,6 +19,7 @@ export default function ReportPanel({ initialMonth, scopeNote }: Props) {
   const connMaterialsHref = valid
     ? `/api/reports/connection-reports?mode=materials&month=${month}`
     : '#'
+  const dailyHref = valid ? `/api/reports/work-daily-reports?month=${month}` : '#'
 
   return (
     <div className="space-y-5">
@@ -67,12 +68,19 @@ export default function ReportPanel({ initialMonth, scopeNote }: Props) {
       </div>
 
       <div className="space-y-2 rounded-xl border border-slate-200 bg-slate-50/60 p-3">
-        <p className="text-sm font-semibold text-slate-700">접속일보 (M3 Phase 2-B)</p>
+        <p className="text-sm font-semibold text-slate-700">접속일보</p>
         <div className="grid grid-cols-2 gap-2">
           <DownloadButton href={connSummaryHref} valid={valid} label="일보별" />
           <DownloadButton href={connSegmentHref} valid={valid} label="세그먼트별" />
           <DownloadButton href={connTasksHref} valid={valid} label="공종별" />
           <DownloadButton href={connMaterialsHref} valid={valid} label="자재별" />
+        </div>
+      </div>
+
+      <div className="space-y-2 rounded-xl border border-slate-200 bg-slate-50/60 p-3">
+        <p className="text-sm font-semibold text-slate-700">일반 일보 (외선·기타)</p>
+        <div className="grid grid-cols-1 gap-2">
+          <DownloadButton href={dailyHref} valid={valid} label="일보 CSV 받기" />
         </div>
       </div>
 

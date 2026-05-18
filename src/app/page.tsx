@@ -529,6 +529,12 @@ export default async function Home() {
               케이블 마스터 →
             </Link>
             <Link
+              href="/admin/facilities"
+              className="block rounded-lg border border-slate-200 hover:border-slate-900 px-4 py-3 text-base font-medium text-slate-900 dark:border-slate-800 dark:hover:border-slate-100 dark:text-slate-100"
+            >
+              함체·국사 마스터 →
+            </Link>
+            <Link
               href="/admin/reports"
               className="block rounded-lg border border-slate-200 hover:border-slate-900 px-4 py-3 text-base font-medium text-slate-900 dark:border-slate-800 dark:hover:border-slate-100 dark:text-slate-100"
             >

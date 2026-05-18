@@ -6,6 +6,9 @@ import { createClient } from '@/lib/supabase/server'
 import {
   CABLE_SPEC_VALUES,
   CONNECTION_TASK_TYPE_VALUES,
+  PHOTO_BUCKET,
+  PHOTO_MAX_BYTES,
+  PHOTO_MIME_WHITELIST,
   parseLineNumbers,
   type CableSpec,
   type ConnectionTaskType,
@@ -655,4 +658,155 @@ export async function removeMaterial(formData: FormData) {
   redirect(
     `/works/${workId}/connection-reports/${reportId}?ok=` + encodeURIComponent('자재를 삭제했습니다'),
   )
+}
+
+// ===== 사진 첨부 ========================================================
+// 클라이언트(PhotoUploader)에서 한 장씩 호출. EXIF (촬영시각·GPS) 는 클라이언트
+// 에서 exifr 로 미리 추출해 hidden field 로 함께 전송한다.
+// 결과를 JSON 으로 돌려준다 (redirect 안 함) — client 가 여러 장 순차 업로드 후
+// 한 번만 refresh.
+
+type UploadResult = { ok: true } | { ok: false; error: string }
+
+function buildPhotoPath(reportId: string, filename: string): string {
+  const dot = filename.lastIndexOf('.')
+  const ext = dot >= 0 ? filename.slice(dot + 1).toLowerCase().replace(/[^a-z0-9]/g, '') : ''
+  const uuid = crypto.randomUUID()
+  return ext ? `${reportId}/${uuid}.${ext}` : `${reportId}/${uuid}`
+}
+
+function parseFloatOrNull(raw: FormDataEntryValue | null): number | null {
+  if (typeof raw !== 'string') return null
+  const s = raw.trim()
+  if (!s) return null
+  const n = Number(s)
+  return Number.isFinite(n) ? n : null
+}
+
+export async function uploadConnectionPhoto(formData: FormData): Promise<UploadResult> {
+  const reportId = String(formData.get('report_id') ?? '').trim()
+  const workId = String(formData.get('work_id') ?? '').trim()
+  if (!reportId || !workId) return { ok: false, error: '일보 id 가 없습니다' }
+
+  const file = formData.get('file')
+  if (!(file instanceof File) || file.size === 0) {
+    return { ok: false, error: '파일이 비어있습니다' }
+  }
+  if (file.size > PHOTO_MAX_BYTES) {
+    return { ok: false, error: `'${file.name}' — 10MB 이하여야 합니다` }
+  }
+  if (!PHOTO_MIME_WHITELIST.includes(file.type)) {
+    return { ok: false, error: `'${file.name}' — 이미지(JPG·PNG·WEBP·HEIC) 만 첨부할 수 있습니다` }
+  }
+
+  const takenAtRaw = String(formData.get('taken_at') ?? '').trim() || null
+  const gpsLat = parseFloatOrNull(formData.get('gps_lat'))
+  const gpsLng = parseFloatOrNull(formData.get('gps_lng'))
+
+  const { supabase, me } = await requireUser()
+  await ensureAuthorPending(supabase, me, reportId, workId)
+
+  const path = buildPhotoPath(reportId, file.name)
+  const { error: upErr } = await supabase.storage
+    .from(PHOTO_BUCKET)
+    .upload(path, file, { contentType: file.type, upsert: false })
+  if (upErr) {
+    return { ok: false, error: `업로드 실패: ${upErr.message}` }
+  }
+
+  const { error: insErr } = await supabase.from('connection_report_photos').insert({
+    report_id: reportId,
+    path,
+    filename: file.name,
+    mime_type: file.type,
+    file_size: file.size,
+    taken_at: takenAtRaw,
+    gps_lat: gpsLat,
+    gps_lng: gpsLng,
+    uploaded_by: me.id,
+  })
+  if (insErr) {
+    // Storage 에는 올라갔지만 DB row 없음 → 고아 파일 방지로 즉시 삭제 시도
+    await supabase.storage.from(PHOTO_BUCKET).remove([path])
+    return { ok: false, error: `메타 저장 실패: ${insErr.message}` }
+  }
+
+  revalidatePath(`/works/${workId}/connection-reports/${reportId}`)
+  return { ok: true }
+}
+
+export async function removeConnectionPhoto(formData: FormData) {
+  const photoId = String(formData.get('photo_id') ?? '').trim()
+  const reportId = String(formData.get('report_id') ?? '').trim()
+  const workId = String(formData.get('work_id') ?? '').trim()
+  if (!photoId || !reportId || !workId) {
+    redirect('/works?err=' + encodeURIComponent('필수 값이 없습니다'))
+  }
+
+  const { supabase } = await requireUser()
+  // RLS 가 권한 분기 담당 (작성자+대기 OR admin)
+
+  // 먼저 path 조회 후 storage 정리
+  const { data: row } = await supabase
+    .from('connection_report_photos')
+    .select('path')
+    .eq('id', photoId)
+    .maybeSingle()
+  const photo = row as { path: string } | null
+  if (!photo) {
+    redirect(
+      `/works/${workId}/connection-reports/${reportId}?err=` +
+        encodeURIComponent('사진을 찾을 수 없습니다'),
+    )
+  }
+
+  const { error: delErr } = await supabase
+    .from('connection_report_photos')
+    .delete()
+    .eq('id', photoId)
+  if (delErr) {
+    redirect(
+      `/works/${workId}/connection-reports/${reportId}?err=` +
+        encodeURIComponent('삭제 실패: ' + delErr.message),
+    )
+  }
+
+  // Storage 정리 (실패해도 본문 진행)
+  await supabase.storage.from(PHOTO_BUCKET).remove([photo.path])
+
+  revalidatePath(`/works/${workId}/connection-reports/${reportId}`)
+  redirect(
+    `/works/${workId}/connection-reports/${reportId}?ok=` +
+      encodeURIComponent('사진을 삭제했습니다'),
+  )
+}
+
+// 다운로드용 signedUrl. 5분짜리. 서버 컴포넌트에서 호출.
+export async function getConnectionPhotoUrl(
+  path: string,
+  filename: string,
+): Promise<string | null> {
+  const supabase = await createClient()
+  const { data, error } = await supabase.storage
+    .from(PHOTO_BUCKET)
+    .createSignedUrl(path, 60 * 5, { download: filename })
+  if (error || !data?.signedUrl) return null
+  return data.signedUrl
+}
+
+// 인라인 표시용 (download 옵션 없이 signedUrl)
+export async function getConnectionPhotoViewUrls(
+  paths: string[],
+): Promise<Map<string, string>> {
+  const supabase = await createClient()
+  const result = new Map<string, string>()
+  if (paths.length === 0) return result
+  const { data } = await supabase.storage
+    .from(PHOTO_BUCKET)
+    .createSignedUrls(paths, 60 * 30) // 30분
+  if (!data) return result
+  for (const item of data) {
+    if (item.signedUrl && item.path) result.set(item.path, item.signedUrl)
+  }
+  return result
 }
