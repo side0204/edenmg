@@ -148,11 +148,58 @@ export async function createChain(formData: FormData) {
     }))
     .filter((b) => b.name)
 
-  const upperMasterId = String(formData.get('upper_station_master_id') ?? '').trim() || null
-  const lowerMasterId = String(formData.get('lower_station_master_id') ?? '').trim() || null
+  const upperMasterIdRaw = String(formData.get('upper_station_master_id') ?? '').trim() || null
+  const lowerMasterIdRaw = String(formData.get('lower_station_master_id') ?? '').trim() || null
 
   const { supabase, me } = await requireUser()
   await ensureChainManager(supabase, me, workId)
+
+  // 폼에서 받은 master_id 들이 모두 같은 회사에 속하는지 한 번에 검증.
+  // 같은 회사 아니면 그 master_id 는 null 로 강등 (악의적 cross-company 참조 차단).
+  const allMasterIds = Array.from(
+    new Set(
+      [
+        upperMasterIdRaw,
+        lowerMasterIdRaw,
+        ...cleanBoxes.map((b) => b.master_id),
+      ].filter((x): x is string => !!x),
+    ),
+  )
+  const verifiedMasterMap = new Map<
+    string,
+    {
+      code: string | null
+      spec_enum: CableSpec | null
+      address: string | null
+      lat: number | null
+      lng: number | null
+    }
+  >()
+  if (allMasterIds.length > 0) {
+    const { data: masters } = await supabase
+      .from('connection_facilities')
+      .select('id, code, spec_enum, address, lat, lng')
+      .in('id', allMasterIds)
+      .eq('company_id', me.company_id)
+    for (const m of (masters ?? []) as Array<{
+      id: string
+      code: string | null
+      spec_enum: CableSpec | null
+      address: string | null
+      lat: number | null
+      lng: number | null
+    }>) {
+      verifiedMasterMap.set(m.id, {
+        code: m.code,
+        spec_enum: m.spec_enum,
+        address: m.address,
+        lat: m.lat,
+        lng: m.lng,
+      })
+    }
+  }
+  const upperMasterId = upperMasterIdRaw && verifiedMasterMap.has(upperMasterIdRaw) ? upperMasterIdRaw : null
+  const lowerMasterId = lowerMasterIdRaw && verifiedMasterMap.has(lowerMasterIdRaw) ? lowerMasterIdRaw : null
 
   // chain insert
   const { data: chain, error: chainErr } = await supabase
@@ -167,26 +214,10 @@ export async function createChain(formData: FormData) {
     )
   }
 
-  // 상위국 (root) — 마스터 선택 시 추가 메타 prefill
-  let upperPrefill: {
-    code: string | null
-    spec_enum: CableSpec | null
-    address: string | null
-    lat: number | null
-    lng: number | null
-  } = { code: null, spec_enum: null, address: null, lat: null, lng: null }
-  if (upperMasterId) {
-    const { data: m } = await supabase
-      .from('connection_facilities')
-      .select('code, spec_enum, address, lat, lng')
-      .eq('id', upperMasterId)
-      .eq('company_id', me.company_id)
-      .maybeSingle()
-    if (m) {
-      const row = m as typeof upperPrefill
-      upperPrefill = row
-    }
-  }
+  // 상위국 (root) — 마스터 선택 시 추가 메타 prefill (검증된 master 만)
+  const upperPrefill = upperMasterId
+    ? verifiedMasterMap.get(upperMasterId)!
+    : { code: null, spec_enum: null, address: null, lat: null, lng: null }
 
   const { data: upper, error: upperErr } = await supabase
     .from('connection_plan_nodes')
@@ -216,6 +247,8 @@ export async function createChain(formData: FormData) {
   let prevId: string = upper.id
   for (let i = 0; i < cleanBoxes.length; i++) {
     const b = cleanBoxes[i]
+    // master_id 가 회사 검증 통과한 경우에만 보존, 아니면 null
+    const verifiedBoxMasterId = b.master_id && verifiedMasterMap.has(b.master_id) ? b.master_id : null
     const { data: ins, error: insErr } = await supabase
       .from('connection_plan_nodes')
       .insert({
@@ -229,7 +262,7 @@ export async function createChain(formData: FormData) {
         lng: b.lng,
         address: b.address,
         notes: b.notes,
-        master_id: b.master_id,
+        master_id: verifiedBoxMasterId,
         position: 0,
       })
       .select('id')
@@ -243,23 +276,10 @@ export async function createChain(formData: FormData) {
     prevId = ins.id
   }
 
-  // 하위국 — 마지막 함체(또는 상위국)의 자식. 마스터 선택 시 prefill.
-  let lowerPrefill: {
-    code: string | null
-    spec_enum: CableSpec | null
-    address: string | null
-    lat: number | null
-    lng: number | null
-  } = { code: null, spec_enum: null, address: null, lat: null, lng: null }
-  if (lowerMasterId) {
-    const { data: m } = await supabase
-      .from('connection_facilities')
-      .select('code, spec_enum, address, lat, lng')
-      .eq('id', lowerMasterId)
-      .eq('company_id', me.company_id)
-      .maybeSingle()
-    if (m) lowerPrefill = m as typeof lowerPrefill
-  }
+  // 하위국 — 마지막 함체(또는 상위국)의 자식. 검증된 master 만 사용.
+  const lowerPrefill = lowerMasterId
+    ? verifiedMasterMap.get(lowerMasterId)!
+    : { code: null, spec_enum: null, address: null, lat: null, lng: null }
 
   const { error: lowerErr } = await supabase.from('connection_plan_nodes').insert({
     chain_id: chain.id,

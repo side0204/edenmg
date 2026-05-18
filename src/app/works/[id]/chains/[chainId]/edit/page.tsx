@@ -136,12 +136,14 @@ export default async function ChainEditPage({
     .eq('is_active', true)
     .order('name')
   const masters = (mastersData ?? []) as FacilityMasterRow[]
-  const boxMasterNames = masters
-    .filter((m) => m.facility_type === 'box')
-    .map((m) => (m.code ? `${m.name} (${m.code})` : m.name))
-  const stationMasterNames = masters
-    .filter((m) => m.facility_type === 'station')
-    .map((m) => (m.code ? `${m.name} (${m.code})` : m.name))
+  // 이름만 표시 — chain edit 폼은 server form 이라 코드 정보까지 자동 채울 수 없음.
+  // 자동 채움이 필요하면 chain 신규 등록 폼 (ChainSetupForm) 사용.
+  const boxMasterNames = Array.from(
+    new Set(masters.filter((m) => m.facility_type === 'box').map((m) => m.name)),
+  )
+  const stationMasterNames = Array.from(
+    new Set(masters.filter((m) => m.facility_type === 'station').map((m) => m.name)),
+  )
 
   // 트리 빌드
   const childrenMap = new Map<string | null, NodeRow[]>()
