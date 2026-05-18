@@ -88,10 +88,10 @@ export async function GET(req: Request) {
   // 회사의 접속팀 작업
   const { data: worksData } = await supabase
     .from('works')
-    .select('id, name, order_id')
+    .select('id, name, order_id, status')
     .eq('company_id', me.company_id)
     .eq('worker_type', '접속팀')
-  type WorkMeta = { id: string; name: string; order_id: string | null }
+  type WorkMeta = { id: string; name: string; order_id: string | null; status: string }
   const works = (worksData ?? []) as WorkMeta[]
   const workById = new Map<string, WorkMeta>(works.map((w) => [w.id, w]))
 
@@ -124,7 +124,12 @@ export async function GET(req: Request) {
     const tableData = await buildStatsTable(
       supabase,
       reports,
-      new Map(works.map((w) => [w.id, { name: w.name, order_id: w.order_id }])),
+      new Map(
+        works.map((w) => [
+          w.id,
+          { name: w.name, order_id: w.order_id, status: w.status },
+        ]),
+      ),
     )
     const showTasks = metric === 'all' || metric === 'tasks'
     const showMaterials = metric === 'all' || metric === 'materials'
@@ -135,6 +140,7 @@ export async function GET(req: Request) {
       '작업자',
       '공사번호',
       '작업명',
+      '상태',
       ...taskCols.map((c) => c.label),
       ...matCols.map((c) => {
         const parts = [c.name]
@@ -148,6 +154,7 @@ export async function GET(req: Request) {
       r.workerName,
       r.orderId ?? '',
       r.workName,
+      r.workStatus,
       ...taskCols.map((c) => r.taskCounts.get(c.key) ?? ''),
       ...matCols.map((c) => r.materialQtys.get(c.key) ?? ''),
     ])
@@ -157,6 +164,7 @@ export async function GET(req: Request) {
         '',
         '',
         `(${tableData.rows.length}건)`,
+        '',
         ...taskCols.map((c) => c.totalCount),
         ...matCols.map((c) => c.totalQuantity),
       ])

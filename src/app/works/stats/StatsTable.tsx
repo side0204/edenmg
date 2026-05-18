@@ -1,4 +1,5 @@
 import type { StatsTableData } from '@/lib/connection-aggregate'
+import { STATUS_COLOR, type WorkStatus } from '@/lib/work'
 
 /**
  * 일보 단위 wide 표.
@@ -47,6 +48,9 @@ export function StatsTable({
               <th className="border-b border-slate-200 px-2 py-2 font-semibold text-slate-700 whitespace-nowrap">
                 작업명
               </th>
+              <th className="border-b border-slate-200 px-2 py-2 font-semibold text-slate-700 whitespace-nowrap">
+                상태
+              </th>
               {taskColumns.map((c) => (
                 <th
                   key={c.key}
@@ -84,6 +88,20 @@ export function StatsTable({
                 <td className="border-b border-slate-200 px-2 py-1.5 text-slate-700 whitespace-nowrap">
                   {r.workName}
                 </td>
+                <td className="border-b border-slate-200 px-2 py-1.5 whitespace-nowrap">
+                  {r.workStatus ? (
+                    <span
+                      className={
+                        'inline-block rounded-full border px-1.5 py-0.5 text-[10px] font-medium ' +
+                        (STATUS_COLOR[r.workStatus as WorkStatus] ?? 'text-slate-500 bg-slate-50 border-slate-200')
+                      }
+                    >
+                      {r.workStatus}
+                    </span>
+                  ) : (
+                    <span className="text-slate-300">·</span>
+                  )}
+                </td>
                 {taskColumns.map((c) => {
                   const v = r.taskCounts.get(c.key)
                   return (
@@ -116,7 +134,7 @@ export function StatsTable({
           <tfoot className="bg-slate-50">
             <tr className="text-right text-slate-700 font-semibold">
               <td
-                colSpan={4}
+                colSpan={5}
                 className="sticky left-0 z-10 bg-slate-50 border-t border-r border-slate-200 px-2 py-2 text-left whitespace-nowrap"
               >
                 합계 ({data.rows.length}건)

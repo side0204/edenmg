@@ -7,6 +7,7 @@ import {
   buildStatsTable,
   type Aggregation,
 } from '@/lib/connection-aggregate'
+import { STATUS_COLOR, type WorkStatus } from '@/lib/work'
 import { AggregationCard } from '../AggregationCard'
 import { StatsTable } from './StatsTable'
 
@@ -103,10 +104,10 @@ export default async function StatsPage({
   // 회사의 접속팀 작업만 — 자재·공종 통계는 접속일보 한정
   const { data: worksData } = await supabase
     .from('works')
-    .select('id, name, order_id')
+    .select('id, name, order_id, status')
     .eq('company_id', me.company_id)
     .eq('worker_type', '접속팀')
-  type WorkMeta = { id: string; name: string; order_id: string | null }
+  type WorkMeta = { id: string; name: string; order_id: string | null; status: string }
   const works = (worksData ?? []) as WorkMeta[]
   const workById = new Map<string, WorkMeta>(works.map((w) => [w.id, w]))
 
@@ -171,7 +172,12 @@ export default async function StatsPage({
       ? await buildStatsTable(
           supabase,
           reports,
-          new Map(works.map((w) => [w.id, { name: w.name, order_id: w.order_id }])),
+          new Map(
+            works.map((w) => [
+              w.id,
+              { name: w.name, order_id: w.order_id, status: w.status },
+            ]),
+          ),
         )
       : null
 
@@ -209,13 +215,41 @@ export default async function StatsPage({
     for (const key of statsMap.keys()) labelByKey.set(key, key)
   }
 
+  // 그룹별 작업 상태 분포 — 같은 그룹에 속한 unique work 들의 status 카운트
+  const workIdsByGroup = new Map<string, Set<string>>()
+  for (const r of reports) {
+    const gk = getGroupKey(r.id)
+    if (gk == null) continue
+    let s = workIdsByGroup.get(gk)
+    if (!s) {
+      s = new Set()
+      workIdsByGroup.set(gk, s)
+    }
+    s.add(r.work_id)
+  }
+
   // 정렬 + TOP N
-  type GroupEntry = { key: string; label: string; aggregation: Aggregation }
-  const allEntries: GroupEntry[] = Array.from(statsMap.entries()).map(([key, agg]) => ({
-    key,
-    label: labelByKey.get(key) ?? key,
-    aggregation: agg,
-  }))
+  type GroupEntry = {
+    key: string
+    label: string
+    aggregation: Aggregation
+    statusCounts: { status: WorkStatus; count: number }[]
+  }
+  const allEntries: GroupEntry[] = Array.from(statsMap.entries()).map(([key, agg]) => {
+    const wids = workIdsByGroup.get(key) ?? new Set<string>()
+    const counts = new Map<WorkStatus, number>()
+    for (const wid of wids) {
+      const w = workById.get(wid)
+      if (!w) continue
+      counts.set(w.status as WorkStatus, (counts.get(w.status as WorkStatus) ?? 0) + 1)
+    }
+    return {
+      key,
+      label: labelByKey.get(key) ?? key,
+      aggregation: agg,
+      statusCounts: Array.from(counts.entries()).map(([status, count]) => ({ status, count })),
+    }
+  })
   const isTimeDim = dim === 'year' || dim === 'month' || dim === 'day'
   if (isTimeDim) {
     allEntries.sort((a, b) => (a.key < b.key ? 1 : a.key > b.key ? -1 : 0))
@@ -515,6 +549,22 @@ export default async function StatsPage({
                             <span className="ml-1.5 text-slate-400 group-open:hidden">· 펼치기 ▾</span>
                             <span className="ml-1.5 text-slate-400 hidden group-open:inline">· 접기 ▴</span>
                           </p>
+                          {entry.statusCounts.length > 0 && (
+                            <div className="flex flex-wrap items-center gap-1">
+                              {entry.statusCounts.map((sc) => (
+                                <span
+                                  key={sc.status}
+                                  className={
+                                    'inline-flex items-center gap-0.5 rounded-full border px-1.5 py-0.5 text-[10px] font-medium ' +
+                                    STATUS_COLOR[sc.status]
+                                  }
+                                >
+                                  {sc.status}
+                                  <span className="tabular-nums">{sc.count}</span>
+                                </span>
+                              ))}
+                            </div>
+                          )}
                         </div>
                       </div>
                     </summary>

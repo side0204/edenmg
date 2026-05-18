@@ -376,6 +376,8 @@ export type StatsTableRow = {
   workerName: string
   orderId: string | null
   workName: string
+  /** 작업 상태 (예정/진행중/완료/취소) */
+  workStatus: string
   /** 공종 컬럼 키 → 그 일보의 수량 합 */
   taskCounts: Map<string, number>
   /** 자재 컬럼 키 → 그 일보의 수량 합 */
@@ -402,7 +404,7 @@ export async function buildStatsTable(
     author_employee_id: string
     report_date: string
   }[],
-  worksById: Map<string, { name: string; order_id: string | null }>,
+  worksById: Map<string, { name: string; order_id: string | null; status: string }>,
 ): Promise<StatsTableData> {
   if (reportMeta.length === 0) {
     return { rows: [], taskColumns: [], materialColumns: [] }
@@ -558,6 +560,7 @@ export async function buildStatsTable(
         workerName: employeeNameById.get(r.author_employee_id) ?? '?',
         orderId: w?.order_id ?? null,
         workName: w?.name ?? '?',
+        workStatus: w?.status ?? '',
         taskCounts: taskByReport.get(r.id) ?? new Map(),
         materialQtys: matByReport.get(r.id) ?? new Map(),
       }
