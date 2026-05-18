@@ -190,7 +190,6 @@ export default async function ConnectionReportDetailPage({
     nodes = (nodesData ?? []) as NodeRow[]
   }
 
-  const nodeMap = new Map<string, NodeRow>(nodes.map((n) => [n.id, n]))
   const childrenMap = new Map<string | null, NodeRow[]>()
   for (const n of nodes) {
     const arr = childrenMap.get(n.parent_id) ?? []
@@ -321,23 +320,24 @@ export default async function ConnectionReportDetailPage({
           )}
         </section>
 
-        {/* 트리 + 노드별 cable·공종·자재 */}
+        {/* 트리 시각화: 노드 라인 + indented cable 카드 */}
         {root && (
-          <section className="space-y-3">
-            <h2 className="text-base font-semibold text-slate-700 tracking-tight">노드 트리</h2>
-            <NodeTree
-              node={root}
-              childrenMap={childrenMap}
-              nodeMap={nodeMap}
-              segByNode={segByNode}
-              tasksByNode={tasksByNode}
-              materialsByNode={materialsByNode}
-              masterMap={masterMap}
-              masters={masters}
-              canEdit={canEdit}
-              report={report}
-              workId={work.id}
-            />
+          <section className="rounded-2xl bg-white border border-slate-200 p-5 space-y-1.5">
+            <h2 className="text-base font-semibold text-slate-700 tracking-tight">chain</h2>
+            <div className="pt-2 space-y-1.5">
+              <FlatTree
+                root={root}
+                childrenMap={childrenMap}
+                segByNode={segByNode}
+                tasksByNode={tasksByNode}
+                materialsByNode={materialsByNode}
+                masterMap={masterMap}
+                masters={masters}
+                canEdit={canEdit}
+                report={report}
+                workId={work.id}
+              />
+            </div>
           </section>
         )}
 
@@ -403,10 +403,13 @@ export default async function ConnectionReportDetailPage({
   )
 }
 
-function NodeTree(props: {
-  node: NodeRow
+type FlatItem =
+  | { kind: 'node'; node: NodeRow }
+  | { kind: 'cable'; childNode: NodeRow; parentNode: NodeRow }
+
+function FlatTree(props: {
+  root: NodeRow
   childrenMap: Map<string | null, NodeRow[]>
-  nodeMap: Map<string, NodeRow>
   segByNode: Map<string, SegmentRow>
   tasksByNode: Map<string, TaskRow[]>
   materialsByNode: Map<string, MaterialRow[]>
@@ -416,29 +419,68 @@ function NodeTree(props: {
   report: ReportRow
   workId: string
 }) {
-  const { node, childrenMap } = props
-  const children = childrenMap.get(node.id) ?? []
+  const items: FlatItem[] = []
+  const visit = (node: NodeRow) => {
+    items.push({ kind: 'node', node })
+    const children = props.childrenMap.get(node.id) ?? []
+    for (const c of children) {
+      items.push({ kind: 'cable', childNode: c, parentNode: node })
+      visit(c)
+    }
+  }
+  visit(props.root)
+
   return (
-    <div className="space-y-2">
-      <NodeCard {...props} />
-      {children.length > 0 && (
-        <div className="ml-4 border-l-2 border-slate-100 pl-2 space-y-2">
-          {children.map((c) => (
-            <NodeTree
-              key={c.id}
-              {...props}
-              node={c}
-            />
-          ))}
-        </div>
-      )}
+    <>
+      {items.map((item, idx) => {
+        if (item.kind === 'node') {
+          return <NodeLine key={`node-${item.node.id}-${idx}`} node={item.node} />
+        }
+        return (
+          <CableInfo
+            key={`cable-${item.childNode.id}-${idx}`}
+            childNode={item.childNode}
+            parentNode={item.parentNode}
+            segByNode={props.segByNode}
+            tasksByNode={props.tasksByNode}
+            materialsByNode={props.materialsByNode}
+            masterMap={props.masterMap}
+            masters={props.masters}
+            canEdit={props.canEdit}
+            report={props.report}
+            workId={props.workId}
+          />
+        )
+      })}
+    </>
+  )
+}
+
+function NodeLine({ node }: { node: NodeRow }) {
+  const meta = [node.code && `ID: ${node.code}`, node.spec_enum ?? node.spec]
+    .filter(Boolean)
+    .join(' · ')
+  return (
+    <div className="py-1">
+      <p className="text-base font-semibold text-slate-900">
+        <span className="mr-1.5 rounded bg-slate-100 px-1.5 py-0.5 text-[11px] font-medium text-slate-600">
+          {PLAN_NODE_TYPE_LABEL[node.node_type]}
+        </span>
+        {node.name}
+        {node.added_during_report_id && (
+          <span className="ml-1.5 rounded bg-amber-100 px-1 py-0.5 text-[10px] text-amber-700">
+            ★ 작업 중 추가
+          </span>
+        )}
+      </p>
+      {meta && <p className="mt-0.5 text-xs text-slate-500">{meta}</p>}
     </div>
   )
 }
 
-function NodeCard({
-  node,
-  nodeMap,
+function CableInfo({
+  childNode,
+  parentNode,
   segByNode,
   tasksByNode,
   materialsByNode,
@@ -448,9 +490,8 @@ function NodeCard({
   report,
   workId,
 }: {
-  node: NodeRow
-  childrenMap: Map<string | null, NodeRow[]>
-  nodeMap: Map<string, NodeRow>
+  childNode: NodeRow
+  parentNode: NodeRow
   segByNode: Map<string, SegmentRow>
   tasksByNode: Map<string, TaskRow[]>
   materialsByNode: Map<string, MaterialRow[]>
@@ -460,294 +501,263 @@ function NodeCard({
   report: ReportRow
   workId: string
 }) {
-  const seg = segByNode.get(node.id)
-  const parent = node.parent_id ? nodeMap.get(node.parent_id) : null
-  const tasks = tasksByNode.get(node.id) ?? []
-  const mats = materialsByNode.get(node.id) ?? []
+  const seg = segByNode.get(childNode.id)
+  const tasks = tasksByNode.get(childNode.id) ?? []
+  const mats = materialsByNode.get(childNode.id) ?? []
 
   return (
-    <div className="rounded-lg border border-slate-200 bg-white p-3 space-y-2">
-      <p className="text-sm">
-        <span className="rounded bg-slate-100 px-1.5 py-0.5 text-xs text-slate-600 mr-1.5">
-          {PLAN_NODE_TYPE_LABEL[node.node_type]}
-        </span>
-        <span className="font-medium text-slate-900">{node.name}</span>
-        {node.code && <span className="ml-1.5 text-xs text-slate-500">ID: {node.code}</span>}
-        {(node.spec_enum || node.spec) && (
-          <span className="ml-1.5 text-xs text-slate-500">{node.spec_enum ?? node.spec}</span>
-        )}
-        {node.added_during_report_id && (
-          <span className="ml-1.5 rounded bg-amber-100 px-1 py-0.5 text-[10px] text-amber-700">
-            ★ 작업 중 추가
-          </span>
-        )}
-      </p>
+    <div className="ml-6 border-l-2 border-slate-200 pl-3">
+      <div className="rounded-lg border border-slate-200 bg-slate-50/60 p-3 space-y-1.5">
+        <p className="text-[11px] text-slate-500">
+          <span>{parentNode.name}</span>
+          <span className="mx-1 text-slate-400">→</span>
+          <span>{childNode.name}</span>
+        </p>
 
-      {/* cable (parent → this node) */}
-      {parent && seg && (
-        <div className="rounded-md bg-slate-50 border border-slate-200 px-2.5 py-2 text-xs">
-          <p className="text-slate-500">
-            cable: {parent.name} → {node.name}
-          </p>
-          <p className="mt-0.5 text-slate-800">
-            <span className="font-medium">{seg.cable_spec}</span>
-            {seg.cable_code && (
-              <>
-                <span className="mx-1">·</span>
-                <span className="text-slate-600">ID: {seg.cable_code}</span>
-              </>
-            )}
-            <span className="mx-1">·</span>
-            <span>선번 {seg.line_numbers}</span>
-            <span className="mx-1">·</span>
-            <span
-              className={
-                'rounded px-1.5 py-0.5 text-[10px] ' +
-                (seg.is_completed
-                  ? 'bg-emerald-100 text-emerald-700'
-                  : 'bg-slate-200 text-slate-600')
+        {seg ? (
+          <>
+            <DetailRow label="케이블규격" value={seg.cable_spec} />
+            {seg.cable_code && <DetailRow label="케이블ID" value={seg.cable_code} />}
+            <DetailRow label="선번" value={seg.line_numbers} />
+            {seg.segment_notes && <DetailRow label="cable 메모" value={seg.segment_notes} />}
+            <DetailRow
+              label="완료여부"
+              value={
+                <span
+                  className={
+                    'rounded px-1.5 py-0.5 text-[10px] ' +
+                    (seg.is_completed
+                      ? 'bg-emerald-100 text-emerald-700'
+                      : 'bg-slate-200 text-slate-600')
+                  }
+                >
+                  {seg.is_completed ? '완료' : '진행중'}
+                </span>
               }
-            >
-              {seg.is_completed ? '완료' : '진행중'}
-            </span>
-          </p>
-          {seg.segment_notes && (
-            <p className="mt-0.5 text-slate-500 whitespace-pre-wrap">{seg.segment_notes}</p>
-          )}
-        </div>
-      )}
-
-      {/* 공종 리스트 */}
-      <div className="space-y-1">
-        <p className="text-xs font-medium text-slate-600">공종 ({tasks.length})</p>
-        {tasks.length === 0 ? (
-          <p className="text-xs text-slate-400">없음</p>
+            />
+          </>
         ) : (
-          <ul className="space-y-1">
-            {tasks.map((t) => (
-              <li key={t.id} className="flex items-center justify-between gap-2 text-xs">
-                <div className="min-w-0 flex-1">
-                  <span
-                    className={
-                      'rounded-full border px-2 py-0.5 ' + TASK_TYPE_COLOR[t.task_type]
-                    }
-                  >
-                    {formatTaskLabel(t.task_type, t.custom_task_name)}
-                  </span>
-                  <span className="ml-2 font-medium">×{t.task_count}</span>
-                  {t.notes && <span className="ml-2 text-slate-500">· {t.notes}</span>}
-                </div>
-                {canEdit && (
-                  <form action={removeTask}>
-                    <input type="hidden" name="task_id" value={t.id} />
+          <p className="text-xs text-slate-400">이 cable 미작업</p>
+        )}
+
+        {/* 사용자재 */}
+        <DetailRow
+          label="사용자재"
+          value={
+            <div className="space-y-1">
+              {mats.length === 0 ? (
+                <span className="text-xs text-slate-400">없음</span>
+              ) : (
+                <ul className="space-y-0.5">
+                  {mats.map((m) => {
+                    const master = m.material_id ? masterMap.get(m.material_id) : null
+                    const name = master?.name ?? m.custom_name ?? '?'
+                    const spec = master?.spec ?? m.custom_spec
+                    const unit = master?.unit ?? m.custom_unit
+                    return (
+                      <li
+                        key={m.id}
+                        className="flex items-center justify-between gap-2 text-xs text-slate-700"
+                      >
+                        <span className="min-w-0 flex-1">
+                          <span className="font-medium">{name}</span>
+                          {spec && <span className="ml-1 text-slate-500">({spec})</span>}
+                          <span className="ml-2">
+                            ×{m.quantity}
+                            {unit && <span className="ml-0.5">{unit}</span>}
+                          </span>
+                          {!master && (
+                            <span className="ml-1.5 text-[10px] rounded bg-amber-100 px-1 text-amber-700">
+                              직접입력
+                            </span>
+                          )}
+                          {m.notes && <span className="ml-2 text-slate-500">· {m.notes}</span>}
+                        </span>
+                        {canEdit && (
+                          <form action={removeMaterial}>
+                            <input type="hidden" name="material_row_id" value={m.id} />
+                            <input type="hidden" name="report_id" value={report.id} />
+                            <input type="hidden" name="work_id" value={workId} />
+                            <button
+                              type="submit"
+                              className="rounded p-0.5 text-slate-400 hover:text-rose-600 hover:bg-rose-50"
+                              aria-label="삭제"
+                            >
+                              <Trash2 className="h-3 w-3" />
+                            </button>
+                          </form>
+                        )}
+                      </li>
+                    )
+                  })}
+                </ul>
+              )}
+              {canEdit && (
+                <details>
+                  <summary className="cursor-pointer text-[11px] text-blue-600">+ 자재 추가</summary>
+                  <form action={addMaterial} className="mt-1 grid grid-cols-2 gap-1">
                     <input type="hidden" name="report_id" value={report.id} />
                     <input type="hidden" name="work_id" value={workId} />
+                    <input type="hidden" name="plan_node_id" value={childNode.id} />
+                    <select name="material_id" defaultValue="" className={smallInput + ' col-span-2'}>
+                      <option value="">마스터 선택 (또는 직접 입력)</option>
+                      {masters.map((m) => (
+                        <option key={m.id} value={m.id}>
+                          {m.name}
+                          {m.spec ? ` (${m.spec})` : ''}
+                          {m.unit ? ` · ${m.unit}` : ''}
+                        </option>
+                      ))}
+                    </select>
+                    <input
+                      name="custom_name"
+                      placeholder="명"
+                      maxLength={100}
+                      className={smallInput}
+                    />
+                    <input
+                      name="custom_spec"
+                      placeholder="규격"
+                      maxLength={100}
+                      className={smallInput}
+                    />
+                    <input
+                      name="custom_unit"
+                      placeholder="단위"
+                      maxLength={20}
+                      className={smallInput}
+                    />
+                    <input
+                      name="quantity"
+                      type="number"
+                      step="0.001"
+                      min="0.001"
+                      required
+                      placeholder="수량 *"
+                      className={smallInput}
+                    />
+                    <input
+                      name="notes"
+                      placeholder="메모"
+                      maxLength={200}
+                      className={smallInput + ' col-span-2'}
+                    />
                     <button
                       type="submit"
-                      className="rounded p-1 text-slate-400 hover:text-rose-600 hover:bg-rose-50"
-                      aria-label="삭제"
+                      className="col-span-2 rounded-md bg-slate-900 px-2 py-1 text-xs font-medium text-white hover:bg-slate-800"
                     >
-                      <Trash2 className="h-3.5 w-3.5" />
+                      자재 추가
                     </button>
                   </form>
-                )}
-              </li>
-            ))}
-          </ul>
-        )}
-        {canEdit && (
-          <details className="mt-1">
-            <summary className="cursor-pointer text-xs text-blue-600">+ 공종 추가</summary>
-            <form action={addTask} className="mt-2 grid grid-cols-2 gap-2">
-              <input type="hidden" name="report_id" value={report.id} />
-              <input type="hidden" name="work_id" value={workId} />
-              <input type="hidden" name="plan_node_id" value={node.id} />
-              <select name="task_type" required className={smallInput}>
-                <option value="">공종 선택</option>
-                {CONNECTION_TASK_TYPE_VALUES.map((c) => (
-                  <option key={c} value={c}>
-                    {c}
-                  </option>
-                ))}
-              </select>
-              <input
-                name="task_count"
-                type="number"
-                min="1"
-                required
-                placeholder="수량"
-                className={smallInput}
-              />
-              <input
-                name="custom_task_name"
-                placeholder="기타 선택 시 공종명"
-                maxLength={50}
-                className={smallInput + ' col-span-2'}
-              />
-              <input
-                name="notes"
-                placeholder="메모 (선택)"
-                maxLength={200}
-                className={smallInput + ' col-span-2'}
-              />
-              <button
-                type="submit"
-                className="col-span-2 rounded-md bg-slate-900 px-3 py-1.5 text-xs font-medium text-white hover:bg-slate-800"
-              >
-                공종 추가
-              </button>
-            </form>
-          </details>
-        )}
-      </div>
-
-      {/* 자재 리스트 */}
-      <div className="space-y-1">
-        <p className="text-xs font-medium text-slate-600">자재 ({mats.length})</p>
-        {mats.length === 0 ? (
-          <p className="text-xs text-slate-400">없음</p>
-        ) : (
-          <ul className="space-y-1">
-            {mats.map((m) => {
-              const master = m.material_id ? masterMap.get(m.material_id) : null
-              const name = master?.name ?? m.custom_name ?? '?'
-              const spec = master?.spec ?? m.custom_spec
-              const unit = master?.unit ?? m.custom_unit
-              return (
-                <li key={m.id} className="flex items-center justify-between gap-2 text-xs">
-                  <div className="min-w-0 flex-1">
-                    <span className="font-medium text-slate-800">{name}</span>
-                    {spec && <span className="ml-1 text-slate-500">({spec})</span>}
-                    <span className="ml-2">
-                      {m.quantity}
-                      {unit && <span className="ml-0.5">{unit}</span>}
-                    </span>
-                    {!master && (
-                      <span className="ml-1.5 text-[10px] rounded bg-amber-100 px-1 text-amber-700">
-                        직접입력
-                      </span>
-                    )}
-                    {m.notes && <span className="ml-2 text-slate-500">· {m.notes}</span>}
-                  </div>
-                  {canEdit && (
-                    <form action={removeMaterial}>
-                      <input type="hidden" name="material_row_id" value={m.id} />
-                      <input type="hidden" name="report_id" value={report.id} />
-                      <input type="hidden" name="work_id" value={workId} />
-                      <button
-                        type="submit"
-                        className="rounded p-1 text-slate-400 hover:text-rose-600 hover:bg-rose-50"
-                        aria-label="삭제"
-                      >
-                        <Trash2 className="h-3.5 w-3.5" />
-                      </button>
-                    </form>
-                  )}
-                </li>
-              )
-            })}
-          </ul>
-        )}
-        {canEdit && (
-          <details className="mt-1">
-            <summary className="cursor-pointer text-xs text-blue-600">+ 자재 추가</summary>
-            <form action={addMaterial} className="mt-2 grid grid-cols-2 gap-2">
-              <input type="hidden" name="report_id" value={report.id} />
-              <input type="hidden" name="work_id" value={workId} />
-              <input type="hidden" name="plan_node_id" value={node.id} />
-              <select name="material_id" defaultValue="" className={smallInput + ' col-span-2'}>
-                <option value="">마스터에서 선택 (또는 직접 입력)</option>
-                {masters.map((m) => (
-                  <option key={m.id} value={m.id}>
-                    {m.name}
-                    {m.spec ? ` (${m.spec})` : ''}
-                    {m.unit ? ` · ${m.unit}` : ''}
-                  </option>
-                ))}
-              </select>
-              <input
-                name="custom_name"
-                placeholder="직접 입력: 명"
-                maxLength={100}
-                className={smallInput}
-              />
-              <input
-                name="custom_spec"
-                placeholder="직접 입력: 규격"
-                maxLength={100}
-                className={smallInput}
-              />
-              <input
-                name="custom_unit"
-                placeholder="직접 입력: 단위"
-                maxLength={20}
-                className={smallInput}
-              />
-              <input
-                name="quantity"
-                type="number"
-                step="0.001"
-                min="0.001"
-                required
-                placeholder="수량 *"
-                className={smallInput}
-              />
-              <input
-                name="notes"
-                placeholder="메모 (선택)"
-                maxLength={200}
-                className={smallInput + ' col-span-2'}
-              />
-              <button
-                type="submit"
-                className="col-span-2 rounded-md bg-slate-900 px-3 py-1.5 text-xs font-medium text-white hover:bg-slate-800"
-              >
-                자재 추가
-              </button>
-            </form>
-          </details>
-        )}
-      </div>
-
-      {/* segments 가 없는 cable 표시 (parent 있고 seg 없으면 "이 cable 미작업") */}
-      {parent && !seg && canEdit && (
-        <p className="text-[11px] text-slate-400">
-          ↑ 이 cable 미작업. 일보 추가/수정에서 케이블규격·선번 입력 시 자동 생성.
-        </p>
-      )}
-
-      {/* 함체에는 cable 추가 입력 폼 — canEdit 일 때만 (제출 시점에 segments 가 없던 cable 을 추가) */}
-      {canEdit && parent && !seg && (
-        <AddSegmentForm
-          report={report}
-          workId={workId}
-          node={node}
-          parentName={parent.name}
+                </details>
+              )}
+            </div>
+          }
         />
-      )}
+
+        {/* 공종 */}
+        <DetailRow
+          label="공종"
+          value={
+            <div className="space-y-1">
+              {tasks.length === 0 ? (
+                <span className="text-xs text-slate-400">없음</span>
+              ) : (
+                <ul className="space-y-0.5">
+                  {tasks.map((t) => (
+                    <li
+                      key={t.id}
+                      className="flex items-center justify-between gap-2 text-xs"
+                    >
+                      <span className="min-w-0 flex-1">
+                        <span
+                          className={
+                            'rounded-full border px-1.5 py-0.5 text-[10px] ' +
+                            TASK_TYPE_COLOR[t.task_type]
+                          }
+                        >
+                          {formatTaskLabel(t.task_type, t.custom_task_name)}
+                        </span>
+                        <span className="ml-1 font-medium text-slate-700">×{t.task_count}</span>
+                        {t.notes && <span className="ml-1.5 text-slate-500">· {t.notes}</span>}
+                      </span>
+                      {canEdit && (
+                        <form action={removeTask}>
+                          <input type="hidden" name="task_id" value={t.id} />
+                          <input type="hidden" name="report_id" value={report.id} />
+                          <input type="hidden" name="work_id" value={workId} />
+                          <button
+                            type="submit"
+                            className="rounded p-0.5 text-slate-400 hover:text-rose-600 hover:bg-rose-50"
+                            aria-label="삭제"
+                          >
+                            <Trash2 className="h-3 w-3" />
+                          </button>
+                        </form>
+                      )}
+                    </li>
+                  ))}
+                </ul>
+              )}
+              {canEdit && (
+                <details>
+                  <summary className="cursor-pointer text-[11px] text-blue-600">+ 공종 추가</summary>
+                  <form action={addTask} className="mt-1 grid grid-cols-2 gap-1">
+                    <input type="hidden" name="report_id" value={report.id} />
+                    <input type="hidden" name="work_id" value={workId} />
+                    <input type="hidden" name="plan_node_id" value={childNode.id} />
+                    <select name="task_type" required className={smallInput}>
+                      <option value="">공종 선택</option>
+                      {CONNECTION_TASK_TYPE_VALUES.map((c) => (
+                        <option key={c} value={c}>
+                          {c}
+                        </option>
+                      ))}
+                    </select>
+                    <input
+                      name="task_count"
+                      type="number"
+                      min="1"
+                      required
+                      placeholder="수량"
+                      className={smallInput}
+                    />
+                    <input
+                      name="custom_task_name"
+                      placeholder="기타 시 공종명"
+                      maxLength={50}
+                      className={smallInput + ' col-span-2'}
+                    />
+                    <input
+                      name="notes"
+                      placeholder="메모"
+                      maxLength={200}
+                      className={smallInput + ' col-span-2'}
+                    />
+                    <button
+                      type="submit"
+                      className="col-span-2 rounded-md bg-slate-900 px-2 py-1 text-xs font-medium text-white hover:bg-slate-800"
+                    >
+                      공종 추가
+                    </button>
+                  </form>
+                </details>
+              )}
+            </div>
+          }
+        />
+      </div>
     </div>
   )
 }
 
-function AddSegmentForm({
-  report,
-  workId,
-  node,
-  parentName,
-}: {
-  report: ReportRow
-  workId: string
-  node: NodeRow
-  parentName: string
-}) {
-  // 미작업 cable 에 대해 ad-hoc 으로 segment 추가하는 폼.
-  // 작성자+대기 시에만 노출됨. server action 은 addMaterial 패턴과 유사하게 별도 액션이 필요한데,
-  // 일보 작성 흐름상 빈 cable 은 보통 다음 일보에서 채우므로 v1 은 안내문만 둠.
-  void report
-  void workId
-  void node
-  void parentName
-  return null
+function DetailRow({ label, value }: { label: string; value: React.ReactNode }) {
+  return (
+    <div className="grid grid-cols-[5rem_1fr] items-start gap-2">
+      <span className="pt-0.5 text-xs font-medium text-slate-600">{label}</span>
+      <div className="min-w-0 text-sm text-slate-800">{value}</div>
+    </div>
+  )
 }
 
 function formatDateTime(iso: string): string {

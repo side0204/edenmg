@@ -40,7 +40,7 @@ export type CableMaster = {
 type TaskRow = {
   task_type: ConnectionTaskType | ''
   custom_task_name: string
-  task_count: string // 입력은 string, 검증 시 int
+  task_count: string
   notes: string
 }
 
@@ -52,6 +52,10 @@ type MaterialRow = {
   quantity: string
   notes: string
 }
+
+type RenderItem =
+  | { kind: 'node'; node: UnifiedNode }
+  | { kind: 'cable'; childNode: UnifiedNode; parentNode: UnifiedNode }
 
 export function UnifiedReportForm({
   workId,
@@ -75,12 +79,9 @@ export function UnifiedReportForm({
   cableMasters: CableMaster[]
   defaultReportDate: string
   action: (formData: FormData) => void
-  /** 노드 수정·끼우기 후 돌아올 경로 (예: /works/[id]/connection-reports/new) */
   returnTo: string
-  /** chain 편집 link 노출 권한 (작업자는 false, 담당자/admin/ceo 는 true) */
   canEditChain: boolean
 }) {
-  // 노드별 dynamic state
   const [tasksByNode, setTasksByNode] = useState<Record<string, TaskRow[]>>(() => {
     const init: Record<string, TaskRow[]> = {}
     for (const n of segmentNodes) init[n.id] = []
@@ -92,9 +93,33 @@ export function UnifiedReportForm({
     return init
   })
 
-  // 서버로 보낼 JSON 직렬화 (hidden 필드 값)
   const tasksJson = useMemo(() => JSON.stringify(tasksByNode), [tasksByNode])
   const materialsJson = useMemo(() => JSON.stringify(materialsByNode), [materialsByNode])
+
+  // DFS flat list (node + cable interleaved)
+  const flatList = useMemo<RenderItem[]>(() => {
+    const result: RenderItem[] = []
+    const childrenByParent = new Map<string, UnifiedNode[]>()
+    for (const n of segmentNodes) {
+      if (n.parent_id) {
+        const arr = childrenByParent.get(n.parent_id) ?? []
+        arr.push(n)
+        childrenByParent.set(n.parent_id, arr)
+      }
+    }
+    const root = Object.values(nodeMap).find((n) => !n.parent_id) ?? null
+    if (!root) return result
+    const visit = (node: UnifiedNode) => {
+      result.push({ kind: 'node', node })
+      const children = childrenByParent.get(node.id) ?? []
+      for (const child of children) {
+        result.push({ kind: 'cable', childNode: child, parentNode: node })
+        visit(child)
+      }
+    }
+    visit(root)
+    return result
+  }, [segmentNodes, nodeMap])
 
   return (
     <form action={action} className="space-y-5">
@@ -138,43 +163,50 @@ export function UnifiedReportForm({
         </label>
       </section>
 
-      {segmentNodes.length === 0 ? (
+      {flatList.length === 0 ? (
         <p className="rounded-lg bg-slate-50 px-4 py-6 text-center text-sm text-slate-500">
-          cable 이 없습니다. 먼저 chain 에 함체·하위국을 추가하세요.
+          chain 이 없습니다. 먼저 chain 에 함체·하위국을 추가하세요.
         </p>
       ) : (
-        <>
+        <section className="rounded-2xl bg-white border border-slate-200 p-5 space-y-2">
+          <h2 className="text-base font-semibold text-slate-700 tracking-tight">
+            {chainName ? `「${chainName}」` : 'chain'}
+          </h2>
           <p className="text-xs text-slate-500">
-            {chainName ? `「${chainName}」` : 'chain'} — 각 cable 별로 케이블·선번·공종·자재를 한번에 입력합니다. cable 입력이 비어있으면 그 cable 은 미작업으로 처리됩니다.
+            노드 사이 cable 카드에 케이블·선번·자재·공종을 입력하세요. 빈 cable 은 미작업 처리.
           </p>
-          <div className="space-y-3">
-            {segmentNodes.map((n) => {
-              const parent = n.parent_id ? nodeMap[n.parent_id] : null
-              const parentLabel = parent
-                ? `[${PLAN_NODE_TYPE_LABEL[parent.node_type]}] ${parent.name}${
-                    parent.spec_enum ? ` (${parent.spec_enum})` : ''
-                  }`
-                : '?'
-              const nodeLabel = `[${PLAN_NODE_TYPE_LABEL[n.node_type]}] ${n.name}${
-                n.code ? ` ID:${n.code}` : ''
-              }${n.spec_enum ? ` (${n.spec_enum})` : ''}`
+
+          <div className="space-y-1.5 pt-2">
+            {flatList.map((item, idx) => {
+              if (item.kind === 'node') {
+                return (
+                  <NodeRow
+                    key={`node-${item.node.id}-${idx}`}
+                    node={item.node}
+                    workId={workId}
+                    chainId={chainId}
+                    returnTo={returnTo}
+                    canEditChain={canEditChain}
+                  />
+                )
+              }
               return (
-                <NodeCard
-                  key={n.id}
-                  nodeId={n.id}
-                  parentId={n.parent_id}
+                <CableCard
+                  key={`cable-${item.childNode.id}-${idx}`}
+                  nodeId={item.childNode.id}
+                  parentId={item.parentNode.id}
                   workId={workId}
                   chainId={chainId}
                   returnTo={returnTo}
-                  parentLabel={parentLabel}
-                  nodeLabel={nodeLabel}
-                  tasks={tasksByNode[n.id] ?? []}
+                  parentName={item.parentNode.name}
+                  childName={item.childNode.name}
+                  tasks={tasksByNode[item.childNode.id] ?? []}
                   setTasks={(rows) =>
-                    setTasksByNode((prev) => ({ ...prev, [n.id]: rows }))
+                    setTasksByNode((prev) => ({ ...prev, [item.childNode.id]: rows }))
                   }
-                  materials={materialsByNode[n.id] ?? []}
+                  materials={materialsByNode[item.childNode.id] ?? []}
                   setMaterials={(rows) =>
-                    setMaterialsByNode((prev) => ({ ...prev, [n.id]: rows }))
+                    setMaterialsByNode((prev) => ({ ...prev, [item.childNode.id]: rows }))
                   }
                   masters={masters}
                   cableMasters={cableMasters}
@@ -183,7 +215,7 @@ export function UnifiedReportForm({
               )
             })}
           </div>
-        </>
+        </section>
       )}
 
       <button
@@ -196,14 +228,61 @@ export function UnifiedReportForm({
   )
 }
 
-function NodeCard({
+// ===== 노드 라인 (이름만) =============================================
+function NodeRow({
+  node,
+  workId,
+  chainId,
+  returnTo,
+  canEditChain,
+}: {
+  node: UnifiedNode
+  workId: string
+  chainId: string
+  returnTo: string
+  canEditChain: boolean
+}) {
+  const returnToParam = encodeURIComponent(returnTo)
+  const editNodeHref =
+    node.parent_id // 상위국은 수정 페이지 진입 불가 (chain edit 으로만)
+      ? `/works/${workId}/chains/${chainId}/nodes/${node.id}/edit?return_to=${returnToParam}`
+      : null
+  const meta = [node.code && `ID: ${node.code}`, node.spec_enum].filter(Boolean).join(' · ')
+
+  return (
+    <div className="flex items-center justify-between gap-2 py-1.5">
+      <div className="min-w-0">
+        <p className="text-base font-semibold text-slate-900">
+          <span className="mr-1.5 rounded bg-slate-100 px-1.5 py-0.5 text-[11px] font-medium text-slate-600">
+            {PLAN_NODE_TYPE_LABEL[node.node_type]}
+          </span>
+          {node.name}
+        </p>
+        {meta && <p className="mt-0.5 text-xs text-slate-500">{meta}</p>}
+      </div>
+      {canEditChain && editNodeHref && (
+        <Link
+          href={editNodeHref}
+          className="shrink-0 inline-flex items-center gap-0.5 rounded border border-slate-300 px-1.5 py-0.5 text-[11px] text-slate-600 hover:bg-slate-50"
+          title="노드 정보 수정"
+        >
+          <Pencil className="h-3 w-3" />
+          수정
+        </Link>
+      )}
+    </div>
+  )
+}
+
+// ===== cable 카드 (노드 사이, indented) ===============================
+function CableCard({
   nodeId,
   parentId,
   workId,
   chainId,
   returnTo,
-  parentLabel,
-  nodeLabel,
+  parentName,
+  childName,
   tasks,
   setTasks,
   materials,
@@ -213,12 +292,12 @@ function NodeCard({
   canEditChain,
 }: {
   nodeId: string
-  parentId: string | null
+  parentId: string
   workId: string
   chainId: string
   returnTo: string
-  parentLabel: string
-  nodeLabel: string
+  parentName: string
+  childName: string
   tasks: TaskRow[]
   setTasks: (rows: TaskRow[]) => void
   materials: MaterialRow[]
@@ -230,6 +309,7 @@ function NodeCard({
   const [lineNumbers, setLineNumbers] = useState('')
   const [cableCode, setCableCode] = useState('')
   const [cableSpec, setCableSpec] = useState<CableSpec | ''>('')
+
   const trimmed = lineNumbers.trim()
   let preview: { ok: true; coreCount: number } | { ok: false; error: string } | null = null
   if (trimmed) {
@@ -238,7 +318,6 @@ function NodeCard({
   }
   void calcCoreCount
 
-  // 케이블ID 입력 → 마스터에 매치되면 spec 자동 채움
   const handleCableCodeChange = (next: string) => {
     setCableCode(next)
     const hit = cableMasters.find((m) => m.code === next.trim())
@@ -259,68 +338,44 @@ function NodeCard({
   const addMaterial = () =>
     setMaterials([
       ...materials,
-      {
-        material_id: '',
-        custom_name: '',
-        custom_spec: '',
-        custom_unit: '',
-        quantity: '',
-        notes: '',
-      },
+      { material_id: '', custom_name: '', custom_spec: '', custom_unit: '', quantity: '', notes: '' },
     ])
   const updateMaterial = (idx: number, patch: Partial<MaterialRow>) =>
     setMaterials(materials.map((m, i) => (i === idx ? { ...m, ...patch } : m)))
   const removeMaterial = (idx: number) => setMaterials(materials.filter((_, i) => i !== idx))
 
   const returnToParam = encodeURIComponent(returnTo)
-  const editNodeHref = `/works/${workId}/chains/${chainId}/nodes/${nodeId}/edit?return_to=${returnToParam}`
-  const insertBetweenHref = parentId
-    ? `/works/${workId}/chains/${chainId}/edit?parent=${parentId}&between_child=${nodeId}&return_to=${returnToParam}#노드추가`
-    : null
+  const insertBetweenHref = `/works/${workId}/chains/${chainId}/edit?parent=${parentId}&between_child=${nodeId}&return_to=${returnToParam}#노드추가`
 
   return (
-    <section className="rounded-2xl bg-white border border-slate-200 p-4 space-y-3">
-      <div className="flex items-start justify-between gap-2">
-        <p className="text-xs text-slate-600 min-w-0">
-          <span className="font-medium">{parentLabel}</span>
-          <span className="mx-1 text-slate-400">→</span>
-          <span className="font-medium">{nodeLabel}</span>
-        </p>
-        {canEditChain && (
-          <div className="flex shrink-0 gap-1">
-            {insertBetweenHref && (
-              <Link
-                href={insertBetweenHref}
-                className="inline-flex items-center gap-0.5 rounded border border-dashed border-slate-300 px-1.5 py-0.5 text-[11px] text-slate-500 hover:border-slate-900 hover:text-slate-900"
-                title="이 cable 중간에 함체 끼우기"
-              >
-                <Plus className="h-3 w-3" />
-                사이 끼우기
-              </Link>
-            )}
+    <div className="ml-6 border-l-2 border-slate-200 pl-3">
+      <div className="rounded-lg border border-slate-200 bg-slate-50/60 p-3 space-y-2.5">
+        <div className="flex items-center justify-between gap-2">
+          <p className="text-[11px] text-slate-500">
+            <span>{parentName}</span>
+            <span className="mx-1 text-slate-400">→</span>
+            <span>{childName}</span>
+          </p>
+          {canEditChain && (
             <Link
-              href={editNodeHref}
-              className="inline-flex items-center gap-0.5 rounded border border-slate-300 px-1.5 py-0.5 text-[11px] text-slate-600 hover:bg-slate-50"
-              title="노드 정보 수정"
+              href={insertBetweenHref}
+              className="shrink-0 inline-flex items-center gap-0.5 rounded border border-dashed border-slate-300 px-1.5 py-0.5 text-[11px] text-slate-500 hover:border-slate-900 hover:text-slate-900"
+              title="이 cable 중간에 함체 끼우기"
             >
-              <Pencil className="h-3 w-3" />
-              노드 수정
+              <Plus className="h-3 w-3" />
+              사이 끼우기
             </Link>
-          </div>
-        )}
-      </div>
+          )}
+        </div>
 
-      {/* cable 입력 */}
-      <div className="rounded-lg border border-slate-200 bg-slate-50 p-3 space-y-2">
-        <p className="text-xs font-medium text-slate-600">cable</p>
-        <label className="block">
-          <span className="block text-xs text-slate-600">케이블ID (선택)</span>
+        {/* 행 1: 케이블ID */}
+        <Row label="케이블ID">
           <input
             name={`cable_code_${nodeId}`}
             value={cableCode}
             onChange={(e) => handleCableCodeChange(e.currentTarget.value)}
             list={`cable-codes-${nodeId}`}
-            placeholder="마스터에서 선택하거나 직접 입력 (또는 공란)"
+            placeholder="마스터 검색 또는 직접 입력 (또는 공란)"
             maxLength={100}
             className={smallInput}
           />
@@ -331,54 +386,118 @@ function NodeCard({
               </option>
             ))}
           </datalist>
-        </label>
-        <div className="grid grid-cols-2 gap-2">
-          <label className="block">
-            <span className="block text-xs text-slate-600">케이블규격</span>
-            <select
-              name={`cable_spec_${nodeId}`}
-              value={cableSpec}
-              onChange={(e) => setCableSpec(e.currentTarget.value as CableSpec | '')}
-              className={smallInput}
-            >
-              <option value="">선택</option>
-              {CABLE_SPEC_VALUES.map((c) => (
-                <option key={c} value={c}>
-                  {c}
-                </option>
-              ))}
-            </select>
-          </label>
-          <label className="block">
-            <span className="block text-xs text-slate-600">사용선번</span>
-            <input
-              name={`line_numbers_${nodeId}`}
-              value={lineNumbers}
-              onChange={(e) => setLineNumbers(e.currentTarget.value)}
-              placeholder="1-6 / 1,3,5 / 1-6,12-18"
-              className={
-                smallInput +
-                (preview && !preview.ok
-                  ? ' border-rose-400 focus:border-rose-500 focus:ring-rose-500'
-                  : '')
-              }
-            />
-          </label>
-        </div>
-        <div className="flex items-center justify-between gap-3 text-xs">
-          <div>
-            {preview && preview.ok && (
-              <span className="rounded bg-emerald-100 px-2 py-0.5 font-medium text-emerald-700">
-                접속코어수: {preview.coreCount}
+        </Row>
+
+        {/* 행 2: 케이블규격 */}
+        <Row label="케이블규격">
+          <select
+            name={`cable_spec_${nodeId}`}
+            value={cableSpec}
+            onChange={(e) => setCableSpec(e.currentTarget.value as CableSpec | '')}
+            className={smallInput}
+          >
+            <option value="">선택</option>
+            {CABLE_SPEC_VALUES.map((c) => (
+              <option key={c} value={c}>
+                {c}
+              </option>
+            ))}
+          </select>
+        </Row>
+
+        {/* 행 3: 선번 + 코어수 */}
+        <Row
+          label="선번"
+          trailing={
+            preview && preview.ok ? (
+              <span className="rounded bg-emerald-100 px-1.5 py-0.5 text-[11px] font-medium text-emerald-700">
+                {preview.coreCount} 코어
               </span>
-            )}
-            {preview && !preview.ok && (
-              <span className="rounded bg-rose-100 px-2 py-0.5 font-medium text-rose-700">
+            ) : preview && !preview.ok ? (
+              <span className="rounded bg-rose-100 px-1.5 py-0.5 text-[11px] font-medium text-rose-700">
                 ⚠ {preview.error}
               </span>
-            )}
-          </div>
-          <label className="inline-flex items-center gap-1 text-slate-600">
+            ) : null
+          }
+        >
+          <input
+            name={`line_numbers_${nodeId}`}
+            value={lineNumbers}
+            onChange={(e) => setLineNumbers(e.currentTarget.value)}
+            placeholder="1-6 / 1,3,5 / 1-6,12-18"
+            className={
+              smallInput +
+              (preview && !preview.ok
+                ? ' border-rose-400 focus:border-rose-500 focus:ring-rose-500'
+                : '')
+            }
+          />
+        </Row>
+
+        {/* 행 4: 사용자재 */}
+        <Row
+          label="사용자재"
+          trailing={
+            <button
+              type="button"
+              onClick={addMaterial}
+              className="inline-flex items-center gap-0.5 rounded px-1.5 py-0.5 text-[11px] text-blue-600 hover:bg-blue-50"
+            >
+              <Plus className="h-3 w-3" />
+              추가
+            </button>
+          }
+        >
+          {materials.length === 0 ? (
+            <span className="text-xs text-slate-400">없음</span>
+          ) : (
+            <div className="space-y-1">
+              {materials.map((m, idx) => (
+                <MaterialRowInput
+                  key={idx}
+                  row={m}
+                  masters={masters}
+                  onUpdate={(patch) => updateMaterial(idx, patch)}
+                  onRemove={() => removeMaterial(idx)}
+                />
+              ))}
+            </div>
+          )}
+        </Row>
+
+        {/* 행 5: 공종 */}
+        <Row
+          label="공종"
+          trailing={
+            <button
+              type="button"
+              onClick={addTask}
+              className="inline-flex items-center gap-0.5 rounded px-1.5 py-0.5 text-[11px] text-blue-600 hover:bg-blue-50"
+            >
+              <Plus className="h-3 w-3" />
+              추가
+            </button>
+          }
+        >
+          {tasks.length === 0 ? (
+            <span className="text-xs text-slate-400">없음</span>
+          ) : (
+            <div className="space-y-1">
+              {tasks.map((t, idx) => (
+                <TaskRowInput
+                  key={idx}
+                  row={t}
+                  onUpdate={(patch) => updateTask(idx, patch)}
+                  onRemove={() => removeTask(idx)}
+                />
+              ))}
+            </div>
+          )}
+        </Row>
+
+        {/* 행 6: 완료 토글 + 메모 */}
+        <div className="flex items-center gap-2 pt-1">
+          <label className="inline-flex items-center gap-1 text-xs text-slate-600">
             <input
               type="checkbox"
               name={`completed_${nodeId}`}
@@ -388,180 +507,188 @@ function NodeCard({
             />
             완료
           </label>
+          <input
+            name={`segment_notes_${nodeId}`}
+            placeholder="cable 메모 (선택)"
+            maxLength={200}
+            className={smallInput + ' flex-1'}
+          />
         </div>
+      </div>
+    </div>
+  )
+}
+
+// ===== 행 레이아웃 헬퍼 ================================================
+function Row({
+  label,
+  trailing,
+  children,
+}: {
+  label: string
+  trailing?: React.ReactNode
+  children: React.ReactNode
+}) {
+  return (
+    <div className="grid grid-cols-[5rem_1fr_auto] items-start gap-2">
+      <span className="pt-1.5 text-xs font-medium text-slate-600">{label}</span>
+      <div className="min-w-0">{children}</div>
+      <div className="pt-1">{trailing}</div>
+    </div>
+  )
+}
+
+// ===== 자재 행 입력 ====================================================
+function MaterialRowInput({
+  row,
+  masters,
+  onUpdate,
+  onRemove,
+}: {
+  row: MaterialRow
+  masters: MaterialMaster[]
+  onUpdate: (patch: Partial<MaterialRow>) => void
+  onRemove: () => void
+}) {
+  const useCustom = !row.material_id
+  return (
+    <div className="rounded-md border border-slate-200 bg-white p-1.5 space-y-1">
+      <div className="grid grid-cols-[1fr_auto] gap-1">
+        <select
+          value={row.material_id}
+          onChange={(e) => {
+            const id = e.currentTarget.value
+            onUpdate({
+              material_id: id,
+              custom_name: id ? '' : row.custom_name,
+              custom_spec: id ? '' : row.custom_spec,
+              custom_unit: id ? '' : row.custom_unit,
+            })
+          }}
+          className={smallInput}
+        >
+          <option value="">마스터 선택 (또는 직접 입력)</option>
+          {masters.map((m) => (
+            <option key={m.id} value={m.id}>
+              {m.name}
+              {m.spec ? ` (${m.spec})` : ''}
+              {m.unit ? ` · ${m.unit}` : ''}
+            </option>
+          ))}
+        </select>
+        <button
+          type="button"
+          onClick={onRemove}
+          className="rounded p-1 text-slate-400 hover:text-rose-600 hover:bg-rose-50"
+        >
+          <Trash2 className="h-3.5 w-3.5" />
+        </button>
+      </div>
+      {useCustom && (
+        <div className="grid grid-cols-3 gap-1">
+          <input
+            value={row.custom_name}
+            onChange={(e) => onUpdate({ custom_name: e.currentTarget.value })}
+            placeholder="명"
+            maxLength={100}
+            className={smallInput}
+          />
+          <input
+            value={row.custom_spec}
+            onChange={(e) => onUpdate({ custom_spec: e.currentTarget.value })}
+            placeholder="규격"
+            maxLength={100}
+            className={smallInput}
+          />
+          <input
+            value={row.custom_unit}
+            onChange={(e) => onUpdate({ custom_unit: e.currentTarget.value })}
+            placeholder="단위"
+            maxLength={20}
+            className={smallInput}
+          />
+        </div>
+      )}
+      <div className="grid grid-cols-2 gap-1">
         <input
-          name={`segment_notes_${nodeId}`}
-          placeholder="cable 메모 (선택)"
+          type="number"
+          step="0.001"
+          min="0.001"
+          value={row.quantity}
+          onChange={(e) => onUpdate({ quantity: e.currentTarget.value })}
+          placeholder="수량 *"
+          className={smallInput}
+        />
+        <input
+          value={row.notes}
+          onChange={(e) => onUpdate({ notes: e.currentTarget.value })}
+          placeholder="메모"
           maxLength={200}
           className={smallInput}
         />
       </div>
+    </div>
+  )
+}
 
-      {/* 공종 입력 */}
-      <div className="space-y-2">
-        <div className="flex items-center justify-between">
-          <p className="text-xs font-medium text-slate-600">공종 ({tasks.length})</p>
-          <button
-            type="button"
-            onClick={addTask}
-            className="inline-flex items-center gap-0.5 rounded px-1.5 py-0.5 text-xs text-blue-600 hover:bg-blue-50"
-          >
-            <Plus className="h-3 w-3" />
-            추가
-          </button>
-        </div>
-        {tasks.map((t, idx) => (
-          <div key={idx} className="rounded-lg border border-slate-200 p-2 space-y-1.5">
-            <div className="grid grid-cols-[1fr_5rem_auto] gap-1.5">
-              <select
-                value={t.task_type}
-                onChange={(e) =>
-                  updateTask(idx, { task_type: e.currentTarget.value as ConnectionTaskType | '' })
-                }
-                className={smallInput}
-              >
-                <option value="">공종 선택</option>
-                {CONNECTION_TASK_TYPE_VALUES.map((c) => (
-                  <option key={c} value={c}>
-                    {c}
-                  </option>
-                ))}
-              </select>
-              <input
-                type="number"
-                min="1"
-                value={t.task_count}
-                onChange={(e) => updateTask(idx, { task_count: e.currentTarget.value })}
-                placeholder="수량"
-                className={smallInput}
-              />
-              <button
-                type="button"
-                onClick={() => removeTask(idx)}
-                className="rounded p-1 text-slate-400 hover:text-rose-600 hover:bg-rose-50"
-                aria-label="삭제"
-              >
-                <Trash2 className="h-3.5 w-3.5" />
-              </button>
-            </div>
-            {t.task_type === '기타' && (
-              <input
-                value={t.custom_task_name}
-                onChange={(e) => updateTask(idx, { custom_task_name: e.currentTarget.value })}
-                placeholder="공종명 직접 입력"
-                maxLength={50}
-                className={smallInput}
-              />
-            )}
-            <input
-              value={t.notes}
-              onChange={(e) => updateTask(idx, { notes: e.currentTarget.value })}
-              placeholder="메모 (선택)"
-              maxLength={200}
-              className={smallInput}
-            />
-          </div>
-        ))}
+// ===== 공종 행 입력 ====================================================
+function TaskRowInput({
+  row,
+  onUpdate,
+  onRemove,
+}: {
+  row: TaskRow
+  onUpdate: (patch: Partial<TaskRow>) => void
+  onRemove: () => void
+}) {
+  return (
+    <div className="rounded-md border border-slate-200 bg-white p-1.5 space-y-1">
+      <div className="grid grid-cols-[1fr_5rem_auto] gap-1">
+        <select
+          value={row.task_type}
+          onChange={(e) => onUpdate({ task_type: e.currentTarget.value as ConnectionTaskType | '' })}
+          className={smallInput}
+        >
+          <option value="">공종 선택</option>
+          {CONNECTION_TASK_TYPE_VALUES.map((c) => (
+            <option key={c} value={c}>
+              {c}
+            </option>
+          ))}
+        </select>
+        <input
+          type="number"
+          min="1"
+          value={row.task_count}
+          onChange={(e) => onUpdate({ task_count: e.currentTarget.value })}
+          placeholder="수량"
+          className={smallInput}
+        />
+        <button
+          type="button"
+          onClick={onRemove}
+          className="rounded p-1 text-slate-400 hover:text-rose-600 hover:bg-rose-50"
+        >
+          <Trash2 className="h-3.5 w-3.5" />
+        </button>
       </div>
-
-      {/* 자재 입력 */}
-      <div className="space-y-2">
-        <div className="flex items-center justify-between">
-          <p className="text-xs font-medium text-slate-600">자재 ({materials.length})</p>
-          <button
-            type="button"
-            onClick={addMaterial}
-            className="inline-flex items-center gap-0.5 rounded px-1.5 py-0.5 text-xs text-blue-600 hover:bg-blue-50"
-          >
-            <Plus className="h-3 w-3" />
-            추가
-          </button>
-        </div>
-        {materials.map((m, idx) => {
-          const useCustom = !m.material_id
-          return (
-            <div key={idx} className="rounded-lg border border-slate-200 p-2 space-y-1.5">
-              <div className="grid grid-cols-[1fr_auto] gap-1.5">
-                <select
-                  value={m.material_id}
-                  onChange={(e) => {
-                    const id = e.currentTarget.value
-                    updateMaterial(idx, {
-                      material_id: id,
-                      // 마스터 선택하면 custom 비움
-                      custom_name: id ? '' : m.custom_name,
-                      custom_spec: id ? '' : m.custom_spec,
-                      custom_unit: id ? '' : m.custom_unit,
-                    })
-                  }}
-                  className={smallInput}
-                >
-                  <option value="">마스터에서 선택 (또는 직접 입력)</option>
-                  {masters.map((mst) => (
-                    <option key={mst.id} value={mst.id}>
-                      {mst.name}
-                      {mst.spec ? ` (${mst.spec})` : ''}
-                      {mst.unit ? ` · ${mst.unit}` : ''}
-                    </option>
-                  ))}
-                </select>
-                <button
-                  type="button"
-                  onClick={() => removeMaterial(idx)}
-                  className="rounded p-1 text-slate-400 hover:text-rose-600 hover:bg-rose-50"
-                  aria-label="삭제"
-                >
-                  <Trash2 className="h-3.5 w-3.5" />
-                </button>
-              </div>
-              {useCustom && (
-                <div className="grid grid-cols-3 gap-1.5">
-                  <input
-                    value={m.custom_name}
-                    onChange={(e) => updateMaterial(idx, { custom_name: e.currentTarget.value })}
-                    placeholder="자재명"
-                    maxLength={100}
-                    className={smallInput}
-                  />
-                  <input
-                    value={m.custom_spec}
-                    onChange={(e) => updateMaterial(idx, { custom_spec: e.currentTarget.value })}
-                    placeholder="규격"
-                    maxLength={100}
-                    className={smallInput}
-                  />
-                  <input
-                    value={m.custom_unit}
-                    onChange={(e) => updateMaterial(idx, { custom_unit: e.currentTarget.value })}
-                    placeholder="단위"
-                    maxLength={20}
-                    className={smallInput}
-                  />
-                </div>
-              )}
-              <div className="grid grid-cols-2 gap-1.5">
-                <input
-                  type="number"
-                  step="0.001"
-                  min="0.001"
-                  value={m.quantity}
-                  onChange={(e) => updateMaterial(idx, { quantity: e.currentTarget.value })}
-                  placeholder="수량 *"
-                  className={smallInput}
-                />
-                <input
-                  value={m.notes}
-                  onChange={(e) => updateMaterial(idx, { notes: e.currentTarget.value })}
-                  placeholder="메모 (선택)"
-                  maxLength={200}
-                  className={smallInput}
-                />
-              </div>
-            </div>
-          )
-        })}
-      </div>
-    </section>
+      {row.task_type === '기타' && (
+        <input
+          value={row.custom_task_name}
+          onChange={(e) => onUpdate({ custom_task_name: e.currentTarget.value })}
+          placeholder="공종명 직접 입력"
+          maxLength={50}
+          className={smallInput}
+        />
+      )}
+      <input
+        value={row.notes}
+        onChange={(e) => onUpdate({ notes: e.currentTarget.value })}
+        placeholder="메모 (선택)"
+        maxLength={200}
+        className={smallInput}
+      />
+    </div>
   )
 }
 
