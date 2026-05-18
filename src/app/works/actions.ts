@@ -84,6 +84,7 @@ function parseWorkForm(formData: FormData) {
   const end_date = String(formData.get('end_date') ?? '').trim() || null
   const status = (String(formData.get('status') ?? '예정') || '예정') as WorkStatus
   const notes = String(formData.get('notes') ?? '').trim() || null
+  const instructions = String(formData.get('instructions') ?? '').trim() || null
 
   return {
     name,
@@ -101,6 +102,7 @@ function parseWorkForm(formData: FormData) {
     end_date,
     status,
     notes,
+    instructions,
   }
 }
 
@@ -136,6 +138,9 @@ function validateWork(p: ReturnType<typeof parseWorkForm>): string | null {
 
   if (p.start_date && p.end_date && p.end_date < p.start_date) {
     return '종료일은 시작일 이후여야 합니다.'
+  }
+  if (p.instructions && p.instructions.length > 1000) {
+    return '지시사항은 1000자 이하로 입력하세요.'
   }
   return null
 }

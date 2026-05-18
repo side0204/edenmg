@@ -10,6 +10,7 @@ import {
   type MaterialMaster,
   type UnifiedNode,
 } from '../../../UnifiedReportForm'
+import { InstructionsBanner } from '../../../InstructionsBanner'
 
 type ChainRow = { id: string; work_id: string; name: string | null }
 type NodeRow = {
@@ -56,7 +57,7 @@ export default async function NewConnectionReportPage({
 
   const { data: workData } = await supabase
     .from('works')
-    .select('id, company_id, name, worker_type, assignee_employee_id')
+    .select('id, company_id, name, worker_type, assignee_employee_id, instructions')
     .eq('id', id)
     .maybeSingle()
   const work = workData as
@@ -66,6 +67,7 @@ export default async function NewConnectionReportPage({
         name: string
         worker_type: string | null
         assignee_employee_id: string | null
+        instructions: string | null
       }
     | null
   if (!work || work.company_id !== me.company_id) notFound()
@@ -167,6 +169,8 @@ export default async function NewConnectionReportPage({
             각 cable 별로 케이블·선번 + 그 노드의 공종·자재까지 한번에 입력하세요.
           </p>
         </header>
+
+        <InstructionsBanner instructions={work.instructions} />
 
         {chains.length > 1 && (
           <nav className="flex gap-1 overflow-x-auto rounded-xl bg-slate-100 p-1 text-sm">

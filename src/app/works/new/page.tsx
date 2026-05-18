@@ -68,6 +68,7 @@ export default async function NewWorkPage() {
     end_date: null,
     status: '예정',
     notes: null,
+    instructions: null,
   }
 
   return (

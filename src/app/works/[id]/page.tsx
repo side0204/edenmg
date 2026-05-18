@@ -17,6 +17,7 @@ import {
 } from '@/lib/work'
 import { aggregateConnectionTotals } from '@/lib/connection-aggregate'
 import { AggregationCard } from '../AggregationCard'
+import { InstructionsBanner } from '../InstructionsBanner'
 import { assignEmployee, unassignEmployee } from '../actions'
 
 type WorkRow = {
@@ -36,6 +37,7 @@ type WorkRow = {
   end_date: string | null
   status: WorkStatus
   notes: string | null
+  instructions: string | null
   is_active: boolean
 }
 
@@ -87,7 +89,7 @@ export default async function WorkDetailPage({
   const { data: workData } = await supabase
     .from('works')
     .select(
-      'id, company_id, name, client, address, category, subcategory, order_id, worker_type, worker_type_custom, assignee_employee_id, expected_volume, start_date, end_date, status, notes, is_active',
+      'id, company_id, name, client, address, category, subcategory, order_id, worker_type, worker_type_custom, assignee_employee_id, expected_volume, start_date, end_date, status, notes, instructions, is_active',
     )
     .eq('id', id)
     .maybeSingle()
@@ -233,6 +235,53 @@ export default async function WorkDetailPage({
     candidates = (candidatesData ?? []) as typeof candidates
   }
 
+  // ===== 진행률 =====
+  // 접속팀: 완료 cable 수 / 전체 cable 수 (parent_id NOT NULL plan_nodes 기준)
+  // 외선·기타: 누적 일보 건수
+  let connectionProgress: { totalCables: number; doneCables: number; ratio: number } | null = null
+  let nonConnReportCount = 0
+  if (isConnectionTeam) {
+    const { data: chainsData } = await supabase
+      .from('connection_chains')
+      .select('id')
+      .eq('work_id', work.id)
+    const chainIds = ((chainsData ?? []) as { id: string }[]).map((c) => c.id)
+    if (chainIds.length > 0) {
+      const { data: cableNodes } = await supabase
+        .from('connection_plan_nodes')
+        .select('id')
+        .in('chain_id', chainIds)
+        .not('parent_id', 'is', null)
+      const cableNodeIds = ((cableNodes ?? []) as { id: string }[]).map((n) => n.id)
+      const totalCables = cableNodeIds.length
+      let doneCables = 0
+      if (totalCables > 0) {
+        const { data: completedSegs } = await supabase
+          .from('connection_report_segments')
+          .select('plan_node_id')
+          .in('plan_node_id', cableNodeIds)
+          .eq('is_completed', true)
+        const doneSet = new Set(
+          ((completedSegs ?? []) as { plan_node_id: string }[]).map((s) => s.plan_node_id),
+        )
+        doneCables = doneSet.size
+      }
+      connectionProgress = {
+        totalCables,
+        doneCables,
+        ratio: totalCables > 0 ? doneCables / totalCables : 0,
+      }
+    } else {
+      connectionProgress = { totalCables: 0, doneCables: 0, ratio: 0 }
+    }
+  } else {
+    const { count } = await supabase
+      .from('work_daily_reports')
+      .select('*', { count: 'exact', head: true })
+      .eq('work_id', work.id)
+    nonConnReportCount = count ?? 0
+  }
+
   // ===== 자재·공종 합계 =====
   // 작업별 합계 — 이 작업이 접속팀이면 자기 일보 집계
   const workTotals = isConnectionTeam
@@ -290,6 +339,8 @@ export default async function WorkDetailPage({
           )}
         </header>
 
+        <InstructionsBanner instructions={work.instructions} />
+
         <section className="rounded-2xl bg-white border border-slate-200 p-5 space-y-3">
           <div>
             <span
@@ -325,6 +376,40 @@ export default async function WorkDetailPage({
             </InfoRow>
           )}
         </section>
+
+        {connectionProgress ? (
+          <section className="rounded-2xl bg-white border border-slate-200 p-5 space-y-2">
+            <div className="flex items-center justify-between gap-3">
+              <h2 className="text-base font-semibold text-slate-700 tracking-tight">진행률</h2>
+              <span className="text-sm font-semibold tabular-nums text-slate-900">
+                {Math.round(connectionProgress.ratio * 100)}%
+              </span>
+            </div>
+            <div className="h-2 w-full rounded-full bg-slate-100 overflow-hidden">
+              <div
+                className="h-full bg-emerald-500 transition-all"
+                style={{ width: `${Math.round(connectionProgress.ratio * 100)}%` }}
+              />
+            </div>
+            <p className="text-xs text-slate-500">
+              완료 cable {connectionProgress.doneCables} / {connectionProgress.totalCables}개
+              {connectionProgress.totalCables === 0 && (
+                <span className="ml-1 text-amber-700">· 작업구간을 먼저 등록하세요</span>
+              )}
+            </p>
+          </section>
+        ) : (
+          <section className="rounded-2xl bg-white border border-slate-200 p-5 flex items-center justify-between gap-3">
+            <h2 className="text-base font-semibold text-slate-700 tracking-tight">진행 현황</h2>
+            <span className="text-sm text-slate-700">
+              누적 일보{' '}
+              <span className="font-semibold tabular-nums text-slate-900">
+                {nonConnReportCount}
+              </span>
+              건
+            </span>
+          </section>
+        )}
 
         {isConnectionTeam ? (
           <>

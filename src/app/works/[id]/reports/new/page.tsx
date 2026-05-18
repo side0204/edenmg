@@ -4,11 +4,13 @@ import { ChevronLeft } from 'lucide-react'
 import { createClient } from '@/lib/supabase/server'
 import { submitReport } from '../../../report-actions'
 import { ReportForm, type ReportFormValues } from '../../../ReportForm'
+import { InstructionsBanner } from '../../../InstructionsBanner'
 
 type WorkRow = {
   id: string
   company_id: string
   name: string
+  instructions: string | null
 }
 
 export default async function NewReportPage({
@@ -44,7 +46,7 @@ export default async function NewReportPage({
 
   const { data: workData } = await supabase
     .from('works')
-    .select('id, company_id, name')
+    .select('id, company_id, name, instructions')
     .eq('id', id)
     .maybeSingle()
   const work = workData as WorkRow | null
@@ -92,6 +94,8 @@ export default async function NewReportPage({
           </Link>
           <h1 className="mt-1 text-3xl font-bold text-slate-900 tracking-tight">일보 작성</h1>
         </header>
+
+        <InstructionsBanner instructions={work.instructions} />
 
         <ReportForm initial={initial} action={submitReport} submitLabel="제출" />
       </div>

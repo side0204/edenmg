@@ -30,6 +30,7 @@ export type WorkFormValues = {
   end_date: string | null
   status: WorkStatus
   notes: string | null
+  instructions: string | null
 }
 
 type ClientChoice = '' | 'LG유플러스' | '기타'
@@ -249,13 +250,27 @@ export function WorkForm({
         </select>
       </Field>
 
+      <Field label="작업자 지시사항 (선택)">
+        <textarea
+          name="instructions"
+          rows={3}
+          maxLength={1000}
+          defaultValue={initial.instructions ?? ''}
+          placeholder="현장 유의사항·안전수칙·연락처 등 — 일보 작성 화면 상단에 항상 노출됩니다"
+          className={`${inputClass} resize-none`}
+        />
+        <p className="mt-1 text-xs text-amber-700">
+          작업자가 일보 작성 시 매번 보게 되는 강조 영역입니다.
+        </p>
+      </Field>
+
       <Field label="비고 (선택)">
         <textarea
           name="notes"
           rows={3}
           maxLength={500}
           defaultValue={initial.notes ?? ''}
-          placeholder="특이사항·메모"
+          placeholder="내부 메모 (작업자 화면엔 강조 안 됨)"
           className={`${inputClass} resize-none`}
         />
       </Field>
