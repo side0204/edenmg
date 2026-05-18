@@ -62,9 +62,16 @@ const NEW_ASSIGNMENT_DAYS = 3
 export default async function WorksPage({
   searchParams,
 }: {
-  searchParams: Promise<{ cat?: string; wt?: string; status?: string; q?: string; mine?: string }>
+  searchParams: Promise<{
+    cat?: string
+    wt?: string
+    status?: string
+    q?: string
+    mine?: string
+    worker?: string
+  }>
 }) {
-  const { cat, wt, status: statusParam, q, mine } = await searchParams
+  const { cat, wt, status: statusParam, q, mine, worker: workerParam } = await searchParams
   const supabase = await createClient()
 
   const {
@@ -74,15 +81,19 @@ export default async function WorksPage({
 
   const { data: meRow } = await supabase
     .from('employees')
-    .select('id, permission, can_manage_works, can_delete_works, is_active')
+    .select(
+      'id, company_id, permission, can_manage_works, can_delete_works, can_view_stats, is_active',
+    )
     .eq('auth_user_id', user.id)
     .maybeSingle()
   const me = meRow as
     | {
         id: string
+        company_id: string
         permission: 'worker' | 'foreman' | 'admin' | 'ceo'
         can_manage_works: boolean
         can_delete_works: boolean
+        can_view_stats: boolean
         is_active: boolean
       }
     | null
@@ -91,6 +102,8 @@ export default async function WorksPage({
   const isAdminLike = me.permission === 'admin' || me.permission === 'ceo'
   const canManage = isAdminLike || me.can_manage_works
   const canDelete = isAdminLike || me.can_delete_works
+  // 작업자 탭 노출 권한: admin/ceo 또는 통계 조회 권한자 (회사 전체 데이터 조회 권한과 일관)
+  const canViewOthers = isAdminLike || me.can_view_stats
 
   // 활성 카테고리 / worker_type / status 결정
   const activeCat: '' | WorkCategory = (CATEGORY_TABS.find((t) => t.key === cat)?.key ?? '') as
@@ -106,6 +119,28 @@ export default async function WorksPage({
     | WorkStatus
   const query = (q ?? '').trim()
   const isMineMode = mine === '1'
+  // 작업자 모드: worker 파라미터가 있고 권한자일 때만 활성
+  //   - worker=<uuid> → 그 직원 작업만
+  //   - worker=open  → 탭만 활성, picker 노출 (선택 전)
+  const workerTabActive = canViewOthers && !!workerParam && !isMineMode
+  const selectedWorkerId =
+    canViewOthers && workerParam && /^[0-9a-f-]{36}$/i.test(workerParam) ? workerParam : null
+  const isWorkerMode = workerTabActive && !!selectedWorkerId
+
+  // 작업자 탭 노출 시 직원 후보 fetch (회사 활성 직원)
+  let workerCandidates: { id: string; name: string; position: string | null; team: string | null }[] = []
+  if (canViewOthers) {
+    const { data: emps } = await supabase
+      .from('employees')
+      .select('id, name, position, team')
+      .eq('company_id', me.company_id)
+      .eq('is_active', true)
+      .order('name')
+    workerCandidates = (emps ?? []) as typeof workerCandidates
+  }
+  const selectedWorker = selectedWorkerId
+    ? (workerCandidates.find((c) => c.id === selectedWorkerId) ?? null)
+    : null
 
   // 본인이 배정된 작업 ID + 가장 최근 배정 created_at 매핑 (신규 배지·정렬용)
   const myAssignmentByWork = new Map<string, string>() // work_id → latest assigned_at
@@ -145,6 +180,23 @@ export default async function WorksPage({
     } else {
       dbQuery = dbQuery.in('id', myWorkIds)
     }
+  } else if (isWorkerMode && selectedWorkerId) {
+    // 선택된 작업자에게 배정된 작업
+    const { data: assigns } = await supabase
+      .from('work_assignments')
+      .select('work_id')
+      .eq('employee_id', selectedWorkerId)
+    const workerWorkIds = Array.from(
+      new Set(((assigns ?? []) as { work_id: string }[]).map((a) => a.work_id)),
+    )
+    if (workerWorkIds.length === 0) {
+      dbQuery = dbQuery.eq('id', '00000000-0000-0000-0000-000000000000')
+    } else {
+      dbQuery = dbQuery.in('id', workerWorkIds)
+    }
+  } else if (workerTabActive && !selectedWorkerId) {
+    // 작업자 탭은 활성인데 직원 미선택 → 작업 목록 비움 (picker 만 노출)
+    dbQuery = dbQuery.eq('id', '00000000-0000-0000-0000-000000000000')
   }
 
   const { data, error: listError } = await dbQuery
@@ -200,21 +252,33 @@ export default async function WorksPage({
     status?: '' | WorkStatus
     q?: string
     mine?: boolean
+    worker?: string | null // null = 작업자 모드 해제, '' = 작업자 탭 활성(미선택)
   }) => {
     const params = new URLSearchParams()
     const finalCat = next.cat ?? activeCat
     const finalWt = next.wt ?? (showSubtabs ? activeWt : '')
     const finalStatus = next.status ?? activeStatus
     const finalQ = next.q ?? query
-    const finalMine = next.mine ?? isMineMode
+    const finalMine = next.mine ?? (isMineMode && next.worker === undefined)
+    // worker: undefined → 기존 유지, null → 제거, 빈문자열 → 'open' 마커, id → set
+    let finalWorker: string | null | undefined
+    if (next.worker === undefined) finalWorker = selectedWorkerId
+    else finalWorker = next.worker
     if (finalCat) params.set('cat', finalCat)
     if (finalWt) params.set('wt', finalWt)
     if (finalStatus) params.set('status', finalStatus)
     if (finalQ) params.set('q', finalQ)
     if (finalMine) params.set('mine', '1')
+    if (finalWorker) params.set('worker', finalWorker)
     const qs = params.toString()
     return qs ? `/works?${qs}` : '/works'
   }
+
+  // 작업자 탭 클릭 시 사용할 기본 URL — 선택 없이 활성화하려면 worker=open
+  const workerTabHref =
+    isWorkerMode && selectedWorkerId
+      ? buildHref({ mine: false, worker: selectedWorkerId })
+      : buildHref({ mine: false, worker: 'open' })
 
   return (
     <main className="min-h-screen p-4 sm:p-6">
@@ -229,12 +293,20 @@ export default async function WorksPage({
               홈
             </Link>
             <h1 className="mt-1 text-3xl font-bold text-slate-900 tracking-tight">
-              {isMineMode ? '내 작업 진행 목록' : '작업 관리'}
+              {isMineMode
+                ? '내 작업 진행 목록'
+                : workerTabActive
+                  ? `작업자별 진행 목록`
+                  : '작업 관리'}
             </h1>
             <p className="mt-1 text-sm text-slate-500">
               {isMineMode
                 ? `본인이 배정된 작업 · ${rows.length}건${newAssignmentCount > 0 ? ` · 신규 ${newAssignmentCount}건` : ''}`
-                : `작업 카드를 탭하면 바로 일보 작성 · ${rows.length}건`}
+                : workerTabActive
+                  ? selectedWorker
+                    ? `${selectedWorker.name} 배정 작업 · ${rows.length}건`
+                    : '작업자를 선택하세요'
+                  : `작업 카드를 탭하면 바로 일보 작성 · ${rows.length}건`}
             </p>
           </div>
           <div className="flex flex-col items-end gap-1.5">
@@ -257,13 +329,13 @@ export default async function WorksPage({
           </div>
         </header>
 
-        {/* 0차 토글: 전체 / 내 작업 */}
+        {/* 0차 토글: 전체 / 작업자 (권한자만) / 내 작업 */}
         <nav className="flex gap-1 rounded-xl bg-slate-100 p-1 text-sm">
           <Link
-            href={buildHref({ mine: false })}
+            href={buildHref({ mine: false, worker: null })}
             className={
               'flex-1 inline-flex items-center justify-center gap-1.5 rounded-lg px-3 py-2 font-medium transition-colors ' +
-              (!isMineMode
+              (!isMineMode && !workerTabActive
                 ? 'bg-white text-slate-900 shadow-sm'
                 : 'text-slate-600 hover:text-slate-900')
             }
@@ -271,8 +343,26 @@ export default async function WorksPage({
             <Users className="h-4 w-4" />
             전체
           </Link>
+          {canViewOthers && (
+            <Link
+              href={workerTabHref}
+              className={
+                'flex-1 inline-flex items-center justify-center gap-1.5 rounded-lg px-3 py-2 font-medium transition-colors ' +
+                (workerTabActive
+                  ? 'bg-white text-slate-900 shadow-sm'
+                  : 'text-slate-600 hover:text-slate-900')
+              }
+            >
+              <Users className="h-4 w-4" />
+              {selectedWorker ? (
+                <span className="truncate">작업자 · {selectedWorker.name}</span>
+              ) : (
+                <span>작업자</span>
+              )}
+            </Link>
+          )}
           <Link
-            href={buildHref({ mine: true })}
+            href={buildHref({ mine: true, worker: null })}
             className={
               'flex-1 inline-flex items-center justify-center gap-1.5 rounded-lg px-3 py-2 font-medium transition-colors ' +
               (isMineMode
@@ -290,12 +380,63 @@ export default async function WorksPage({
           </Link>
         </nav>
 
-        {/* 검색 폼 (GET — URL 파라미터 q 로 반영, 기존 cat/wt/status/mine 유지) */}
+        {/* 작업자 picker — 작업자 탭 활성 시만 노출 */}
+        {workerTabActive && (
+          <form
+            method="get"
+            action="/works"
+            className="rounded-xl border border-slate-200 bg-white p-3 space-y-2"
+          >
+            {activeCat && <input type="hidden" name="cat" value={activeCat} />}
+            {showSubtabs && activeWt && <input type="hidden" name="wt" value={activeWt} />}
+            {activeStatus && <input type="hidden" name="status" value={activeStatus} />}
+            {query && <input type="hidden" name="q" value={query} />}
+            <label className="block">
+              <span className="block text-[10px] font-medium text-slate-500 uppercase mb-1">
+                작업자 선택
+              </span>
+              <select
+                name="worker"
+                defaultValue={selectedWorkerId ?? ''}
+                className="w-full rounded-md border border-slate-300 px-3 py-2 text-sm bg-white"
+              >
+                <option value="open">— 선택 —</option>
+                {workerCandidates.map((c) => {
+                  const sub = [c.position, c.team ? `${c.team}팀` : null]
+                    .filter(Boolean)
+                    .join(' · ')
+                  return (
+                    <option key={c.id} value={c.id}>
+                      {c.name}
+                      {sub ? ` (${sub})` : ''}
+                    </option>
+                  )
+                })}
+              </select>
+            </label>
+            <button
+              type="submit"
+              className="w-full rounded-md bg-slate-900 px-3 py-2 text-sm font-medium text-white hover:bg-slate-800"
+            >
+              적용
+            </button>
+            {!selectedWorker && (
+              <p className="text-[11px] text-amber-700">
+                작업자를 선택하면 해당 직원이 배정된 작업만 표시됩니다.
+              </p>
+            )}
+          </form>
+        )}
+
+        {/* 검색 폼 (GET — URL 파라미터 q 로 반영, 기존 cat/wt/status/mine/worker 유지) */}
         <form method="get" className="relative">
           {activeCat && <input type="hidden" name="cat" value={activeCat} />}
           {showSubtabs && activeWt && <input type="hidden" name="wt" value={activeWt} />}
           {activeStatus && <input type="hidden" name="status" value={activeStatus} />}
           {isMineMode && <input type="hidden" name="mine" value="1" />}
+          {workerTabActive && (
+            <input type="hidden" name="worker" value={selectedWorkerId ?? 'open'} />
+          )}
           <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
           <input
             type="search"
