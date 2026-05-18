@@ -10,6 +10,7 @@ import {
   type WorkCategory,
   type WorkStatus,
   type WorkSubcategory,
+  type WorkWorkerType,
 } from '@/lib/work'
 
 type WorkRow = {
@@ -18,13 +19,37 @@ type WorkRow = {
   client: string | null
   category: WorkCategory
   subcategory: WorkSubcategory | null
+  worker_type: WorkWorkerType | null
   start_date: string | null
   end_date: string | null
   status: WorkStatus
   is_active: boolean
 }
 
-export default async function WorksPage() {
+const CATEGORY_TABS: { key: '' | WorkCategory; label: string }[] = [
+  { key: '', label: '전체' },
+  { key: '청약', label: '청약' },
+  { key: '계획', label: '계획' },
+  { key: '지장이설', label: '지장이설' },
+  { key: '기타', label: '기타' },
+]
+
+// 서브탭 노출 카테고리 (청약/계획/지장이설). 기타·전체는 서브탭 없음.
+const SUBTAB_CATEGORIES: readonly WorkCategory[] = ['청약', '계획', '지장이설']
+
+// URL 의 wt 파라미터 ↔ DB worker_type enum 매핑
+const WT_TABS: { key: '' | '외선' | '접속'; label: string; dbValue: WorkWorkerType | null }[] = [
+  { key: '', label: '전체', dbValue: null },
+  { key: '외선', label: '외선', dbValue: '외선팀' },
+  { key: '접속', label: '접속', dbValue: '접속팀' },
+]
+
+export default async function WorksPage({
+  searchParams,
+}: {
+  searchParams: Promise<{ cat?: string; wt?: string }>
+}) {
+  const { cat, wt } = await searchParams
   const supabase = await createClient()
 
   const {
@@ -44,14 +69,36 @@ export default async function WorksPage() {
 
   const canManage = me.permission === 'admin' || me.permission === 'ceo' || me.can_manage_works
 
-  const { data, error: listError } = await supabase
+  // 활성 카테고리 / worker_type 결정
+  const activeCat: '' | WorkCategory = (CATEGORY_TABS.find((t) => t.key === cat)?.key ?? '') as
+    | ''
+    | WorkCategory
+  const showSubtabs = activeCat !== '' && SUBTAB_CATEGORIES.includes(activeCat as WorkCategory)
+  const activeWt: '' | '외선' | '접속' = showSubtabs
+    ? ((WT_TABS.find((t) => t.key === wt)?.key ?? '') as '' | '외선' | '접속')
+    : ''
+  const activeWtDb = WT_TABS.find((t) => t.key === activeWt)?.dbValue ?? null
+
+  let query = supabase
     .from('works')
-    .select('id, name, client, category, subcategory, start_date, end_date, status, is_active')
+    .select('id, name, client, category, subcategory, worker_type, start_date, end_date, status, is_active')
     .order('is_active', { ascending: false })
     .order('start_date', { ascending: false, nullsFirst: false })
     .order('created_at', { ascending: false })
 
+  if (activeCat) query = query.eq('category', activeCat)
+  if (activeWtDb) query = query.eq('worker_type', activeWtDb)
+
+  const { data, error: listError } = await query
   const rows = (data ?? []) as WorkRow[]
+
+  const buildHref = (nextCat: '' | WorkCategory, nextWt: '' | '외선' | '접속') => {
+    const params = new URLSearchParams()
+    if (nextCat) params.set('cat', nextCat)
+    if (nextWt) params.set('wt', nextWt)
+    const qs = params.toString()
+    return qs ? `/works?${qs}` : '/works'
+  }
 
   return (
     <main className="min-h-screen p-4 sm:p-6">
@@ -81,6 +128,50 @@ export default async function WorksPage() {
           )}
         </header>
 
+        {/* 1차 탭: 카테고리 */}
+        <nav className="flex gap-1 overflow-x-auto rounded-xl bg-slate-100 p-1 text-sm">
+          {CATEGORY_TABS.map((t) => {
+            const active = activeCat === t.key
+            return (
+              <Link
+                key={t.key || 'all'}
+                href={buildHref(t.key, '')}
+                className={
+                  'shrink-0 rounded-lg px-3 py-1.5 font-medium transition-colors ' +
+                  (active
+                    ? 'bg-white text-slate-900 shadow-sm'
+                    : 'text-slate-600 hover:text-slate-900')
+                }
+              >
+                {t.label}
+              </Link>
+            )
+          })}
+        </nav>
+
+        {/* 2차 탭: 작업자 구분 (청약/계획/지장이설 만) */}
+        {showSubtabs && (
+          <nav className="flex gap-1 overflow-x-auto rounded-lg border border-slate-200 bg-white p-1 text-xs">
+            {WT_TABS.map((t) => {
+              const active = activeWt === t.key
+              return (
+                <Link
+                  key={t.key || 'all'}
+                  href={buildHref(activeCat, t.key)}
+                  className={
+                    'shrink-0 rounded-md px-3 py-1.5 font-medium transition-colors ' +
+                    (active
+                      ? 'bg-slate-900 text-white'
+                      : 'text-slate-600 hover:bg-slate-50')
+                  }
+                >
+                  {t.label}
+                </Link>
+              )
+            })}
+          </nav>
+        )}
+
         {listError && (
           <p className="text-sm text-red-600 bg-red-50 border border-red-200 rounded-lg p-3">
             목록을 불러오지 못했습니다: {listError.message}
@@ -90,7 +181,7 @@ export default async function WorksPage() {
         {rows.length === 0 && !listError ? (
           <EmptyState
             icon={Hammer}
-            title="등록된 작업 없음"
+            title={activeCat || activeWt ? '해당 조건의 작업 없음' : '등록된 작업 없음'}
             description={
               canManage
                 ? '공사 건을 등록하면 작업자 배정·일보 작성이 가능합니다.'
