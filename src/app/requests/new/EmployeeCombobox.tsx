@@ -115,7 +115,10 @@ export function EmployeeCombobox({
         <div className="fixed inset-0 z-50 flex flex-col bg-black/40">
           <div
             className="flex-1"
-            onClick={() => setOpen(false)}
+            onPointerDown={(e) => {
+              e.preventDefault()
+              setOpen(false)
+            }}
             aria-hidden
           />
           <div className="rounded-t-2xl bg-white shadow-xl max-h-[85vh] flex flex-col">
@@ -132,7 +135,10 @@ export function EmployeeCombobox({
               />
               <button
                 type="button"
-                onClick={() => setOpen(false)}
+                onPointerDown={(e) => {
+                  e.preventDefault()
+                  setOpen(false)
+                }}
                 className="shrink-0 rounded p-1.5 text-slate-500 hover:bg-slate-100"
                 aria-label="닫기"
               >
@@ -153,7 +159,10 @@ export function EmployeeCombobox({
                       <li key={emp.id}>
                         <button
                           type="button"
-                          onClick={() => onPick(emp)}
+                          onPointerDown={(e) => {
+                            e.preventDefault()
+                            onPick(emp)
+                          }}
                           className="w-full px-4 py-3 text-left hover:bg-slate-50 active:bg-slate-100"
                         >
                           <span className="block text-base font-medium text-slate-900">
