@@ -60,9 +60,10 @@ export function WorkersMultiSelect({
     })
 
   const onPick = (emp: EmployeeOption) => {
+    // 선택 후 모달을 닫지 않음 — 여러 명 연속 추가 가능.
+    // 모달이 안 닫히므로 ghost click 자체가 발생 안 함 (담당자 모달 오작동 차단의 근본 해결).
     setSelected((prev) => [...prev, emp])
     setQuery('')
-    closeWithBlock()
   }
 
   const onRemove = (id: string) => {
@@ -147,6 +148,19 @@ export function WorkersMultiSelect({
             aria-hidden
           />
           <div className="rounded-t-2xl bg-white shadow-xl max-h-[85vh] flex flex-col">
+            <div className="flex items-center justify-between gap-2 border-b border-slate-100 px-4 py-2.5">
+              <p className="text-xs text-slate-500">
+                추가됨 <span className="font-semibold text-slate-900 tabular-nums">{selected.length}</span>명
+                · 직원을 탭하면 바로 추가됩니다
+              </p>
+              <button
+                type="button"
+                onClick={() => closeWithBlock()}
+                className="rounded-md bg-slate-900 px-3 py-1 text-xs font-medium text-white hover:bg-slate-800"
+              >
+                완료
+              </button>
+            </div>
             <div className="flex items-center gap-2 border-b border-slate-200 px-4 py-3">
               <Search className="h-5 w-5 shrink-0 text-slate-400" />
               <input
