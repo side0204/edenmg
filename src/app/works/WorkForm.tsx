@@ -120,7 +120,7 @@ export function WorkForm({
             name="order_id"
             defaultValue={initial.order_id ?? ''}
             maxLength={50}
-            placeholder="발주처 오더 ID — 모르면 비워두세요"
+            placeholder="ID 입력"
             className={inputClass}
           />
         </Field>
