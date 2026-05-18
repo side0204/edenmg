@@ -2,6 +2,7 @@ import type { Metadata } from "next";
 import { Suspense } from "react";
 import { Toaster } from "sonner";
 import ToastBridge from "@/components/ToastBridge";
+import BottomNav from "@/components/BottomNav";
 import "./globals.css";
 
 export const metadata: Metadata = {
@@ -16,13 +17,17 @@ export default function RootLayout({
 }>) {
   return (
     <html lang="ko" className="h-full antialiased">
-      <body className="min-h-full flex flex-col bg-slate-50 text-slate-900">
+      <body
+        className="min-h-full flex flex-col bg-slate-50 text-slate-900"
+        style={{ paddingBottom: 'calc(4rem + env(safe-area-inset-bottom))' }}
+      >
         {children}
         <Toaster
           position="bottom-center"
           richColors
           closeButton
           duration={3500}
+          offset={{ bottom: 'calc(5rem + env(safe-area-inset-bottom))' }}
           toastOptions={{
             classNames: {
               toast: 'rounded-xl border shadow-lg',
@@ -32,6 +37,7 @@ export default function RootLayout({
         <Suspense fallback={null}>
           <ToastBridge />
         </Suspense>
+        <BottomNav />
       </body>
     </html>
   );
