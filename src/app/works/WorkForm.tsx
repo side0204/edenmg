@@ -13,6 +13,7 @@ import {
 } from '@/lib/work'
 import { AddressInput } from './AddressInput'
 import { EmployeeCombobox, type EmployeeOption } from '../requests/new/EmployeeCombobox'
+import { WorkersMultiSelect } from './WorkersMultiSelect'
 
 export type WorkFormValues = {
   id: string | null
@@ -47,12 +48,15 @@ export function WorkForm({
   submitLabel,
   candidates,
   initialAssignee,
+  showWorkers = false,
 }: {
   initial: WorkFormValues
   action: (formData: FormData) => void
   submitLabel: string
   candidates: EmployeeOption[]
   initialAssignee: EmployeeOption | null
+  /** 작업자 다중 선택 섹션 노출 (등록 모드 only — 수정은 작업 상세에서 별도 관리) */
+  showWorkers?: boolean
 }) {
   const [category, setCategory] = useState<WorkCategory>(initial.category)
   const [subcategory, setSubcategory] = useState<WorkSubcategory | ''>(initial.subcategory ?? '')
@@ -210,6 +214,16 @@ export function WorkForm({
           이 작업의 일일 작업일보는 담당자가 결재합니다.
         </p>
       </Field>
+
+      {showWorkers && (
+        <Field label="작업자 (선택)">
+          <WorkersMultiSelect candidates={candidates} />
+          <p className="mt-1 text-xs text-slate-500">
+            동일 작업에 함께 일하는 작업자들을 추가하세요. 작업 전체 기간으로 배정되며, 등록 후 작업
+            상세에서 기간을 조정하거나 추가·해제할 수 있습니다.
+          </p>
+        </Field>
+      )}
 
       <Field label="예상물량 (선택)">
         <input

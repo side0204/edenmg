@@ -176,6 +176,44 @@ export async function createWork(formData: FormData) {
     if (assigneeErr) redirect('/works/new?err=' + encodeURIComponent(assigneeErr))
   }
 
+  // 작업자 다중 선택 (worker_ids JSON 배열)
+  const workerIdsRaw = String(formData.get('worker_ids') ?? '')
+  let workerIds: string[] = []
+  if (workerIdsRaw) {
+    try {
+      const parsedIds = JSON.parse(workerIdsRaw)
+      if (Array.isArray(parsedIds)) {
+        workerIds = Array.from(
+          new Set(
+            parsedIds.filter(
+              (x): x is string => typeof x === 'string' && /^[0-9a-f-]{36}$/i.test(x),
+            ),
+          ),
+        )
+      }
+    } catch {
+      // 무시 — 잘못된 JSON 은 작업자 없이 등록 진행
+    }
+  }
+
+  // 작업자 검증 — 같은 회사·활성
+  if (workerIds.length > 0) {
+    const { data: workersRows } = await supabase
+      .from('employees')
+      .select('id, company_id, is_active')
+      .in('id', workerIds)
+    const valid = ((workersRows ?? []) as { id: string; company_id: string; is_active: boolean }[])
+      .filter((w) => w.company_id === me.company_id && w.is_active)
+      .map((w) => w.id)
+    if (valid.length !== workerIds.length) {
+      redirect(
+        '/works/new?err=' +
+          encodeURIComponent('일부 작업자가 같은 회사 활성 직원이 아닙니다. 다시 선택하세요.'),
+      )
+    }
+    workerIds = valid
+  }
+
   const { clientCustomMissing, ...payload } = parsed
   void clientCustomMissing
   const { data: inserted, error } = await supabase
@@ -188,6 +226,25 @@ export async function createWork(formData: FormData) {
     redirect('/works/new?err=' + encodeURIComponent('등록 실패: ' + (error?.message ?? '알 수 없음')))
   }
 
+  // 작업자 일괄 배정 — 작업 전체 기간 (assigned_start/end null)
+  if (workerIds.length > 0) {
+    const { error: assignErr } = await supabase.from('work_assignments').insert(
+      workerIds.map((eid) => ({
+        work_id: inserted.id,
+        employee_id: eid,
+        assigned_start: null,
+        assigned_end: null,
+      })),
+    )
+    if (assignErr) {
+      // 작업은 등록됐으니 상세 페이지로 이동하면서 오류 안내
+      redirect(
+        `/works/${inserted.id}?err=` +
+          encodeURIComponent('작업 등록은 완료. 일부 작업자 배정 실패: ' + assignErr.message),
+      )
+    }
+  }
+
   revalidatePath('/works')
 
   // 접속팀 작업이면 작업구간(=chain) 등록 화면으로 자동 진입.
@@ -195,11 +252,18 @@ export async function createWork(formData: FormData) {
   if (parsed.worker_type === '접속팀') {
     redirect(
       `/works/${inserted.id}/chains/new?ok=` +
-        encodeURIComponent(`${parsed.name} 등록 완료. 이어서 작업구간을 등록하세요.`),
+        encodeURIComponent(
+          `${parsed.name} 등록 완료 (작업자 ${workerIds.length}명). 이어서 작업구간을 등록하세요.`,
+        ),
     )
   }
 
-  redirect(`/works/${inserted.id}?ok=` + encodeURIComponent(`${parsed.name} 작업을 등록했습니다`))
+  redirect(
+    `/works/${inserted.id}?ok=` +
+      encodeURIComponent(
+        `${parsed.name} 작업을 등록했습니다${workerIds.length > 0 ? ` (작업자 ${workerIds.length}명 배정)` : ''}`,
+      ),
+  )
 }
 
 export async function updateWork(formData: FormData) {

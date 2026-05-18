@@ -94,6 +94,7 @@ export default async function NewWorkPage() {
           submitLabel="등록"
           candidates={candidates}
           initialAssignee={initialAssignee}
+          showWorkers
         />
       </div>
     </main>
