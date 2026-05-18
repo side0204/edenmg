@@ -465,6 +465,12 @@ export default async function Home() {
               현장 관리 →
             </Link>
             <Link
+              href="/admin/materials"
+              className="block rounded-lg border border-slate-200 hover:border-slate-900 px-4 py-3 text-base font-medium text-slate-900 dark:border-slate-800 dark:hover:border-slate-100 dark:text-slate-100"
+            >
+              자재 마스터 →
+            </Link>
+            <Link
               href="/admin/reports"
               className="block rounded-lg border border-slate-200 hover:border-slate-900 px-4 py-3 text-base font-medium text-slate-900 dark:border-slate-800 dark:hover:border-slate-100 dark:text-slate-100"
             >

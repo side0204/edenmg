@@ -247,14 +247,53 @@ owner 결정사항:
   - `/works/[id]/reports/[reportId]` — 상세 + (작성자+대기 시) 인라인 수정 + (담당자 시) 승인·반려 액션
 - **EmployeeCombobox**: `defaultSelected` prop 추가로 편집 모드 prefill 지원 (휴가 신청과 공유).
 
+### ✅ 완료 (M3 Phase 2-B 접속일보, 2026-05-18)
+
+접속팀(`worker_type='접속팀'`) 작업 전용 별도 entity. 일반 작업일보(`work_daily_reports`) 와 완전히 분리. 외선팀·기타는 일반 일보 유지 (외선일보는 v2 예정).
+
+owner 결정사항 핵심:
+
+| 항목 | 결정 | 비고 |
+|---|---|---|
+| **chain 구조** | 트리 (상위국 root → 함체들 → 하위국 leaf). 분기 가능 | 한 작업에 chain 1:N |
+| **plan vs actual** | plan(함체·구조)은 chain 에, actual(케이블규격·선번)은 일보에 | B안 |
+| **케이블 규격 enum** | 10종 (1C·1C드랍·2C·2C드랍·12C·36C·72C·144C·288C·576C) | DB enum, 추가는 마이그레이션 |
+| **사용선번** | 자유 텍스트 ("1-6", "1,3,5", "1-6,12-18"). **같은 cable 안 중복 금지** | 클라이언트+서버 이중 검증 |
+| **접속코어수** | 선번 파싱해서 자동 계산. DB 저장 X, 입력 시 라이브 표시 + CSV 출력 시 server 재계산 | |
+| **공종 enum 14종** | 접속(12C이하/초과)·성단접속·성단작업·함체작업(주간/야간)·중간분기함체(기설/신설)·단자함설치·국사패치·IJP신설·고위험(함체)·신호수·기타 | "기타" 안전망 유지 |
+| **자재 마스터** | 회사별 materials 테이블 (명·규격·단위·활성). admin/ceo 만 CUD. 비규격은 일보에서 직접 입력 | |
+| **노드별 입력** | 노드마다 공종·공종수·사용자재 (1:N 행). 자재는 마스터 선택 OR 직접 입력 둘 중 하나 (CHECK 제약) | |
+| **ad-hoc 함체 추가** | 작업자(배정자)도 chain plan_nodes 에 함체 추가 가능. created_by/added_during_report_id 로 추적 | |
+| **분기 UI** | 들여쓰기 트리. parent 드롭다운 선택 또는 "사이 끼우기" 모드 | |
+| **결재** | 1단 (작성자 → 담당자 승인/반려). 일반 일보와 동일 | |
+| **엑셀 출력** | 일보별·세그먼트별·공종별·자재별 4모드 | UTF-8+BOM, CRLF |
+
+- **DB 마이그레이션**
+  - [`0011_connection_plan.sql`](./supabase/migrations/0011_connection_plan.sql) — enum 3종 + connection_chains + connection_plan_nodes + materials 마스터 + RLS + GRANT
+  - [`0012_connection_reports.sql`](./supabase/migrations/0012_connection_reports.sql) — connection_reports + report_segments + node_materials + node_tasks + ALTER plan_nodes add added_during_report_id (forward FK 회피) + RLS + GRANT
+- **공통 유틸**: [`src/lib/connection.ts`](./src/lib/connection.ts) — `parseLineNumbers`(중복 detect 포함)·`calcCoreCount`·enum 상수·색상 매핑·`formatTaskLabel`. server/client 양쪽 import.
+- **자재 마스터**: [`/admin/materials`](./src/app/admin/materials/page.tsx) + new/[id] + actions (admin/ceo 전용. 삭제 대신 is_active 토글)
+- **chain CRUD**: [`chain-actions.ts`](./src/app/works/chain-actions.ts) — createChain(상위국+하위국 자동 생성)·updateChain·deleteChain·createNode(insert_between 모드 지원)·updateNode·deleteNode
+  - 화면: [`/works/[id]/chains/new`](./src/app/works/[id]/chains/new/page.tsx) (상위국·하위국 골격), [`/works/[id]/chains/[chainId]/edit`](./src/app/works/[id]/chains/[chainId]/edit/page.tsx) (트리 + 노드 추가 폼), [`nodes/[nodeId]/edit`](./src/app/works/[id]/chains/[chainId]/nodes/[nodeId]/edit/page.tsx) (개별 노드 수정)
+- **접속일보**: [`connection-report-actions.ts`](./src/app/works/connection-report-actions.ts) — submit·updateMeta·approve·reject·addTask·removeTask·addMaterial·removeMaterial
+  - 화면: [`/works/[id]/connection-reports/new`](./src/app/works/[id]/connection-reports/new/page.tsx) (cable 별 입력 + 라이브 코어수), [`[reportId]`](./src/app/works/[id]/connection-reports/[reportId]/page.tsx) (트리 + cable + 노드별 공종·자재 인라인 add/remove + 결재)
+  - 클라이언트 위젯: [`CableSegmentInput`](./src/app/works/CableSegmentInput.tsx) — 입력 즉시 코어수 표시 + 중복·역순·음수 빨간 경고
+- **작업 상세 분기**: `/works/[id]` 에서 `worker_type='접속팀'` 이면 일반 일보 섹션 숨김 + chain 관리 + 접속일보 섹션 노출. 외선/기타는 기존 그대로.
+- **엑셀 API**: [`/api/reports/connection-reports`](./src/app/api/reports/connection-reports/route.ts) — `?mode=summary|segment|tasks|materials&month=YYYY-MM&work_id=옵션`. 회사 스코프 + foreman 은 본인 담당 작업만.
+- **/admin/reports**: 접속일보 4모드 다운로드 버튼 묶음 추가.
+
 ### 🟡 미완 / 후속
 
-- **운영 작업 (owner 가 Supabase Dashboard 에서 SQL 실행 필요)**
+- **운영 작업 (owner 가 Supabase Dashboard 에서 SQL 실행 필요)** ⚠️
   - [`0007_leave_substitute.sql`](./supabase/migrations/0007_leave_substitute.sql) — 휴가 대무자 컬럼
   - [`0008_works.sql`](./supabase/migrations/0008_works.sql) — M3 작업관리 테이블·enum·권한 컬럼
   - [`0009_works_order_id.sql`](./supabase/migrations/0009_works_order_id.sql) — 작업 ID 컬럼 (청약·지장이설)
   - [`0010_work_daily_reports.sql`](./supabase/migrations/0010_work_daily_reports.sql) — works 확장 + 일일 작업일보
-- **M3 Phase 2 후속** — 사진 첨부 + EXIF·워터마크 (PRD M3-06), 일보 결재함 통합 (현재는 작업 상세에서 진입), 일보 월별 CSV 리포트
+  - [`0011_connection_plan.sql`](./supabase/migrations/0011_connection_plan.sql) — 접속일보 chain side
+  - [`0012_connection_reports.sql`](./supabase/migrations/0012_connection_reports.sql) — 접속일보 report side
+- **외선일보 별도 entity (v2)** — 접속일보와 동일 패턴으로 외선팀 전용 모듈. 외선 작업 특성(케이블 포설구간·전주번호 등)에 맞는 구조 별도 설계.
+- **접속일보 후속 (v2)** — segment-level 작업자 태그, 사진 첨부 + EXIF, 국사·함체 마스터 테이블화, 재접속 이력 조회, 지도 시각화
+- **M3 Phase 2 후속** — 사진 첨부 + EXIF·워터마크 (PRD M3-06), 일보 결재함 통합 (현재는 작업 상세에서 진입), 일반 일보 월별 CSV 리포트
 - **M3 Phase 3 (대시보드)** — PRD M3-05: 현장별 진행률·누적 인시·자재 사용량.
 - **`/admin/sites` 수정사항** — owner 가 별도로 보강 예정 (현장 등록 폼·목록 UX).
 - **알림** — 의도적으로 인앱 토스트만. PWA 푸시는 M3 들어갈 때 같이 도입 검토.

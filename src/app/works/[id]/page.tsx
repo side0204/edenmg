@@ -1,6 +1,6 @@
 import Link from 'next/link'
 import { notFound, redirect } from 'next/navigation'
-import { ChevronLeft, FileText, Pencil, Plus, X } from 'lucide-react'
+import { Cable, ChevronLeft, FileText, Pencil, Plus, X } from 'lucide-react'
 import { createClient } from '@/lib/supabase/server'
 import {
   REPORT_STATUS_COLOR,
@@ -99,19 +99,81 @@ export default async function WorkDetailPage({
     .order('assigned_start', { ascending: true, nullsFirst: true })
   const assignments = (assignmentsData ?? []) as AssignmentRow[]
 
-  // 일보 (최근 10건)
-  const { data: reportsData } = await supabase
-    .from('work_daily_reports')
-    .select('id, report_date, author_employee_id, progress, status')
-    .eq('work_id', id)
-    .order('report_date', { ascending: false })
-    .limit(10)
-  const reports = (reportsData ?? []) as ReportRow[]
+  const isConnectionTeam = work.worker_type === '접속팀'
+
+  // 일반 일보: 접속팀은 안 씀 (별도 접속일보 사용)
+  const reports: ReportRow[] = []
+  if (!isConnectionTeam) {
+    const { data: reportsData } = await supabase
+      .from('work_daily_reports')
+      .select('id, report_date, author_employee_id, progress, status')
+      .eq('work_id', id)
+      .order('report_date', { ascending: false })
+      .limit(10)
+    reports.push(...((reportsData ?? []) as ReportRow[]))
+  }
+
+  // 접속팀 작업: chain 리스트 + 접속일보 최근 10건
+  type ChainSummary = {
+    id: string
+    name: string | null
+    node_count: number
+  }
+  type ConnReportSummary = {
+    id: string
+    report_date: string
+    author_employee_id: string
+    progress: WorkReportProgress
+    status: WorkReportStatus
+  }
+  let chains: ChainSummary[] = []
+  let connectionReports: ConnReportSummary[] = []
+  if (isConnectionTeam) {
+    const { data: chainData } = await supabase
+      .from('connection_chains')
+      .select('id, name')
+      .eq('work_id', id)
+      .order('position')
+    const chainsRaw = (chainData ?? []) as { id: string; name: string | null }[]
+    if (chainsRaw.length > 0) {
+      const { data: nodeCountData } = await supabase
+        .from('connection_plan_nodes')
+        .select('chain_id')
+        .in('id', []) // dummy, will be replaced
+      // chain 별 node 수: groupBy 대신 한 번에 가져와서 메모리에서 카운트
+      void nodeCountData
+      const { data: allNodes } = await supabase
+        .from('connection_plan_nodes')
+        .select('chain_id')
+        .in(
+          'chain_id',
+          chainsRaw.map((c) => c.id),
+        )
+      const countMap = new Map<string, number>()
+      for (const n of (allNodes ?? []) as { chain_id: string }[]) {
+        countMap.set(n.chain_id, (countMap.get(n.chain_id) ?? 0) + 1)
+      }
+      chains = chainsRaw.map((c) => ({
+        id: c.id,
+        name: c.name,
+        node_count: countMap.get(c.id) ?? 0,
+      }))
+    }
+
+    const { data: crData } = await supabase
+      .from('connection_reports')
+      .select('id, report_date, author_employee_id, progress, status')
+      .eq('work_id', id)
+      .order('report_date', { ascending: false })
+      .limit(10)
+    connectionReports = (crData ?? []) as ConnReportSummary[]
+  }
 
   // 직원 이름·메타 매핑 — 배정자 + 일보 작성자 + 담당자 모두 묶어서 1회 조회
   const employeeIds = new Set<string>()
   for (const a of assignments) employeeIds.add(a.employee_id)
   for (const r of reports) employeeIds.add(r.author_employee_id)
+  for (const r of connectionReports) employeeIds.add(r.author_employee_id)
   if (work.assignee_employee_id) employeeIds.add(work.assignee_employee_id)
 
   const employeeMap = new Map<
@@ -152,6 +214,9 @@ export default async function WorkDetailPage({
   const today = new Date()
   const todayKST = new Date(today.getTime() + 9 * 60 * 60 * 1000).toISOString().slice(0, 10)
   const myTodayReport = reports.find(
+    (r) => r.author_employee_id === me.id && r.report_date === todayKST,
+  )
+  const myTodayConnReport = connectionReports.find(
     (r) => r.author_employee_id === me.id && r.report_date === todayKST,
   )
 
@@ -233,68 +298,178 @@ export default async function WorkDetailPage({
           )}
         </section>
 
-        <section className="rounded-2xl bg-white border border-slate-200 p-5 space-y-3">
-          <div className="flex items-center justify-between gap-3">
-            <h2 className="text-base font-semibold text-slate-700 tracking-tight inline-flex items-center gap-1.5">
-              <FileText className="h-4 w-4 text-slate-500" />
-              작업일보 ({reports.length})
-            </h2>
-            {canWriteReport && !myTodayReport && (
-              <Link
-                href={`/works/${work.id}/reports/new`}
-                className="shrink-0 inline-flex items-center gap-1 rounded-lg bg-slate-900 px-3 py-1.5 text-xs font-medium text-white hover:bg-slate-800"
-              >
-                <Plus className="h-3.5 w-3.5" />
-                오늘 일보 작성
-              </Link>
-            )}
-            {myTodayReport && (
-              <Link
-                href={`/works/${work.id}/reports/${myTodayReport.id}`}
-                className="shrink-0 inline-flex items-center gap-1 rounded-lg border border-slate-300 px-3 py-1.5 text-xs font-medium text-slate-700 hover:bg-slate-50"
-              >
-                오늘 일보 보기
-              </Link>
-            )}
-          </div>
-
-          {reports.length === 0 ? (
-            <p className="rounded-lg bg-slate-50 px-4 py-6 text-center text-sm text-slate-500">
-              아직 작성된 일보가 없습니다.
-            </p>
-          ) : (
-            <ul className="divide-y divide-slate-100 rounded-lg border border-slate-200">
-              {reports.map((r) => {
-                const emp = employeeMap.get(r.author_employee_id)
-                return (
-                  <li key={r.id}>
-                    <Link
-                      href={`/works/${work.id}/reports/${r.id}`}
-                      className="flex items-center justify-between gap-2 px-3 py-2.5 text-sm hover:bg-slate-50"
-                    >
-                      <div className="min-w-0 flex-1">
-                        <p className="text-slate-900">
-                          <span className="font-medium">{r.report_date}</span>
-                          <span className="ml-2 text-xs text-slate-500">
-                            {emp?.name ?? '?'} · {r.progress}
-                          </span>
-                        </p>
-                      </div>
-                      <span
-                        className={
-                          'shrink-0 rounded-full border px-2 py-0.5 text-xs font-medium ' +
-                          REPORT_STATUS_COLOR[r.status]
-                        }
+        {isConnectionTeam ? (
+          <>
+            {/* chain 관리 (접속팀 전용) */}
+            <section className="rounded-2xl bg-white border border-slate-200 p-5 space-y-3">
+              <div className="flex items-center justify-between gap-3">
+                <h2 className="text-base font-semibold text-slate-700 tracking-tight inline-flex items-center gap-1.5">
+                  <Cable className="h-4 w-4 text-slate-500" />
+                  chain 관리 ({chains.length})
+                </h2>
+                {canManage && (
+                  <Link
+                    href={`/works/${work.id}/chains/new`}
+                    className="shrink-0 inline-flex items-center gap-1 rounded-lg bg-slate-900 px-3 py-1.5 text-xs font-medium text-white hover:bg-slate-800"
+                  >
+                    <Plus className="h-3.5 w-3.5" />
+                    chain 등록
+                  </Link>
+                )}
+              </div>
+              {chains.length === 0 ? (
+                <p className="rounded-lg bg-slate-50 px-4 py-6 text-center text-sm text-slate-500">
+                  등록된 chain 이 없습니다. chain 을 등록한 뒤 함체를 추가하면 접속일보를 작성할 수 있습니다.
+                </p>
+              ) : (
+                <ul className="divide-y divide-slate-100 rounded-lg border border-slate-200">
+                  {chains.map((c) => (
+                    <li key={c.id}>
+                      <Link
+                        href={`/works/${work.id}/chains/${c.id}/edit`}
+                        className="flex items-center justify-between gap-2 px-3 py-2.5 text-sm hover:bg-slate-50"
                       >
-                        {r.status}
-                      </span>
-                    </Link>
-                  </li>
-                )
-              })}
-            </ul>
-          )}
-        </section>
+                        <div className="min-w-0 flex-1">
+                          <p className="font-medium text-slate-900 truncate">
+                            {c.name || 'chain'}
+                          </p>
+                          <p className="text-xs text-slate-500">노드 {c.node_count}개</p>
+                        </div>
+                        <span className="shrink-0 text-xs text-slate-400">편집 →</span>
+                      </Link>
+                    </li>
+                  ))}
+                </ul>
+              )}
+            </section>
+
+            {/* 접속일보 */}
+            <section className="rounded-2xl bg-white border border-slate-200 p-5 space-y-3">
+              <div className="flex items-center justify-between gap-3">
+                <h2 className="text-base font-semibold text-slate-700 tracking-tight inline-flex items-center gap-1.5">
+                  <FileText className="h-4 w-4 text-slate-500" />
+                  접속일보 ({connectionReports.length})
+                </h2>
+                {canWriteReport && chains.length > 0 && !myTodayConnReport && (
+                  <Link
+                    href={`/works/${work.id}/connection-reports/new`}
+                    className="shrink-0 inline-flex items-center gap-1 rounded-lg bg-slate-900 px-3 py-1.5 text-xs font-medium text-white hover:bg-slate-800"
+                  >
+                    <Plus className="h-3.5 w-3.5" />
+                    오늘 일보 작성
+                  </Link>
+                )}
+                {myTodayConnReport && (
+                  <Link
+                    href={`/works/${work.id}/connection-reports/${myTodayConnReport.id}`}
+                    className="shrink-0 inline-flex items-center gap-1 rounded-lg border border-slate-300 px-3 py-1.5 text-xs font-medium text-slate-700 hover:bg-slate-50"
+                  >
+                    오늘 일보 보기
+                  </Link>
+                )}
+              </div>
+              {connectionReports.length === 0 ? (
+                <p className="rounded-lg bg-slate-50 px-4 py-6 text-center text-sm text-slate-500">
+                  아직 작성된 접속일보가 없습니다.
+                </p>
+              ) : (
+                <ul className="divide-y divide-slate-100 rounded-lg border border-slate-200">
+                  {connectionReports.map((r) => {
+                    const emp = employeeMap.get(r.author_employee_id)
+                    return (
+                      <li key={r.id}>
+                        <Link
+                          href={`/works/${work.id}/connection-reports/${r.id}`}
+                          className="flex items-center justify-between gap-2 px-3 py-2.5 text-sm hover:bg-slate-50"
+                        >
+                          <div className="min-w-0 flex-1">
+                            <p className="text-slate-900">
+                              <span className="font-medium">{r.report_date}</span>
+                              <span className="ml-2 text-xs text-slate-500">
+                                {emp?.name ?? '?'} · {r.progress}
+                              </span>
+                            </p>
+                          </div>
+                          <span
+                            className={
+                              'shrink-0 rounded-full border px-2 py-0.5 text-xs font-medium ' +
+                              REPORT_STATUS_COLOR[r.status]
+                            }
+                          >
+                            {r.status}
+                          </span>
+                        </Link>
+                      </li>
+                    )
+                  })}
+                </ul>
+              )}
+            </section>
+          </>
+        ) : (
+          <section className="rounded-2xl bg-white border border-slate-200 p-5 space-y-3">
+            <div className="flex items-center justify-between gap-3">
+              <h2 className="text-base font-semibold text-slate-700 tracking-tight inline-flex items-center gap-1.5">
+                <FileText className="h-4 w-4 text-slate-500" />
+                작업일보 ({reports.length})
+              </h2>
+              {canWriteReport && !myTodayReport && (
+                <Link
+                  href={`/works/${work.id}/reports/new`}
+                  className="shrink-0 inline-flex items-center gap-1 rounded-lg bg-slate-900 px-3 py-1.5 text-xs font-medium text-white hover:bg-slate-800"
+                >
+                  <Plus className="h-3.5 w-3.5" />
+                  오늘 일보 작성
+                </Link>
+              )}
+              {myTodayReport && (
+                <Link
+                  href={`/works/${work.id}/reports/${myTodayReport.id}`}
+                  className="shrink-0 inline-flex items-center gap-1 rounded-lg border border-slate-300 px-3 py-1.5 text-xs font-medium text-slate-700 hover:bg-slate-50"
+                >
+                  오늘 일보 보기
+                </Link>
+              )}
+            </div>
+
+            {reports.length === 0 ? (
+              <p className="rounded-lg bg-slate-50 px-4 py-6 text-center text-sm text-slate-500">
+                아직 작성된 일보가 없습니다.
+              </p>
+            ) : (
+              <ul className="divide-y divide-slate-100 rounded-lg border border-slate-200">
+                {reports.map((r) => {
+                  const emp = employeeMap.get(r.author_employee_id)
+                  return (
+                    <li key={r.id}>
+                      <Link
+                        href={`/works/${work.id}/reports/${r.id}`}
+                        className="flex items-center justify-between gap-2 px-3 py-2.5 text-sm hover:bg-slate-50"
+                      >
+                        <div className="min-w-0 flex-1">
+                          <p className="text-slate-900">
+                            <span className="font-medium">{r.report_date}</span>
+                            <span className="ml-2 text-xs text-slate-500">
+                              {emp?.name ?? '?'} · {r.progress}
+                            </span>
+                          </p>
+                        </div>
+                        <span
+                          className={
+                            'shrink-0 rounded-full border px-2 py-0.5 text-xs font-medium ' +
+                            REPORT_STATUS_COLOR[r.status]
+                          }
+                        >
+                          {r.status}
+                        </span>
+                      </Link>
+                    </li>
+                  )
+                })}
+              </ul>
+            )}
+          </section>
+        )}
 
         <section className="rounded-2xl bg-white border border-slate-200 p-5 space-y-3">
           <h2 className="text-base font-semibold text-slate-700 tracking-tight">
