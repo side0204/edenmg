@@ -282,6 +282,19 @@ owner 결정사항 핵심:
 - **엑셀 API**: [`/api/reports/connection-reports`](./src/app/api/reports/connection-reports/route.ts) — `?mode=summary|segment|tasks|materials&month=YYYY-MM&work_id=옵션`. 회사 스코프 + foreman 은 본인 담당 작업만.
 - **/admin/reports**: 접속일보 4모드 다운로드 버튼 묶음 추가.
 
+### ✅ 완료 (접속일보 후속 정정 1, 2026-05-18)
+
+owner 피드백 4건 반영:
+
+1. **상위국·하위국 사이 노드 추가 UI** — chain 트리 편집 페이지 각 부모-자식 edge 사이에 inline `[+ 여기 끼우기]` 버튼 노출. 클릭 시 `?parent=<부모>&between_child=<자식>` URL 파라미터로 add 폼 모드 전환.
+2. **함체 규격 enum 화** — text 자유입력 → cable_spec enum (10종) 드롭다운. legacy text 컬럼 `spec` 은 그대로 두고 새 `spec_enum` 컬럼 신설. 텍스트 값이 enum 매치되면 자동 migrate.
+3. **일보 작성 화면 통합 폼** — cable·공종·자재를 한 화면·한번에 입력. [`UnifiedReportForm`](./src/app/works/UnifiedReportForm.tsx) 클라이언트 컴포넌트로 노드별 dynamic rows(공종·자재 add/remove). 서버 액션은 `tasks_json`·`materials_json` 직렬화 필드로 받아 한 번에 검증+insert.
+4. **결과 검토 후 추가** — 대기 중.
+
+- **DB 마이그레이션**: [`0013_node_spec_enum.sql`](./supabase/migrations/0013_node_spec_enum.sql) — `connection_plan_nodes.spec_enum public.cable_spec` 추가 + text→enum 자동 매핑
+- **UI**: 노드 등록/수정 폼 enum 드롭다운, 트리 표시 enum 우선, 사이 끼우기 버튼, 일보 통합 폼
+- **CSV segment 모드**: 함체규격 컬럼은 spec_enum 우선 (legacy text fallback)
+
 ### 🟡 미완 / 후속
 
 - **운영 작업 (owner 가 Supabase Dashboard 에서 SQL 실행 필요)** ⚠️
@@ -291,6 +304,7 @@ owner 결정사항 핵심:
   - [`0010_work_daily_reports.sql`](./supabase/migrations/0010_work_daily_reports.sql) — works 확장 + 일일 작업일보
   - [`0011_connection_plan.sql`](./supabase/migrations/0011_connection_plan.sql) — 접속일보 chain side
   - [`0012_connection_reports.sql`](./supabase/migrations/0012_connection_reports.sql) — 접속일보 report side
+  - [`0013_node_spec_enum.sql`](./supabase/migrations/0013_node_spec_enum.sql) — 함체 규격 enum 컬럼 추가
 - **외선일보 별도 entity (v2)** — 접속일보와 동일 패턴으로 외선팀 전용 모듈. 외선 작업 특성(케이블 포설구간·전주번호 등)에 맞는 구조 별도 설계.
 - **접속일보 후속 (v2)** — segment-level 작업자 태그, 사진 첨부 + EXIF, 국사·함체 마스터 테이블화, 재접속 이력 조회, 지도 시각화
 - **M3 Phase 2 후속** — 사진 첨부 + EXIF·워터마크 (PRD M3-06), 일보 결재함 통합 (현재는 작업 상세에서 진입), 일반 일보 월별 CSV 리포트

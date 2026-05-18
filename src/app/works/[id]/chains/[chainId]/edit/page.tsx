@@ -3,7 +3,9 @@ import { notFound, redirect } from 'next/navigation'
 import { ChevronLeft, Pencil, Trash2, Plus } from 'lucide-react'
 import { createClient } from '@/lib/supabase/server'
 import {
+  CABLE_SPEC_VALUES,
   PLAN_NODE_TYPE_LABEL,
+  type CableSpec,
   type PlanNodeType,
 } from '@/lib/connection'
 import { createNode, deleteChain, deleteNode, updateChain } from '../../../../chain-actions'
@@ -24,6 +26,7 @@ type NodeRow = {
   name: string
   code: string | null
   spec: string | null
+  spec_enum: CableSpec | null
   lat: number | null
   lng: number | null
   address: string | null
@@ -108,7 +111,7 @@ export default async function ChainEditPage({
   const { data: nodesData } = await supabase
     .from('connection_plan_nodes')
     .select(
-      'id, chain_id, parent_id, position, node_type, name, code, spec, lat, lng, address, notes, added_during_report_id',
+      'id, chain_id, parent_id, position, node_type, name, code, spec, spec_enum, lat, lng, address, notes, added_during_report_id',
     )
     .eq('chain_id', chainId)
     .order('position')
@@ -249,12 +252,14 @@ export default async function ChainEditPage({
                 />
               </Field>
               <Field label="함체 규격 (선택)">
-                <input
-                  name="spec"
-                  maxLength={50}
-                  placeholder="예: 12C 함체"
-                  className={inputClass}
-                />
+                <select name="spec_enum" defaultValue="" className={inputClass}>
+                  <option value="">선택 안 함</option>
+                  {CABLE_SPEC_VALUES.map((c) => (
+                    <option key={c} value={c}>
+                      {c}
+                    </option>
+                  ))}
+                </select>
               </Field>
             </div>
 
@@ -352,14 +357,23 @@ function NodeBranch({
       {children.length > 0 && (
         <div className="ml-4 border-l-2 border-slate-100 pl-2 space-y-1">
           {children.map((c) => (
-            <NodeBranch
-              key={c.id}
-              node={c}
-              childrenMap={childrenMap}
-              workId={workId}
-              chainId={chainId}
-              depth={depth + 1}
-            />
+            <div key={c.id} className="space-y-1">
+              {/* inline 사이 끼우기 — 이 부모(node) 와 자식(c) edge 사이 */}
+              <Link
+                href={`/works/${workId}/chains/${chainId}/edit?parent=${node.id}&between_child=${c.id}#노드추가`}
+                className="inline-flex items-center gap-1 rounded-md border border-dashed border-slate-300 px-2 py-1 text-[11px] text-slate-500 hover:border-slate-900 hover:text-slate-900"
+              >
+                <Plus className="h-3 w-3" />
+                여기 끼우기 ({node.name} ↔ {c.name})
+              </Link>
+              <NodeBranch
+                node={c}
+                childrenMap={childrenMap}
+                workId={workId}
+                chainId={chainId}
+                depth={depth + 1}
+              />
+            </div>
           ))}
         </div>
       )}
@@ -378,7 +392,10 @@ function NodeRowView({
   chainId: string
   depth: number
 }) {
-  const meta = [node.code && `ID: ${node.code}`, node.spec]
+  const meta = [
+    node.code && `ID: ${node.code}`,
+    node.spec_enum || node.spec, // enum 우선, 없으면 legacy text
+  ]
     .filter(Boolean)
     .join(' · ')
 

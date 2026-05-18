@@ -2,10 +2,13 @@ import Link from 'next/link'
 import { notFound, redirect } from 'next/navigation'
 import { ChevronLeft } from 'lucide-react'
 import { createClient } from '@/lib/supabase/server'
-import { PLAN_NODE_TYPE_LABEL, type PlanNodeType } from '@/lib/connection'
-import { REPORT_PROGRESS_VALUES } from '@/lib/work'
-import { CableSegmentInput } from '../../../CableSegmentInput'
+import type { CableSpec, PlanNodeType } from '@/lib/connection'
 import { submitConnectionReport } from '../../../connection-report-actions'
+import {
+  UnifiedReportForm,
+  type MaterialMaster,
+  type UnifiedNode,
+} from '../../../UnifiedReportForm'
 
 type ChainRow = { id: string; work_id: string; name: string | null }
 type NodeRow = {
@@ -16,6 +19,7 @@ type NodeRow = {
   node_type: PlanNodeType
   name: string
   code: string | null
+  spec_enum: CableSpec | null
 }
 
 export default async function NewConnectionReportPage({
@@ -62,7 +66,6 @@ export default async function NewConnectionReportPage({
     redirect(`/works/${id}?err=` + encodeURIComponent('접속팀 작업만 접속일보를 작성합니다'))
   }
 
-  // 배정자 확인
   const isAdmin = me.permission === 'admin' || me.permission === 'ceo'
   if (!isAdmin) {
     const { data: assigned } = await supabase
@@ -76,7 +79,6 @@ export default async function NewConnectionReportPage({
     }
   }
 
-  // chains
   const { data: chainsData } = await supabase
     .from('connection_chains')
     .select('id, work_id, name')
@@ -89,22 +91,45 @@ export default async function NewConnectionReportPage({
     )
   }
 
-  // 선택된 chain
   const activeChainId = chainParam && chains.some((c) => c.id === chainParam) ? chainParam : chains[0].id
   const activeChain = chains.find((c) => c.id === activeChainId)!
 
-  // 해당 chain 의 모든 노드
   const { data: nodesData } = await supabase
     .from('connection_plan_nodes')
-    .select('id, chain_id, parent_id, position, node_type, name, code')
+    .select('id, chain_id, parent_id, position, node_type, name, code, spec_enum')
     .eq('chain_id', activeChainId)
     .order('position')
   const nodes = (nodesData ?? []) as NodeRow[]
-  const nodeMap = new Map<string, NodeRow>(nodes.map((n) => [n.id, n]))
-  // segment 가 있는 노드 = parent_id 가 있는 노드 (상위국 제외)
-  const segmentNodes = nodes.filter((n) => n.parent_id !== null)
+  const segmentNodes: UnifiedNode[] = nodes
+    .filter((n) => n.parent_id !== null)
+    .map((n) => ({
+      id: n.id,
+      parent_id: n.parent_id,
+      node_type: n.node_type,
+      name: n.name,
+      code: n.code,
+      spec_enum: n.spec_enum,
+    }))
+  const nodeMap: Record<string, UnifiedNode> = {}
+  for (const n of nodes) {
+    nodeMap[n.id] = {
+      id: n.id,
+      parent_id: n.parent_id,
+      node_type: n.node_type,
+      name: n.name,
+      code: n.code,
+      spec_enum: n.spec_enum,
+    }
+  }
 
-  // 기본 일자
+  const { data: mastersData } = await supabase
+    .from('materials')
+    .select('id, name, spec, unit')
+    .eq('company_id', me.company_id)
+    .eq('is_active', true)
+    .order('name')
+  const masters = (mastersData ?? []) as MaterialMaster[]
+
   const today = new Date()
   const todayKST = new Date(today.getTime() + 9 * 60 * 60 * 1000).toISOString().slice(0, 10)
   const reportDate = dateParam && /^\d{4}-\d{2}-\d{2}$/.test(dateParam) ? dateParam : todayKST
@@ -122,11 +147,10 @@ export default async function NewConnectionReportPage({
           </Link>
           <h1 className="mt-1 text-3xl font-bold text-slate-900 tracking-tight">접속일보 작성</h1>
           <p className="mt-1 text-sm text-slate-500">
-            cable 마다 케이블규격·사용선번을 입력하세요. 빈 cable 은 미작업으로 처리. 노드별 공종·자재는 일보 제출 후 상세 페이지에서 추가합니다.
+            각 cable 별로 케이블·선번 + 그 노드의 공종·자재까지 한번에 입력하세요.
           </p>
         </header>
 
-        {/* chain 선택 */}
         {chains.length > 1 && (
           <nav className="flex gap-1 overflow-x-auto rounded-xl bg-slate-100 p-1 text-sm">
             {chains.map((c) => (
@@ -146,88 +170,16 @@ export default async function NewConnectionReportPage({
           </nav>
         )}
 
-        <form action={submitConnectionReport} className="space-y-5">
-          <input type="hidden" name="work_id" value={work.id} />
-
-          <section className="rounded-2xl bg-white border border-slate-200 p-5 space-y-3">
-            <h2 className="text-base font-semibold text-slate-700 tracking-tight">일보 기본 정보</h2>
-            <div className="grid grid-cols-2 gap-3">
-              <label className="block">
-                <span className="block text-sm font-medium text-slate-700">일자 *</span>
-                <input
-                  type="date"
-                  name="report_date"
-                  defaultValue={reportDate}
-                  required
-                  className={inputClass}
-                />
-              </label>
-              <label className="block">
-                <span className="block text-sm font-medium text-slate-700">진행률 *</span>
-                <select name="progress" defaultValue="진행중" className={inputClass}>
-                  {REPORT_PROGRESS_VALUES.map((p) => (
-                    <option key={p} value={p}>
-                      {p}
-                    </option>
-                  ))}
-                </select>
-              </label>
-            </div>
-            <label className="block">
-              <span className="block text-sm font-medium text-slate-700">비고 (선택)</span>
-              <textarea
-                name="notes"
-                rows={2}
-                maxLength={1000}
-                placeholder="협업 메모·특이사항"
-                className={`${inputClass} resize-none`}
-              />
-            </label>
-          </section>
-
-          <section className="rounded-2xl bg-white border border-slate-200 p-5 space-y-3">
-            <h2 className="text-base font-semibold text-slate-700 tracking-tight">
-              cable 별 입력 ({activeChain.name ? `「${activeChain.name}」` : 'chain'})
-            </h2>
-            <p className="text-xs text-slate-500">
-              빈 칸은 &lsquo;오늘 미작업&rsquo; 으로 처리됩니다. 사용선번은 한 cable 안에서 중복되면 안 됩니다.
-            </p>
-            {segmentNodes.length === 0 ? (
-              <p className="rounded-lg bg-slate-50 px-4 py-6 text-center text-sm text-slate-500">
-                cable 이 없습니다. 먼저 chain 에 함체·하위국을 추가하세요.
-              </p>
-            ) : (
-              <div className="space-y-2">
-                {segmentNodes.map((n) => {
-                  const parent = n.parent_id ? nodeMap.get(n.parent_id) : null
-                  return (
-                    <CableSegmentInput
-                      key={n.id}
-                      planNodeId={n.id}
-                      parentLabel={`[${parent ? PLAN_NODE_TYPE_LABEL[parent.node_type] : '?'}] ${
-                        parent?.name ?? '?'
-                      }`}
-                      nodeLabel={`[${PLAN_NODE_TYPE_LABEL[n.node_type]}] ${n.name}${
-                        n.code ? ` (ID: ${n.code})` : ''
-                      }`}
-                    />
-                  )
-                })}
-              </div>
-            )}
-          </section>
-
-          <button
-            type="submit"
-            className="w-full rounded-lg bg-slate-900 px-4 py-3 text-base font-medium text-white hover:bg-slate-800"
-          >
-            일보 제출 (이후 상세에서 공종·자재 추가)
-          </button>
-        </form>
+        <UnifiedReportForm
+          workId={work.id}
+          chainName={activeChain.name}
+          segmentNodes={segmentNodes}
+          nodeMap={nodeMap}
+          masters={masters}
+          defaultReportDate={reportDate}
+          action={submitConnectionReport}
+        />
       </div>
     </main>
   )
 }
-
-const inputClass =
-  'w-full rounded-lg border border-slate-300 px-3 py-2.5 text-base bg-white focus:border-slate-900 focus:outline-none focus:ring-1 focus:ring-slate-900'

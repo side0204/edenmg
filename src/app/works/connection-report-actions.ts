@@ -94,6 +94,7 @@ export async function submitConnectionReport(formData: FormData) {
     is_completed: boolean
     segment_notes: string | null
   }> = []
+  const activeNodeIds = new Set<string>() // cable 입력된 노드 = 그 노드 공종/자재 저장 대상
   for (const [key, val] of formData.entries()) {
     if (typeof val !== 'string') continue
     const match = key.match(/^line_numbers_(.+)$/)
@@ -125,6 +126,7 @@ export async function submitConnectionReport(formData: FormData) {
       is_completed: isCompleted,
       segment_notes: segmentNotes,
     })
+    activeNodeIds.add(nodeId)
   }
 
   if (segmentInputs.length === 0) {
@@ -132,6 +134,116 @@ export async function submitConnectionReport(formData: FormData) {
       `/works/${workId}/connection-reports/new?err=` +
         encodeURIComponent('최소 1개 cable 에 케이블 규격·선번을 입력하세요'),
     )
+  }
+
+  // tasks_json / materials_json 파싱
+  const tasksByNode = parseJsonField<
+    Record<
+      string,
+      Array<{
+        task_type?: string
+        custom_task_name?: string
+        task_count?: string | number
+        notes?: string
+      }>
+    >
+  >(formData.get('tasks_json'), {})
+  const materialsByNode = parseJsonField<
+    Record<
+      string,
+      Array<{
+        material_id?: string
+        custom_name?: string
+        custom_spec?: string
+        custom_unit?: string
+        quantity?: string | number
+        notes?: string
+      }>
+    >
+  >(formData.get('materials_json'), {})
+
+  // 검증 + payload 빌드 (cable 입력된 노드의 rows 만)
+  const taskPayloads: Array<{
+    plan_node_id: string
+    task_type: ConnectionTaskType
+    custom_task_name: string | null
+    task_count: number
+    notes: string | null
+  }> = []
+  for (const nodeId of Object.keys(tasksByNode)) {
+    if (!activeNodeIds.has(nodeId)) continue
+    for (const t of tasksByNode[nodeId] ?? []) {
+      const tt = String(t.task_type ?? '').trim() as ConnectionTaskType
+      if (!tt) continue // 빈 행 skip
+      if (!CONNECTION_TASK_TYPE_VALUES.includes(tt)) {
+        redirect(
+          `/works/${workId}/connection-reports/new?err=` + encodeURIComponent('공종이 잘못되었습니다'),
+        )
+      }
+      const customName = String(t.custom_task_name ?? '').trim() || null
+      if (tt === '기타' && !customName) {
+        redirect(
+          `/works/${workId}/connection-reports/new?err=` +
+            encodeURIComponent("공종 '기타' 선택 시 공종명을 입력하세요"),
+        )
+      }
+      const cnt = parseInt(String(t.task_count ?? ''), 10)
+      if (!Number.isFinite(cnt) || cnt <= 0) {
+        redirect(
+          `/works/${workId}/connection-reports/new?err=` +
+            encodeURIComponent('공종 수량은 1 이상이어야 합니다'),
+        )
+      }
+      taskPayloads.push({
+        plan_node_id: nodeId,
+        task_type: tt,
+        custom_task_name: tt === '기타' ? customName : null,
+        task_count: cnt,
+        notes: String(t.notes ?? '').trim() || null,
+      })
+    }
+  }
+
+  const materialPayloads: Array<{
+    plan_node_id: string
+    material_id: string | null
+    custom_name: string | null
+    custom_spec: string | null
+    custom_unit: string | null
+    quantity: number
+    notes: string | null
+  }> = []
+  for (const nodeId of Object.keys(materialsByNode)) {
+    if (!activeNodeIds.has(nodeId)) continue
+    for (const m of materialsByNode[nodeId] ?? []) {
+      const materialId = String(m.material_id ?? '').trim() || null
+      const customName = String(m.custom_name ?? '').trim() || null
+      const hasMaster = !!materialId
+      const hasCustom = !!customName
+      if (!hasMaster && !hasCustom) continue // 빈 행
+      if (hasMaster && hasCustom) {
+        redirect(
+          `/works/${workId}/connection-reports/new?err=` +
+            encodeURIComponent('자재는 마스터 선택 또는 직접 입력 중 하나만 입력하세요'),
+        )
+      }
+      const qty = Number(m.quantity)
+      if (!Number.isFinite(qty) || qty <= 0) {
+        redirect(
+          `/works/${workId}/connection-reports/new?err=` +
+            encodeURIComponent('자재 수량을 올바르게 입력하세요'),
+        )
+      }
+      materialPayloads.push({
+        plan_node_id: nodeId,
+        material_id: hasMaster ? materialId : null,
+        custom_name: hasMaster ? null : customName,
+        custom_spec: hasMaster ? null : String(m.custom_spec ?? '').trim() || null,
+        custom_unit: hasMaster ? null : String(m.custom_unit ?? '').trim() || null,
+        quantity: qty,
+        notes: String(m.notes ?? '').trim() || null,
+      })
+    }
   }
 
   const { supabase, me } = await requireUser()
@@ -169,11 +281,46 @@ export async function submitConnectionReport(formData: FormData) {
     )
   }
 
+  // tasks insert
+  if (taskPayloads.length > 0) {
+    const { error: tErr } = await supabase
+      .from('connection_node_tasks')
+      .insert(taskPayloads.map((t) => ({ ...t, report_id: report.id })))
+    if (tErr) {
+      redirect(
+        `/works/${workId}/connection-reports/${report.id}?err=` +
+          encodeURIComponent('공종 저장 실패: ' + tErr.message),
+      )
+    }
+  }
+
+  // materials insert
+  if (materialPayloads.length > 0) {
+    const { error: mErr } = await supabase
+      .from('connection_node_materials')
+      .insert(materialPayloads.map((m) => ({ ...m, report_id: report.id })))
+    if (mErr) {
+      redirect(
+        `/works/${workId}/connection-reports/${report.id}?err=` +
+          encodeURIComponent('자재 저장 실패: ' + mErr.message),
+      )
+    }
+  }
+
   revalidatePath(`/works/${workId}`)
   redirect(
     `/works/${workId}/connection-reports/${report.id}?ok=` +
-      encodeURIComponent('접속일보를 제출했습니다. 노드별 공종·자재를 추가하세요'),
+      encodeURIComponent('접속일보를 제출했습니다'),
   )
+}
+
+function parseJsonField<T>(raw: FormDataEntryValue | null, fallback: T): T {
+  if (typeof raw !== 'string' || !raw.trim()) return fallback
+  try {
+    return JSON.parse(raw) as T
+  } catch {
+    return fallback
+  }
 }
 
 // ===== 일보 메타 수정 (date 고정, notes/progress 만) ===================

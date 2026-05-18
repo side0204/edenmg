@@ -2,7 +2,7 @@ import Link from 'next/link'
 import { notFound, redirect } from 'next/navigation'
 import { ChevronLeft } from 'lucide-react'
 import { createClient } from '@/lib/supabase/server'
-import { PLAN_NODE_TYPE_LABEL, type PlanNodeType } from '@/lib/connection'
+import { CABLE_SPEC_VALUES, PLAN_NODE_TYPE_LABEL, type CableSpec, type PlanNodeType } from '@/lib/connection'
 import { updateNode } from '../../../../../../chain-actions'
 
 type NodeRow = {
@@ -12,6 +12,7 @@ type NodeRow = {
   name: string
   code: string | null
   spec: string | null
+  spec_enum: CableSpec | null
   lat: number | null
   lng: number | null
   address: string | null
@@ -67,7 +68,7 @@ export default async function EditNodePage({
 
   const { data: nodeData } = await supabase
     .from('connection_plan_nodes')
-    .select('id, chain_id, node_type, name, code, spec, lat, lng, address, notes')
+    .select('id, chain_id, node_type, name, code, spec, spec_enum, lat, lng, address, notes')
     .eq('id', nodeId)
     .maybeSingle()
   const node = nodeData as NodeRow | null
@@ -120,12 +121,23 @@ export default async function EditNodePage({
                   />
                 </Field>
                 <Field label="함체 규격 (선택)">
-                  <input
-                    name="spec"
-                    maxLength={50}
-                    defaultValue={node.spec ?? ''}
+                  <select
+                    name="spec_enum"
+                    defaultValue={node.spec_enum ?? ''}
                     className={inputClass}
-                  />
+                  >
+                    <option value="">선택 안 함</option>
+                    {CABLE_SPEC_VALUES.map((c) => (
+                      <option key={c} value={c}>
+                        {c}
+                      </option>
+                    ))}
+                  </select>
+                  {node.spec && !node.spec_enum && (
+                    <p className="mt-1 text-xs text-amber-600">
+                      이전 입력값: {node.spec} (텍스트). 위 드롭다운에서 재선택하세요.
+                    </p>
+                  )}
                 </Field>
               </div>
 

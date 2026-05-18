@@ -232,6 +232,7 @@ export async function GET(req: NextRequest) {
       name: string
       code: string | null
       spec: string | null
+      spec_enum: string | null
       lat: number | null
       lng: number | null
       added_during_report_id: string | null
@@ -242,7 +243,7 @@ export async function GET(req: NextRequest) {
     const { data: nodesData } = await supabase
       .from('connection_plan_nodes')
       .select(
-        'id, chain_id, parent_id, node_type, name, code, spec, lat, lng, added_during_report_id',
+        'id, chain_id, parent_id, node_type, name, code, spec, spec_enum, lat, lng, added_during_report_id',
       )
       .in('id', uniqueNodeIds)
     const nodes = (nodesData ?? []) as {
@@ -253,6 +254,7 @@ export async function GET(req: NextRequest) {
       name: string
       code: string | null
       spec: string | null
+      spec_enum: string | null
       lat: number | null
       lng: number | null
       added_during_report_id: string | null
@@ -277,7 +279,7 @@ export async function GET(req: NextRequest) {
         const { data: parents } = await supabase
           .from('connection_plan_nodes')
           .select(
-            'id, chain_id, parent_id, node_type, name, code, spec, lat, lng, added_during_report_id',
+            'id, chain_id, parent_id, node_type, name, code, spec, spec_enum, lat, lng, added_during_report_id',
           )
           .in('id', missing)
         for (const p of (parents ?? []) as Parameters<typeof nodeMap.set>[1][]) {
@@ -307,7 +309,7 @@ export async function GET(req: NextRequest) {
         node?.name ?? '',
         node ? PLAN_NODE_TYPE_LABEL[node.node_type as keyof typeof PLAN_NODE_TYPE_LABEL] : '',
         node?.code ?? '',
-        node?.spec ?? '',
+        node?.spec_enum ?? node?.spec ?? '',
         gps,
         s.cable_spec,
         s.line_numbers,

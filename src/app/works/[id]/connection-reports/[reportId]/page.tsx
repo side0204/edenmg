@@ -54,6 +54,7 @@ type NodeRow = {
   name: string
   code: string | null
   spec: string | null
+  spec_enum: CableSpec | null
   added_during_report_id: string | null
 }
 
@@ -182,7 +183,7 @@ export default async function ConnectionReportDetailPage({
 
     const { data: nodesData } = await supabase
       .from('connection_plan_nodes')
-      .select('id, chain_id, parent_id, node_type, name, code, spec, added_during_report_id')
+      .select('id, chain_id, parent_id, node_type, name, code, spec, spec_enum, added_during_report_id')
       .eq('chain_id', activeChainId)
       .order('position')
     nodes = (nodesData ?? []) as NodeRow[]
@@ -471,6 +472,9 @@ function NodeCard({
         </span>
         <span className="font-medium text-slate-900">{node.name}</span>
         {node.code && <span className="ml-1.5 text-xs text-slate-500">ID: {node.code}</span>}
+        {(node.spec_enum || node.spec) && (
+          <span className="ml-1.5 text-xs text-slate-500">{node.spec_enum ?? node.spec}</span>
+        )}
         {node.added_during_report_id && (
           <span className="ml-1.5 rounded bg-amber-100 px-1 py-0.5 text-[10px] text-amber-700">
             ★ 작업 중 추가

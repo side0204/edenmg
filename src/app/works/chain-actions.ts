@@ -3,7 +3,7 @@
 import { redirect } from 'next/navigation'
 import { revalidatePath } from 'next/cache'
 import { createClient } from '@/lib/supabase/server'
-import type { PlanNodeType } from '@/lib/connection'
+import { CABLE_SPEC_VALUES, type CableSpec, type PlanNodeType } from '@/lib/connection'
 
 type Permission = 'worker' | 'foreman' | 'admin' | 'ceo'
 
@@ -205,11 +205,16 @@ export async function deleteChain(formData: FormData) {
 // ===== 노드 CRUD ========================================================
 
 function parseNodeForm(formData: FormData) {
+  const specEnumRaw = String(formData.get('spec_enum') ?? '').trim()
+  const specEnum = (CABLE_SPEC_VALUES.includes(specEnumRaw as CableSpec)
+    ? (specEnumRaw as CableSpec)
+    : null) as CableSpec | null
   return {
     name: String(formData.get('name') ?? '').trim(),
     node_type: String(formData.get('node_type') ?? '').trim() as PlanNodeType,
     code: String(formData.get('code') ?? '').trim() || null,
-    spec: String(formData.get('spec') ?? '').trim() || null,
+    spec: String(formData.get('spec') ?? '').trim() || null, // legacy text
+    spec_enum: specEnum,
     lat: parseNum(formData.get('lat')),
     lng: parseNum(formData.get('lng')),
     address: String(formData.get('address') ?? '').trim() || null,
@@ -273,6 +278,7 @@ export async function createNode(formData: FormData) {
     name: p.name,
     code: p.code,
     spec: p.spec,
+    spec_enum: p.spec_enum,
     lat: p.lat,
     lng: p.lng,
     address: p.address,
@@ -340,6 +346,7 @@ export async function updateNode(formData: FormData) {
       name: p.name,
       code: p.code,
       spec: p.spec,
+      spec_enum: p.spec_enum,
       lat: p.lat,
       lng: p.lng,
       address: p.address,
