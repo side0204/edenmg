@@ -31,6 +31,12 @@ export type MaterialMaster = {
   unit: string | null
 }
 
+export type CableMaster = {
+  id: string
+  code: string
+  spec_enum: CableSpec | null
+}
+
 type TaskRow = {
   task_type: ConnectionTaskType | ''
   custom_task_name: string
@@ -54,9 +60,11 @@ export function UnifiedReportForm({
   segmentNodes,
   nodeMap,
   masters,
+  cableMasters,
   defaultReportDate,
   action,
   returnTo,
+  canEditChain,
 }: {
   workId: string
   chainId: string
@@ -64,10 +72,13 @@ export function UnifiedReportForm({
   segmentNodes: UnifiedNode[]
   nodeMap: Record<string, UnifiedNode>
   masters: MaterialMaster[]
+  cableMasters: CableMaster[]
   defaultReportDate: string
   action: (formData: FormData) => void
   /** 노드 수정·끼우기 후 돌아올 경로 (예: /works/[id]/connection-reports/new) */
   returnTo: string
+  /** chain 편집 link 노출 권한 (작업자는 false, 담당자/admin/ceo 는 true) */
+  canEditChain: boolean
 }) {
   // 노드별 dynamic state
   const [tasksByNode, setTasksByNode] = useState<Record<string, TaskRow[]>>(() => {
@@ -166,6 +177,8 @@ export function UnifiedReportForm({
                     setMaterialsByNode((prev) => ({ ...prev, [n.id]: rows }))
                   }
                   masters={masters}
+                  cableMasters={cableMasters}
+                  canEditChain={canEditChain}
                 />
               )
             })}
@@ -196,6 +209,8 @@ function NodeCard({
   materials,
   setMaterials,
   masters,
+  cableMasters,
+  canEditChain,
 }: {
   nodeId: string
   parentId: string | null
@@ -209,8 +224,12 @@ function NodeCard({
   materials: MaterialRow[]
   setMaterials: (rows: MaterialRow[]) => void
   masters: MaterialMaster[]
+  cableMasters: CableMaster[]
+  canEditChain: boolean
 }) {
   const [lineNumbers, setLineNumbers] = useState('')
+  const [cableCode, setCableCode] = useState('')
+  const [cableSpec, setCableSpec] = useState<CableSpec | ''>('')
   const trimmed = lineNumbers.trim()
   let preview: { ok: true; coreCount: number } | { ok: false; error: string } | null = null
   if (trimmed) {
@@ -218,6 +237,15 @@ function NodeCard({
     preview = r.ok ? { ok: true, coreCount: r.coreCount } : { ok: false, error: r.error }
   }
   void calcCoreCount
+
+  // 케이블ID 입력 → 마스터에 매치되면 spec 자동 채움
+  const handleCableCodeChange = (next: string) => {
+    setCableCode(next)
+    const hit = cableMasters.find((m) => m.code === next.trim())
+    if (hit && hit.spec_enum && !cableSpec) {
+      setCableSpec(hit.spec_enum)
+    }
+  }
 
   const addTask = () =>
     setTasks([
@@ -258,35 +286,61 @@ function NodeCard({
           <span className="mx-1 text-slate-400">→</span>
           <span className="font-medium">{nodeLabel}</span>
         </p>
-        <div className="flex shrink-0 gap-1">
-          {insertBetweenHref && (
+        {canEditChain && (
+          <div className="flex shrink-0 gap-1">
+            {insertBetweenHref && (
+              <Link
+                href={insertBetweenHref}
+                className="inline-flex items-center gap-0.5 rounded border border-dashed border-slate-300 px-1.5 py-0.5 text-[11px] text-slate-500 hover:border-slate-900 hover:text-slate-900"
+                title="이 cable 중간에 함체 끼우기"
+              >
+                <Plus className="h-3 w-3" />
+                사이 끼우기
+              </Link>
+            )}
             <Link
-              href={insertBetweenHref}
-              className="inline-flex items-center gap-0.5 rounded border border-dashed border-slate-300 px-1.5 py-0.5 text-[11px] text-slate-500 hover:border-slate-900 hover:text-slate-900"
-              title="이 cable 중간에 함체 끼우기"
+              href={editNodeHref}
+              className="inline-flex items-center gap-0.5 rounded border border-slate-300 px-1.5 py-0.5 text-[11px] text-slate-600 hover:bg-slate-50"
+              title="노드 정보 수정"
             >
-              <Plus className="h-3 w-3" />
-              사이 끼우기
+              <Pencil className="h-3 w-3" />
+              노드 수정
             </Link>
-          )}
-          <Link
-            href={editNodeHref}
-            className="inline-flex items-center gap-0.5 rounded border border-slate-300 px-1.5 py-0.5 text-[11px] text-slate-600 hover:bg-slate-50"
-            title="노드 정보 수정"
-          >
-            <Pencil className="h-3 w-3" />
-            노드 수정
-          </Link>
-        </div>
+          </div>
+        )}
       </div>
 
       {/* cable 입력 */}
       <div className="rounded-lg border border-slate-200 bg-slate-50 p-3 space-y-2">
         <p className="text-xs font-medium text-slate-600">cable</p>
+        <label className="block">
+          <span className="block text-xs text-slate-600">케이블ID (선택)</span>
+          <input
+            name={`cable_code_${nodeId}`}
+            value={cableCode}
+            onChange={(e) => handleCableCodeChange(e.currentTarget.value)}
+            list={`cable-codes-${nodeId}`}
+            placeholder="마스터에서 선택하거나 직접 입력 (또는 공란)"
+            maxLength={100}
+            className={smallInput}
+          />
+          <datalist id={`cable-codes-${nodeId}`}>
+            {cableMasters.map((m) => (
+              <option key={m.id} value={m.code}>
+                {m.spec_enum ?? ''}
+              </option>
+            ))}
+          </datalist>
+        </label>
         <div className="grid grid-cols-2 gap-2">
           <label className="block">
             <span className="block text-xs text-slate-600">케이블규격</span>
-            <select name={`cable_spec_${nodeId}`} defaultValue="" className={smallInput}>
+            <select
+              name={`cable_spec_${nodeId}`}
+              value={cableSpec}
+              onChange={(e) => setCableSpec(e.currentTarget.value as CableSpec | '')}
+              className={smallInput}
+            >
               <option value="">선택</option>
               {CABLE_SPEC_VALUES.map((c) => (
                 <option key={c} value={c}>

@@ -6,6 +6,7 @@ import type { CableSpec, PlanNodeType } from '@/lib/connection'
 import { submitConnectionReport } from '../../../connection-report-actions'
 import {
   UnifiedReportForm,
+  type CableMaster,
   type MaterialMaster,
   type UnifiedNode,
 } from '../../../UnifiedReportForm'
@@ -55,11 +56,17 @@ export default async function NewConnectionReportPage({
 
   const { data: workData } = await supabase
     .from('works')
-    .select('id, company_id, name, worker_type')
+    .select('id, company_id, name, worker_type, assignee_employee_id')
     .eq('id', id)
     .maybeSingle()
   const work = workData as
-    | { id: string; company_id: string; name: string; worker_type: string | null }
+    | {
+        id: string
+        company_id: string
+        name: string
+        worker_type: string | null
+        assignee_employee_id: string | null
+      }
     | null
   if (!work || work.company_id !== me.company_id) notFound()
   if (work.worker_type !== '접속팀') {
@@ -130,6 +137,21 @@ export default async function NewConnectionReportPage({
     .order('name')
   const masters = (mastersData ?? []) as MaterialMaster[]
 
+  const { data: cableMastersData } = await supabase
+    .from('cables')
+    .select('id, code, spec_enum')
+    .eq('company_id', me.company_id)
+    .eq('is_active', true)
+    .order('code')
+  const cableMasters = (cableMastersData ?? []) as CableMaster[]
+
+  // chain 편집 권한: admin/ceo OR can_manage_works(데이터 부족하나 권한 체크는 server action 에서) OR work.assignee
+  // 일단 admin/ceo/assignee 만 노출 (가장 보수적)
+  const canEditChain =
+    me.permission === 'admin' ||
+    me.permission === 'ceo' ||
+    work.assignee_employee_id === me.id
+
   const today = new Date()
   const todayKST = new Date(today.getTime() + 9 * 60 * 60 * 1000).toISOString().slice(0, 10)
   const reportDate = dateParam && /^\d{4}-\d{2}-\d{2}$/.test(dateParam) ? dateParam : todayKST
@@ -177,9 +199,11 @@ export default async function NewConnectionReportPage({
           segmentNodes={segmentNodes}
           nodeMap={nodeMap}
           masters={masters}
+          cableMasters={cableMasters}
           defaultReportDate={reportDate}
           action={submitConnectionReport}
           returnTo={`/works/${work.id}/connection-reports/new?chain=${activeChain.id}`}
+          canEditChain={canEditChain}
         />
       </div>
     </main>

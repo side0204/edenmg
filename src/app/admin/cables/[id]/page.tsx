@@ -1,0 +1,79 @@
+import Link from 'next/link'
+import { notFound, redirect } from 'next/navigation'
+import { ChevronLeft } from 'lucide-react'
+import { createClient } from '@/lib/supabase/server'
+import type { CableSpec } from '@/lib/connection'
+import { updateCable } from '../actions'
+import { CableForm, type CableFormValues } from '../CableForm'
+
+type Row = {
+  id: string
+  company_id: string
+  code: string
+  spec_enum: CableSpec | null
+  notes: string | null
+}
+
+export default async function EditCablePage({
+  params,
+}: {
+  params: Promise<{ id: string }>
+}) {
+  const { id } = await params
+  const supabase = await createClient()
+  const {
+    data: { user },
+  } = await supabase.auth.getUser()
+  if (!user) redirect('/login')
+
+  const { data: meRow } = await supabase
+    .from('employees')
+    .select('company_id, permission, is_active')
+    .eq('auth_user_id', user.id)
+    .maybeSingle()
+  const me = meRow as
+    | {
+        company_id: string
+        permission: 'worker' | 'foreman' | 'admin' | 'ceo'
+        is_active: boolean
+      }
+    | null
+  if (!me || !me.is_active) redirect('/?err=' + encodeURIComponent('계정이 활성 상태가 아닙니다'))
+  if (me.permission !== 'admin' && me.permission !== 'ceo') {
+    redirect('/?err=' + encodeURIComponent('관리자 권한이 필요합니다'))
+  }
+
+  const { data } = await supabase
+    .from('cables')
+    .select('id, company_id, code, spec_enum, notes')
+    .eq('id', id)
+    .maybeSingle()
+  const row = data as Row | null
+  if (!row || row.company_id !== me.company_id) notFound()
+
+  const initial: CableFormValues = {
+    id: row.id,
+    code: row.code,
+    spec_enum: row.spec_enum ?? '',
+    notes: row.notes ?? '',
+  }
+
+  return (
+    <main className="min-h-screen p-4 sm:p-6">
+      <div className="mx-auto max-w-md space-y-5">
+        <header>
+          <Link
+            href="/admin/cables"
+            className="inline-flex items-center gap-1 text-sm text-slate-500 hover:text-slate-900"
+          >
+            <ChevronLeft className="h-4 w-4" />
+            케이블 마스터
+          </Link>
+          <h1 className="mt-1 text-3xl font-bold text-slate-900 tracking-tight">케이블 수정</h1>
+        </header>
+
+        <CableForm initial={initial} action={updateCable} submitLabel="저장" />
+      </div>
+    </main>
+  )
+}

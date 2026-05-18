@@ -42,6 +42,7 @@ type SegmentRow = {
   plan_node_id: string
   cable_spec: CableSpec
   line_numbers: string
+  cable_code: string | null
   is_completed: boolean
   segment_notes: string | null
 }
@@ -155,7 +156,7 @@ export default async function ConnectionReportDetailPage({
   // segments
   const { data: segsData } = await supabase
     .from('connection_report_segments')
-    .select('id, plan_node_id, cable_spec, line_numbers, is_completed, segment_notes')
+    .select('id, plan_node_id, cable_spec, line_numbers, cable_code, is_completed, segment_notes')
     .eq('report_id', reportId)
   const segments = (segsData ?? []) as SegmentRow[]
   const segByNode = new Map<string, SegmentRow>(segments.map((s) => [s.plan_node_id, s]))
@@ -490,6 +491,12 @@ function NodeCard({
           </p>
           <p className="mt-0.5 text-slate-800">
             <span className="font-medium">{seg.cable_spec}</span>
+            {seg.cable_code && (
+              <>
+                <span className="mx-1">·</span>
+                <span className="text-slate-600">ID: {seg.cable_code}</span>
+              </>
+            )}
             <span className="mx-1">·</span>
             <span>선번 {seg.line_numbers}</span>
             <span className="mx-1">·</span>

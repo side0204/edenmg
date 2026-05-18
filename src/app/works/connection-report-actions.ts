@@ -86,13 +86,14 @@ export async function submitConnectionReport(formData: FormData) {
     )
   }
 
-  // segments: form fields cable_spec_<nodeId>, line_numbers_<nodeId>, completed_<nodeId>, segment_notes_<nodeId>
+  // segments: form fields cable_spec_<nodeId>, line_numbers_<nodeId>, completed_<nodeId>, segment_notes_<nodeId>, cable_code_<nodeId>
   const segmentInputs: Array<{
     plan_node_id: string
     cable_spec: CableSpec
     line_numbers: string
     is_completed: boolean
     segment_notes: string | null
+    cable_code: string | null
   }> = []
   const activeNodeIds = new Set<string>() // cable 입력된 노드 = 그 노드 공종/자재 저장 대상
   for (const [key, val] of formData.entries()) {
@@ -119,12 +120,14 @@ export async function submitConnectionReport(formData: FormData) {
     }
     const isCompleted = String(formData.get(`completed_${nodeId}`) ?? '') === '1'
     const segmentNotes = String(formData.get(`segment_notes_${nodeId}`) ?? '').trim() || null
+    const cableCode = String(formData.get(`cable_code_${nodeId}`) ?? '').trim() || null
     segmentInputs.push({
       plan_node_id: nodeId,
       cable_spec: cableSpecRaw,
       line_numbers: lineNumbers,
       is_completed: isCompleted,
       segment_notes: segmentNotes,
+      cable_code: cableCode,
     })
     activeNodeIds.add(nodeId)
   }

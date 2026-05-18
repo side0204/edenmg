@@ -282,6 +282,21 @@ owner 결정사항 핵심:
 - **엑셀 API**: [`/api/reports/connection-reports`](./src/app/api/reports/connection-reports/route.ts) — `?mode=summary|segment|tasks|materials&month=YYYY-MM&work_id=옵션`. 회사 스코프 + foreman 은 본인 담당 작업만.
 - **/admin/reports**: 접속일보 4모드 다운로드 버튼 묶음 추가.
 
+### ✅ 완료 (작업자 흐름 단순화 + 케이블ID 도입, 2026-05-18)
+
+owner 요청: "작업자가 최대한 복잡하지 않게. 절차 간단했으면 좋겠어."
+
+반영:
+- **chain 편집 진입점 권한 제한** — 일보 작성 폼의 [노드 수정]·[+ 사이 끼우기] 링크는 admin/ceo/담당자 권한일 때만 노출. 일반 작업자는 chain 변경 UI 자체가 안 보임 → 화면이 깔끔.
+- **cable_code (케이블ID) 신규 필드** — segments 에 cable_code text 컬럼 추가. 일보 작성 시 datalist 자동완성으로 회사 케이블 마스터에서 검색, 마스터에 없으면 직접 입력, 또는 공란 OK.
+- **자동 채움** — 입력한 케이블ID 가 마스터에 매치되면 cable_spec 자동 prefill. 작업자가 케이블규격을 매번 다시 안 골라도 됨.
+- **케이블 마스터 페이지** — `/admin/cables` (admin/ceo 전용). 자재 마스터와 동일 패턴 (code·spec_enum·notes·is_active). 마스터에서 cable_spec 지정해두면 일보 자동 채움 효과.
+
+- **DB**: [`0014_cables_master.sql`](./supabase/migrations/0014_cables_master.sql) — cables 마스터 + RLS + `connection_report_segments.cable_code text`
+- **공통**: [`UnifiedReportForm.tsx`](./src/app/works/UnifiedReportForm.tsx) — `canEditChain` prop, `cableMasters` prop, cable_code datalist + spec 자동채움 client-side
+- **CSV**: segment 모드에 "케이블ID" 컬럼 추가
+- **홈 관리 메뉴**: 자재 마스터 옆에 케이블 마스터 진입점 추가
+
 ### ✅ 완료 (접속일보 후속 정정 1, 2026-05-18)
 
 owner 피드백 4건 반영:
@@ -305,6 +320,7 @@ owner 피드백 4건 반영:
   - [`0011_connection_plan.sql`](./supabase/migrations/0011_connection_plan.sql) — 접속일보 chain side
   - [`0012_connection_reports.sql`](./supabase/migrations/0012_connection_reports.sql) — 접속일보 report side
   - [`0013_node_spec_enum.sql`](./supabase/migrations/0013_node_spec_enum.sql) — 함체 규격 enum 컬럼 추가
+  - [`0014_cables_master.sql`](./supabase/migrations/0014_cables_master.sql) — 케이블 마스터 + cable_code 컬럼
 - **외선일보 별도 entity (v2)** — 접속일보와 동일 패턴으로 외선팀 전용 모듈. 외선 작업 특성(케이블 포설구간·전주번호 등)에 맞는 구조 별도 설계.
 - **접속일보 후속 (v2)** — segment-level 작업자 태그, 사진 첨부 + EXIF, 국사·함체 마스터 테이블화, 재접속 이력 조회, 지도 시각화
 - **M3 Phase 2 후속** — 사진 첨부 + EXIF·워터마크 (PRD M3-06), 일보 결재함 통합 (현재는 작업 상세에서 진입), 일반 일보 월별 CSV 리포트

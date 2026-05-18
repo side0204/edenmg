@@ -156,7 +156,7 @@ export async function GET(req: NextRequest) {
   const { data: segsData } = await supabase
     .from('connection_report_segments')
     .select(
-      'id, report_id, plan_node_id, cable_spec, line_numbers, is_completed, segment_notes',
+      'id, report_id, plan_node_id, cable_spec, line_numbers, cable_code, is_completed, segment_notes',
     )
     .in('report_id', reportIds)
   const segments = (segsData ?? []) as {
@@ -165,6 +165,7 @@ export async function GET(req: NextRequest) {
     plan_node_id: string
     cable_spec: string
     line_numbers: string
+    cable_code: string | null
     is_completed: boolean
     segment_notes: string | null
   }[]
@@ -312,6 +313,7 @@ export async function GET(req: NextRequest) {
         node?.spec_enum ?? node?.spec ?? '',
         gps,
         s.cable_spec,
+        s.cable_code ?? '',
         s.line_numbers,
         coreCount,
         s.is_completed ? '완료' : '진행중',
@@ -421,6 +423,7 @@ function headerForMode(mode: string): string[] {
       '함체규격',
       'GPS',
       '케이블규격',
+      '케이블ID',
       '사용선번',
       '접속코어수',
       '완료여부',
