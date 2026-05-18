@@ -1,5 +1,5 @@
 import Link from 'next/link'
-import { Clock, Car, ClipboardCheck, Settings, FileText, CalendarDays } from 'lucide-react'
+import { Bell, Clock, Car, ClipboardCheck, Hammer, Settings, FileText, CalendarDays } from 'lucide-react'
 import { createClient } from '@/lib/supabase/server'
 import { LEAVE_TYPE_LABEL, formatPeriod, type LeaveType } from '@/lib/leave'
 import { signOut } from './login/actions'
@@ -190,6 +190,26 @@ export default async function Home() {
       return a.vehicle.plate_number.localeCompare(b.vehicle.plate_number)
     })
 
+  // ===== 내 작업 (배정자 알림용) =====
+  // 본인이 배정된 작업의 work_assignments 중 최근 created_at 모아 신규 배지 카운트
+  const NEW_ASSIGNMENT_DAYS = 3
+  const newCutoff = new Date(
+    new Date().getTime() - NEW_ASSIGNMENT_DAYS * 24 * 60 * 60 * 1000,
+  ).toISOString()
+  const { data: myAssignsData } = await supabase
+    .from('work_assignments')
+    .select('work_id, created_at')
+    .eq('employee_id', employee.id)
+  const myAssignsByWork = new Map<string, string>()
+  for (const a of (myAssignsData ?? []) as { work_id: string; created_at: string }[]) {
+    const prev = myAssignsByWork.get(a.work_id)
+    if (!prev || prev < a.created_at) myAssignsByWork.set(a.work_id, a.created_at)
+  }
+  const myWorkCount = myAssignsByWork.size
+  const myNewAssignmentCount = Array.from(myAssignsByWork.values()).filter(
+    (t) => t >= newCutoff,
+  ).length
+
   // 결재 대기 건수 (홈 배지용)
   const canApprove = employee.permission !== 'worker'
   let approvalsPendingCount = 0
@@ -365,6 +385,38 @@ export default async function Home() {
             전체 차량 관리 →
           </Link>
         </section>
+
+        {myWorkCount > 0 && (
+          <section className="rounded-2xl bg-white shadow-sm border border-slate-200 dark:bg-slate-900 dark:border-slate-800 p-6 space-y-3">
+            <h2 className="flex items-center gap-2 text-base font-semibold text-slate-700 tracking-tight dark:text-slate-300">
+              <Hammer className="h-5 w-5 text-slate-400" />
+              내 작업 진행 목록
+              {myNewAssignmentCount > 0 && (
+                <span className="ml-auto inline-flex items-center gap-0.5 rounded-full bg-amber-100 text-amber-800 text-xs font-bold px-2 py-0.5">
+                  <Bell className="h-3 w-3" />
+                  신규 {myNewAssignmentCount}
+                </span>
+              )}
+            </h2>
+            <Link
+              href="/works?mine=1"
+              className="flex items-center justify-between rounded-lg border border-slate-200 hover:border-slate-900 px-4 py-3 text-base font-medium text-slate-900 dark:border-slate-800 dark:hover:border-slate-100 dark:text-slate-100"
+            >
+              <span>
+                배정된 작업 {myWorkCount}건
+                {myNewAssignmentCount > 0 && (
+                  <span className="ml-1.5 text-xs font-normal text-amber-700">
+                    (최근 {NEW_ASSIGNMENT_DAYS}일 신규 {myNewAssignmentCount}건)
+                  </span>
+                )}
+              </span>
+              <span className="text-sm text-slate-400">→</span>
+            </Link>
+            <p className="text-[11px] text-slate-500">
+              카드 탭 시 바로 일보 작성. 신규 배정은 호박색 「신규」 배지로 강조됩니다.
+            </p>
+          </section>
+        )}
 
         <section className="rounded-2xl bg-white shadow-sm border border-slate-200 dark:bg-slate-900 dark:border-slate-800 p-6 space-y-3">
           <h2 className="flex items-center gap-2 text-base font-semibold text-slate-700 tracking-tight dark:text-slate-300">
