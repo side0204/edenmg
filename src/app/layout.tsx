@@ -7,7 +7,7 @@ import OfficeSubTabs from "@/components/OfficeSubTabs";
 import "./globals.css";
 
 export const metadata: Metadata = {
-  title: "(주)이든정보기술 — 광케이블 시공 통합관리",
+  title: "(주)이든정보기술 — 통합관리시스템",
   description: "근태·작업·자재·안전을 한 곳에서",
   manifest: "/manifest.json",
   appleWebApp: {
