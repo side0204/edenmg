@@ -16,7 +16,7 @@ export function WorkersMultiSelect({
   name = 'worker_ids',
   candidates,
   initialSelected = [],
-  placeholder = '이름·직급·팀으로 검색',
+  placeholder = '이름·직급·팀·분야로 검색',
 }: {
   name?: string
   candidates: EmployeeOption[]
@@ -26,6 +26,10 @@ export function WorkersMultiSelect({
   const [selected, setSelected] = useState<EmployeeOption[]>(initialSelected)
   const [open, setOpen] = useState(false)
   const [query, setQuery] = useState('')
+  // ghost click 차단: 모달 닫은 직후 잠시 (300ms) fixed overlay 로 click 흡수.
+  // 한 페이지에 다른 모달(담당자 EmployeeCombobox) 트리거가 있을 때 좌표가 겹쳐
+  // 모달이 다시 열리거나 다른 선택이 변경되는 안드로이드 크롬 ghost-click 버그 방어.
+  const [ghostBlock, setGhostBlock] = useState(false)
 
   useEffect(() => {
     if (!open) return
@@ -35,6 +39,12 @@ export function WorkersMultiSelect({
       document.body.style.overflow = prev
     }
   }, [open])
+
+  const closeWithBlock = () => {
+    setOpen(false)
+    setGhostBlock(true)
+    setTimeout(() => setGhostBlock(false), 300)
+  }
 
   const selectedIds = new Set(selected.map((s) => s.id))
   const q = query.trim().toLowerCase()
@@ -52,7 +62,7 @@ export function WorkersMultiSelect({
   const onPick = (emp: EmployeeOption) => {
     setSelected((prev) => [...prev, emp])
     setQuery('')
-    setOpen(false)
+    closeWithBlock()
   }
 
   const onRemove = (id: string) => {
@@ -76,7 +86,11 @@ export function WorkersMultiSelect({
         ) : (
           <ul className="space-y-1.5">
             {selected.map((s) => {
-              const sub = [s.position, s.team ? `${s.team}팀` : null]
+              const sub = [
+                s.position,
+                s.team ? `${s.team}팀` : null,
+                s.work_type ? `${s.work_type}` : null,
+              ]
                 .filter(Boolean)
                 .join(' · ')
               return (
@@ -85,7 +99,14 @@ export function WorkersMultiSelect({
                   className="flex items-center gap-2 rounded-lg border border-slate-200 bg-slate-50 px-3 py-2"
                 >
                   <div className="min-w-0 flex-1">
-                    <p className="truncate text-sm font-medium text-slate-900">{s.name}</p>
+                    <p className="truncate text-sm font-medium text-slate-900 inline-flex items-center gap-1.5">
+                      {s.name}
+                      {s.work_type && (
+                        <span className="inline-flex rounded-full border border-slate-200 bg-white px-1.5 py-0.5 text-[10px] font-medium text-slate-600">
+                          {s.work_type}
+                        </span>
+                      )}
+                    </p>
                     {sub && <p className="text-[11px] text-slate-500 truncate">{sub}</p>}
                   </div>
                   <button
@@ -121,7 +142,7 @@ export function WorkersMultiSelect({
             className="flex-1"
             onPointerDown={(e) => {
               e.preventDefault()
-              setOpen(false)
+              closeWithBlock()
             }}
             aria-hidden
           />
@@ -139,7 +160,7 @@ export function WorkersMultiSelect({
               />
               <button
                 type="button"
-                onClick={() => setOpen(false)}
+                onClick={() => closeWithBlock()}
                 className="shrink-0 rounded p-1 text-slate-400 hover:text-slate-700 hover:bg-slate-100"
                 aria-label="닫기"
               >
@@ -158,7 +179,11 @@ export function WorkersMultiSelect({
               ) : (
                 <ul className="divide-y divide-slate-100">
                   {filtered.map((c) => {
-                    const sub = [c.position, c.team ? `${c.team}팀` : null]
+                    const sub = [
+                      c.position,
+                      c.team ? `${c.team}팀` : null,
+                      c.work_type ? `${c.work_type}` : null,
+                    ]
                       .filter(Boolean)
                       .join(' · ')
                     return (
@@ -168,6 +193,7 @@ export function WorkersMultiSelect({
                           tabIndex={0}
                           onPointerDown={(e) => {
                             e.preventDefault()
+                            e.stopPropagation()
                             onPick(c)
                           }}
                           onKeyDown={(e) => {
@@ -179,7 +205,14 @@ export function WorkersMultiSelect({
                           className="flex w-full items-center gap-3 px-4 py-3 text-left hover:bg-slate-50 active:bg-slate-100 cursor-pointer"
                         >
                           <div className="min-w-0 flex-1">
-                            <p className="truncate text-base text-slate-900">{c.name}</p>
+                            <p className="truncate text-base text-slate-900 inline-flex items-center gap-1.5">
+                              {c.name}
+                              {c.work_type && (
+                                <span className="inline-flex rounded-full border border-slate-200 bg-slate-50 px-1.5 py-0.5 text-[10px] font-medium text-slate-600">
+                                  {c.work_type}
+                                </span>
+                              )}
+                            </p>
                             {sub && (
                               <p className="mt-0.5 truncate text-xs text-slate-500">{sub}</p>
                             )}
@@ -193,6 +226,22 @@ export function WorkersMultiSelect({
             </div>
           </div>
         </div>
+      )}
+
+      {/* ghost click 흡수 overlay — 모달 닫힌 직후 300ms 만 표시 */}
+      {ghostBlock && (
+        <div
+          className="fixed inset-0 z-[60]"
+          onPointerDown={(e) => {
+            e.preventDefault()
+            e.stopPropagation()
+          }}
+          onClick={(e) => {
+            e.preventDefault()
+            e.stopPropagation()
+          }}
+          aria-hidden
+        />
       )}
     </>
   )
