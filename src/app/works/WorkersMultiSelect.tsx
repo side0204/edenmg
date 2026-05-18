@@ -43,6 +43,11 @@ export function WorkersMultiSelect({
   const [selected, setSelected] = useState<SelectedWorker[]>(initialSelected)
   const [open, setOpen] = useState(false)
   const [query, setQuery] = useState('')
+  // 모달 닫힌 직후 잠시 fixed overlay 로 모든 클릭 흡수.
+  // 「완료」 탭 등으로 모달을 닫으면 그 좌표 아래에 있던 메인 form 의 작업자 카드
+  // X 버튼이 ghost-tap 으로 발화하여 작업자가 자동 제거되는 안드로이드 크롬 버그
+  // 방어. 800ms 정도가 안정적.
+  const [ghostBlock, setGhostBlock] = useState(false)
 
   useEffect(() => {
     if (!open) return
@@ -52,6 +57,12 @@ export function WorkersMultiSelect({
       document.body.style.overflow = prev
     }
   }, [open])
+
+  const closeModal = () => {
+    setOpen(false)
+    setGhostBlock(true)
+    setTimeout(() => setGhostBlock(false), 800)
+  }
 
   const selectedIdSet = useMemo(() => new Set(selected.map((s) => s.id)), [selected])
   const q = query.trim().toLowerCase()
@@ -219,7 +230,7 @@ export function WorkersMultiSelect({
           <button
             type="button"
             className="flex-1"
-            onClick={() => setOpen(false)}
+            onClick={() => closeModal()}
             aria-label="닫기"
           />
           <div className="rounded-t-2xl bg-white shadow-xl max-h-[85vh] flex flex-col">
@@ -233,7 +244,7 @@ export function WorkersMultiSelect({
               </p>
               <button
                 type="button"
-                onClick={() => setOpen(false)}
+                onClick={() => closeModal()}
                 className="rounded-md bg-slate-900 px-3 py-1.5 text-xs font-medium text-white hover:bg-slate-800"
               >
                 완료
@@ -273,7 +284,7 @@ export function WorkersMultiSelect({
               />
               <button
                 type="button"
-                onClick={() => setOpen(false)}
+                onClick={() => closeModal()}
                 className="shrink-0 rounded p-1 text-slate-400 hover:text-slate-700 hover:bg-slate-100"
                 aria-label="닫기"
               >
@@ -347,6 +358,23 @@ export function WorkersMultiSelect({
             </div>
           </div>
         </div>
+      )}
+
+      {/* ghost click 흡수 overlay — 모달 닫힌 직후 800ms.
+          메인 form 의 작업자 X 버튼·추가 버튼이 ghost-tap 으로 클릭되는 것 차단. */}
+      {ghostBlock && (
+        <div
+          className="fixed inset-0 z-[60]"
+          onPointerDown={(e) => {
+            e.preventDefault()
+            e.stopPropagation()
+          }}
+          onClick={(e) => {
+            e.preventDefault()
+            e.stopPropagation()
+          }}
+          aria-hidden
+        />
       )}
     </>
   )
