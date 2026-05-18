@@ -2,6 +2,7 @@
 
 import { useRef, useState, useTransition } from 'react'
 import type { ReactNode } from 'react'
+import { MapPin } from 'lucide-react'
 
 export type SiteFormValues = {
   id: string | null
@@ -117,9 +118,16 @@ export function SiteForm({
           type="button"
           onClick={fillCurrentLocation}
           disabled={geoLoading}
-          className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50 disabled:opacity-50"
+          className="inline-flex w-full items-center justify-center gap-1.5 rounded-lg border border-slate-300 px-3 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50 disabled:opacity-50"
         >
-          {geoLoading ? '위치 가져오는 중…' : '📍 현재 위치로 채우기'}
+          {geoLoading ? (
+            '위치 가져오는 중…'
+          ) : (
+            <>
+              <MapPin className="h-4 w-4" />
+              현재 위치로 채우기
+            </>
+          )}
         </button>
         {geoError && <p className="text-xs text-red-600">{geoError}</p>}
         <p className="text-xs text-slate-400">

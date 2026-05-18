@@ -1,5 +1,6 @@
 import Link from 'next/link'
 import { notFound } from 'next/navigation'
+import { ChevronLeft, Plus } from 'lucide-react'
 import { createClient } from '@/lib/supabase/server'
 
 type Permission = 'worker' | 'foreman' | 'admin' | 'ceo'
@@ -64,16 +65,18 @@ export default async function SitesPage() {
       <div className="mx-auto max-w-3xl space-y-5">
         <header className="flex items-center justify-between gap-3">
           <div>
-            <Link href="/" className="text-xs text-slate-500 hover:text-slate-900">
-              ← 홈
+            <Link href="/" className="inline-flex items-center gap-1 text-sm text-slate-500 hover:text-slate-900">
+              <ChevronLeft className="h-4 w-4" />
+              홈
             </Link>
             <h1 className="mt-1 text-3xl font-bold text-slate-900 tracking-tight">현장 관리</h1>
           </div>
           <Link
             href="/admin/sites/new"
-            className="rounded-lg bg-slate-900 px-4 py-2 text-sm font-medium text-white hover:bg-slate-800"
+            className="inline-flex items-center gap-1 rounded-lg bg-slate-900 px-4 py-2 text-sm font-medium text-white hover:bg-slate-800"
           >
-            + 현장 등록
+            <Plus className="h-4 w-4" />
+            현장 등록
           </Link>
         </header>
 

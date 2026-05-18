@@ -54,6 +54,7 @@ function parseSubmitForm(formData: FormData) {
   const endTimeRaw = String(formData.get('end_time') ?? '').trim()
   const reason = String(formData.get('reason') ?? '').trim()
   const foremanRaw = String(formData.get('assigned_foreman_id') ?? '').trim()
+  const substituteRaw = String(formData.get('substitute_employee_id') ?? '').trim()
   const isUrgent = formData.get('is_urgent') === 'on'
 
   return {
@@ -64,6 +65,7 @@ function parseSubmitForm(formData: FormData) {
     end_time: endTimeRaw || null,
     reason,
     assigned_foreman_id: foremanRaw || null,
+    substitute_employee_id: substituteRaw || null,
     is_urgent: isUrgent,
   }
 }
@@ -89,6 +91,7 @@ function validateSubmit(p: ReturnType<typeof parseSubmitForm>): string | null {
 
   if (!p.reason) return '사유를 입력하세요.'
   if (p.reason.length > 500) return '사유는 500자 이하로 입력하세요.'
+  if (!p.substitute_employee_id) return '대무자를 지정하세요.'
   return null
 }
 
@@ -142,6 +145,23 @@ export async function submitRequest(formData: FormData) {
     }
   }
 
+  // substitute_employee_id 검증 — 본인 금지, 같은 회사 활성 직원만
+  if (parsed.substitute_employee_id === me.id) {
+    redirect('/requests/new?err=' + encodeURIComponent('본인을 대무자로 지정할 수 없습니다'))
+  }
+  const { data: subRow } = await supabase
+    .from('employees')
+    .select('id, company_id, is_active')
+    .eq('id', parsed.substitute_employee_id)
+    .maybeSingle()
+  const substitute = subRow as { id: string; company_id: string; is_active: boolean } | null
+  if (!substitute || substitute.company_id !== me.company_id) {
+    redirect('/requests/new?err=' + encodeURIComponent('잘못된 대무자입니다'))
+  }
+  if (!substitute.is_active) {
+    redirect('/requests/new?err=' + encodeURIComponent('비활성 직원은 대무자로 지정할 수 없습니다'))
+  }
+
   // 결재자 지정 여부에 따라 시작 stage 결정
   const pendingStage = parsed.assigned_foreman_id ? 'foreman' : 'admin'
 
@@ -157,6 +177,7 @@ export async function submitRequest(formData: FormData) {
       end_time: parsed.end_time,
       reason: parsed.reason,
       assigned_foreman_id: parsed.assigned_foreman_id,
+      substitute_employee_id: parsed.substitute_employee_id,
       is_urgent: parsed.is_urgent,
       status: '대기',
       pending_stage: pendingStage,

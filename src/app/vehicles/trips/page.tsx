@@ -1,4 +1,5 @@
 import Link from 'next/link'
+import { Download, Fuel, ChevronLeft } from 'lucide-react'
 import { createClient } from '@/lib/supabase/server'
 import { monthRangeKST } from '@/lib/csv'
 
@@ -204,17 +205,19 @@ export default async function VehicleTripsPage({
       <div className="mx-auto max-w-4xl space-y-5">
         <header className="flex items-center justify-between gap-3">
           <div>
-            <Link href="/vehicles" className="text-xs text-slate-500 hover:text-slate-900">
-              ← 차량 관리
+            <Link href="/vehicles" className="inline-flex items-center gap-1 text-sm text-slate-500 hover:text-slate-900">
+              <ChevronLeft className="h-4 w-4" />
+              차량 관리
             </Link>
             <h1 className="mt-1 text-3xl font-bold text-slate-900 tracking-tight">운행일지 검색</h1>
             <p className="mt-0.5 text-xs text-slate-500">기간·차량·운전자·주유 여부로 필터링 후 CSV 다운로드</p>
           </div>
           <a
             href={csvHref}
-            className="rounded-lg bg-slate-900 px-4 py-2 text-sm font-medium text-white hover:bg-slate-800"
+            className="inline-flex items-center gap-1.5 rounded-lg bg-slate-900 px-4 py-2 text-sm font-medium text-white hover:bg-slate-800"
           >
-            ⬇ CSV
+            <Download className="h-4 w-4" />
+            CSV
           </a>
         </header>
 
@@ -388,10 +391,10 @@ export default async function VehicleTripsPage({
                         </Td>
                         <Td>
                           {t.refueled ? (
-                            <span className="text-amber-700">
-                              ⛽
+                            <span className="inline-flex items-center gap-1 text-amber-700">
+                              <Fuel className="h-3.5 w-3.5" />
                               {t.refuel_amount_krw !== null
-                                ? ` ${t.refuel_amount_krw.toLocaleString()}`
+                                ? t.refuel_amount_krw.toLocaleString()
                                 : ''}
                             </span>
                           ) : (

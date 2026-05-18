@@ -1,5 +1,6 @@
 import Link from 'next/link'
 import { notFound, redirect } from 'next/navigation'
+import { ChevronLeft } from 'lucide-react'
 import { createClient } from '@/lib/supabase/server'
 import { returnVehicle } from '../../actions'
 
@@ -81,8 +82,9 @@ export default async function ReturnPage({
     <main className="min-h-screen p-4 sm:p-6">
       <div className="mx-auto max-w-md space-y-5">
         <header>
-          <Link href="/vehicles" className="text-xs text-slate-500 hover:text-slate-900">
-            ← 차량 목록
+          <Link href="/vehicles" className="inline-flex items-center gap-1 text-sm text-slate-500 hover:text-slate-900">
+            <ChevronLeft className="h-4 w-4" />
+            차량 목록
           </Link>
           <h1 className="mt-1 text-3xl font-bold text-slate-900 tracking-tight">반납</h1>
           <p className="mt-1 text-sm text-slate-600">

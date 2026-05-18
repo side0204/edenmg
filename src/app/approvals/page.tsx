@@ -1,5 +1,6 @@
 import Link from 'next/link'
 import { notFound, redirect } from 'next/navigation'
+import { ChevronLeft } from 'lucide-react'
 import { createClient } from '@/lib/supabase/server'
 import {
   LEAVE_TYPE_LABEL,
@@ -78,8 +79,9 @@ export default async function ApprovalsPage() {
     <main className="min-h-screen p-4 sm:p-6">
       <div className="mx-auto max-w-2xl space-y-5">
         <header>
-          <Link href="/" className="text-sm text-slate-500 hover:text-slate-900">
-            ← 홈
+          <Link href="/" className="inline-flex items-center gap-1 text-sm text-slate-500 hover:text-slate-900">
+            <ChevronLeft className="h-4 w-4" />
+            홈
           </Link>
           <h1 className="mt-1 text-3xl font-bold text-slate-900 tracking-tight">결재함</h1>
           <p className="mt-1 text-sm text-slate-500">

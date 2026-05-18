@@ -51,7 +51,8 @@ export async function GET(request: NextRequest) {
         reason, is_urgent, status, pending_stage,
         final_actor_id, final_acted_at, created_at,
         employees:employee_id ( name, permission, position, team, work_type ),
-        foreman:assigned_foreman_id ( name )
+        foreman:assigned_foreman_id ( name ),
+        substitute:substitute_employee_id ( name )
       `,
     )
     .eq('company_id', me.company_id)
@@ -88,6 +89,7 @@ export async function GET(request: NextRequest) {
       work_type: string | null
     } | null
     foreman: { name: string | null } | null
+    substitute: { name: string | null } | null
   }
   const rows = (data ?? []) as unknown as Row[]
 
@@ -119,6 +121,7 @@ export async function GET(request: NextRequest) {
     r.end_time ? r.end_time.slice(0, 5) : '',
     r.is_urgent ? '예' : '',
     r.foreman?.name ?? '',
+    r.substitute?.name ?? '',
     r.status,
     r.reason,
     r.final_actor_id ? actorNameById.get(r.final_actor_id) ?? '' : '',
@@ -142,6 +145,7 @@ const LEAVE_HEADERS = [
   '종료시각',
   '긴급',
   '1차결재자(소장)',
+  '대무자',
   '상태',
   '사유',
   '최종처리자',

@@ -1,5 +1,7 @@
 import Link from 'next/link'
+import { Clock, Car, ClipboardCheck, Settings, FileText, CalendarDays } from 'lucide-react'
 import { createClient } from '@/lib/supabase/server'
+import { LEAVE_TYPE_LABEL, formatPeriod, type LeaveType } from '@/lib/leave'
 import { signOut } from './login/actions'
 import VehicleStatusList from './VehicleStatusList'
 
@@ -218,6 +220,56 @@ export default async function Home() {
     .eq('employee_id', employee.id)
     .eq('status', '대기')
 
+  // 휴가자 현황 — 이번 달에 일부라도 걸치는 승인된 신청
+  // (다일 휴가는 시작~종료 전체 기간을 그대로 표시)
+  const [yearStr, monthStr] = workDate.split('-')
+  const yearNum = Number(yearStr)
+  const monthNum = Number(monthStr)
+  const lastDayOfMonth = new Date(Date.UTC(yearNum, monthNum, 0)).getUTCDate()
+  const monthFirst = `${yearStr}-${monthStr}-01`
+  const monthLast = `${yearStr}-${monthStr}-${String(lastDayOfMonth).padStart(2, '0')}`
+
+  const { data: leavesData } = await supabase
+    .from('leave_requests')
+    .select(
+      'id, employee_id, type, start_date, end_date, start_time, end_time, substitute_employee_id',
+    )
+    .eq('company_id', employee.company_id)
+    .eq('status', '승인')
+    .lte('start_date', monthLast)
+    .gte('end_date', monthFirst)
+    .order('start_date', { ascending: true })
+
+  type LeaveRow = {
+    id: string
+    employee_id: string
+    type: LeaveType
+    start_date: string
+    end_date: string
+    start_time: string | null
+    end_time: string | null
+    substitute_employee_id: string | null
+  }
+  const leaves = (leavesData ?? []) as LeaveRow[]
+
+  const leavePersonIds = Array.from(
+    new Set(
+      leaves
+        .flatMap((l) => [l.employee_id, l.substitute_employee_id])
+        .filter((v): v is string => !!v),
+    ),
+  )
+  const leaveNameById = new Map<string, string>()
+  if (leavePersonIds.length > 0) {
+    const { data: persons } = await supabase
+      .from('employees')
+      .select('id, name')
+      .in('id', leavePersonIds)
+    for (const p of (persons ?? []) as { id: string; name: string }[]) {
+      leaveNameById.set(p.id, p.name)
+    }
+  }
+
   return (
     <main className="min-h-screen p-4 sm:p-6">
       <div className="mx-auto max-w-2xl space-y-6">
@@ -242,7 +294,8 @@ export default async function Home() {
         </header>
 
         <section className="rounded-2xl bg-white shadow-sm border border-slate-200 p-6 space-y-4">
-          <h2 className="text-base font-semibold text-slate-700 tracking-tight">
+          <h2 className="flex items-center gap-2 text-base font-semibold text-slate-700 tracking-tight">
+            <Clock className="h-5 w-5 text-slate-400" />
             오늘 근태
           </h2>
 
@@ -275,7 +328,8 @@ export default async function Home() {
         </section>
 
         <section className="rounded-2xl bg-white shadow-sm border border-slate-200 p-6 space-y-4">
-          <h2 className="text-base font-semibold text-slate-700 tracking-tight">
+          <h2 className="flex items-center gap-2 text-base font-semibold text-slate-700 tracking-tight">
+            <Car className="h-5 w-5 text-slate-400" />
             업무용 차량
           </h2>
 
@@ -321,7 +375,8 @@ export default async function Home() {
         </section>
 
         <section className="rounded-2xl bg-white shadow-sm border border-slate-200 p-6 space-y-3">
-          <h2 className="text-base font-semibold text-slate-700 tracking-tight">
+          <h2 className="flex items-center gap-2 text-base font-semibold text-slate-700 tracking-tight">
+            <ClipboardCheck className="h-5 w-5 text-slate-400" />
             결재
           </h2>
           <Link
@@ -350,9 +405,60 @@ export default async function Home() {
           )}
         </section>
 
+        <section className="rounded-2xl bg-white shadow-sm border border-slate-200 p-6 space-y-3">
+          <h2 className="flex items-center gap-2 text-base font-semibold text-slate-700 tracking-tight">
+            <CalendarDays className="h-5 w-5 text-slate-400" />
+            휴가자 현황
+            <span className="ml-auto text-xs font-normal text-slate-400">
+              {yearStr}년 {monthNum}월
+            </span>
+          </h2>
+          {leaves.length === 0 ? (
+            <p className="rounded-lg bg-slate-50 px-4 py-6 text-center text-sm text-slate-500">
+              이번 달 승인된 휴가가 없습니다.
+            </p>
+          ) : (
+            <ul className="divide-y divide-slate-100 rounded-lg border border-slate-200">
+              {leaves.map((l) => {
+                const isOngoing = workDate >= l.start_date && workDate <= l.end_date
+                return (
+                  <li key={l.id} className="px-3 py-3 text-sm">
+                    <div className="flex items-start justify-between gap-2">
+                      <div className="min-w-0 flex-1">
+                        <p className="text-slate-900">
+                          <span className="font-semibold">
+                            {leaveNameById.get(l.employee_id) ?? '?'}
+                          </span>
+                          <span className="ml-1.5 text-slate-500">
+                            · {LEAVE_TYPE_LABEL[l.type]}
+                          </span>
+                        </p>
+                        <p className="mt-0.5 text-xs text-slate-500">
+                          {formatPeriod(l.start_date, l.end_date, l.start_time, l.end_time)}
+                        </p>
+                        {l.substitute_employee_id && (
+                          <p className="mt-0.5 text-xs text-slate-500">
+                            대무: {leaveNameById.get(l.substitute_employee_id) ?? '?'}
+                          </p>
+                        )}
+                      </div>
+                      {isOngoing && (
+                        <span className="shrink-0 rounded-full bg-emerald-100 text-emerald-800 text-xs font-bold px-2 py-0.5">
+                          진행 중
+                        </span>
+                      )}
+                    </div>
+                  </li>
+                )
+              })}
+            </ul>
+          )}
+        </section>
+
         {isAdmin && (
           <section className="rounded-2xl bg-white shadow-sm border border-slate-200 p-6 space-y-3">
-            <h2 className="text-base font-semibold text-slate-700 tracking-tight">
+            <h2 className="flex items-center gap-2 text-base font-semibold text-slate-700 tracking-tight">
+              <Settings className="h-5 w-5 text-slate-400" />
               관리
             </h2>
             <Link
@@ -378,7 +484,8 @@ export default async function Home() {
 
         {!isAdmin && employee.permission === 'foreman' && (
           <section className="rounded-2xl bg-white shadow-sm border border-slate-200 p-6 space-y-3">
-            <h2 className="text-base font-semibold text-slate-700 tracking-tight">
+            <h2 className="flex items-center gap-2 text-base font-semibold text-slate-700 tracking-tight">
+              <FileText className="h-5 w-5 text-slate-400" />
               리포트
             </h2>
             <Link

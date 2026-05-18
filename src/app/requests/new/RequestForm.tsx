@@ -9,10 +9,19 @@ import {
   type LeaveType,
 } from '@/lib/leave'
 import { submitRequest } from '../actions'
+import { EmployeeCombobox, type EmployeeOption } from './EmployeeCombobox'
 
 export type ForemanOption = { id: string; name: string; permission_label: string }
 
-export function RequestForm({ foremen, defaultDate }: { foremen: ForemanOption[]; defaultDate: string }) {
+export function RequestForm({
+  foremen,
+  substituteCandidates,
+  defaultDate,
+}: {
+  foremen: ForemanOption[]
+  substituteCandidates: EmployeeOption[]
+  defaultDate: string
+}) {
   const [type, setType] = useState<LeaveType>('연차')
   const [startDate, setStartDate] = useState(defaultDate)
   const [endDate, setEndDate] = useState(defaultDate)
@@ -109,6 +118,18 @@ export function RequestForm({ foremen, defaultDate }: { foremen: ForemanOption[]
         </select>
         <p className="mt-1 text-xs text-slate-400">
           미지정 시 관리자/대표 단계로 바로 올라갑니다. 평소 1차 결재 받는 소장이 있으면 선택하세요.
+        </p>
+      </Field>
+
+      <Field label="대무자 *">
+        <EmployeeCombobox
+          name="substitute_employee_id"
+          candidates={substituteCandidates}
+          required
+          placeholder="이름·직급·팀으로 검색"
+        />
+        <p className="mt-1 text-xs text-slate-400">
+          휴가 동안 업무를 대신할 직원을 지정합니다. 본인·비활성 직원은 제외됩니다.
         </p>
       </Field>
 

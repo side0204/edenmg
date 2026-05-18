@@ -1,5 +1,6 @@
 import Link from 'next/link'
 import { notFound } from 'next/navigation'
+import { ChevronLeft } from 'lucide-react'
 import { createClient } from '@/lib/supabase/server'
 import { updateSite } from '../actions'
 import { fetchManagerCandidates } from '../managers'
@@ -73,8 +74,9 @@ export default async function EditSitePage({
     <main className="min-h-screen p-4 sm:p-6">
       <div className="mx-auto max-w-md space-y-5">
         <header>
-          <Link href="/admin/sites" className="text-xs text-slate-500 hover:text-slate-900">
-            ← 현장 목록
+          <Link href="/admin/sites" className="inline-flex items-center gap-1 text-sm text-slate-500 hover:text-slate-900">
+            <ChevronLeft className="h-4 w-4" />
+            현장 목록
           </Link>
           <h1 className="mt-1 text-3xl font-bold text-slate-900 tracking-tight">현장 수정</h1>
           <p className="mt-1 text-xs text-slate-500">{site.name}</p>

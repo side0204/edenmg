@@ -1,4 +1,5 @@
 import Link from 'next/link'
+import { Search, Fuel, Plus, ChevronLeft } from 'lucide-react'
 import { createClient } from '@/lib/supabase/server'
 
 type Permission = 'worker' | 'foreman' | 'admin' | 'ceo'
@@ -121,8 +122,9 @@ export default async function VehiclesPage() {
       <div className="mx-auto max-w-3xl space-y-5">
         <header className="flex items-center justify-between gap-3">
           <div>
-            <Link href="/" className="text-sm text-slate-500 hover:text-slate-900">
-              ← 홈
+            <Link href="/" className="inline-flex items-center gap-1 text-sm text-slate-500 hover:text-slate-900">
+              <ChevronLeft className="h-4 w-4" />
+              홈
             </Link>
             <h1 className="mt-1 text-3xl font-bold text-slate-900 tracking-tight">업무용 차량</h1>
             <p className="mt-1 text-sm text-slate-500">
@@ -132,16 +134,18 @@ export default async function VehiclesPage() {
           <div className="flex items-center gap-2 shrink-0">
             <Link
               href="/vehicles/trips"
-              className="rounded-lg border border-slate-300 px-3 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50"
+              className="inline-flex items-center gap-1.5 rounded-lg border border-slate-300 px-3 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50"
             >
-              🔍 운행 이력
+              <Search className="h-4 w-4" />
+              운행 이력
             </Link>
             {isAdmin && (
               <Link
                 href="/vehicles/new"
-                className="rounded-lg bg-slate-900 px-4 py-2 text-sm font-medium text-white hover:bg-slate-800"
+                className="inline-flex items-center gap-1 rounded-lg bg-slate-900 px-4 py-2 text-sm font-medium text-white hover:bg-slate-800"
               >
-                + 차량 등록
+                <Plus className="h-4 w-4" />
+                차량 등록
               </Link>
             )}
           </div>
@@ -315,10 +319,10 @@ export default async function VehiclesPage() {
                         <span className="ml-2 text-slate-600">{distance.toLocaleString()} km</span>
                       )}
                       {t.refueled && (
-                        <span className="ml-2 text-amber-700">
-                          ⛽
+                        <span className="ml-2 inline-flex items-center gap-1 text-amber-700">
+                          <Fuel className="h-3.5 w-3.5" />
                           {t.refuel_amount_krw !== null
-                            ? ` ${t.refuel_amount_krw.toLocaleString()}원`
+                            ? `${t.refuel_amount_krw.toLocaleString()}원`
                             : ''}
                         </span>
                       )}

@@ -1,5 +1,6 @@
 import Link from 'next/link'
 import { notFound } from 'next/navigation'
+import { ChevronLeft } from 'lucide-react'
 import { createClient } from '@/lib/supabase/server'
 import { inviteEmployee } from './actions'
 import {
@@ -32,8 +33,9 @@ export default async function InviteEmployeePage() {
     <main className="min-h-screen p-4 sm:p-6">
       <div className="mx-auto max-w-md space-y-5">
         <header>
-          <Link href="/admin/employees" className="text-xs text-slate-500 hover:text-slate-900">
-            ← 직원 목록
+          <Link href="/admin/employees" className="inline-flex items-center gap-1 text-sm text-slate-500 hover:text-slate-900">
+            <ChevronLeft className="h-4 w-4" />
+            직원 목록
           </Link>
           <h1 className="mt-1 text-3xl font-bold text-slate-900 tracking-tight">직원 초대</h1>
           <p className="mt-1 text-sm text-slate-500">

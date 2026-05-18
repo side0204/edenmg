@@ -1,5 +1,6 @@
 import Link from 'next/link'
 import { notFound, redirect } from 'next/navigation'
+import { ChevronLeft } from 'lucide-react'
 import { createClient } from '@/lib/supabase/server'
 import {
   ATTACHMENT_ALLOWED_TYPES,
@@ -31,6 +32,7 @@ type RequestRow = {
   status: LeaveStatus
   pending_stage: LeaveStage | null
   assigned_foreman_id: string | null
+  substitute_employee_id: string | null
   final_actor_id: string | null
   final_acted_at: string | null
   attachment_path: string | null
@@ -88,7 +90,7 @@ export default async function RequestDetailPage({
 
   const { data: reqRow } = await supabase
     .from('leave_requests')
-    .select('id, employee_id, type, start_date, end_date, start_time, end_time, reason, is_urgent, status, pending_stage, assigned_foreman_id, final_actor_id, final_acted_at, attachment_path, attachment_filename, created_at')
+    .select('id, employee_id, type, start_date, end_date, start_time, end_time, reason, is_urgent, status, pending_stage, assigned_foreman_id, substitute_employee_id, final_actor_id, final_acted_at, attachment_path, attachment_filename, created_at')
     .eq('id', id)
     .maybeSingle()
   const req = reqRow as RequestRow | null
@@ -103,7 +105,7 @@ export default async function RequestDetailPage({
 
   // 등장한 사람들 이름 한 번에 조회
   const personIds = Array.from(
-    new Set([req.employee_id, req.assigned_foreman_id, req.final_actor_id, ...approvals.map((a) => a.actor_employee_id)].filter((v): v is string => !!v)),
+    new Set([req.employee_id, req.assigned_foreman_id, req.substitute_employee_id, req.final_actor_id, ...approvals.map((a) => a.actor_employee_id)].filter((v): v is string => !!v)),
   )
   const nameById = new Map<string, string>()
   if (personIds.length > 0) {
@@ -123,8 +125,9 @@ export default async function RequestDetailPage({
     <main className="min-h-screen p-4 sm:p-6">
       <div className="mx-auto max-w-md space-y-5">
         <header>
-          <Link href="/requests" className="text-sm text-slate-500 hover:text-slate-900">
-            ← 내 신청
+          <Link href="/requests" className="inline-flex items-center gap-1 text-sm text-slate-500 hover:text-slate-900">
+            <ChevronLeft className="h-4 w-4" />
+            내 신청
           </Link>
           <h1 className="mt-1 text-3xl font-bold text-slate-900 tracking-tight flex items-center gap-2">
             {LEAVE_TYPE_LABEL[req.type]}
@@ -151,6 +154,9 @@ export default async function RequestDetailPage({
           </InfoRow>
           <InfoRow label="지정 결재자">
             {req.assigned_foreman_id ? nameById.get(req.assigned_foreman_id) ?? '?' : '없음 (관리자 직행)'}
+          </InfoRow>
+          <InfoRow label="대무자">
+            {req.substitute_employee_id ? nameById.get(req.substitute_employee_id) ?? '?' : '미지정'}
           </InfoRow>
           <InfoRow label="사유">
             <span className="whitespace-pre-wrap">{req.reason}</span>
