@@ -41,6 +41,15 @@ export type Aggregation = {
   tasks: AggregatedTask[]
 }
 
+/**
+ * 그룹핑 결과 — 작업통계 페이지처럼 차원별로 합계를 나눠 보여줄 때.
+ * key 는 차원에 따라 employee_id / order_id / work_id / YYYY / YYYY-MM / YYYY-MM-DD.
+ */
+export type AggregationGroup = {
+  key: string
+  aggregation: Aggregation
+}
+
 const EMPTY: Aggregation = { reportCount: 0, materials: [], tasks: [] }
 
 /**
@@ -59,6 +68,17 @@ export async function aggregateConnectionTotals(
     .select('id')
     .in('work_id', workIds)
   const reportIds = ((reportRows ?? []) as { id: string }[]).map((r) => r.id)
+  return aggregateConnectionTotalsByReports(supabase, reportIds)
+}
+
+/**
+ * 일보 IDs 를 직접 받아서 자재·공종 합산.
+ * 작업통계 페이지처럼 그룹별로 일보를 추려 합산할 때 사용.
+ */
+export async function aggregateConnectionTotalsByReports(
+  supabase: SupabaseServer,
+  reportIds: string[],
+): Promise<Aggregation> {
   if (reportIds.length === 0) return { ...EMPTY }
 
   // 자재·공종·마스터 병렬 fetch
@@ -169,4 +189,164 @@ export async function aggregateConnectionTotals(
   const materials = Array.from(matGroups.values()).sort((a, b) => b.totalQuantity - a.totalQuantity)
 
   return { reportCount: reportIds.length, materials, tasks }
+}
+
+/**
+ * 그룹별 통계 — 작업통계 페이지에서 차원별로 한 번에 집계.
+ * - reportIds 의 모든 tasks·materials 를 한 번에 fetch
+ * - getGroupKey(reportId) 로 그룹 결정 → 메모리에서 그룹별 누적
+ * - getGroupKey 가 null 반환하면 그 일보는 무시 (예: dim=order 에서 order_id 가 없는 작업)
+ *
+ * 반환: 그룹키 → Aggregation 매핑 (정렬 없음. 호출자가 라벨 매핑 후 정렬)
+ */
+export async function aggregateConnectionStats(
+  supabase: SupabaseServer,
+  reportIds: string[],
+  getGroupKey: (reportId: string) => string | null,
+): Promise<Map<string, Aggregation>> {
+  const result = new Map<string, Aggregation>()
+  if (reportIds.length === 0) return result
+
+  type GroupAccum = {
+    reports: Set<string>
+    tasks: Map<string, AggregatedTask>
+    materials: Map<string, AggregatedMaterial>
+  }
+  const accumByGroup = new Map<string, GroupAccum>()
+  const getOrInit = (key: string): GroupAccum => {
+    let a = accumByGroup.get(key)
+    if (!a) {
+      a = { reports: new Set(), tasks: new Map(), materials: new Map() }
+      accumByGroup.set(key, a)
+    }
+    return a
+  }
+
+  // 일보 자체 카운트 (tasks·materials 가 0건이어도 reportCount 는 잡혀야 함)
+  for (const rid of reportIds) {
+    const gk = getGroupKey(rid)
+    if (gk == null) continue
+    getOrInit(gk).reports.add(rid)
+  }
+
+  // 한 번에 tasks + materials fetch
+  const [tasksRes, matsRes] = await Promise.all([
+    supabase
+      .from('connection_node_tasks')
+      .select('report_id, task_type, custom_task_name, task_count')
+      .in('report_id', reportIds),
+    supabase
+      .from('connection_node_materials')
+      .select('report_id, material_id, custom_name, custom_spec, custom_unit, quantity')
+      .in('report_id', reportIds),
+  ])
+
+  // 마스터 lookup
+  const materialIds = Array.from(
+    new Set(
+      ((matsRes.data ?? []) as { material_id: string | null }[])
+        .map((m) => m.material_id)
+        .filter((x): x is string => !!x),
+    ),
+  )
+  const masterMap = new Map<string, { name: string; spec: string | null; unit: string | null }>()
+  if (materialIds.length > 0) {
+    const { data: mastersData } = await supabase
+      .from('materials')
+      .select('id, name, spec, unit')
+      .in('id', materialIds)
+    for (const m of (mastersData ?? []) as {
+      id: string
+      name: string
+      spec: string | null
+      unit: string | null
+    }[]) {
+      masterMap.set(m.id, { name: m.name, spec: m.spec, unit: m.unit })
+    }
+  }
+
+  // 공종 누적
+  for (const t of (tasksRes.data ?? []) as {
+    report_id: string
+    task_type: ConnectionTaskType
+    custom_task_name: string | null
+    task_count: number
+  }[]) {
+    const gk = getGroupKey(t.report_id)
+    if (gk == null) continue
+    const accum = getOrInit(gk)
+    const key = t.task_type === '기타' ? `기타::${t.custom_task_name ?? ''}` : t.task_type
+    const existing = accum.tasks.get(key)
+    if (existing) {
+      existing.totalCount += Number(t.task_count) || 0
+    } else {
+      accum.tasks.set(key, {
+        key,
+        task_type: t.task_type,
+        custom_task_name: t.custom_task_name,
+        label: t.task_type === '기타' ? (t.custom_task_name ?? '기타') : t.task_type,
+        totalCount: Number(t.task_count) || 0,
+      })
+    }
+  }
+
+  // 자재 누적
+  for (const m of (matsRes.data ?? []) as {
+    report_id: string
+    material_id: string | null
+    custom_name: string | null
+    custom_spec: string | null
+    custom_unit: string | null
+    quantity: number
+  }[]) {
+    const gk = getGroupKey(m.report_id)
+    if (gk == null) continue
+    const accum = getOrInit(gk)
+    let key: string
+    let name: string
+    let spec: string | null
+    let unit: string | null
+    let isCustom: boolean
+    if (m.material_id) {
+      const master = masterMap.get(m.material_id)
+      key = `M:${m.material_id}`
+      name = master?.name ?? '?'
+      spec = master?.spec ?? null
+      unit = master?.unit ?? null
+      isCustom = false
+    } else {
+      const cn = (m.custom_name ?? '').trim()
+      const cs = (m.custom_spec ?? '').trim()
+      const cu = (m.custom_unit ?? '').trim()
+      key = `C:${cn}|${cs}|${cu}`
+      name = cn || '?'
+      spec = cs || null
+      unit = cu || null
+      isCustom = true
+    }
+    const existing = accum.materials.get(key)
+    if (existing) {
+      existing.totalQuantity += Number(m.quantity) || 0
+    } else {
+      accum.materials.set(key, {
+        key,
+        material_id: m.material_id,
+        name,
+        spec,
+        unit,
+        isCustom,
+        totalQuantity: Number(m.quantity) || 0,
+      })
+    }
+  }
+
+  // 최종 변환 + 그룹별 정렬
+  for (const [gk, accum] of accumByGroup.entries()) {
+    const tasks = Array.from(accum.tasks.values()).sort((a, b) => b.totalCount - a.totalCount)
+    const materials = Array.from(accum.materials.values()).sort(
+      (a, b) => b.totalQuantity - a.totalQuantity,
+    )
+    result.set(gk, { reportCount: accum.reports.size, tasks, materials })
+  }
+  return result
 }

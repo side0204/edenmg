@@ -1,6 +1,6 @@
 import Link from 'next/link'
 import { redirect } from 'next/navigation'
-import { Bell, ChevronLeft, ChevronRight, FileText, Hammer, Plus, Search, Users } from 'lucide-react'
+import { BarChart3, Bell, ChevronLeft, ChevronRight, FileText, Hammer, Plus, Search, Users } from 'lucide-react'
 import { createClient } from '@/lib/supabase/server'
 import { EmptyState } from '@/components/EmptyState'
 import {
@@ -237,15 +237,24 @@ export default async function WorksPage({
                 : `작업 카드를 탭하면 바로 일보 작성 · ${rows.length}건`}
             </p>
           </div>
-          {canManage && (
+          <div className="flex flex-col items-end gap-1.5">
+            {canManage && (
+              <Link
+                href="/works/new"
+                className="inline-flex items-center gap-1 rounded-lg bg-slate-900 px-4 py-2 text-sm font-medium text-white hover:bg-slate-800"
+              >
+                <Plus className="h-4 w-4" />
+                작업 등록
+              </Link>
+            )}
             <Link
-              href="/works/new"
-              className="inline-flex items-center gap-1 rounded-lg bg-slate-900 px-4 py-2 text-sm font-medium text-white hover:bg-slate-800"
+              href="/works/stats"
+              className="inline-flex items-center gap-1 rounded-lg border border-slate-300 px-3 py-1.5 text-xs font-medium text-slate-700 hover:bg-slate-50"
             >
-              <Plus className="h-4 w-4" />
-              작업 등록
+              <BarChart3 className="h-3.5 w-3.5" />
+              통계
             </Link>
-          )}
+          </div>
         </header>
 
         {/* 0차 토글: 전체 / 내 작업 */}
