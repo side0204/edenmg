@@ -61,7 +61,7 @@ export function UnifiedReportForm({
   workId,
   chainId,
   chainName,
-  segmentNodes,
+  planNodes,
   nodeMap,
   masters,
   cableMasters,
@@ -74,7 +74,8 @@ export function UnifiedReportForm({
   workId: string
   chainId: string
   chainName: string | null
-  segmentNodes: UnifiedNode[]
+  /** 작업구간의 모든 노드 (상위국·접속함체·하위국 포함). 노드별 자재·공종 입력 대상. */
+  planNodes: UnifiedNode[]
   nodeMap: Record<string, UnifiedNode>
   masters: MaterialMaster[]
   cableMasters: CableMaster[]
@@ -88,12 +89,12 @@ export function UnifiedReportForm({
 }) {
   const [tasksByNode, setTasksByNode] = useState<Record<string, TaskRow[]>>(() => {
     const init: Record<string, TaskRow[]> = {}
-    for (const n of segmentNodes) init[n.id] = []
+    for (const n of planNodes) init[n.id] = []
     return init
   })
   const [materialsByNode, setMaterialsByNode] = useState<Record<string, MaterialRow[]>>(() => {
     const init: Record<string, MaterialRow[]> = {}
-    for (const n of segmentNodes) init[n.id] = []
+    for (const n of planNodes) init[n.id] = []
     return init
   })
 
@@ -104,7 +105,7 @@ export function UnifiedReportForm({
   const flatList = useMemo<RenderItem[]>(() => {
     const result: RenderItem[] = []
     const childrenByParent = new Map<string, UnifiedNode[]>()
-    for (const n of segmentNodes) {
+    for (const n of planNodes) {
       if (n.parent_id) {
         const arr = childrenByParent.get(n.parent_id) ?? []
         arr.push(n)
@@ -123,7 +124,7 @@ export function UnifiedReportForm({
     }
     visit(root)
     return result
-  }, [segmentNodes, nodeMap])
+  }, [planNodes, nodeMap])
 
   return (
     <form action={action} className="space-y-5">
@@ -177,25 +178,34 @@ export function UnifiedReportForm({
             {chainName ? `「${chainName}」` : '작업구간'}
           </h2>
           <p className="text-xs text-slate-500">
-            노드 사이 cable 카드에 케이블·선번·자재·공종을 입력하세요. 빈 cable 은 미작업 처리.
+            각 노드(상위국·접속함체·하위국)에 사용자재·공종을 입력하고, 노드 사이 cable 카드에 케이블·선번을 입력하세요.
           </p>
 
           <div className="space-y-1.5 pt-2">
             {flatList.map((item, idx) => {
               if (item.kind === 'node') {
                 return (
-                  <NodeRow
+                  <NodeCard
                     key={`node-${item.node.id}-${idx}`}
                     node={item.node}
                     workId={workId}
                     chainId={chainId}
                     returnTo={returnTo}
                     canEditNode={canEditNode}
+                    tasks={tasksByNode[item.node.id] ?? []}
+                    setTasks={(rows) =>
+                      setTasksByNode((prev) => ({ ...prev, [item.node.id]: rows }))
+                    }
+                    materials={materialsByNode[item.node.id] ?? []}
+                    setMaterials={(rows) =>
+                      setMaterialsByNode((prev) => ({ ...prev, [item.node.id]: rows }))
+                    }
+                    masters={masters}
                   />
                 )
               }
               return (
-                <CableCard
+                <CableSegmentCard
                   key={`cable-${item.childNode.id}-${idx}`}
                   nodeId={item.childNode.id}
                   parentId={item.parentNode.id}
@@ -204,15 +214,6 @@ export function UnifiedReportForm({
                   returnTo={returnTo}
                   parentName={item.parentNode.name}
                   childName={item.childNode.name}
-                  tasks={tasksByNode[item.childNode.id] ?? []}
-                  setTasks={(rows) =>
-                    setTasksByNode((prev) => ({ ...prev, [item.childNode.id]: rows }))
-                  }
-                  materials={materialsByNode[item.childNode.id] ?? []}
-                  setMaterials={(rows) =>
-                    setMaterialsByNode((prev) => ({ ...prev, [item.childNode.id]: rows }))
-                  }
-                  masters={masters}
                   cableMasters={cableMasters}
                   canAddNode={canAddNode}
                 />
@@ -232,54 +233,139 @@ export function UnifiedReportForm({
   )
 }
 
-// ===== 노드 라인 (이름만) =============================================
-function NodeRow({
+// ===== 노드 카드 (자재·공종 입력) =====================================
+function NodeCard({
   node,
   workId,
   chainId,
   returnTo,
   canEditNode,
+  tasks,
+  setTasks,
+  materials,
+  setMaterials,
+  masters,
 }: {
   node: UnifiedNode
   workId: string
   chainId: string
   returnTo: string
   canEditNode: boolean
+  tasks: TaskRow[]
+  setTasks: (rows: TaskRow[]) => void
+  materials: MaterialRow[]
+  setMaterials: (rows: MaterialRow[]) => void
+  masters: MaterialMaster[]
 }) {
   const returnToParam = encodeURIComponent(returnTo)
+  // 상위국은 노드 편집 페이지 진입 불가 (작업구간 edit 으로만)
   const editNodeHref =
-    node.parent_id // 상위국은 수정 페이지 진입 불가 (작업구간 edit 으로만)
+    node.parent_id
       ? `/works/${workId}/chains/${chainId}/nodes/${node.id}/edit?return_to=${returnToParam}`
       : null
   const meta = [node.code && `ID: ${node.code}`, node.spec_enum].filter(Boolean).join(' · ')
 
+  const addTask = () =>
+    setTasks([...tasks, { task_type: '', custom_task_name: '', task_count: '', notes: '' }])
+  const updateTask = (idx: number, patch: Partial<TaskRow>) =>
+    setTasks(tasks.map((t, i) => (i === idx ? { ...t, ...patch } : t)))
+  const removeTask = (idx: number) => setTasks(tasks.filter((_, i) => i !== idx))
+
+  const addMaterial = () =>
+    setMaterials([
+      ...materials,
+      { material_id: '', custom_name: '', custom_spec: '', custom_unit: '', quantity: '', notes: '' },
+    ])
+  const updateMaterial = (idx: number, patch: Partial<MaterialRow>) =>
+    setMaterials(materials.map((m, i) => (i === idx ? { ...m, ...patch } : m)))
+  const removeMaterial = (idx: number) => setMaterials(materials.filter((_, i) => i !== idx))
+
   return (
-    <div className="flex items-center justify-between gap-2 py-1.5">
-      <div className="min-w-0">
-        <p className="text-base font-semibold text-slate-900">
+    <div className="rounded-lg border border-slate-200 bg-white p-3 space-y-2.5">
+      <div className="flex items-center justify-between gap-2">
+        <p className="text-base font-semibold text-slate-900 min-w-0">
           <span className="mr-1.5 rounded bg-slate-100 px-1.5 py-0.5 text-[11px] font-medium text-slate-600">
             {PLAN_NODE_TYPE_LABEL[node.node_type]}
           </span>
           {node.name}
         </p>
-        {meta && <p className="mt-0.5 text-xs text-slate-500">{meta}</p>}
+        {canEditNode && editNodeHref && (
+          <Link
+            href={editNodeHref}
+            className="shrink-0 inline-flex items-center gap-0.5 rounded border border-slate-300 px-1.5 py-0.5 text-[11px] text-slate-600 hover:bg-slate-50"
+            title="노드 정보 수정"
+          >
+            <Pencil className="h-3 w-3" />
+            수정
+          </Link>
+        )}
       </div>
-      {canEditNode && editNodeHref && (
-        <Link
-          href={editNodeHref}
-          className="shrink-0 inline-flex items-center gap-0.5 rounded border border-slate-300 px-1.5 py-0.5 text-[11px] text-slate-600 hover:bg-slate-50"
-          title="노드 정보 수정"
-        >
-          <Pencil className="h-3 w-3" />
-          수정
-        </Link>
-      )}
+      {meta && <p className="text-xs text-slate-500">{meta}</p>}
+
+      <Row
+        label="사용자재"
+        trailing={
+          <button
+            type="button"
+            onClick={addMaterial}
+            className="inline-flex items-center gap-0.5 rounded px-1.5 py-0.5 text-[11px] text-blue-600 hover:bg-blue-50"
+          >
+            <Plus className="h-3 w-3" />
+            추가
+          </button>
+        }
+      >
+        {materials.length === 0 ? (
+          <span className="text-xs text-slate-400">없음</span>
+        ) : (
+          <div className="space-y-1">
+            {materials.map((m, idx) => (
+              <MaterialRowInput
+                key={idx}
+                row={m}
+                masters={masters}
+                onUpdate={(patch) => updateMaterial(idx, patch)}
+                onRemove={() => removeMaterial(idx)}
+              />
+            ))}
+          </div>
+        )}
+      </Row>
+
+      <Row
+        label="공종"
+        trailing={
+          <button
+            type="button"
+            onClick={addTask}
+            className="inline-flex items-center gap-0.5 rounded px-1.5 py-0.5 text-[11px] text-blue-600 hover:bg-blue-50"
+          >
+            <Plus className="h-3 w-3" />
+            추가
+          </button>
+        }
+      >
+        {tasks.length === 0 ? (
+          <span className="text-xs text-slate-400">없음</span>
+        ) : (
+          <div className="space-y-1">
+            {tasks.map((t, idx) => (
+              <TaskRowInput
+                key={idx}
+                row={t}
+                onUpdate={(patch) => updateTask(idx, patch)}
+                onRemove={() => removeTask(idx)}
+              />
+            ))}
+          </div>
+        )}
+      </Row>
     </div>
   )
 }
 
-// ===== cable 카드 (노드 사이, indented) ===============================
-function CableCard({
+// ===== cable segment 카드 (노드 사이, 케이블·선번만) ===================
+function CableSegmentCard({
   nodeId,
   parentId,
   workId,
@@ -287,11 +373,6 @@ function CableCard({
   returnTo,
   parentName,
   childName,
-  tasks,
-  setTasks,
-  materials,
-  setMaterials,
-  masters,
   cableMasters,
   canAddNode,
 }: {
@@ -302,11 +383,6 @@ function CableCard({
   returnTo: string
   parentName: string
   childName: string
-  tasks: TaskRow[]
-  setTasks: (rows: TaskRow[]) => void
-  materials: MaterialRow[]
-  setMaterials: (rows: MaterialRow[]) => void
-  masters: MaterialMaster[]
   cableMasters: CableMaster[]
   /** 사이끼우기 노출 권한 — admin/ceo/담당자 + 배정 작업자 */
   canAddNode: boolean
@@ -330,24 +406,6 @@ function CableCard({
       setCableSpec(hit.spec_enum)
     }
   }
-
-  const addTask = () =>
-    setTasks([
-      ...tasks,
-      { task_type: '', custom_task_name: '', task_count: '', notes: '' },
-    ])
-  const updateTask = (idx: number, patch: Partial<TaskRow>) =>
-    setTasks(tasks.map((t, i) => (i === idx ? { ...t, ...patch } : t)))
-  const removeTask = (idx: number) => setTasks(tasks.filter((_, i) => i !== idx))
-
-  const addMaterial = () =>
-    setMaterials([
-      ...materials,
-      { material_id: '', custom_name: '', custom_spec: '', custom_unit: '', quantity: '', notes: '' },
-    ])
-  const updateMaterial = (idx: number, patch: Partial<MaterialRow>) =>
-    setMaterials(materials.map((m, i) => (i === idx ? { ...m, ...patch } : m)))
-  const removeMaterial = (idx: number) => setMaterials(materials.filter((_, i) => i !== idx))
 
   const returnToParam = encodeURIComponent(returnTo)
   const insertBetweenHref = `/works/${workId}/chains/${chainId}/edit?parent=${parentId}&between_child=${nodeId}&return_to=${returnToParam}#노드추가`
@@ -373,7 +431,6 @@ function CableCard({
           )}
         </div>
 
-        {/* 행 1: 케이블ID */}
         <Row label="케이블ID">
           <input
             name={`cable_code_${nodeId}`}
@@ -393,7 +450,6 @@ function CableCard({
           </datalist>
         </Row>
 
-        {/* 행 2: 케이블규격 */}
         <Row label="케이블규격">
           <select
             name={`cable_spec_${nodeId}`}
@@ -410,7 +466,6 @@ function CableCard({
           </select>
         </Row>
 
-        {/* 행 3: 선번 + 코어수 */}
         <Row
           label="선번"
           trailing={
@@ -439,68 +494,6 @@ function CableCard({
           />
         </Row>
 
-        {/* 행 4: 사용자재 */}
-        <Row
-          label="사용자재"
-          trailing={
-            <button
-              type="button"
-              onClick={addMaterial}
-              className="inline-flex items-center gap-0.5 rounded px-1.5 py-0.5 text-[11px] text-blue-600 hover:bg-blue-50"
-            >
-              <Plus className="h-3 w-3" />
-              추가
-            </button>
-          }
-        >
-          {materials.length === 0 ? (
-            <span className="text-xs text-slate-400">없음</span>
-          ) : (
-            <div className="space-y-1">
-              {materials.map((m, idx) => (
-                <MaterialRowInput
-                  key={idx}
-                  row={m}
-                  masters={masters}
-                  onUpdate={(patch) => updateMaterial(idx, patch)}
-                  onRemove={() => removeMaterial(idx)}
-                />
-              ))}
-            </div>
-          )}
-        </Row>
-
-        {/* 행 5: 공종 */}
-        <Row
-          label="공종"
-          trailing={
-            <button
-              type="button"
-              onClick={addTask}
-              className="inline-flex items-center gap-0.5 rounded px-1.5 py-0.5 text-[11px] text-blue-600 hover:bg-blue-50"
-            >
-              <Plus className="h-3 w-3" />
-              추가
-            </button>
-          }
-        >
-          {tasks.length === 0 ? (
-            <span className="text-xs text-slate-400">없음</span>
-          ) : (
-            <div className="space-y-1">
-              {tasks.map((t, idx) => (
-                <TaskRowInput
-                  key={idx}
-                  row={t}
-                  onUpdate={(patch) => updateTask(idx, patch)}
-                  onRemove={() => removeTask(idx)}
-                />
-              ))}
-            </div>
-          )}
-        </Row>
-
-        {/* 행 6: 완료 토글 + 메모 */}
         <div className="flex items-center gap-2 pt-1">
           <label className="inline-flex items-center gap-1 text-xs text-slate-600">
             <input

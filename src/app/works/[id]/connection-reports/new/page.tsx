@@ -107,26 +107,18 @@ export default async function NewConnectionReportPage({
     .eq('chain_id', activeChainId)
     .order('position')
   const nodes = (nodesData ?? []) as NodeRow[]
-  const segmentNodes: UnifiedNode[] = nodes
-    .filter((n) => n.parent_id !== null)
-    .map((n) => ({
-      id: n.id,
-      parent_id: n.parent_id,
-      node_type: n.node_type,
-      name: n.name,
-      code: n.code,
-      spec_enum: n.spec_enum,
-    }))
+  // 모든 노드(상위국 root + 함체 + 하위국) 를 폼에 전달 — 노드별 자재·공종 입력 대상
+  const planNodes: UnifiedNode[] = nodes.map((n) => ({
+    id: n.id,
+    parent_id: n.parent_id,
+    node_type: n.node_type,
+    name: n.name,
+    code: n.code,
+    spec_enum: n.spec_enum,
+  }))
   const nodeMap: Record<string, UnifiedNode> = {}
-  for (const n of nodes) {
-    nodeMap[n.id] = {
-      id: n.id,
-      parent_id: n.parent_id,
-      node_type: n.node_type,
-      name: n.name,
-      code: n.code,
-      spec_enum: n.spec_enum,
-    }
+  for (const n of planNodes) {
+    nodeMap[n.id] = n
   }
 
   const { data: mastersData } = await supabase
@@ -199,7 +191,7 @@ export default async function NewConnectionReportPage({
           workId={work.id}
           chainId={activeChain.id}
           chainName={activeChain.name}
-          segmentNodes={segmentNodes}
+          planNodes={planNodes}
           nodeMap={nodeMap}
           masters={masters}
           cableMasters={cableMasters}

@@ -161,13 +161,34 @@ export default async function ConnectionReportDetailPage({
   const segments = (segsData ?? []) as SegmentRow[]
   const segByNode = new Map<string, SegmentRow>(segments.map((s) => [s.plan_node_id, s]))
 
-  // 일보의 segments 가 가리키는 chain 찾기 (segments → plan_nodes.chain_id)
+  // 일보의 segments / tasks / materials 중 아무거나 하나의 plan_node_id 로 chain 추적.
+  // (자재·공종만 입력한 경우 segments 가 비어도 노드 추적 가능)
   let activeChainId: string | null = null
-  if (segments.length > 0) {
+  let firstNodeId: string | null = segments[0]?.plan_node_id ?? null
+  if (!firstNodeId) {
+    const { data: t } = await supabase
+      .from('connection_node_tasks')
+      .select('plan_node_id')
+      .eq('report_id', reportId)
+      .limit(1)
+      .maybeSingle()
+    firstNodeId = (t as { plan_node_id: string } | null)?.plan_node_id ?? null
+  }
+  if (!firstNodeId) {
+    const { data: m } = await supabase
+      .from('connection_node_materials')
+      .select('plan_node_id')
+      .eq('report_id', reportId)
+      .limit(1)
+      .maybeSingle()
+    firstNodeId = (m as { plan_node_id: string } | null)?.plan_node_id ?? null
+  }
+
+  if (firstNodeId) {
     const { data: firstNode } = await supabase
       .from('connection_plan_nodes')
       .select('chain_id')
-      .eq('id', segments[0].plan_node_id)
+      .eq('id', firstNodeId)
       .maybeSingle()
     activeChainId = (firstNode as { chain_id: string } | null)?.chain_id ?? null
   }
@@ -434,7 +455,19 @@ function FlatTree(props: {
     <>
       {items.map((item, idx) => {
         if (item.kind === 'node') {
-          return <NodeLine key={`node-${item.node.id}-${idx}`} node={item.node} />
+          return (
+            <NodeBlock
+              key={`node-${item.node.id}-${idx}`}
+              node={item.node}
+              tasks={props.tasksByNode.get(item.node.id) ?? []}
+              materials={props.materialsByNode.get(item.node.id) ?? []}
+              masterMap={props.masterMap}
+              masters={props.masters}
+              canEdit={props.canEdit}
+              report={props.report}
+              workId={props.workId}
+            />
+          )
         }
         return (
           <CableInfo
@@ -442,13 +475,6 @@ function FlatTree(props: {
             childNode={item.childNode}
             parentNode={item.parentNode}
             segByNode={props.segByNode}
-            tasksByNode={props.tasksByNode}
-            materialsByNode={props.materialsByNode}
-            masterMap={props.masterMap}
-            masters={props.masters}
-            canEdit={props.canEdit}
-            report={props.report}
-            workId={props.workId}
           />
         )
       })}
@@ -456,12 +482,30 @@ function FlatTree(props: {
   )
 }
 
-function NodeLine({ node }: { node: NodeRow }) {
+function NodeBlock({
+  node,
+  tasks,
+  materials,
+  masterMap,
+  masters,
+  canEdit,
+  report,
+  workId,
+}: {
+  node: NodeRow
+  tasks: TaskRow[]
+  materials: MaterialRow[]
+  masterMap: Map<string, MaterialMaster>
+  masters: MaterialMaster[]
+  canEdit: boolean
+  report: ReportRow
+  workId: string
+}) {
   const meta = [node.code && `ID: ${node.code}`, node.spec_enum ?? node.spec]
     .filter(Boolean)
     .join(' · ')
   return (
-    <div className="py-1">
+    <div className="rounded-lg border border-slate-200 bg-white p-3 space-y-1.5">
       <p className="text-base font-semibold text-slate-900">
         <span className="mr-1.5 rounded bg-slate-100 px-1.5 py-0.5 text-[11px] font-medium text-slate-600">
           {PLAN_NODE_TYPE_LABEL[node.node_type]}
@@ -473,7 +517,212 @@ function NodeLine({ node }: { node: NodeRow }) {
           </span>
         )}
       </p>
-      {meta && <p className="mt-0.5 text-xs text-slate-500">{meta}</p>}
+      {meta && <p className="text-xs text-slate-500">{meta}</p>}
+
+      <DetailRow
+        label="사용자재"
+        value={
+          <div className="space-y-1">
+            {materials.length === 0 ? (
+              <span className="text-xs text-slate-400">없음</span>
+            ) : (
+              <ul className="space-y-0.5">
+                {materials.map((m) => {
+                  const master = m.material_id ? masterMap.get(m.material_id) : null
+                  const name = master?.name ?? m.custom_name ?? '?'
+                  const spec = master?.spec ?? m.custom_spec
+                  const unit = master?.unit ?? m.custom_unit
+                  return (
+                    <li
+                      key={m.id}
+                      className="flex items-center justify-between gap-2 text-xs text-slate-700"
+                    >
+                      <span className="min-w-0 flex-1">
+                        <span className="font-medium">{name}</span>
+                        {spec && <span className="ml-1 text-slate-500">({spec})</span>}
+                        <span className="ml-2">
+                          ×{m.quantity}
+                          {unit && <span className="ml-0.5">{unit}</span>}
+                        </span>
+                        {!master && (
+                          <span className="ml-1.5 text-[10px] rounded bg-amber-100 px-1 text-amber-700">
+                            직접입력
+                          </span>
+                        )}
+                        {m.notes && <span className="ml-2 text-slate-500">· {m.notes}</span>}
+                      </span>
+                      {canEdit && (
+                        <form action={removeMaterial}>
+                          <input type="hidden" name="material_row_id" value={m.id} />
+                          <input type="hidden" name="report_id" value={report.id} />
+                          <input type="hidden" name="work_id" value={workId} />
+                          <button
+                            type="submit"
+                            className="rounded p-0.5 text-slate-400 hover:text-rose-600 hover:bg-rose-50"
+                            aria-label="삭제"
+                          >
+                            <Trash2 className="h-3 w-3" />
+                          </button>
+                        </form>
+                      )}
+                    </li>
+                  )
+                })}
+              </ul>
+            )}
+            {canEdit && (
+              <details>
+                <summary className="cursor-pointer text-[11px] text-blue-600">+ 자재 추가</summary>
+                <form action={addMaterial} className="mt-1 grid grid-cols-2 gap-1">
+                  <input type="hidden" name="report_id" value={report.id} />
+                  <input type="hidden" name="work_id" value={workId} />
+                  <input type="hidden" name="plan_node_id" value={node.id} />
+                  <select name="material_id" defaultValue="" className={smallInput + ' col-span-2'}>
+                    <option value="">마스터 선택 (또는 직접 입력)</option>
+                    {masters.map((m) => (
+                      <option key={m.id} value={m.id}>
+                        {m.name}
+                        {m.spec ? ` (${m.spec})` : ''}
+                        {m.unit ? ` · ${m.unit}` : ''}
+                      </option>
+                    ))}
+                  </select>
+                  <input
+                    name="custom_name"
+                    placeholder="명"
+                    maxLength={100}
+                    className={smallInput}
+                  />
+                  <input
+                    name="custom_spec"
+                    placeholder="규격"
+                    maxLength={100}
+                    className={smallInput}
+                  />
+                  <input
+                    name="custom_unit"
+                    placeholder="단위"
+                    maxLength={20}
+                    className={smallInput}
+                  />
+                  <input
+                    name="quantity"
+                    type="number"
+                    step="0.001"
+                    min="0.001"
+                    required
+                    placeholder="수량 *"
+                    className={smallInput}
+                  />
+                  <input
+                    name="notes"
+                    placeholder="메모"
+                    maxLength={200}
+                    className={smallInput + ' col-span-2'}
+                  />
+                  <button
+                    type="submit"
+                    className="col-span-2 rounded-md bg-slate-900 px-2 py-1 text-xs font-medium text-white hover:bg-slate-800"
+                  >
+                    자재 추가
+                  </button>
+                </form>
+              </details>
+            )}
+          </div>
+        }
+      />
+
+      <DetailRow
+        label="공종"
+        value={
+          <div className="space-y-1">
+            {tasks.length === 0 ? (
+              <span className="text-xs text-slate-400">없음</span>
+            ) : (
+              <ul className="space-y-0.5">
+                {tasks.map((t) => (
+                  <li
+                    key={t.id}
+                    className="flex items-center justify-between gap-2 text-xs"
+                  >
+                    <span className="min-w-0 flex-1">
+                      <span
+                        className={
+                          'rounded-full border px-1.5 py-0.5 text-[10px] ' +
+                          TASK_TYPE_COLOR[t.task_type]
+                        }
+                      >
+                        {formatTaskLabel(t.task_type, t.custom_task_name)}
+                      </span>
+                      <span className="ml-1 font-medium text-slate-700">×{t.task_count}</span>
+                      {t.notes && <span className="ml-1.5 text-slate-500">· {t.notes}</span>}
+                    </span>
+                    {canEdit && (
+                      <form action={removeTask}>
+                        <input type="hidden" name="task_id" value={t.id} />
+                        <input type="hidden" name="report_id" value={report.id} />
+                        <input type="hidden" name="work_id" value={workId} />
+                        <button
+                          type="submit"
+                          className="rounded p-0.5 text-slate-400 hover:text-rose-600 hover:bg-rose-50"
+                          aria-label="삭제"
+                        >
+                          <Trash2 className="h-3 w-3" />
+                        </button>
+                      </form>
+                    )}
+                  </li>
+                ))}
+              </ul>
+            )}
+            {canEdit && (
+              <details>
+                <summary className="cursor-pointer text-[11px] text-blue-600">+ 공종 추가</summary>
+                <form action={addTask} className="mt-1 grid grid-cols-2 gap-1">
+                  <input type="hidden" name="report_id" value={report.id} />
+                  <input type="hidden" name="work_id" value={workId} />
+                  <input type="hidden" name="plan_node_id" value={node.id} />
+                  <select name="task_type" required className={smallInput}>
+                    <option value="">공종 선택</option>
+                    {CONNECTION_TASK_TYPE_VALUES.map((c) => (
+                      <option key={c} value={c}>
+                        {c}
+                      </option>
+                    ))}
+                  </select>
+                  <input
+                    name="task_count"
+                    type="number"
+                    min="1"
+                    required
+                    placeholder="수량"
+                    className={smallInput}
+                  />
+                  <input
+                    name="custom_task_name"
+                    placeholder="기타 시 공종명"
+                    maxLength={50}
+                    className={smallInput + ' col-span-2'}
+                  />
+                  <input
+                    name="notes"
+                    placeholder="메모"
+                    maxLength={200}
+                    className={smallInput + ' col-span-2'}
+                  />
+                  <button
+                    type="submit"
+                    className="col-span-2 rounded-md bg-slate-900 px-2 py-1 text-xs font-medium text-white hover:bg-slate-800"
+                  >
+                    공종 추가
+                  </button>
+                </form>
+              </details>
+            )}
+          </div>
+        }
+      />
     </div>
   )
 }
@@ -482,28 +731,12 @@ function CableInfo({
   childNode,
   parentNode,
   segByNode,
-  tasksByNode,
-  materialsByNode,
-  masterMap,
-  masters,
-  canEdit,
-  report,
-  workId,
 }: {
   childNode: NodeRow
   parentNode: NodeRow
   segByNode: Map<string, SegmentRow>
-  tasksByNode: Map<string, TaskRow[]>
-  materialsByNode: Map<string, MaterialRow[]>
-  masterMap: Map<string, MaterialMaster>
-  masters: MaterialMaster[]
-  canEdit: boolean
-  report: ReportRow
-  workId: string
 }) {
   const seg = segByNode.get(childNode.id)
-  const tasks = tasksByNode.get(childNode.id) ?? []
-  const mats = materialsByNode.get(childNode.id) ?? []
 
   return (
     <div className="ml-6 border-l-2 border-slate-200 pl-3">
@@ -539,213 +772,6 @@ function CableInfo({
         ) : (
           <p className="text-xs text-slate-400">이 cable 미작업</p>
         )}
-
-        {/* 사용자재 */}
-        <DetailRow
-          label="사용자재"
-          value={
-            <div className="space-y-1">
-              {mats.length === 0 ? (
-                <span className="text-xs text-slate-400">없음</span>
-              ) : (
-                <ul className="space-y-0.5">
-                  {mats.map((m) => {
-                    const master = m.material_id ? masterMap.get(m.material_id) : null
-                    const name = master?.name ?? m.custom_name ?? '?'
-                    const spec = master?.spec ?? m.custom_spec
-                    const unit = master?.unit ?? m.custom_unit
-                    return (
-                      <li
-                        key={m.id}
-                        className="flex items-center justify-between gap-2 text-xs text-slate-700"
-                      >
-                        <span className="min-w-0 flex-1">
-                          <span className="font-medium">{name}</span>
-                          {spec && <span className="ml-1 text-slate-500">({spec})</span>}
-                          <span className="ml-2">
-                            ×{m.quantity}
-                            {unit && <span className="ml-0.5">{unit}</span>}
-                          </span>
-                          {!master && (
-                            <span className="ml-1.5 text-[10px] rounded bg-amber-100 px-1 text-amber-700">
-                              직접입력
-                            </span>
-                          )}
-                          {m.notes && <span className="ml-2 text-slate-500">· {m.notes}</span>}
-                        </span>
-                        {canEdit && (
-                          <form action={removeMaterial}>
-                            <input type="hidden" name="material_row_id" value={m.id} />
-                            <input type="hidden" name="report_id" value={report.id} />
-                            <input type="hidden" name="work_id" value={workId} />
-                            <button
-                              type="submit"
-                              className="rounded p-0.5 text-slate-400 hover:text-rose-600 hover:bg-rose-50"
-                              aria-label="삭제"
-                            >
-                              <Trash2 className="h-3 w-3" />
-                            </button>
-                          </form>
-                        )}
-                      </li>
-                    )
-                  })}
-                </ul>
-              )}
-              {canEdit && (
-                <details>
-                  <summary className="cursor-pointer text-[11px] text-blue-600">+ 자재 추가</summary>
-                  <form action={addMaterial} className="mt-1 grid grid-cols-2 gap-1">
-                    <input type="hidden" name="report_id" value={report.id} />
-                    <input type="hidden" name="work_id" value={workId} />
-                    <input type="hidden" name="plan_node_id" value={childNode.id} />
-                    <select name="material_id" defaultValue="" className={smallInput + ' col-span-2'}>
-                      <option value="">마스터 선택 (또는 직접 입력)</option>
-                      {masters.map((m) => (
-                        <option key={m.id} value={m.id}>
-                          {m.name}
-                          {m.spec ? ` (${m.spec})` : ''}
-                          {m.unit ? ` · ${m.unit}` : ''}
-                        </option>
-                      ))}
-                    </select>
-                    <input
-                      name="custom_name"
-                      placeholder="명"
-                      maxLength={100}
-                      className={smallInput}
-                    />
-                    <input
-                      name="custom_spec"
-                      placeholder="규격"
-                      maxLength={100}
-                      className={smallInput}
-                    />
-                    <input
-                      name="custom_unit"
-                      placeholder="단위"
-                      maxLength={20}
-                      className={smallInput}
-                    />
-                    <input
-                      name="quantity"
-                      type="number"
-                      step="0.001"
-                      min="0.001"
-                      required
-                      placeholder="수량 *"
-                      className={smallInput}
-                    />
-                    <input
-                      name="notes"
-                      placeholder="메모"
-                      maxLength={200}
-                      className={smallInput + ' col-span-2'}
-                    />
-                    <button
-                      type="submit"
-                      className="col-span-2 rounded-md bg-slate-900 px-2 py-1 text-xs font-medium text-white hover:bg-slate-800"
-                    >
-                      자재 추가
-                    </button>
-                  </form>
-                </details>
-              )}
-            </div>
-          }
-        />
-
-        {/* 공종 */}
-        <DetailRow
-          label="공종"
-          value={
-            <div className="space-y-1">
-              {tasks.length === 0 ? (
-                <span className="text-xs text-slate-400">없음</span>
-              ) : (
-                <ul className="space-y-0.5">
-                  {tasks.map((t) => (
-                    <li
-                      key={t.id}
-                      className="flex items-center justify-between gap-2 text-xs"
-                    >
-                      <span className="min-w-0 flex-1">
-                        <span
-                          className={
-                            'rounded-full border px-1.5 py-0.5 text-[10px] ' +
-                            TASK_TYPE_COLOR[t.task_type]
-                          }
-                        >
-                          {formatTaskLabel(t.task_type, t.custom_task_name)}
-                        </span>
-                        <span className="ml-1 font-medium text-slate-700">×{t.task_count}</span>
-                        {t.notes && <span className="ml-1.5 text-slate-500">· {t.notes}</span>}
-                      </span>
-                      {canEdit && (
-                        <form action={removeTask}>
-                          <input type="hidden" name="task_id" value={t.id} />
-                          <input type="hidden" name="report_id" value={report.id} />
-                          <input type="hidden" name="work_id" value={workId} />
-                          <button
-                            type="submit"
-                            className="rounded p-0.5 text-slate-400 hover:text-rose-600 hover:bg-rose-50"
-                            aria-label="삭제"
-                          >
-                            <Trash2 className="h-3 w-3" />
-                          </button>
-                        </form>
-                      )}
-                    </li>
-                  ))}
-                </ul>
-              )}
-              {canEdit && (
-                <details>
-                  <summary className="cursor-pointer text-[11px] text-blue-600">+ 공종 추가</summary>
-                  <form action={addTask} className="mt-1 grid grid-cols-2 gap-1">
-                    <input type="hidden" name="report_id" value={report.id} />
-                    <input type="hidden" name="work_id" value={workId} />
-                    <input type="hidden" name="plan_node_id" value={childNode.id} />
-                    <select name="task_type" required className={smallInput}>
-                      <option value="">공종 선택</option>
-                      {CONNECTION_TASK_TYPE_VALUES.map((c) => (
-                        <option key={c} value={c}>
-                          {c}
-                        </option>
-                      ))}
-                    </select>
-                    <input
-                      name="task_count"
-                      type="number"
-                      min="1"
-                      required
-                      placeholder="수량"
-                      className={smallInput}
-                    />
-                    <input
-                      name="custom_task_name"
-                      placeholder="기타 시 공종명"
-                      maxLength={50}
-                      className={smallInput + ' col-span-2'}
-                    />
-                    <input
-                      name="notes"
-                      placeholder="메모"
-                      maxLength={200}
-                      className={smallInput + ' col-span-2'}
-                    />
-                    <button
-                      type="submit"
-                      className="col-span-2 rounded-md bg-slate-900 px-2 py-1 text-xs font-medium text-white hover:bg-slate-800"
-                    >
-                      공종 추가
-                    </button>
-                  </form>
-                </details>
-              )}
-            </div>
-          }
-        />
       </div>
     </div>
   )

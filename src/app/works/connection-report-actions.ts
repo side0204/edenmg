@@ -87,6 +87,7 @@ export async function submitConnectionReport(formData: FormData) {
   }
 
   // segments: form fields cable_spec_<nodeId>, line_numbers_<nodeId>, completed_<nodeId>, segment_notes_<nodeId>, cable_code_<nodeId>
+  // (cable segment 는 child node 의 id 키로 입력됨. parent_id 가 NULL 인 root 노드는 segment 없음.)
   const segmentInputs: Array<{
     plan_node_id: string
     cable_spec: CableSpec
@@ -95,7 +96,6 @@ export async function submitConnectionReport(formData: FormData) {
     segment_notes: string | null
     cable_code: string | null
   }> = []
-  const activeNodeIds = new Set<string>() // cable 입력된 노드 = 그 노드 공종/자재 저장 대상
   for (const [key, val] of formData.entries()) {
     if (typeof val !== 'string') continue
     const match = key.match(/^line_numbers_(.+)$/)
@@ -129,14 +129,6 @@ export async function submitConnectionReport(formData: FormData) {
       segment_notes: segmentNotes,
       cable_code: cableCode,
     })
-    activeNodeIds.add(nodeId)
-  }
-
-  if (segmentInputs.length === 0) {
-    redirect(
-      `/works/${workId}/connection-reports/new?err=` +
-        encodeURIComponent('최소 1개 cable 에 케이블 규격·선번을 입력하세요'),
-    )
   }
 
   // tasks_json / materials_json 파싱
@@ -165,7 +157,7 @@ export async function submitConnectionReport(formData: FormData) {
     >
   >(formData.get('materials_json'), {})
 
-  // 검증 + payload 빌드 (cable 입력된 노드의 rows 만)
+  // 검증 + payload 빌드 — 자재·공종은 모든 노드(상위국·접속함체·하위국)에서 입력 가능
   const taskPayloads: Array<{
     plan_node_id: string
     task_type: ConnectionTaskType
@@ -174,7 +166,6 @@ export async function submitConnectionReport(formData: FormData) {
     notes: string | null
   }> = []
   for (const nodeId of Object.keys(tasksByNode)) {
-    if (!activeNodeIds.has(nodeId)) continue
     for (const t of tasksByNode[nodeId] ?? []) {
       const tt = String(t.task_type ?? '').trim() as ConnectionTaskType
       if (!tt) continue // 빈 행 skip
@@ -217,7 +208,6 @@ export async function submitConnectionReport(formData: FormData) {
     notes: string | null
   }> = []
   for (const nodeId of Object.keys(materialsByNode)) {
-    if (!activeNodeIds.has(nodeId)) continue
     for (const m of materialsByNode[nodeId] ?? []) {
       const materialId = String(m.material_id ?? '').trim() || null
       const customName = String(m.custom_name ?? '').trim() || null
@@ -249,6 +239,18 @@ export async function submitConnectionReport(formData: FormData) {
     }
   }
 
+  // 적어도 하나는 있어야 의미 있는 일보. 모두 비면 막음.
+  if (
+    segmentInputs.length === 0 &&
+    taskPayloads.length === 0 &&
+    materialPayloads.length === 0
+  ) {
+    redirect(
+      `/works/${workId}/connection-reports/new?err=` +
+        encodeURIComponent('cable 선번, 노드 자재, 노드 공종 중 최소 하나는 입력하세요'),
+    )
+  }
+
   const { supabase, me } = await requireUser()
   await ensureCanAuthor(supabase, me, workId)
 
@@ -272,16 +274,18 @@ export async function submitConnectionReport(formData: FormData) {
     redirect(`/works/${workId}/connection-reports/new?err=` + encodeURIComponent(friendly))
   }
 
-  // segments insert
-  const segmentPayload = segmentInputs.map((s) => ({ ...s, report_id: report.id }))
-  const { error: sErr } = await supabase
-    .from('connection_report_segments')
-    .insert(segmentPayload)
-  if (sErr) {
-    redirect(
-      `/works/${workId}/connection-reports/${report.id}?err=` +
-        encodeURIComponent('일보는 생성됐지만 segment 저장 실패: ' + sErr.message),
-    )
+  // segments insert (없으면 skip — cable 입력 안 한 노드만 작업한 날도 가능)
+  if (segmentInputs.length > 0) {
+    const segmentPayload = segmentInputs.map((s) => ({ ...s, report_id: report.id }))
+    const { error: sErr } = await supabase
+      .from('connection_report_segments')
+      .insert(segmentPayload)
+    if (sErr) {
+      redirect(
+        `/works/${workId}/connection-reports/${report.id}?err=` +
+          encodeURIComponent('일보는 생성됐지만 segment 저장 실패: ' + sErr.message),
+      )
+    }
   }
 
   // tasks insert
