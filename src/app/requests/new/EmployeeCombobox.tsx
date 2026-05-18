@@ -135,14 +135,22 @@ export function EmployeeCombobox({
                   .join(' · ')
                 return (
                   <li key={emp.id}>
-                    <button
-                      type="button"
+                    <div
+                      role="button"
+                      tabIndex={0}
+                      onMouseDown={(e) => e.preventDefault()}
                       onClick={() => onSelect(emp)}
-                      className="block w-full px-3 py-2.5 text-left text-sm hover:bg-slate-50 active:bg-slate-100"
+                      onKeyDown={(e) => {
+                        if (e.key === 'Enter' || e.key === ' ') {
+                          e.preventDefault()
+                          onSelect(emp)
+                        }
+                      }}
+                      className="block w-full cursor-pointer select-none px-3 py-2.5 text-left text-sm hover:bg-slate-50 active:bg-slate-100"
                     >
-                      <p className="font-medium text-slate-900">{emp.name}</p>
-                      {sub && <p className="mt-0.5 text-xs text-slate-500">{sub}</p>}
-                    </button>
+                      <span className="block font-medium text-slate-900">{emp.name}</span>
+                      {sub && <span className="mt-0.5 block text-xs text-slate-500">{sub}</span>}
+                    </div>
                   </li>
                 )
               })}
