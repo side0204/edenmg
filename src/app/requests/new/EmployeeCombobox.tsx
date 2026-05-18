@@ -1,7 +1,7 @@
 'use client'
 
-import { useEffect, useRef, useState } from 'react'
-import { ChevronDown, X } from 'lucide-react'
+import { useEffect, useState } from 'react'
+import { ChevronDown, Search, X } from 'lucide-react'
 
 export type EmployeeOption = {
   id: string
@@ -12,11 +12,11 @@ export type EmployeeOption = {
 }
 
 /**
- * 검색 가능한 직원 콤보박스. 모바일 친화 설계.
+ * 검색 가능한 직원 콤보박스. 모바일 SaaS 표준 패턴 — 풀스크린 모달 검색.
  *
- * - 입력 시 이름·직급·팀·분야 부분 매칭(대소문자 무시) 으로 후보 필터링
- * - 선택 시 hidden input 에 id 저장, 표시 input 에 이름·직급·팀 라벨
- * - 외부 클릭 시 자동 닫힘
+ * - 트리거 탭 → 화면 전체를 덮는 모달 오버레이 + 검색 input + 결과 리스트
+ * - 모바일 키보드와 dropdown 위치 충돌 회피, 클릭 영역 명확
+ * - 선택 시 모달 닫힘, hidden input 에 id 저장
  * - 필수(required) 일 때 hidden input 의 native required 로 폼 검증
  */
 export function EmployeeCombobox({
@@ -32,24 +32,19 @@ export function EmployeeCombobox({
   placeholder?: string
   emptyLabel?: string
 }) {
-  const [query, setQuery] = useState('')
   const [open, setOpen] = useState(false)
+  const [query, setQuery] = useState('')
   const [selected, setSelected] = useState<EmployeeOption | null>(null)
-  const wrapRef = useRef<HTMLDivElement>(null)
 
-  // 외부 클릭 시 닫음
+  // 모달 열린 동안 body 스크롤 잠금
   useEffect(() => {
-    const onDocPointer = (e: Event) => {
-      if (!wrapRef.current) return
-      if (!wrapRef.current.contains(e.target as Node)) setOpen(false)
-    }
-    document.addEventListener('mousedown', onDocPointer)
-    document.addEventListener('touchstart', onDocPointer)
+    if (!open) return
+    const prev = document.body.style.overflow
+    document.body.style.overflow = 'hidden'
     return () => {
-      document.removeEventListener('mousedown', onDocPointer)
-      document.removeEventListener('touchstart', onDocPointer)
+      document.body.style.overflow = prev
     }
-  }, [])
+  }, [open])
 
   const q = query.trim().toLowerCase()
   const filtered = q
@@ -68,7 +63,7 @@ export function EmployeeCombobox({
         .join(' · ')
     : ''
 
-  const onSelect = (emp: EmployeeOption) => {
+  const onPick = (emp: EmployeeOption) => {
     setSelected(emp)
     setQuery('')
     setOpen(false)
@@ -76,19 +71,26 @@ export function EmployeeCombobox({
 
   const onClear = () => {
     setSelected(null)
+  }
+
+  const openModal = () => {
     setQuery('')
-    setOpen(false)
+    setOpen(true)
   }
 
   return (
-    <div ref={wrapRef} className="relative">
+    <>
       <input type="hidden" name={name} value={selected?.id ?? ''} required={required} />
 
       {selected ? (
         <div className="flex items-center gap-2 rounded-lg border border-slate-300 bg-white px-3 py-2.5">
-          <div className="min-w-0 flex-1">
+          <button
+            type="button"
+            onClick={openModal}
+            className="min-w-0 flex-1 text-left"
+          >
             <p className="truncate text-base text-slate-900">{selectedLabel}</p>
-          </div>
+          </button>
           <button
             type="button"
             onClick={onClear}
@@ -99,65 +101,77 @@ export function EmployeeCombobox({
           </button>
         </div>
       ) : (
-        <div className="relative">
-          <input
-            type="text"
-            value={query}
-            onChange={(e) => {
-              setQuery(e.currentTarget.value)
-              setOpen(true)
-            }}
-            onFocus={() => setOpen(true)}
-            placeholder={placeholder}
-            className="w-full rounded-lg border border-slate-300 bg-white px-3 py-2.5 pr-9 text-base focus:border-slate-900 focus:outline-none focus:ring-1 focus:ring-slate-900"
-            autoComplete="off"
-          />
-          <button
-            type="button"
-            onClick={() => setOpen((v) => !v)}
-            className="absolute right-2 top-1/2 -translate-y-1/2 rounded p-1 text-slate-400 hover:text-slate-700"
-            aria-label={open ? '닫기' : '열기'}
-          >
-            <ChevronDown className={`h-4 w-4 transition-transform ${open ? 'rotate-180' : ''}`} />
-          </button>
-        </div>
+        <button
+          type="button"
+          onClick={openModal}
+          className="flex w-full items-center justify-between gap-2 rounded-lg border border-slate-300 bg-white px-3 py-2.5 text-left text-base text-slate-400"
+        >
+          <span>{placeholder}</span>
+          <ChevronDown className="h-4 w-4 text-slate-400" />
+        </button>
       )}
 
-      {open && !selected && (
-        <div className="absolute z-10 mt-1 w-full overflow-hidden rounded-lg border border-slate-200 bg-white shadow-lg">
-          {filtered.length === 0 ? (
-            <p className="px-3 py-3 text-sm text-slate-500">{emptyLabel}</p>
-          ) : (
-            <ul className="max-h-72 divide-y divide-slate-100 overflow-auto">
-              {filtered.map((emp) => {
-                const sub = [emp.position, emp.team ? `${emp.team}팀` : null, emp.work_type]
-                  .filter(Boolean)
-                  .join(' · ')
-                return (
-                  <li key={emp.id}>
-                    <div
-                      role="button"
-                      tabIndex={0}
-                      onMouseDown={(e) => e.preventDefault()}
-                      onClick={() => onSelect(emp)}
-                      onKeyDown={(e) => {
-                        if (e.key === 'Enter' || e.key === ' ') {
-                          e.preventDefault()
-                          onSelect(emp)
-                        }
-                      }}
-                      className="block w-full cursor-pointer select-none px-3 py-2.5 text-left text-sm hover:bg-slate-50 active:bg-slate-100"
-                    >
-                      <span className="block font-medium text-slate-900">{emp.name}</span>
-                      {sub && <span className="mt-0.5 block text-xs text-slate-500">{sub}</span>}
-                    </div>
-                  </li>
-                )
-              })}
-            </ul>
-          )}
+      {open && (
+        <div className="fixed inset-0 z-50 flex flex-col bg-black/40">
+          <div
+            className="flex-1"
+            onClick={() => setOpen(false)}
+            aria-hidden
+          />
+          <div className="rounded-t-2xl bg-white shadow-xl max-h-[85vh] flex flex-col">
+            <div className="flex items-center gap-2 border-b border-slate-200 px-4 py-3">
+              <Search className="h-5 w-5 shrink-0 text-slate-400" />
+              <input
+                type="text"
+                autoFocus
+                value={query}
+                onChange={(e) => setQuery(e.currentTarget.value)}
+                placeholder={placeholder}
+                className="min-w-0 flex-1 bg-transparent text-base focus:outline-none"
+                autoComplete="off"
+              />
+              <button
+                type="button"
+                onClick={() => setOpen(false)}
+                className="shrink-0 rounded p-1.5 text-slate-500 hover:bg-slate-100"
+                aria-label="닫기"
+              >
+                <X className="h-5 w-5" />
+              </button>
+            </div>
+
+            <div className="flex-1 overflow-y-auto">
+              {filtered.length === 0 ? (
+                <p className="px-4 py-8 text-center text-sm text-slate-500">{emptyLabel}</p>
+              ) : (
+                <ul className="divide-y divide-slate-100">
+                  {filtered.map((emp) => {
+                    const sub = [emp.position, emp.team ? `${emp.team}팀` : null, emp.work_type]
+                      .filter(Boolean)
+                      .join(' · ')
+                    return (
+                      <li key={emp.id}>
+                        <button
+                          type="button"
+                          onClick={() => onPick(emp)}
+                          className="w-full px-4 py-3 text-left hover:bg-slate-50 active:bg-slate-100"
+                        >
+                          <span className="block text-base font-medium text-slate-900">
+                            {emp.name}
+                          </span>
+                          {sub && (
+                            <span className="mt-0.5 block text-sm text-slate-500">{sub}</span>
+                          )}
+                        </button>
+                      </li>
+                    )
+                  })}
+                </ul>
+              )}
+            </div>
+          </div>
         </div>
       )}
-    </div>
+    </>
   )
 }
