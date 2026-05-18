@@ -1,0 +1,54 @@
+'use client'
+
+import Link from 'next/link'
+import { usePathname } from 'next/navigation'
+
+type SubTab = {
+  href: string
+  label: string
+  /** 활성 판정 prefix 목록 */
+  matchPrefixes: string[]
+}
+
+const SUB_TABS: SubTab[] = [
+  { href: '/attendance', label: '근태', matchPrefixes: ['/attendance'] },
+  { href: '/vehicles', label: '차량', matchPrefixes: ['/vehicles'] },
+  // 결재는 내 신청(/requests) 과 결재함(/approvals) 둘 다 같은 서브탭으로 묶음
+  { href: '/requests', label: '결재', matchPrefixes: ['/requests', '/approvals'] },
+]
+
+/**
+ * 사무 그룹(근태·차량·결재) 경로에서만 상단에 sticky 로 표시되는 서브탭.
+ * 그 외 경로(/, /admin, /login 등) 에서는 null.
+ */
+export default function OfficeSubTabs() {
+  const pathname = usePathname() ?? '/'
+
+  const isOffice = SUB_TABS.some((t) => t.matchPrefixes.some((p) => pathname.startsWith(p)))
+  if (!isOffice) return null
+
+  return (
+    <div className="sticky top-0 z-30 border-b border-slate-200 bg-white/95 backdrop-blur">
+      <ul className="mx-auto flex max-w-2xl">
+        {SUB_TABS.map((tab) => {
+          const active = tab.matchPrefixes.some((p) => pathname.startsWith(p))
+          return (
+            <li key={tab.href} className="flex-1">
+              <Link
+                href={tab.href}
+                className={
+                  'block py-3 text-center text-sm font-medium border-b-2 transition-colors ' +
+                  (active
+                    ? 'border-slate-900 text-slate-900'
+                    : 'border-transparent text-slate-400 hover:text-slate-700')
+                }
+              >
+                {tab.label}
+              </Link>
+            </li>
+          )
+        })}
+      </ul>
+    </div>
+  )
+}

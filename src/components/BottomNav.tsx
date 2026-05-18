@@ -2,25 +2,34 @@
 
 import Link from 'next/link'
 import { usePathname } from 'next/navigation'
-import { Home, Clock, Car, ClipboardCheck } from 'lucide-react'
+import { Home, Briefcase } from 'lucide-react'
 
 type Tab = {
   href: string
   label: string
-  // 활성 판정: pathname 이 이 prefix 로 시작하면 active
-  matchPrefix: string
   icon: typeof Home
+  /** 활성 판정 — pathname 이 이 prefix 중 하나로 시작하면 active. exact 모드는 isExact 로 마킹. */
+  matchPrefixes: string[]
+  isExact?: boolean
 }
 
+// 최상위 탭. 향후 M3 작업·M4 자재·M5 안전이 단일 페이지로 들어오면 여기 추가.
+// 사무 그룹은 자체 서브탭(근태·차량·결재) 으로 세분화한다.
 const TABS: Tab[] = [
-  { href: '/', label: '홈', matchPrefix: '/', icon: Home },
-  { href: '/attendance', label: '근태', matchPrefix: '/attendance', icon: Clock },
-  { href: '/vehicles', label: '차량', matchPrefix: '/vehicles', icon: Car },
-  { href: '/requests', label: '결재', matchPrefix: '/requests', icon: ClipboardCheck },
+  {
+    href: '/',
+    label: '홈',
+    icon: Home,
+    matchPrefixes: ['/'],
+    isExact: true,
+  },
+  {
+    href: '/attendance',
+    label: '사무',
+    icon: Briefcase,
+    matchPrefixes: ['/attendance', '/vehicles', '/requests', '/approvals'],
+  },
 ]
-
-// 결재 탭은 두 경로(/requests, /approvals) 를 같이 활성으로 본다.
-const APPROVAL_PATHS = ['/requests', '/approvals']
 
 // 로그인/환영 등 인증 전 페이지에서는 탭 바를 숨긴다.
 const HIDDEN_PREFIXES = ['/login', '/welcome', '/auth']
@@ -38,15 +47,11 @@ export default function BottomNav() {
       <ul className="mx-auto flex max-w-2xl">
         {TABS.map((tab) => {
           const Icon = tab.icon
-          const isHome = tab.href === '/'
-          // 홈은 정확히 매칭, 그 외는 prefix 매칭
-          let active = isHome ? pathname === '/' : pathname.startsWith(tab.matchPrefix)
-          // 결재 탭은 /approvals 도 활성으로
-          if (tab.href === '/requests') {
-            active = APPROVAL_PATHS.some((p) => pathname.startsWith(p))
-          }
+          const active = tab.isExact
+            ? pathname === tab.matchPrefixes[0]
+            : tab.matchPrefixes.some((p) => pathname.startsWith(p))
           return (
-            <li key={tab.href} className="flex-1">
+            <li key={tab.label} className="flex-1">
               <Link
                 href={tab.href}
                 className={

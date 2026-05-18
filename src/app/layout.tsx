@@ -3,6 +3,7 @@ import { Suspense } from "react";
 import { Toaster } from "sonner";
 import ToastBridge from "@/components/ToastBridge";
 import BottomNav from "@/components/BottomNav";
+import OfficeSubTabs from "@/components/OfficeSubTabs";
 import "./globals.css";
 
 export const metadata: Metadata = {
@@ -21,6 +22,7 @@ export default function RootLayout({
         className="min-h-full flex flex-col bg-slate-50 text-slate-900"
         style={{ paddingBottom: 'calc(4rem + env(safe-area-inset-bottom))' }}
       >
+        <OfficeSubTabs />
         {children}
         <Toaster
           position="bottom-center"
