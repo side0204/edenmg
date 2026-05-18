@@ -310,6 +310,67 @@ owner 피드백 4건 반영:
 - **UI**: 노드 등록/수정 폼 enum 드롭다운, 트리 표시 enum 우선, 사이 끼우기 버튼, 일보 통합 폼
 - **CSV segment 모드**: 함체규격 컬럼은 spec_enum 우선 (legacy text fallback)
 
+### ✅ 완료 (작업관리 7개 항목 일괄 개편, 2026-05-18)
+
+owner 요청 (일보 작성 우선·작업자별 흐름·진입 단순화):
+
+- **작업관리 1순위 = 일보 작성**. `/works` 카드 탭 시 작업 상세를 건너뛰고 일보 작성 직행 (접속팀→`/connection-reports/new`, 그 외→`/reports/new`). 상세는 카드 하단 작은 별도 링크 (`absolute inset-0 z-0 + z-20 footer` 패턴).
+- **작업 등록 시 등록자가 기본 담당자로 자동 prefill** (`EmployeeCombobox` defaultSelected). 다르면 변경.
+- **작업 등록 후 접속팀이면 자동으로 `/works/[id]/chains/new`** 진입. 등록자가 작업구간 골격 미리 세팅.
+- **작업목록**: 카테고리·작업자구분·상태 3중 탭 + 순번(1,2,3 row index) + 검색 (작업명·order_id ilike OR). URL 파라미터 `cat`/`wt`/`status`/`q`.
+- **chain → 「작업구간」 UI 라벨 일괄 변경**. DB 테이블·컬럼·코드 변수명은 chain 유지 (마이그 영향 회피).
+- **권한 분리**: `canEditNode` (노드 수정=admin/담당자) vs `canAddNode` (사이끼우기=admin/담당자+배정 작업자). owner: "일보작성자는 등록된 작업구간에서 추가되는 부분만 추가하도록".
+
+### ✅ 완료 (작업 삭제·지시사항·진행률, 2026-05-18)
+
+- **DB 마이그레이션**
+  - [`0015_work_delete_permission.sql`](./supabase/migrations/0015_work_delete_permission.sql) — `employees.can_delete_works` + works RLS 분리 (INSERT/UPDATE = manage 권한, DELETE = delete 권한)
+  - [`0016_work_instructions.sql`](./supabase/migrations/0016_work_instructions.sql) — `works.instructions` text 컬럼
+- **작업 삭제 권한** — admin 만 토글로 부여. DeleteWorkButton 클라이언트 (confirm() 가드). 카드 푸터 우측에 휴지통 (권한자만 노출).
+- **작업자 지시사항** — works.instructions 별도 컬럼 (notes 와 분리). [`InstructionsBanner`](./src/app/works/InstructionsBanner.tsx) 노랑 박스 공용 컴포넌트로 작업 상세·일반 일보 작성·접속일보 작성 화면 상단에 항상 표시.
+- **진행률 카드** — 접속팀: 완료 cable / 전체 cable progress bar. 외선·기타: 누적 일보 카운트.
+- **공사번호 확장** — `order_id` 카테고리 한정 제거. 모든 작업에서 입력 가능. 작업목록 카드·작업 상세 "공사번호" 라벨로 표시.
+- **자재·공종 합계 카드** ([`AggregationCard`](./src/app/works/AggregationCard.tsx) + [`lib/connection-aggregate.ts`](./src/lib/connection-aggregate.ts)) — 작업별 + 같은 공사번호 형제 작업 합산 + 작업목록 검색 결과 합산. 접속일보만 집계 (외선·기타의 자유 텍스트 자재는 집계 불가).
+
+### ✅ 완료 (내 작업 알림 + 작업통계 페이지, 2026-05-18)
+
+- **내 작업 진행 목록** — `/works?mine=1` 토글 + 본인 배정 필터. 신규 배정 amber 「신규」 배지 (work_assignments.created_at 최근 3일) + 본인 마지막 일보 일자. 홈 카드 「내 작업 진행 목록」 진입점 + 신규 카운트.
+- **작업통계 페이지** [`/works/stats`](./src/app/works/stats/page.tsx)
+  - **6차원 탭**: 작업자별 / 공사번호별 / 작업명별 / 연 / 월 / 일
+  - **기간 필터** (from/to YYYY-MM-DD) + **TOP N 토글** (10/30/100/전체, 차원별 기본값)
+  - **두 보기 모드**: 그룹 카드 (`AggregationCard` + reportCount 막대) / 일보 표 ([`StatsTable`](./src/app/works/stats/StatsTable.tsx) wide pivot — 메타 4컬럼 + 동적 공종·자재 컬럼 + 합계 행)
+  - **3 metric 토글**: 전체 통계 / 공종 통계 / 자재 통계 (카드 섹션·표 컬럼·CSV 모두 적용)
+  - **CSV API** [`/api/reports/work-stats`](./src/app/api/reports/work-stats/route.ts) — type=tasks (공종 long) / materials (자재 long) / table (일보 wide). UTF-8+BOM+CRLF.
+  - **그룹별 작업 상태 분포** 배지 (예정/진행중/완료/취소) + 일보 표에 상태 컬럼
+  - **공통 헬퍼** [`aggregateConnectionStats`·`buildStatsTable`](./src/lib/connection-aggregate.ts) — 한 번 fetch + 메모리 그룹핑
+- **통계 권한 분리** (마이그 [`0017_view_stats_permission.sql`](./supabase/migrations/0017_view_stats_permission.sql)): `employees.can_view_stats` — admin 만 토글 부여. 미부여자는 본인 작성 일보 기반 통계만 (파란 안내 배지). admin/employees 에 파란 토글 추가.
+- **작업관리 토글 3탭** — 전체 / **작업자** (권한자만, 직원 select picker) / 내 작업. 권한 = admin OR can_view_stats.
+
+### ✅ 완료 (일보 라벨 분기 + 작업자 다중 배정, 2026-05-18)
+
+- **일보 라벨 헬퍼** [`reportLabel(workerType)`](./src/lib/work.ts) — 접속팀=접속일보, 외선팀=외선일보, 그 외=일보. 카드 배지·페이지 타이틀·일보 섹션 헤더 모두 분기.
+- **작업자 다중 배정** — 작업 등록 폼에 [`WorkersMultiSelect`](./src/app/works/WorkersMultiSelect.tsx) 추가. + 작업자 추가 버튼 → 풀스크린 모달 → toggle (체크박스) → 메인 form 의 작업자 카드에 worker_type 3-버튼 라디오 (접속팀/외선팀/기타).
+- **마이그** [`0019_assignment_worker_type.sql`](./supabase/migrations/0019_assignment_worker_type.sql) — `work_assignments.worker_type` 컬럼 추가. 같은 작업에 작업자별로 다른 worker_type 지정 가능 (접속·외선 혼합 배정).
+- **작업의 worker_type 폼에서 삭제** — 항상 null 저장. `isConnectionTeam` 판단은 `work.worker_type='접속팀' OR 작업자 중 1명이라도 worker_type='접속팀'`. `/chains/new`·`/connection-reports/new` 의 작업 단위 worker_type 차단 제거.
+- **/works 카드 라우팅**: 본인이 배정자면 본인 `work_assignments.worker_type` 우선 사용 → 본인 분야에 맞는 일보 페이지로 직행.
+
+**모바일 모달 안전 패턴 발견** (Galaxy S22 Ultra + 안드로이드 크롬):
+- 증상: 「완료」 탭 시 모달 안 selected 카운트는 정상이지만 닫는 순간 메인 form 의 리스트가 비워짐. ghost-tap·body lock·overlay 모든 차단 패턴 무효.
+- 가설: `{open && <Modal>}` conditional 렌더링 시 모달 unmount → 어떤 식으로든 부모 useState 리셋되는 React reconciliation 이슈.
+- 해결: 모달을 **항상 mount + `hidden pointer-events-none` 클래스로만 visibility 토글**. element unmount 자체 회피.
+
+### ✅ 완료 (권한 enum 재구성, 2026-05-18)
+
+- **마이그** [`0018_permission_rename.sql`](./supabase/migrations/0018_permission_rename.sql):
+  - `UPDATE employees SET permission='admin' WHERE permission='ceo'` — 데이터 통합
+  - `ALTER TYPE employee_permission ADD VALUE 'team_member'`
+  - `ALTER TYPE employee_permission RENAME VALUE 'foreman' TO 'team_leader'`
+  - 출퇴근 RLS 정책 재정의 (foreman → team_leader)
+- **새 위계**: 작업자(worker) / 팀원(team_member, 신규) / 팀장(team_leader) / 관리자(admin, 기존 admin+ceo 통합)
+- **코드 grep replace (57 파일)**: `'admin'||'ceo'` → `'admin'`, `'foreman'` → `'team_leader'`, UI 라벨 '소장→팀장' '관리자/대표→관리자' '현장소장→현장팀장'
+- **leave_stage enum 의 'foreman' 값**·`assigned_foreman_id` 컬럼명은 legacy 유지 (UI 만 '팀장 단계' 로 표시)
+- **관리자가 모든 권한** + 토글로 부여: `can_manage_works` / `can_delete_works` / `can_view_stats` (rose/amber/blue 색상 분리)
+
 ### 🟡 미완 / 후속
 
 - **운영 작업 (owner 가 Supabase Dashboard 에서 SQL 실행 필요)** ⚠️
@@ -321,6 +382,11 @@ owner 피드백 4건 반영:
   - [`0012_connection_reports.sql`](./supabase/migrations/0012_connection_reports.sql) — 접속일보 report side
   - [`0013_node_spec_enum.sql`](./supabase/migrations/0013_node_spec_enum.sql) — 함체 규격 enum 컬럼 추가
   - [`0014_cables_master.sql`](./supabase/migrations/0014_cables_master.sql) — 케이블 마스터 + cable_code 컬럼
+  - [`0015_work_delete_permission.sql`](./supabase/migrations/0015_work_delete_permission.sql) — 작업 삭제 권한 + RLS 분리
+  - [`0016_work_instructions.sql`](./supabase/migrations/0016_work_instructions.sql) — 작업 지시사항 컬럼
+  - [`0017_view_stats_permission.sql`](./supabase/migrations/0017_view_stats_permission.sql) — 통계 조회 권한
+  - [`0018_permission_rename.sql`](./supabase/migrations/0018_permission_rename.sql) — 권한 enum 재구성 (소장→팀장, 대표→관리자 통합, 팀원 신규)
+  - [`0019_assignment_worker_type.sql`](./supabase/migrations/0019_assignment_worker_type.sql) — 작업자별 worker_type
 - **외선일보 별도 entity (v2)** — 접속일보와 동일 패턴으로 외선팀 전용 모듈. 외선 작업 특성(케이블 포설구간·전주번호 등)에 맞는 구조 별도 설계.
 - **접속일보 후속 (v2)** — segment-level 작업자 태그, 사진 첨부 + EXIF, 국사·함체 마스터 테이블화, 재접속 이력 조회, 지도 시각화
 - **M3 Phase 2 후속** — 사진 첨부 + EXIF·워터마크 (PRD M3-06), 일보 결재함 통합 (현재는 작업 상세에서 진입), 일반 일보 월별 CSV 리포트
@@ -332,7 +398,7 @@ owner 피드백 4건 반영:
 - **모바일 LAN 검증 한계** — `npm run dev` 의 JS chunk 가 LAN IP 접속 시 모바일 hydration 자주 실패. 모바일 검증은 Vercel 배포본 사용.
 
 ### 도메인 용어 — 헷갈리기 쉬운 부분
-- **권한 (permission)** : 시스템 접근 제어. 작업자/소장/관리자/대표 4개 enum. 관리자/대표만 직원 관리 화면 진입 가능.
+- **권한 (permission)** : 시스템 접근 제어. 작업자(worker) / 팀원(team_member) / 팀장(team_leader) / 관리자(admin) 4개 enum. 관리자만 직원 관리 + 권한 토글 부여. 결재 = 팀장 OR 관리자. (legacy: foreman→team_leader rename, ceo→admin 통합, 마이그 0018)
 - **직급 (position)** : 회사 내 위계. 이사/부장/차장/과장/대리/사원. 권한과 1:1 아님.
 - **팀 (team)** : 소속 부서. 지장/계획/공가/청약/정산/자재/지원.
 - **분야 (work_type)** : 현장 작업 종류. 공무/외선/접속. 사용자가 평소 "역할" 이라고 부르는 항목 — UI 라벨은 "분야" 로 통일.
