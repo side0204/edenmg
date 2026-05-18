@@ -1,30 +1,48 @@
 import Link from 'next/link'
 import { redirect } from 'next/navigation'
-import { BarChart3, ChevronLeft } from 'lucide-react'
+import { BarChart3, ChevronLeft, Download } from 'lucide-react'
 import { createClient } from '@/lib/supabase/server'
 import { aggregateConnectionStats, type Aggregation } from '@/lib/connection-aggregate'
 import { AggregationCard } from '../AggregationCard'
 
 type Dim = 'worker' | 'order' | 'work' | 'year' | 'month' | 'day'
 
-const DIM_TABS: { key: Dim; label: string }[] = [
-  { key: 'worker', label: '작업자별' },
-  { key: 'order', label: '공사번호별' },
-  { key: 'work', label: '작업명별' },
-  { key: 'year', label: '연별' },
-  { key: 'month', label: '월별' },
-  { key: 'day', label: '일별' },
+const DIM_TABS: { key: Dim; label: string; defaultLimit: number }[] = [
+  { key: 'worker', label: '작업자별', defaultLimit: 30 },
+  { key: 'order', label: '공사번호별', defaultLimit: 30 },
+  { key: 'work', label: '작업명별', defaultLimit: 30 },
+  { key: 'year', label: '연별', defaultLimit: 0 }, // 전체
+  { key: 'month', label: '월별', defaultLimit: 24 },
+  { key: 'day', label: '일별', defaultLimit: 30 },
 ]
 
 const DEFAULT_DIM: Dim = 'worker'
+const LIMIT_OPTIONS = [10, 30, 100, 0] // 0 = 전체
 
 export default async function StatsPage({
   searchParams,
 }: {
-  searchParams: Promise<{ dim?: string }>
+  searchParams: Promise<{
+    dim?: string
+    from?: string
+    to?: string
+    limit?: string
+  }>
 }) {
-  const { dim: dimParam } = await searchParams
-  const dim: Dim = (DIM_TABS.find((t) => t.key === dimParam)?.key ?? DEFAULT_DIM) as Dim
+  const { dim: dimParam, from: fromParam, to: toParam, limit: limitParam } = await searchParams
+  const dimEntry = DIM_TABS.find((t) => t.key === dimParam) ?? DIM_TABS.find((t) => t.key === DEFAULT_DIM)!
+  const dim: Dim = dimEntry.key
+
+  const from = fromParam && /^\d{4}-\d{2}-\d{2}$/.test(fromParam) ? fromParam : null
+  const to = toParam && /^\d{4}-\d{2}-\d{2}$/.test(toParam) ? toParam : null
+
+  // limit: URL > defaultLimit. 0 또는 'all' 은 전체.
+  const limitNum =
+    limitParam === 'all'
+      ? 0
+      : limitParam !== undefined && Number.isFinite(parseInt(limitParam, 10))
+        ? Math.max(0, parseInt(limitParam, 10))
+        : dimEntry.defaultLimit
 
   const supabase = await createClient()
   const {
@@ -59,21 +77,30 @@ export default async function StatsPage({
   const works = (worksData ?? []) as WorkMeta[]
   const workById = new Map<string, WorkMeta>(works.map((w) => [w.id, w]))
 
-  // 그 작업들의 모든 접속일보 메타
-  let reports: { id: string; work_id: string; author_employee_id: string; report_date: string }[] = []
+  // 그 작업들의 모든 접속일보 메타 (기간 필터 적용)
+  type ReportMeta = {
+    id: string
+    work_id: string
+    author_employee_id: string
+    report_date: string
+  }
+  let reports: ReportMeta[] = []
   if (works.length > 0) {
-    const { data: reportsData } = await supabase
+    let q = supabase
       .from('connection_reports')
       .select('id, work_id, author_employee_id, report_date')
       .in(
         'work_id',
         works.map((w) => w.id),
       )
-    reports = (reportsData ?? []) as typeof reports
+    if (from) q = q.gte('report_date', from)
+    if (to) q = q.lte('report_date', to)
+    const { data: reportsData } = await q
+    reports = (reportsData ?? []) as ReportMeta[]
   }
   const reportById = new Map(reports.map((r) => [r.id, r]))
 
-  // 차원별 groupKey 함수
+  // 차원별 groupKey
   let getGroupKey: (reportId: string) => string | null
   switch (dim) {
     case 'worker':
@@ -102,11 +129,10 @@ export default async function StatsPage({
       break
   }
 
-  // 집계
   const reportIds = reports.map((r) => r.id)
   const statsMap = await aggregateConnectionStats(supabase, reportIds, getGroupKey)
 
-  // 라벨 매핑 (worker → name, order/work → 자체값)
+  // 라벨 매핑
   const labelByKey = new Map<string, string>()
   if (dim === 'worker') {
     const workerIds = Array.from(statsMap.keys())
@@ -135,21 +161,49 @@ export default async function StatsPage({
     for (const key of statsMap.keys()) labelByKey.set(key, key)
   }
 
-  // 그룹 정렬: 시간 차원은 최근 → 과거 (내림차순), 그 외는 reportCount 내림차순
+  // 정렬 + TOP N
   type GroupEntry = { key: string; label: string; aggregation: Aggregation }
-  const entries: GroupEntry[] = Array.from(statsMap.entries()).map(([key, agg]) => ({
+  const allEntries: GroupEntry[] = Array.from(statsMap.entries()).map(([key, agg]) => ({
     key,
     label: labelByKey.get(key) ?? key,
     aggregation: agg,
   }))
   const isTimeDim = dim === 'year' || dim === 'month' || dim === 'day'
   if (isTimeDim) {
-    entries.sort((a, b) => (a.key < b.key ? 1 : a.key > b.key ? -1 : 0))
+    allEntries.sort((a, b) => (a.key < b.key ? 1 : a.key > b.key ? -1 : 0))
   } else {
-    entries.sort((a, b) => b.aggregation.reportCount - a.aggregation.reportCount)
+    allEntries.sort((a, b) => b.aggregation.reportCount - a.aggregation.reportCount)
+  }
+  const entries = limitNum > 0 ? allEntries.slice(0, limitNum) : allEntries
+  const truncated = allEntries.length > entries.length
+
+  const maxReports = entries.reduce((m, e) => Math.max(m, e.aggregation.reportCount), 0)
+  const totalReports = reports.length
+
+  // URL 빌더
+  const buildHref = (next: { dim?: Dim; from?: string | null; to?: string | null; limit?: number }) => {
+    const params = new URLSearchParams()
+    const fd = next.dim ?? dim
+    const ffrom = next.from === undefined ? from : next.from
+    const fto = next.to === undefined ? to : next.to
+    const flimit = next.limit === undefined ? limitNum : next.limit
+    if (fd !== DEFAULT_DIM) params.set('dim', fd)
+    if (ffrom) params.set('from', ffrom)
+    if (fto) params.set('to', fto)
+    // 차원의 defaultLimit 와 다를 때만 URL 에 표시
+    const defaultForDim = DIM_TABS.find((t) => t.key === fd)?.defaultLimit ?? 0
+    if (flimit !== defaultForDim) {
+      params.set('limit', flimit === 0 ? 'all' : String(flimit))
+    }
+    const qs = params.toString()
+    return qs ? `/works/stats?${qs}` : '/works/stats'
   }
 
-  const totalReports = reports.length
+  const csvBaseParams = new URLSearchParams()
+  csvBaseParams.set('dim', dim)
+  if (from) csvBaseParams.set('from', from)
+  if (to) csvBaseParams.set('to', to)
+  if (limitNum > 0) csvBaseParams.set('limit', String(limitNum))
 
   return (
     <main className="min-h-screen p-4 sm:p-6">
@@ -167,18 +221,23 @@ export default async function StatsPage({
             작업 통계
           </h1>
           <p className="mt-1 text-sm text-slate-500">
-            접속팀 작업의 자재·공종 합계 · 회사 전체 접속일보 {totalReports}건 기준
+            접속팀 작업의 자재·공종 합계 · 회사 접속일보 {totalReports}건
+            {(from || to) && (
+              <span className="ml-1">
+                · 기간 {from ?? '처음'} ~ {to ?? '오늘'}
+              </span>
+            )}
           </p>
         </header>
 
-        {/* 차원 탭 — 가로 스크롤 */}
+        {/* 차원 탭 */}
         <nav className="flex gap-1 overflow-x-auto rounded-xl bg-slate-100 p-1 text-sm">
           {DIM_TABS.map((t) => {
             const active = dim === t.key
             return (
               <Link
                 key={t.key}
-                href={`/works/stats?dim=${t.key}`}
+                href={buildHref({ dim: t.key, limit: t.defaultLimit })}
                 className={
                   'shrink-0 rounded-lg px-3 py-1.5 font-medium transition-colors ' +
                   (active
@@ -192,41 +251,149 @@ export default async function StatsPage({
           })}
         </nav>
 
+        {/* 기간 필터 폼 (GET — dim/limit 유지) */}
+        <form method="get" className="rounded-xl border border-slate-200 bg-white p-3 space-y-2">
+          <input type="hidden" name="dim" value={dim} />
+          {limitNum !== dimEntry.defaultLimit && (
+            <input type="hidden" name="limit" value={limitNum === 0 ? 'all' : String(limitNum)} />
+          )}
+          <div className="grid grid-cols-[1fr_auto_1fr] items-center gap-2">
+            <label className="block">
+              <span className="block text-[10px] font-medium text-slate-500 uppercase">시작</span>
+              <input
+                type="date"
+                name="from"
+                defaultValue={from ?? ''}
+                className="w-full rounded-md border border-slate-300 px-2 py-1.5 text-sm bg-white"
+              />
+            </label>
+            <span className="pt-4 text-xs text-slate-400">~</span>
+            <label className="block">
+              <span className="block text-[10px] font-medium text-slate-500 uppercase">종료</span>
+              <input
+                type="date"
+                name="to"
+                defaultValue={to ?? ''}
+                className="w-full rounded-md border border-slate-300 px-2 py-1.5 text-sm bg-white"
+              />
+            </label>
+          </div>
+          <div className="flex items-center gap-2">
+            <button
+              type="submit"
+              className="flex-1 rounded-md bg-slate-900 px-3 py-1.5 text-xs font-medium text-white hover:bg-slate-800"
+            >
+              기간 적용
+            </button>
+            {(from || to) && (
+              <Link
+                href={buildHref({ from: null, to: null })}
+                className="rounded-md border border-slate-300 px-3 py-1.5 text-xs font-medium text-slate-700 hover:bg-slate-50"
+              >
+                기간 지우기
+              </Link>
+            )}
+          </div>
+        </form>
+
+        {/* TOP N 토글 + CSV 다운로드 */}
+        <div className="flex items-center justify-between gap-2">
+          <nav className="flex gap-1 rounded-md border border-slate-200 bg-white p-0.5 text-xs">
+            {LIMIT_OPTIONS.map((n) => {
+              const active = limitNum === n
+              return (
+                <Link
+                  key={n}
+                  href={buildHref({ limit: n })}
+                  className={
+                    'rounded px-2 py-1 font-medium transition-colors ' +
+                    (active
+                      ? 'bg-slate-900 text-white'
+                      : 'text-slate-600 hover:bg-slate-50')
+                  }
+                >
+                  {n === 0 ? '전체' : `TOP ${n}`}
+                </Link>
+              )
+            })}
+          </nav>
+          <div className="flex gap-1.5">
+            <a
+              href={`/api/reports/work-stats?type=tasks&${csvBaseParams.toString()}`}
+              className="inline-flex items-center gap-1 rounded-md border border-slate-300 bg-white px-2.5 py-1.5 text-xs font-medium text-slate-700 hover:bg-slate-50"
+            >
+              <Download className="h-3.5 w-3.5" />
+              공종 CSV
+            </a>
+            <a
+              href={`/api/reports/work-stats?type=materials&${csvBaseParams.toString()}`}
+              className="inline-flex items-center gap-1 rounded-md border border-slate-300 bg-white px-2.5 py-1.5 text-xs font-medium text-slate-700 hover:bg-slate-50"
+            >
+              <Download className="h-3.5 w-3.5" />
+              자재 CSV
+            </a>
+          </div>
+        </div>
+
+        {truncated && (
+          <p className="rounded-md bg-amber-50 border border-amber-200 px-3 py-2 text-xs text-amber-800">
+            {dimEntry.label} 그룹 {allEntries.length}개 중 상위 {entries.length}개만 표시. CSV
+            다운로드는 동일하게 상위 {entries.length}개만 포함됩니다. 전체 보려면 「전체」 클릭.
+          </p>
+        )}
+
         {entries.length === 0 ? (
           <div className="rounded-2xl bg-white border border-slate-200 p-8 text-center">
             <p className="text-sm text-slate-500">
-              집계할 접속일보가 없습니다. 접속팀 작업이 등록되고 일보가 작성되면 통계가 표시됩니다.
+              집계할 접속일보가 없습니다. 접속팀 작업 등록·일보 작성 후 다시 확인하세요.
             </p>
           </div>
         ) : (
           <ul className="space-y-3">
-            {entries.map((entry) => (
-              <li key={entry.key}>
-                <details className="group rounded-2xl bg-white border border-slate-200 overflow-hidden">
-                  <summary className="cursor-pointer list-none p-4 hover:bg-slate-50">
-                    <div className="flex items-center justify-between gap-3">
-                      <div className="min-w-0 flex-1">
-                        <p className="font-semibold text-slate-900 truncate">{entry.label}</p>
-                        <p className="mt-0.5 text-xs text-slate-500">
-                          접속일보 {entry.aggregation.reportCount}건 ·{' '}
-                          공종 {entry.aggregation.tasks.length}종 ·{' '}
-                          자재 {entry.aggregation.materials.length}종
-                        </p>
+            {entries.map((entry, idx) => {
+              const ratio = maxReports > 0 ? entry.aggregation.reportCount / maxReports : 0
+              return (
+                <li key={entry.key}>
+                  <details className="group rounded-2xl bg-white border border-slate-200 overflow-hidden">
+                    <summary className="cursor-pointer list-none p-4 hover:bg-slate-50">
+                      <div className="flex items-start gap-3">
+                        <span className="shrink-0 mt-0.5 inline-flex h-6 min-w-6 items-center justify-center rounded-md bg-slate-100 px-1.5 text-xs font-semibold text-slate-600 tabular-nums">
+                          {idx + 1}
+                        </span>
+                        <div className="min-w-0 flex-1 space-y-1.5">
+                          <div className="flex items-center justify-between gap-2">
+                            <p className="font-semibold text-slate-900 truncate">{entry.label}</p>
+                            <span className="shrink-0 text-sm font-semibold tabular-nums text-slate-900">
+                              {entry.aggregation.reportCount}건
+                            </span>
+                          </div>
+                          <div className="h-1.5 w-full rounded-full bg-slate-100 overflow-hidden">
+                            <div
+                              className="h-full bg-emerald-500"
+                              style={{ width: `${Math.max(2, Math.round(ratio * 100))}%` }}
+                            />
+                          </div>
+                          <p className="text-xs text-slate-500">
+                            공종 {entry.aggregation.tasks.length}종 · 자재{' '}
+                            {entry.aggregation.materials.length}종
+                            <span className="ml-1.5 text-slate-400 group-open:hidden">· 펼치기 ▾</span>
+                            <span className="ml-1.5 text-slate-400 hidden group-open:inline">· 접기 ▴</span>
+                          </p>
+                        </div>
                       </div>
-                      <span className="shrink-0 text-xs text-slate-400 group-open:hidden">펼치기 ▾</span>
-                      <span className="shrink-0 text-xs text-slate-400 hidden group-open:inline">접기 ▴</span>
+                    </summary>
+                    <div className="border-t border-slate-100">
+                      <AggregationCard
+                        title="합계"
+                        subtitle={entry.label}
+                        aggregation={entry.aggregation}
+                        showBars
+                      />
                     </div>
-                  </summary>
-                  <div className="border-t border-slate-100">
-                    <AggregationCard
-                      title="합계"
-                      subtitle={entry.label}
-                      aggregation={entry.aggregation}
-                    />
-                  </div>
-                </details>
-              </li>
-            ))}
+                  </details>
+                </li>
+              )
+            })}
           </ul>
         )}
       </div>
