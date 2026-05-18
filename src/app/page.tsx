@@ -1,6 +1,7 @@
 import Link from 'next/link'
 import { createClient } from '@/lib/supabase/server'
 import { signOut } from './login/actions'
+import VehicleStatusList from './VehicleStatusList'
 
 type Permission = 'worker' | 'foreman' | 'admin' | 'ceo'
 
@@ -119,27 +120,73 @@ export default async function Home() {
   const checkedIn = !!today?.check_in_at
   const checkedOut = !!today?.check_out_at
 
-  // 차량 — 내가 현재 사용 중인 운행 (있으면)
-  const { data: myVehicleTripRow } = await supabase
-    .from('vehicle_trips')
-    .select('id, vehicle_id, departed_at')
-    .eq('driver_employee_id', employee.id)
-    .is('returned_at', null)
-    .maybeSingle()
-  const myVehicleTrip = myVehicleTripRow as
-    | { id: string; vehicle_id: string; departed_at: string }
-    | null
-
-  let myVehicleName: string | null = null
-  if (myVehicleTrip) {
-    const { data: v } = await supabase
+  // 차량 — 회사 전 차량 + 현재 운행 중인 행 + 차량별 마지막 반납 km(placeholder 용)
+  const [vehiclesRes, activeTripsRes, recentReturnedRes] = await Promise.all([
+    supabase
       .from('vehicles')
-      .select('plate_number, name')
-      .eq('id', myVehicleTrip.vehicle_id)
-      .maybeSingle()
-    const vRow = v as { plate_number: string; name: string } | null
-    if (vRow) myVehicleName = `${vRow.plate_number} · ${vRow.name}`
+      .select('id, plate_number, name, is_active')
+      .eq('company_id', employee.company_id)
+      .order('is_active', { ascending: false })
+      .order('plate_number'),
+    supabase
+      .from('vehicle_trips')
+      .select(
+        'id, vehicle_id, departed_at, driver_employee_id, start_odometer_km, purpose, employees!driver_employee_id(name)',
+      )
+      .eq('company_id', employee.company_id)
+      .is('returned_at', null),
+    supabase
+      .from('vehicle_trips')
+      .select('vehicle_id, end_odometer_km, returned_at')
+      .eq('company_id', employee.company_id)
+      .not('returned_at', 'is', null)
+      .order('returned_at', { ascending: false })
+      .limit(50),
+  ])
+
+  type VehicleRow = { id: string; plate_number: string; name: string; is_active: boolean }
+  type ActiveTrip = {
+    id: string
+    vehicle_id: string
+    departed_at: string
+    driver_employee_id: string
+    start_odometer_km: number | null
+    purpose: string | null
+    employees: { name: string }[] | null
   }
+  type RecentReturned = { vehicle_id: string; end_odometer_km: number | null; returned_at: string }
+  const vehicles = (vehiclesRes.data ?? []) as VehicleRow[]
+  const activeTrips = (activeTripsRes.data ?? []) as unknown as ActiveTrip[]
+  const tripByVehicleId = new Map(activeTrips.map((t) => [t.vehicle_id, t]))
+
+  // 차량별 가장 최근 반납 km — 회사 전체 returned_at desc 정렬 50건에서 vehicle_id 별 첫 행 추출
+  const lastEndKmByVehicleId = new Map<string, number | null>()
+  for (const t of (recentReturnedRes.data ?? []) as RecentReturned[]) {
+    if (!lastEndKmByVehicleId.has(t.vehicle_id)) {
+      lastEndKmByVehicleId.set(t.vehicle_id, t.end_odometer_km)
+    }
+  }
+
+  const myVehicleTrip = activeTrips.find((t) => t.driver_employee_id === employee.id) ?? null
+  const myVehicle = myVehicleTrip ? vehicles.find((v) => v.id === myVehicleTrip.vehicle_id) ?? null : null
+  const myVehicleName = myVehicle ? `${myVehicle.plate_number} · ${myVehicle.name}` : null
+
+  // 정렬: 사용중 → 대기 → 비활성, 그 안에서 plate_number
+  const vehicleStatusRows = vehicles
+    .map((v) => {
+      const trip = tripByVehicleId.get(v.id) ?? null
+      const status: 'in_use' | 'idle' | 'inactive' = !v.is_active
+        ? 'inactive'
+        : trip
+          ? 'in_use'
+          : 'idle'
+      return { vehicle: v, trip, status }
+    })
+    .sort((a, b) => {
+      const order = { in_use: 0, idle: 1, inactive: 2 } as const
+      if (order[a.status] !== order[b.status]) return order[a.status] - order[b.status]
+      return a.vehicle.plate_number.localeCompare(b.vehicle.plate_number)
+    })
 
   // 결재 대기 건수 (홈 배지용)
   const canApprove = employee.permission !== 'worker'
@@ -227,11 +274,12 @@ export default async function Home() {
           </Link>
         </section>
 
-        <section className="rounded-2xl bg-white shadow-sm border border-slate-200 p-6 space-y-3">
+        <section className="rounded-2xl bg-white shadow-sm border border-slate-200 p-6 space-y-4">
           <h2 className="text-sm font-medium text-slate-500 uppercase tracking-wider">
             업무용 차량
           </h2>
-          {myVehicleTrip ? (
+
+          {myVehicleTrip && (
             <div className="space-y-2">
               <p className="text-sm text-slate-900">
                 사용 중: <span className="font-medium">{myVehicleName ?? '?'}</span>
@@ -246,14 +294,30 @@ export default async function Home() {
                 반납하기 →
               </Link>
             </div>
-          ) : (
-            <Link
-              href="/vehicles"
-              className="block rounded-lg border border-slate-200 hover:border-slate-900 px-4 py-3 text-sm font-medium text-slate-900 text-center"
-            >
-              차량 출고·반납 →
-            </Link>
           )}
+
+          <VehicleStatusList
+            rows={vehicleStatusRows.map(({ vehicle, trip, status }) => ({
+              vehicleId: vehicle.id,
+              plateNumber: vehicle.plate_number,
+              name: vehicle.name,
+              status,
+              driverName: trip?.employees?.[0]?.name ?? null,
+              departedAt: trip?.departed_at ?? null,
+              startOdometerKm: trip?.start_odometer_km ?? null,
+              purpose: trip?.purpose ?? null,
+              isMine: trip?.driver_employee_id === employee.id,
+              lastEndOdometerKm: lastEndKmByVehicleId.get(vehicle.id) ?? null,
+            }))}
+            hasMyActive={!!myVehicleTrip}
+          />
+
+          <Link
+            href="/vehicles"
+            className="block rounded-lg border border-slate-200 hover:border-slate-900 px-4 py-3 text-sm font-medium text-slate-900 text-center"
+          >
+            전체 차량 관리 →
+          </Link>
         </section>
 
         <section className="rounded-2xl bg-white shadow-sm border border-slate-200 p-6 space-y-3">

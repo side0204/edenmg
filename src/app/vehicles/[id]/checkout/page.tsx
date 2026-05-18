@@ -20,13 +20,10 @@ type LastTripRow = {
 
 export default async function CheckoutPage({
   params,
-  searchParams,
 }: {
   params: Promise<{ id: string }>
-  searchParams: Promise<{ error?: string }>
 }) {
   const { id } = await params
-  const { error } = await searchParams
   const supabase = await createClient()
 
   const {
@@ -52,7 +49,7 @@ export default async function CheckoutPage({
 
   // 차량이 비활성이거나 이미 사용 중이면 목록으로
   if (!vehicle.is_active) {
-    redirect('/vehicles?error=' + encodeURIComponent('비활성 차량입니다'))
+    redirect('/vehicles?err=' + encodeURIComponent('비활성 차량입니다'))
   }
 
   const { data: activeRow } = await supabase
@@ -62,7 +59,7 @@ export default async function CheckoutPage({
     .is('returned_at', null)
     .maybeSingle()
   if (activeRow) {
-    redirect('/vehicles?error=' + encodeURIComponent('이미 사용 중인 차량입니다'))
+    redirect('/vehicles?err=' + encodeURIComponent('이미 사용 중인 차량입니다'))
   }
 
   // 본인이 이미 다른 차량 사용 중이면 차단
@@ -73,7 +70,7 @@ export default async function CheckoutPage({
     .is('returned_at', null)
     .maybeSingle()
   if (myActiveRow) {
-    redirect('/vehicles?error=' + encodeURIComponent('이미 다른 차량을 사용 중입니다. 먼저 반납하세요.'))
+    redirect('/vehicles?err=' + encodeURIComponent('이미 다른 차량을 사용 중입니다. 먼저 반납하세요.'))
   }
 
   // 마지막 반납 km — placeholder 로 표시
@@ -100,11 +97,6 @@ export default async function CheckoutPage({
           </p>
         </header>
 
-        {error && (
-          <p className="text-sm text-red-600 bg-red-50 border border-red-200 rounded-lg p-3">
-            {error}
-          </p>
-        )}
 
         <form
           action={checkoutVehicle}

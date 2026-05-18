@@ -23,13 +23,10 @@ type SiteRow = {
 
 export default async function EditSitePage({
   params,
-  searchParams,
 }: {
   params: Promise<{ id: string }>
-  searchParams: Promise<{ error?: string }>
 }) {
   const { id } = await params
-  const { error } = await searchParams
   const supabase = await createClient()
 
   const {
@@ -83,11 +80,6 @@ export default async function EditSitePage({
           <p className="mt-1 text-xs text-slate-500">{site.name}</p>
         </header>
 
-        {error && (
-          <p className="text-sm text-red-600 bg-red-50 border border-red-200 rounded-lg p-3">
-            {error}
-          </p>
-        )}
 
         <SiteForm
           defaults={defaults}

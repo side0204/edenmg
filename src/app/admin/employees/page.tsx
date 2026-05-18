@@ -26,12 +26,7 @@ type EmployeeRow = {
   created_at: string
 }
 
-export default async function EmployeesPage({
-  searchParams,
-}: {
-  searchParams: Promise<{ invited?: string; updated?: string; error?: string }>
-}) {
-  const { invited, updated, error: actionError } = await searchParams
+export default async function EmployeesPage() {
   const supabase = await createClient()
 
   const {
@@ -74,24 +69,6 @@ export default async function EmployeesPage({
             + 초대
           </Link>
         </header>
-
-        {invited && (
-          <p className="text-sm text-emerald-700 bg-emerald-50 border border-emerald-200 rounded-lg p-3">
-            <span className="font-medium">{invited}</span> 주소로 초대 메일을 보냈습니다. 사용자가 링크를 클릭해 비밀번호를 설정하면 가입이 완료됩니다.
-          </p>
-        )}
-
-        {updated && (
-          <p className="text-sm text-emerald-700 bg-emerald-50 border border-emerald-200 rounded-lg p-3">
-            변경되었습니다.
-          </p>
-        )}
-
-        {actionError && (
-          <p className="text-sm text-red-600 bg-red-50 border border-red-200 rounded-lg p-3">
-            {actionError}
-          </p>
-        )}
 
         {listError && (
           <p className="text-sm text-red-600 bg-red-50 border border-red-200 rounded-lg p-3">

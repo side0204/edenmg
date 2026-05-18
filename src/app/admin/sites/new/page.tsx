@@ -21,12 +21,7 @@ const defaults: SiteFormValues = {
   notes: null,
 }
 
-export default async function NewSitePage({
-  searchParams,
-}: {
-  searchParams: Promise<{ error?: string }>
-}) {
-  const { error } = await searchParams
+export default async function NewSitePage() {
   const supabase = await createClient()
 
   const {
@@ -56,11 +51,6 @@ export default async function NewSitePage({
           <h1 className="mt-1 text-2xl font-bold text-slate-900">현장 등록</h1>
         </header>
 
-        {error && (
-          <p className="text-sm text-red-600 bg-red-50 border border-red-200 rounded-lg p-3">
-            {error}
-          </p>
-        )}
 
         <SiteForm
           defaults={defaults}

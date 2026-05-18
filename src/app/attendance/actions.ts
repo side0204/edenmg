@@ -54,7 +54,7 @@ async function requireEmployee() {
 
   const me = meRow as { id: string; company_id: string; is_active: boolean } | null
   if (!me || !me.is_active) {
-    redirect('/attendance?error=' + encodeURIComponent('계정이 활성 상태가 아닙니다'))
+    redirect('/attendance?err=' + encodeURIComponent('계정이 활성 상태가 아닙니다'))
   }
   return { supabase, me }
 }
@@ -62,7 +62,7 @@ async function requireEmployee() {
 export async function checkIn(formData: FormData) {
   const parsed = parseGpsForm(formData)
   const errMsg = validateGps(parsed)
-  if (errMsg) redirect('/attendance?error=' + encodeURIComponent(errMsg))
+  if (errMsg) redirect('/attendance?err=' + encodeURIComponent(errMsg))
 
   const { supabase, me } = await requireEmployee()
   const workDate = todayInSeoul()
@@ -77,7 +77,7 @@ export async function checkIn(formData: FormData) {
   const existing = existingRow as { id: string; check_in_at: string | null } | null
 
   if (existing && existing.check_in_at) {
-    redirect('/attendance?error=' + encodeURIComponent('이미 출근 처리됐습니다'))
+    redirect('/attendance?err=' + encodeURIComponent('이미 출근 처리됐습니다'))
   }
 
   const payload = {
@@ -96,18 +96,18 @@ export async function checkIn(formData: FormData) {
     : await supabase.from('attendances').insert(payload)
 
   if (error) {
-    redirect('/attendance?error=' + encodeURIComponent('출근 기록 실패: ' + error.message))
+    redirect('/attendance?err=' + encodeURIComponent('출근 기록 실패: ' + error.message))
   }
 
   revalidatePath('/attendance')
   revalidatePath('/')
-  redirect('/attendance?action=in')
+  redirect('/attendance?ok=' + encodeURIComponent('출근 처리됐습니다'))
 }
 
 export async function checkOut(formData: FormData) {
   const parsed = parseGpsForm(formData)
   const errMsg = validateGps(parsed)
-  if (errMsg) redirect('/attendance?error=' + encodeURIComponent(errMsg))
+  if (errMsg) redirect('/attendance?err=' + encodeURIComponent(errMsg))
 
   const { supabase, me } = await requireEmployee()
   const workDate = todayInSeoul()
@@ -121,10 +121,10 @@ export async function checkOut(formData: FormData) {
   const existing = row as { id: string; check_in_at: string | null; check_out_at: string | null } | null
 
   if (!existing || !existing.check_in_at) {
-    redirect('/attendance?error=' + encodeURIComponent('먼저 출근 처리부터 해주세요'))
+    redirect('/attendance?err=' + encodeURIComponent('먼저 출근 처리부터 해주세요'))
   }
   if (existing.check_out_at) {
-    redirect('/attendance?error=' + encodeURIComponent('이미 퇴근 처리됐습니다'))
+    redirect('/attendance?err=' + encodeURIComponent('이미 퇴근 처리됐습니다'))
   }
 
   const { error } = await supabase
@@ -138,10 +138,10 @@ export async function checkOut(formData: FormData) {
     .eq('id', existing.id)
 
   if (error) {
-    redirect('/attendance?error=' + encodeURIComponent('퇴근 기록 실패: ' + error.message))
+    redirect('/attendance?err=' + encodeURIComponent('퇴근 기록 실패: ' + error.message))
   }
 
   revalidatePath('/attendance')
   revalidatePath('/')
-  redirect('/attendance?action=out')
+  redirect('/attendance?ok=' + encodeURIComponent('퇴근 처리됐습니다. 수고하셨습니다'))
 }

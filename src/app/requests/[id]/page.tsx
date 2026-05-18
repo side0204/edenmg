@@ -67,18 +67,10 @@ const ACTION_COLOR: Record<LeaveAction, string> = {
 
 export default async function RequestDetailPage({
   params,
-  searchParams,
 }: {
   params: Promise<{ id: string }>
-  searchParams: Promise<{
-    cancelled?: string
-    error?: string
-    attachment?: string
-    attachment_removed?: string
-  }>
 }) {
   const { id } = await params
-  const { cancelled, error, attachment: attachmentFlag, attachment_removed } = await searchParams
   const supabase = await createClient()
 
   const {
@@ -143,27 +135,6 @@ export default async function RequestDetailPage({
             )}
           </h1>
         </header>
-
-        {cancelled && (
-          <p className="text-sm text-emerald-700 bg-emerald-50 border border-emerald-200 rounded-lg p-3">
-            신청을 취소했습니다.
-          </p>
-        )}
-        {attachmentFlag && (
-          <p className="text-sm text-emerald-700 bg-emerald-50 border border-emerald-200 rounded-lg p-3">
-            첨부파일을 저장했습니다.
-          </p>
-        )}
-        {attachment_removed && (
-          <p className="text-sm text-emerald-700 bg-emerald-50 border border-emerald-200 rounded-lg p-3">
-            첨부파일을 삭제했습니다.
-          </p>
-        )}
-        {error && (
-          <p className="text-sm text-red-600 bg-red-50 border border-red-200 rounded-lg p-3">
-            {error}
-          </p>
-        )}
 
         <section className="rounded-2xl bg-white border border-slate-200 p-5 space-y-3">
           <div className="flex items-center justify-between">

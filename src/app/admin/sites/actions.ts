@@ -73,7 +73,7 @@ async function requireAdmin() {
   const me = meRow as { id: string; company_id: string; permission: Permission } | null
 
   if (!me || (me.permission !== 'admin' && me.permission !== 'ceo')) {
-    redirect('/admin/sites?error=' + encodeURIComponent('권한이 없습니다'))
+    redirect('/admin/sites?err=' + encodeURIComponent('권한이 없습니다'))
   }
   return { supabase, me }
 }
@@ -82,7 +82,7 @@ export async function createSite(formData: FormData) {
   const parsed = parseSiteForm(formData)
   const errMsg = validate(parsed)
   if (errMsg) {
-    redirect('/admin/sites/new?error=' + encodeURIComponent(errMsg))
+    redirect('/admin/sites/new?err=' + encodeURIComponent(errMsg))
   }
 
   const { supabase, me } = await requireAdmin()
@@ -93,21 +93,21 @@ export async function createSite(formData: FormData) {
   })
 
   if (error) {
-    redirect('/admin/sites/new?error=' + encodeURIComponent('등록 실패: ' + error.message))
+    redirect('/admin/sites/new?err=' + encodeURIComponent('등록 실패: ' + error.message))
   }
 
   revalidatePath('/admin/sites')
-  redirect('/admin/sites?created=' + encodeURIComponent(parsed.name))
+  redirect('/admin/sites?ok=' + encodeURIComponent(`${parsed.name} 현장을 등록했습니다`))
 }
 
 export async function updateSite(formData: FormData) {
   const id = String(formData.get('id') ?? '').trim()
-  if (!id) redirect('/admin/sites?error=' + encodeURIComponent('현장 id 가 없습니다'))
+  if (!id) redirect('/admin/sites?err=' + encodeURIComponent('현장 id 가 없습니다'))
 
   const parsed = parseSiteForm(formData)
   const errMsg = validate(parsed)
   if (errMsg) {
-    redirect(`/admin/sites/${id}?error=` + encodeURIComponent(errMsg))
+    redirect(`/admin/sites/${id}?err=` + encodeURIComponent(errMsg))
   }
 
   const { supabase } = await requireAdmin()
@@ -115,10 +115,10 @@ export async function updateSite(formData: FormData) {
   const { error } = await supabase.from('sites').update(parsed).eq('id', id)
 
   if (error) {
-    redirect(`/admin/sites/${id}?error=` + encodeURIComponent('수정 실패: ' + error.message))
+    redirect(`/admin/sites/${id}?err=` + encodeURIComponent('수정 실패: ' + error.message))
   }
 
   revalidatePath('/admin/sites')
   revalidatePath(`/admin/sites/${id}`)
-  redirect('/admin/sites?updated=' + encodeURIComponent(parsed.name))
+  redirect('/admin/sites?ok=' + encodeURIComponent(`${parsed.name} 현장 정보를 수정했습니다`))
 }

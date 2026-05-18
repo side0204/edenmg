@@ -21,12 +21,7 @@ type RequestRow = {
   created_at: string
 }
 
-export default async function MyRequestsPage({
-  searchParams,
-}: {
-  searchParams: Promise<{ submitted?: string; cancelled?: string; error?: string }>
-}) {
-  const { submitted, error } = await searchParams
+export default async function MyRequestsPage() {
   const supabase = await createClient()
 
   const {
@@ -69,16 +64,6 @@ export default async function MyRequestsPage({
           </Link>
         </header>
 
-        {submitted && (
-          <p className="text-sm text-emerald-700 bg-emerald-50 border border-emerald-200 rounded-lg p-3">
-            신청이 제출됐습니다. 결재 진행 상황은 각 항목을 눌러 확인하세요.
-          </p>
-        )}
-        {error && (
-          <p className="text-sm text-red-600 bg-red-50 border border-red-200 rounded-lg p-3">
-            {error}
-          </p>
-        )}
         {listError && (
           <p className="text-sm text-red-600 bg-red-50 border border-red-200 rounded-lg p-3">
             목록을 불러오지 못했습니다: {listError.message}

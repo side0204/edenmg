@@ -8,10 +8,10 @@ export async function setPassword(formData: FormData) {
   const confirm = String(formData.get('confirm') ?? '')
 
   if (password.length < 8) {
-    redirect('/welcome?error=' + encodeURIComponent('비밀번호는 8자 이상이어야 합니다'))
+    redirect('/welcome?err=' + encodeURIComponent('비밀번호는 8자 이상이어야 합니다'))
   }
   if (password !== confirm) {
-    redirect('/welcome?error=' + encodeURIComponent('비밀번호가 일치하지 않습니다'))
+    redirect('/welcome?err=' + encodeURIComponent('비밀번호가 일치하지 않습니다'))
   }
 
   const supabase = await createClient()
@@ -24,7 +24,7 @@ export async function setPassword(formData: FormData) {
 
   const { error } = await supabase.auth.updateUser({ password })
   if (error) {
-    redirect('/welcome?error=' + encodeURIComponent('비밀번호 설정 실패: ' + error.message))
+    redirect('/welcome?err=' + encodeURIComponent('비밀번호 설정 실패: ' + error.message))
   }
 
   // employees.accepted_at 갱신 — update_self RLS 정책이 본인 행만 허용.

@@ -42,18 +42,7 @@ const TIME_FMT = new Intl.DateTimeFormat('ko-KR', {
   hour12: false,
 })
 
-export default async function VehiclesPage({
-  searchParams,
-}: {
-  searchParams: Promise<{
-    created?: string
-    updated?: string
-    checked_out?: string
-    returned?: string
-    error?: string
-  }>
-}) {
-  const sp = await searchParams
+export default async function VehiclesPage() {
   const supabase = await createClient()
 
   const {
@@ -158,23 +147,6 @@ export default async function VehiclesPage({
           </div>
         </header>
 
-        {sp.created && (
-          <Banner kind="ok">
-            <span className="font-medium">{sp.created}</span> 차량을 등록했습니다.
-          </Banner>
-        )}
-        {sp.updated && (
-          <Banner kind="ok">
-            <span className="font-medium">{sp.updated}</span> 차량 정보를 수정했습니다.
-          </Banner>
-        )}
-        {sp.checked_out && (
-          <Banner kind="ok">
-            <span className="font-medium">{sp.checked_out}</span> 출고 완료. 운행 마치고 꼭 반납하세요.
-          </Banner>
-        )}
-        {sp.returned && <Banner kind="ok">반납 처리됐습니다.</Banner>}
-        {sp.error && <Banner kind="err">{sp.error}</Banner>}
         {vErr && <Banner kind="err">목록을 불러오지 못했습니다: {vErr.message}</Banner>}
 
         {/* 차량 카드 리스트 */}

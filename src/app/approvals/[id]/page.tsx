@@ -63,13 +63,10 @@ const ACTION_COLOR: Record<LeaveAction, string> = {
 
 export default async function ApprovalDetailPage({
   params,
-  searchParams,
 }: {
   params: Promise<{ id: string }>
-  searchParams: Promise<{ error?: string }>
 }) {
   const { id } = await params
-  const { error } = await searchParams
   const supabase = await createClient()
 
   const {
@@ -85,7 +82,7 @@ export default async function ApprovalDetailPage({
   const me = meRow as
     | { id: string; company_id: string; permission: Permission; is_active: boolean }
     | null
-  if (!me || !me.is_active) redirect('/?error=' + encodeURIComponent('계정이 활성 상태가 아닙니다'))
+  if (!me || !me.is_active) redirect('/?err=' + encodeURIComponent('계정이 활성 상태가 아닙니다'))
   if (me.permission === 'worker') notFound()
 
   const { data: reqRow } = await supabase
@@ -144,11 +141,6 @@ export default async function ApprovalDetailPage({
           </h1>
         </header>
 
-        {error && (
-          <p className="text-sm text-red-600 bg-red-50 border border-red-200 rounded-lg p-3">
-            {error}
-          </p>
-        )}
 
         <section className="rounded-2xl bg-white border border-slate-200 p-5 space-y-3">
           <div className="flex items-center justify-between">

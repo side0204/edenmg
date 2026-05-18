@@ -1,5 +1,8 @@
 import type { Metadata } from "next";
 import { Geist, Geist_Mono } from "next/font/google";
+import { Suspense } from "react";
+import { Toaster } from "sonner";
+import ToastBridge from "@/components/ToastBridge";
 import "./globals.css";
 
 const geistSans = Geist({
@@ -27,7 +30,23 @@ export default function RootLayout({
       lang="ko"
       className={`${geistSans.variable} ${geistMono.variable} h-full antialiased`}
     >
-      <body className="min-h-full flex flex-col bg-slate-50 text-slate-900">{children}</body>
+      <body className="min-h-full flex flex-col bg-slate-50 text-slate-900">
+        {children}
+        <Toaster
+          position="bottom-center"
+          richColors
+          closeButton
+          duration={3500}
+          toastOptions={{
+            classNames: {
+              toast: 'rounded-xl border shadow-lg',
+            },
+          }}
+        />
+        <Suspense fallback={null}>
+          <ToastBridge />
+        </Suspense>
+      </body>
     </html>
   );
 }

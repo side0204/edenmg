@@ -32,13 +32,10 @@ const TIME_FMT = new Intl.DateTimeFormat('ko-KR', {
 
 export default async function ReturnPage({
   params,
-  searchParams,
 }: {
   params: Promise<{ id: string }>
-  searchParams: Promise<{ error?: string }>
 }) {
   const { id } = await params
-  const { error } = await searchParams
   const supabase = await createClient()
 
   const {
@@ -72,12 +69,12 @@ export default async function ReturnPage({
   const trip = tripData as ActiveTripRow | null
 
   if (!trip) {
-    redirect('/vehicles?error=' + encodeURIComponent('이 차량은 사용 중이 아닙니다'))
+    redirect('/vehicles?err=' + encodeURIComponent('이 차량은 사용 중이 아닙니다'))
   }
 
   const isAdmin = me.permission === 'admin' || me.permission === 'ceo'
   if (trip.driver_employee_id !== me.id && !isAdmin) {
-    redirect('/vehicles?error=' + encodeURIComponent('본인 운행만 반납할 수 있습니다'))
+    redirect('/vehicles?err=' + encodeURIComponent('본인 운행만 반납할 수 있습니다'))
   }
 
   return (
@@ -106,11 +103,6 @@ export default async function ReturnPage({
           {trip.purpose && <p className="text-slate-500">목적: {trip.purpose}</p>}
         </div>
 
-        {error && (
-          <p className="text-sm text-red-600 bg-red-50 border border-red-200 rounded-lg p-3">
-            {error}
-          </p>
-        )}
 
         <form
           action={returnVehicle}

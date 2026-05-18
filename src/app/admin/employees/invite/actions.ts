@@ -34,10 +34,10 @@ export async function inviteEmployee(formData: FormData) {
   const workType = pickOptional(formData, 'work_type', WORK_TYPE_VALUES)
 
   if (!name || !email) {
-    redirect('/admin/employees/invite?error=' + encodeURIComponent('이름과 이메일은 필수입니다'))
+    redirect('/admin/employees/invite?err=' + encodeURIComponent('이름과 이메일은 필수입니다'))
   }
   if (!PERMISSION_VALUES.includes(permissionInput)) {
-    redirect('/admin/employees/invite?error=' + encodeURIComponent('권한 값이 올바르지 않습니다'))
+    redirect('/admin/employees/invite?err=' + encodeURIComponent('권한 값이 올바르지 않습니다'))
   }
 
   const supabase = await createClient()
@@ -56,7 +56,7 @@ export async function inviteEmployee(formData: FormData) {
   const me = meRow as { permission: Permission; company_id: string; is_active: boolean } | null
 
   if (!me || !me.is_active || (me.permission !== 'admin' && me.permission !== 'ceo')) {
-    redirect('/admin/employees/invite?error=' + encodeURIComponent('초대 권한이 없습니다'))
+    redirect('/admin/employees/invite?err=' + encodeURIComponent('초대 권한이 없습니다'))
   }
 
   const { data: dup } = await supabase
@@ -65,7 +65,7 @@ export async function inviteEmployee(formData: FormData) {
     .eq('email', email)
     .maybeSingle()
   if (dup) {
-    redirect('/admin/employees/invite?error=' + encodeURIComponent('이미 등록된 이메일입니다'))
+    redirect('/admin/employees/invite?err=' + encodeURIComponent('이미 등록된 이메일입니다'))
   }
 
   let admin
@@ -73,7 +73,7 @@ export async function inviteEmployee(formData: FormData) {
     admin = createAdminClient()
   } catch (e) {
     const msg = e instanceof Error ? e.message : '초대 클라이언트 생성 실패'
-    redirect('/admin/employees/invite?error=' + encodeURIComponent(msg))
+    redirect('/admin/employees/invite?err=' + encodeURIComponent(msg))
   }
 
   // Supabase Dashboard → Authentication → URL Configuration → Redirect URLs 에
@@ -98,7 +98,7 @@ export async function inviteEmployee(formData: FormData) {
   })
 
   if (error) {
-    redirect('/admin/employees/invite?error=' + encodeURIComponent('초대 발송 실패: ' + error.message))
+    redirect('/admin/employees/invite?err=' + encodeURIComponent('초대 발송 실패: ' + error.message))
   }
 
   // 초대 성공 → employees 행은 트리거가 자동 생성. phone 만 별도 업데이트
@@ -112,5 +112,5 @@ export async function inviteEmployee(formData: FormData) {
   }
 
   revalidatePath('/admin/employees')
-  redirect('/admin/employees?invited=' + encodeURIComponent(email))
+  redirect('/admin/employees?ok=' + encodeURIComponent(`${email} 초대를 발송했습니다`))
 }

@@ -14,12 +14,7 @@ const defaults: VehicleFormValues = {
   notes: null,
 }
 
-export default async function NewVehiclePage({
-  searchParams,
-}: {
-  searchParams: Promise<{ error?: string }>
-}) {
-  const { error } = await searchParams
+export default async function NewVehiclePage() {
   const supabase = await createClient()
 
   const {
@@ -47,11 +42,6 @@ export default async function NewVehiclePage({
           <h1 className="mt-1 text-2xl font-bold text-slate-900">차량 등록</h1>
         </header>
 
-        {error && (
-          <p className="text-sm text-red-600 bg-red-50 border border-red-200 rounded-lg p-3">
-            {error}
-          </p>
-        )}
 
         <VehicleForm defaults={defaults} action={createVehicle} submitLabel="차량 등록" />
       </div>

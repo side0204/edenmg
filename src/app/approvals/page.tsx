@@ -24,12 +24,7 @@ type PendingRow = {
   created_at: string
 }
 
-export default async function ApprovalsPage({
-  searchParams,
-}: {
-  searchParams: Promise<{ done?: string; error?: string }>
-}) {
-  const { done, error } = await searchParams
+export default async function ApprovalsPage() {
   const supabase = await createClient()
 
   const {
@@ -45,7 +40,7 @@ export default async function ApprovalsPage({
   const me = meRow as
     | { id: string; company_id: string; permission: Permission; is_active: boolean }
     | null
-  if (!me || !me.is_active) redirect('/?error=' + encodeURIComponent('계정이 활성 상태가 아닙니다'))
+  if (!me || !me.is_active) redirect('/?err=' + encodeURIComponent('계정이 활성 상태가 아닙니다'))
   if (me.permission === 'worker') notFound()
 
   const isAdmin = me.permission === 'admin' || me.permission === 'ceo'
@@ -92,16 +87,6 @@ export default async function ApprovalsPage({
           </p>
         </header>
 
-        {done && (
-          <p className="text-sm text-emerald-700 bg-emerald-50 border border-emerald-200 rounded-lg p-3">
-            처리 완료 — <span className="font-medium">{done}</span>
-          </p>
-        )}
-        {error && (
-          <p className="text-sm text-red-600 bg-red-50 border border-red-200 rounded-lg p-3">
-            {error}
-          </p>
-        )}
         {listError && (
           <p className="text-sm text-red-600 bg-red-50 border border-red-200 rounded-lg p-3">
             목록을 불러오지 못했습니다: {listError.message}

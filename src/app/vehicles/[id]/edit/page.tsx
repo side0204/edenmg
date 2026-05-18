@@ -16,13 +16,10 @@ type VehicleRow = {
 
 export default async function EditVehiclePage({
   params,
-  searchParams,
 }: {
   params: Promise<{ id: string }>
-  searchParams: Promise<{ error?: string }>
 }) {
   const { id } = await params
-  const { error } = await searchParams
   const supabase = await createClient()
 
   const {
@@ -70,11 +67,6 @@ export default async function EditVehiclePage({
           </p>
         </header>
 
-        {error && (
-          <p className="text-sm text-red-600 bg-red-50 border border-red-200 rounded-lg p-3">
-            {error}
-          </p>
-        )}
 
         <VehicleForm defaults={defaults} action={updateVehicle} submitLabel="변경 저장" />
       </div>

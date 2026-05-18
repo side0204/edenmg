@@ -18,12 +18,7 @@ type SiteRow = {
   created_at: string
 }
 
-export default async function SitesPage({
-  searchParams,
-}: {
-  searchParams: Promise<{ created?: string; updated?: string; error?: string }>
-}) {
-  const { created, updated, error: actionError } = await searchParams
+export default async function SitesPage() {
   const supabase = await createClient()
 
   const {
@@ -82,17 +77,6 @@ export default async function SitesPage({
           </Link>
         </header>
 
-        {created && (
-          <Banner kind="ok">
-            <span className="font-medium">{created}</span> 현장을 등록했습니다.
-          </Banner>
-        )}
-        {updated && (
-          <Banner kind="ok">
-            <span className="font-medium">{updated}</span> 현장을 수정했습니다.
-          </Banner>
-        )}
-        {actionError && <Banner kind="err">{actionError}</Banner>}
         {listError && <Banner kind="err">목록을 불러오지 못했습니다: {listError.message}</Banner>}
 
         <ul className="space-y-3">

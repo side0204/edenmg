@@ -1,12 +1,6 @@
 import { signIn } from './actions'
 
-export default async function LoginPage({
-  searchParams,
-}: {
-  searchParams: Promise<{ error?: string }>
-}) {
-  const { error } = await searchParams
-
+export default function LoginPage() {
   return (
     <main className="min-h-screen flex items-center justify-center p-4">
       <form
@@ -40,12 +34,6 @@ export default async function LoginPage({
             className="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2.5 text-base focus:border-slate-900 focus:outline-none focus:ring-1 focus:ring-slate-900"
           />
         </label>
-
-        {error && (
-          <p className="text-sm text-red-600 bg-red-50 border border-red-200 rounded-lg p-3">
-            {error}
-          </p>
-        )}
 
         <button
           type="submit"

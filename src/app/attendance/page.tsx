@@ -27,12 +27,7 @@ type Attendance = {
   check_out_outside_reason: string | null
 }
 
-export default async function AttendancePage({
-  searchParams,
-}: {
-  searchParams: Promise<{ action?: 'in' | 'out'; error?: string }>
-}) {
-  const { action, error } = await searchParams
+export default async function AttendancePage() {
   const supabase = await createClient()
 
   const {
@@ -46,7 +41,7 @@ export default async function AttendancePage({
     .eq('auth_user_id', user.id)
     .maybeSingle()
   const me = meRow as { id: string; name: string; is_active: boolean } | null
-  if (!me || !me.is_active) redirect('/?error=' + encodeURIComponent('계정이 활성 상태가 아닙니다'))
+  if (!me || !me.is_active) redirect('/?err=' + encodeURIComponent('계정이 활성 상태가 아닙니다'))
 
   const workDate = todayInSeoul()
 
@@ -87,10 +82,6 @@ export default async function AttendancePage({
           <h1 className="mt-1 text-2xl font-bold text-slate-900">출퇴근</h1>
           <p className="mt-1 text-xs text-slate-500">{me.name} · {formatWorkDate(workDate)}</p>
         </header>
-
-        {action === 'in' && <Banner kind="ok">출근 처리됐습니다.</Banner>}
-        {action === 'out' && <Banner kind="ok">퇴근 처리됐습니다. 수고하셨습니다.</Banner>}
-        {error && <Banner kind="err">{error}</Banner>}
 
         {sites.length === 0 && (
           <Banner kind="warn">

@@ -22,7 +22,7 @@ export async function GET(request: NextRequest) {
       return NextResponse.redirect(`${origin}${next}`)
     }
     return NextResponse.redirect(
-      `${origin}/login?error=${encodeURIComponent(error.message)}`,
+      `${origin}/login?err=${encodeURIComponent(error.message)}`,
     )
   }
 
@@ -32,11 +32,11 @@ export async function GET(request: NextRequest) {
       return NextResponse.redirect(`${origin}${next}`)
     }
     return NextResponse.redirect(
-      `${origin}/login?error=${encodeURIComponent(error.message)}`,
+      `${origin}/login?err=${encodeURIComponent(error.message)}`,
     )
   }
 
   return NextResponse.redirect(
-    `${origin}/login?error=${encodeURIComponent('잘못된 인증 링크입니다')}`,
+    `${origin}/login?err=${encodeURIComponent('잘못된 인증 링크입니다')}`,
   )
 }

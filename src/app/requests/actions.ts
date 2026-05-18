@@ -108,7 +108,7 @@ async function requireEmployee() {
     | { id: string; company_id: string; permission: Permission; is_active: boolean }
     | null
   if (!me || !me.is_active) {
-    redirect('/?error=' + encodeURIComponent('계정이 활성 상태가 아닙니다'))
+    redirect('/?err=' + encodeURIComponent('계정이 활성 상태가 아닙니다'))
   }
   return { supabase, me }
 }
@@ -116,12 +116,12 @@ async function requireEmployee() {
 export async function submitRequest(formData: FormData) {
   const parsed = parseSubmitForm(formData)
   const errMsg = validateSubmit(parsed)
-  if (errMsg) redirect('/requests/new?error=' + encodeURIComponent(errMsg))
+  if (errMsg) redirect('/requests/new?err=' + encodeURIComponent(errMsg))
 
   // 첨부 검증을 insert 전에 끝낸다 — 잘못된 파일로 신청만 들어가는 사태 방지.
   const attachment = extractAttachment(formData, parsed.type)
   if (typeof attachment === 'string') {
-    redirect('/requests/new?error=' + encodeURIComponent(attachment))
+    redirect('/requests/new?err=' + encodeURIComponent(attachment))
   }
 
   const { supabase, me } = await requireEmployee()
@@ -129,7 +129,7 @@ export async function submitRequest(formData: FormData) {
   // assigned_foreman_id 가 본인이거나 같은 회사가 아니면 거부
   if (parsed.assigned_foreman_id) {
     if (parsed.assigned_foreman_id === me.id) {
-      redirect('/requests/new?error=' + encodeURIComponent('본인을 결재자로 지정할 수 없습니다'))
+      redirect('/requests/new?err=' + encodeURIComponent('본인을 결재자로 지정할 수 없습니다'))
     }
     const { data: f } = await supabase
       .from('employees')
@@ -138,7 +138,7 @@ export async function submitRequest(formData: FormData) {
       .maybeSingle()
     const foreman = f as { id: string; company_id: string } | null
     if (!foreman || foreman.company_id !== me.company_id) {
-      redirect('/requests/new?error=' + encodeURIComponent('잘못된 결재자입니다'))
+      redirect('/requests/new?err=' + encodeURIComponent('잘못된 결재자입니다'))
     }
   }
 
@@ -165,7 +165,7 @@ export async function submitRequest(formData: FormData) {
     .single()
 
   if (error || !inserted) {
-    redirect('/requests/new?error=' + encodeURIComponent('신청 실패: ' + (error?.message ?? '알 수 없음')))
+    redirect('/requests/new?err=' + encodeURIComponent('신청 실패: ' + (error?.message ?? '알 수 없음')))
   }
 
   await supabase.from('leave_request_approvals').insert({
@@ -185,7 +185,7 @@ export async function submitRequest(formData: FormData) {
     if (upErr) {
       revalidatePath('/requests')
       revalidatePath('/')
-      redirect(`/requests/${inserted.id}?error=` + encodeURIComponent('신청은 접수됐지만 첨부 업로드에 실패했습니다: ' + upErr.message))
+      redirect(`/requests/${inserted.id}?err=` + encodeURIComponent('신청은 접수됐지만 첨부 업로드에 실패했습니다: ' + upErr.message))
     }
     await supabase
       .from('leave_requests')
@@ -196,13 +196,13 @@ export async function submitRequest(formData: FormData) {
   revalidatePath('/requests')
   revalidatePath('/approvals')
   revalidatePath('/')
-  redirect('/requests?submitted=1')
+  redirect('/requests?ok=' + encodeURIComponent('신청을 접수했습니다'))
 }
 
 // 대기 중 첨부 교체. 새 파일을 받아 기존 path 가 있으면 삭제 → 새 파일 업로드 → 컬럼 갱신.
 export async function replaceAttachment(formData: FormData) {
   const id = String(formData.get('id') ?? '').trim()
-  if (!id) redirect('/requests?error=' + encodeURIComponent('신청 id 가 없습니다'))
+  if (!id) redirect('/requests?err=' + encodeURIComponent('신청 id 가 없습니다'))
 
   const { supabase, me } = await requireEmployee()
 
@@ -215,20 +215,20 @@ export async function replaceAttachment(formData: FormData) {
     | { id: string; employee_id: string; type: LeaveType; status: string; attachment_path: string | null }
     | null
 
-  if (!lr) redirect('/requests?error=' + encodeURIComponent('신청을 찾을 수 없습니다'))
+  if (!lr) redirect('/requests?err=' + encodeURIComponent('신청을 찾을 수 없습니다'))
   if (lr.employee_id !== me.id) {
-    redirect(`/requests/${id}?error=` + encodeURIComponent('본인 신청만 수정할 수 있습니다'))
+    redirect(`/requests/${id}?err=` + encodeURIComponent('본인 신청만 수정할 수 있습니다'))
   }
   if (lr.status !== '대기') {
-    redirect(`/requests/${id}?error=` + encodeURIComponent('대기 중인 신청만 첨부를 바꿀 수 있습니다'))
+    redirect(`/requests/${id}?err=` + encodeURIComponent('대기 중인 신청만 첨부를 바꿀 수 있습니다'))
   }
 
   const attachment = extractAttachment(formData, lr.type)
   if (typeof attachment === 'string') {
-    redirect(`/requests/${id}?error=` + encodeURIComponent(attachment))
+    redirect(`/requests/${id}?err=` + encodeURIComponent(attachment))
   }
   if (!(attachment instanceof File)) {
-    redirect(`/requests/${id}?error=` + encodeURIComponent('파일을 선택하세요'))
+    redirect(`/requests/${id}?err=` + encodeURIComponent('파일을 선택하세요'))
   }
 
   const path = buildAttachmentPath(lr.id, attachment.name)
@@ -236,7 +236,7 @@ export async function replaceAttachment(formData: FormData) {
     .from(ATTACHMENT_BUCKET)
     .upload(path, attachment, { contentType: attachment.type, upsert: false })
   if (upErr) {
-    redirect(`/requests/${id}?error=` + encodeURIComponent('업로드 실패: ' + upErr.message))
+    redirect(`/requests/${id}?err=` + encodeURIComponent('업로드 실패: ' + upErr.message))
   }
 
   if (lr.attachment_path && lr.attachment_path !== path) {
@@ -251,13 +251,13 @@ export async function replaceAttachment(formData: FormData) {
 
   revalidatePath(`/requests/${id}`)
   revalidatePath('/requests')
-  redirect(`/requests/${id}?attachment=1`)
+  redirect(`/requests/${id}?ok=` + encodeURIComponent('첨부파일을 교체했습니다'))
 }
 
 // 대기 중 첨부 삭제.
 export async function removeAttachment(formData: FormData) {
   const id = String(formData.get('id') ?? '').trim()
-  if (!id) redirect('/requests?error=' + encodeURIComponent('신청 id 가 없습니다'))
+  if (!id) redirect('/requests?err=' + encodeURIComponent('신청 id 가 없습니다'))
 
   const { supabase, me } = await requireEmployee()
 
@@ -270,15 +270,15 @@ export async function removeAttachment(formData: FormData) {
     | { id: string; employee_id: string; status: string; attachment_path: string | null }
     | null
 
-  if (!lr) redirect('/requests?error=' + encodeURIComponent('신청을 찾을 수 없습니다'))
+  if (!lr) redirect('/requests?err=' + encodeURIComponent('신청을 찾을 수 없습니다'))
   if (lr.employee_id !== me.id) {
-    redirect(`/requests/${id}?error=` + encodeURIComponent('본인 신청만 수정할 수 있습니다'))
+    redirect(`/requests/${id}?err=` + encodeURIComponent('본인 신청만 수정할 수 있습니다'))
   }
   if (lr.status !== '대기') {
-    redirect(`/requests/${id}?error=` + encodeURIComponent('대기 중인 신청만 첨부를 바꿀 수 있습니다'))
+    redirect(`/requests/${id}?err=` + encodeURIComponent('대기 중인 신청만 첨부를 바꿀 수 있습니다'))
   }
   if (!lr.attachment_path) {
-    redirect(`/requests/${id}?error=` + encodeURIComponent('삭제할 첨부가 없습니다'))
+    redirect(`/requests/${id}?err=` + encodeURIComponent('삭제할 첨부가 없습니다'))
   }
 
   await supabase.storage.from(ATTACHMENT_BUCKET).remove([lr.attachment_path])
@@ -289,7 +289,7 @@ export async function removeAttachment(formData: FormData) {
 
   revalidatePath(`/requests/${id}`)
   revalidatePath('/requests')
-  redirect(`/requests/${id}?attachment_removed=1`)
+  redirect(`/requests/${id}?ok=` + encodeURIComponent('첨부파일을 삭제했습니다'))
 }
 
 // 다운로드 — 신청 상세/결재함 양쪽에서 사용. signedUrl 5분짜리.
@@ -312,7 +312,7 @@ export async function getAttachmentUrl(leaveRequestId: string): Promise<{ url: s
 
 export async function cancelRequest(formData: FormData) {
   const id = String(formData.get('id') ?? '').trim()
-  if (!id) redirect('/requests?error=' + encodeURIComponent('신청 id 가 없습니다'))
+  if (!id) redirect('/requests?err=' + encodeURIComponent('신청 id 가 없습니다'))
 
   const { supabase, me } = await requireEmployee()
 
@@ -323,12 +323,12 @@ export async function cancelRequest(formData: FormData) {
     .maybeSingle()
   const lr = row as { id: string; employee_id: string; status: string } | null
 
-  if (!lr) redirect('/requests?error=' + encodeURIComponent('신청을 찾을 수 없습니다'))
+  if (!lr) redirect('/requests?err=' + encodeURIComponent('신청을 찾을 수 없습니다'))
   if (lr.employee_id !== me.id) {
-    redirect('/requests?error=' + encodeURIComponent('본인 신청만 취소할 수 있습니다'))
+    redirect('/requests?err=' + encodeURIComponent('본인 신청만 취소할 수 있습니다'))
   }
   if (lr.status !== '대기') {
-    redirect(`/requests/${id}?error=` + encodeURIComponent('대기 중인 신청만 취소할 수 있습니다'))
+    redirect(`/requests/${id}?err=` + encodeURIComponent('대기 중인 신청만 취소할 수 있습니다'))
   }
 
   const now = new Date().toISOString()
@@ -343,7 +343,7 @@ export async function cancelRequest(formData: FormData) {
     .eq('id', id)
 
   if (upErr) {
-    redirect(`/requests/${id}?error=` + encodeURIComponent('취소 실패: ' + upErr.message))
+    redirect(`/requests/${id}?err=` + encodeURIComponent('취소 실패: ' + upErr.message))
   }
 
   await supabase.from('leave_request_approvals').insert({
@@ -357,5 +357,5 @@ export async function cancelRequest(formData: FormData) {
   revalidatePath(`/requests/${id}`)
   revalidatePath('/approvals')
   revalidatePath('/')
-  redirect(`/requests/${id}?cancelled=1`)
+  redirect(`/requests/${id}?ok=` + encodeURIComponent('신청을 취소했습니다'))
 }

@@ -29,7 +29,7 @@ async function requireMe() {
 async function requireAdmin() {
   const { supabase, me } = await requireMe()
   if (me.permission !== 'admin' && me.permission !== 'ceo') {
-    redirect('/vehicles?error=' + encodeURIComponent('권한이 없습니다'))
+    redirect('/vehicles?err=' + encodeURIComponent('권한이 없습니다'))
   }
   return { supabase, me }
 }
@@ -62,7 +62,7 @@ export async function createVehicle(formData: FormData) {
   const parsed = parseVehicleForm(formData)
   const errMsg = validateVehicle(parsed)
   if (errMsg) {
-    redirect('/vehicles/new?error=' + encodeURIComponent(errMsg))
+    redirect('/vehicles/new?err=' + encodeURIComponent(errMsg))
   }
 
   const { supabase, me } = await requireAdmin()
@@ -73,21 +73,21 @@ export async function createVehicle(formData: FormData) {
   })
 
   if (error) {
-    redirect('/vehicles/new?error=' + encodeURIComponent('등록 실패: ' + error.message))
+    redirect('/vehicles/new?err=' + encodeURIComponent('등록 실패: ' + error.message))
   }
 
   revalidatePath('/vehicles')
-  redirect('/vehicles?created=' + encodeURIComponent(parsed.name))
+  redirect('/vehicles?ok=' + encodeURIComponent(`${parsed.name} 차량을 등록했습니다`))
 }
 
 export async function updateVehicle(formData: FormData) {
   const id = String(formData.get('id') ?? '').trim()
-  if (!id) redirect('/vehicles?error=' + encodeURIComponent('차량 id 가 없습니다'))
+  if (!id) redirect('/vehicles?err=' + encodeURIComponent('차량 id 가 없습니다'))
 
   const parsed = parseVehicleForm(formData)
   const errMsg = validateVehicle(parsed)
   if (errMsg) {
-    redirect(`/vehicles/${id}/edit?error=` + encodeURIComponent(errMsg))
+    redirect(`/vehicles/${id}/edit?err=` + encodeURIComponent(errMsg))
   }
 
   const { supabase } = await requireAdmin()
@@ -95,12 +95,12 @@ export async function updateVehicle(formData: FormData) {
   const { error } = await supabase.from('vehicles').update(parsed).eq('id', id)
 
   if (error) {
-    redirect(`/vehicles/${id}/edit?error=` + encodeURIComponent('수정 실패: ' + error.message))
+    redirect(`/vehicles/${id}/edit?err=` + encodeURIComponent('수정 실패: ' + error.message))
   }
 
   revalidatePath('/vehicles')
   revalidatePath(`/vehicles/${id}/edit`)
-  redirect('/vehicles?updated=' + encodeURIComponent(parsed.name))
+  redirect('/vehicles?ok=' + encodeURIComponent(`${parsed.name} 정보를 수정했습니다`))
 }
 
 // ===== 출고·반납 ========================================================
@@ -116,14 +116,14 @@ function parseInt0OrNull(raw: FormDataEntryValue | null): number | null {
 export async function checkoutVehicle(formData: FormData) {
   const vehicleId = String(formData.get('vehicle_id') ?? '').trim()
   if (!vehicleId) {
-    redirect('/vehicles?error=' + encodeURIComponent('차량 id 가 없습니다'))
+    redirect('/vehicles?err=' + encodeURIComponent('차량 id 가 없습니다'))
   }
 
   const startKm = parseInt0OrNull(formData.get('start_odometer_km'))
   const purpose = String(formData.get('purpose') ?? '').trim() || null
 
   if (startKm !== null && startKm < 0) {
-    redirect(`/vehicles/${vehicleId}/checkout?error=` + encodeURIComponent('출발 km 는 0 이상이어야 합니다'))
+    redirect(`/vehicles/${vehicleId}/checkout?err=` + encodeURIComponent('출발 km 는 0 이상이어야 합니다'))
   }
 
   const { supabase, me } = await requireMe()
@@ -137,10 +137,10 @@ export async function checkoutVehicle(formData: FormData) {
   const vehicle = vRow as { id: string; name: string; is_active: boolean; company_id: string } | null
 
   if (!vehicle || vehicle.company_id !== me.company_id) {
-    redirect('/vehicles?error=' + encodeURIComponent('차량을 찾을 수 없습니다'))
+    redirect('/vehicles?err=' + encodeURIComponent('차량을 찾을 수 없습니다'))
   }
   if (!vehicle.is_active) {
-    redirect('/vehicles?error=' + encodeURIComponent('비활성 차량입니다'))
+    redirect('/vehicles?err=' + encodeURIComponent('비활성 차량입니다'))
   }
 
   // 사용 중인 trip 이 이미 있는지 (UI 가 막아주지만 race 안전망)
@@ -151,7 +151,7 @@ export async function checkoutVehicle(formData: FormData) {
     .is('returned_at', null)
     .maybeSingle()
   if (activeRow) {
-    redirect('/vehicles?error=' + encodeURIComponent('이미 사용 중인 차량입니다'))
+    redirect('/vehicles?err=' + encodeURIComponent('이미 사용 중인 차량입니다'))
   }
 
   const { error } = await supabase.from('vehicle_trips').insert({
@@ -163,19 +163,19 @@ export async function checkoutVehicle(formData: FormData) {
   })
 
   if (error) {
-    redirect(`/vehicles/${vehicleId}/checkout?error=` + encodeURIComponent('출고 실패: ' + error.message))
+    redirect(`/vehicles/${vehicleId}/checkout?err=` + encodeURIComponent('출고 실패: ' + error.message))
   }
 
   revalidatePath('/vehicles')
   revalidatePath('/')
-  redirect('/vehicles?checked_out=' + encodeURIComponent(vehicle.name))
+  redirect('/vehicles?ok=' + encodeURIComponent(`${vehicle.name} 출고 완료. 운행 마치고 꼭 반납하세요`))
 }
 
 export async function returnVehicle(formData: FormData) {
   const vehicleId = String(formData.get('vehicle_id') ?? '').trim()
   const tripId = String(formData.get('trip_id') ?? '').trim()
   if (!vehicleId || !tripId) {
-    redirect('/vehicles?error=' + encodeURIComponent('운행 id 가 없습니다'))
+    redirect('/vehicles?err=' + encodeURIComponent('운행 id 가 없습니다'))
   }
 
   const endKm = parseInt0OrNull(formData.get('end_odometer_km'))
@@ -184,10 +184,10 @@ export async function returnVehicle(formData: FormData) {
   const purposeOverride = String(formData.get('purpose') ?? '').trim()
 
   if (endKm !== null && endKm < 0) {
-    redirect(`/vehicles/${vehicleId}/return?error=` + encodeURIComponent('도착 km 는 0 이상이어야 합니다'))
+    redirect(`/vehicles/${vehicleId}/return?err=` + encodeURIComponent('도착 km 는 0 이상이어야 합니다'))
   }
   if (refueled && refuelAmount !== null && refuelAmount < 0) {
-    redirect(`/vehicles/${vehicleId}/return?error=` + encodeURIComponent('주유 금액은 0 이상이어야 합니다'))
+    redirect(`/vehicles/${vehicleId}/return?err=` + encodeURIComponent('주유 금액은 0 이상이어야 합니다'))
   }
 
   const { supabase, me } = await requireMe()
@@ -208,17 +208,17 @@ export async function returnVehicle(formData: FormData) {
   } | null
 
   if (!trip || trip.vehicle_id !== vehicleId) {
-    redirect('/vehicles?error=' + encodeURIComponent('운행 기록을 찾을 수 없습니다'))
+    redirect('/vehicles?err=' + encodeURIComponent('운행 기록을 찾을 수 없습니다'))
   }
   if (trip.returned_at) {
-    redirect('/vehicles?error=' + encodeURIComponent('이미 반납된 운행입니다'))
+    redirect('/vehicles?err=' + encodeURIComponent('이미 반납된 운행입니다'))
   }
   if (trip.driver_employee_id !== me.id && me.permission !== 'admin' && me.permission !== 'ceo') {
-    redirect('/vehicles?error=' + encodeURIComponent('본인 운행만 반납할 수 있습니다'))
+    redirect('/vehicles?err=' + encodeURIComponent('본인 운행만 반납할 수 있습니다'))
   }
 
   if (endKm !== null && trip.start_odometer_km !== null && endKm < trip.start_odometer_km) {
-    redirect(`/vehicles/${vehicleId}/return?error=` + encodeURIComponent('도착 km 는 출발 km 이상이어야 합니다'))
+    redirect(`/vehicles/${vehicleId}/return?err=` + encodeURIComponent('도착 km 는 출발 km 이상이어야 합니다'))
   }
 
   const update: Record<string, unknown> = {
@@ -232,10 +232,10 @@ export async function returnVehicle(formData: FormData) {
   const { error } = await supabase.from('vehicle_trips').update(update).eq('id', tripId)
 
   if (error) {
-    redirect(`/vehicles/${vehicleId}/return?error=` + encodeURIComponent('반납 실패: ' + error.message))
+    redirect(`/vehicles/${vehicleId}/return?err=` + encodeURIComponent('반납 실패: ' + error.message))
   }
 
   revalidatePath('/vehicles')
   revalidatePath('/')
-  redirect('/vehicles?returned=1')
+  redirect('/vehicles?ok=' + encodeURIComponent('반납 처리됐습니다'))
 }

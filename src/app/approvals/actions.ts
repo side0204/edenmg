@@ -22,9 +22,9 @@ async function requireApprover() {
   const me = meRow as
     | { id: string; company_id: string; permission: Permission; is_active: boolean }
     | null
-  if (!me || !me.is_active) redirect('/?error=' + encodeURIComponent('계정이 활성 상태가 아닙니다'))
+  if (!me || !me.is_active) redirect('/?err=' + encodeURIComponent('계정이 활성 상태가 아닙니다'))
   if (me.permission === 'worker') {
-    redirect('/?error=' + encodeURIComponent('결재 권한이 없습니다'))
+    redirect('/?err=' + encodeURIComponent('결재 권한이 없습니다'))
   }
   return { supabase, me }
 }
@@ -63,18 +63,18 @@ function parseActionForm(formData: FormData) {
 
 export async function approveRequest(formData: FormData) {
   const { id, comment } = parseActionForm(formData)
-  if (!id) redirect('/approvals?error=' + encodeURIComponent('신청 id 가 없습니다'))
+  if (!id) redirect('/approvals?err=' + encodeURIComponent('신청 id 가 없습니다'))
 
   const { supabase, me } = await requireApprover()
   const lr = await loadRequest(supabase, id)
-  if (!lr) redirect('/approvals?error=' + encodeURIComponent('신청을 찾을 수 없습니다'))
+  if (!lr) redirect('/approvals?err=' + encodeURIComponent('신청을 찾을 수 없습니다'))
   if (lr.company_id !== me.company_id) {
-    redirect('/approvals?error=' + encodeURIComponent('다른 회사 신청입니다'))
+    redirect('/approvals?err=' + encodeURIComponent('다른 회사 신청입니다'))
   }
 
   const authority = decideAuthority(me, lr)
   if (!authority.canAct) {
-    redirect(`/approvals/${id}?error=` + encodeURIComponent('이 신청을 결재할 권한이 없습니다'))
+    redirect(`/approvals/${id}?err=` + encodeURIComponent('이 신청을 결재할 권한이 없습니다'))
   }
 
   const now = new Date().toISOString()
@@ -113,7 +113,7 @@ export async function approveRequest(formData: FormData) {
     .eq('id', id)
 
   if (upErr) {
-    redirect(`/approvals/${id}?error=` + encodeURIComponent('처리 실패: ' + upErr.message))
+    redirect(`/approvals/${id}?err=` + encodeURIComponent('처리 실패: ' + upErr.message))
   }
 
   await supabase.from('leave_request_approvals').insert({
@@ -128,22 +128,22 @@ export async function approveRequest(formData: FormData) {
   revalidatePath('/requests')
   revalidatePath(`/requests/${id}`)
   revalidatePath('/')
-  redirect('/approvals?done=' + encodeURIComponent(action))
+  redirect('/approvals?ok=' + encodeURIComponent(`${action} 처리됐습니다`))
 }
 
 export async function rejectRequest(formData: FormData) {
   const { id, comment } = parseActionForm(formData)
-  if (!id) redirect('/approvals?error=' + encodeURIComponent('신청 id 가 없습니다'))
+  if (!id) redirect('/approvals?err=' + encodeURIComponent('신청 id 가 없습니다'))
 
   const { supabase, me } = await requireApprover()
   const lr = await loadRequest(supabase, id)
-  if (!lr) redirect('/approvals?error=' + encodeURIComponent('신청을 찾을 수 없습니다'))
+  if (!lr) redirect('/approvals?err=' + encodeURIComponent('신청을 찾을 수 없습니다'))
   if (lr.company_id !== me.company_id) {
-    redirect('/approvals?error=' + encodeURIComponent('다른 회사 신청입니다'))
+    redirect('/approvals?err=' + encodeURIComponent('다른 회사 신청입니다'))
   }
   const authority = decideAuthority(me, lr)
   if (!authority.canAct) {
-    redirect(`/approvals/${id}?error=` + encodeURIComponent('이 신청을 결재할 권한이 없습니다'))
+    redirect(`/approvals/${id}?err=` + encodeURIComponent('이 신청을 결재할 권한이 없습니다'))
   }
 
   const now = new Date().toISOString()
@@ -158,7 +158,7 @@ export async function rejectRequest(formData: FormData) {
     .eq('id', id)
 
   if (upErr) {
-    redirect(`/approvals/${id}?error=` + encodeURIComponent('반려 실패: ' + upErr.message))
+    redirect(`/approvals/${id}?err=` + encodeURIComponent('반려 실패: ' + upErr.message))
   }
 
   await supabase.from('leave_request_approvals').insert({
@@ -173,5 +173,5 @@ export async function rejectRequest(formData: FormData) {
   revalidatePath('/requests')
   revalidatePath(`/requests/${id}`)
   revalidatePath('/')
-  redirect('/approvals?done=' + encodeURIComponent('반려'))
+  redirect('/approvals?ok=' + encodeURIComponent('반려 처리됐습니다'))
 }

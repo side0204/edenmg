@@ -8,7 +8,7 @@ export async function signIn(formData: FormData) {
   const password = String(formData.get('password') ?? '')
 
   if (!email || !password) {
-    redirect('/login?error=' + encodeURIComponent('이메일과 비밀번호를 모두 입력해주세요'))
+    redirect('/login?err=' + encodeURIComponent('이메일과 비밀번호를 모두 입력해주세요'))
   }
 
   const supabase = await createClient()
@@ -18,7 +18,7 @@ export async function signIn(formData: FormData) {
     const msg = error.message === 'Invalid login credentials'
       ? '이메일 또는 비밀번호가 올바르지 않습니다'
       : error.message
-    redirect('/login?error=' + encodeURIComponent(msg))
+    redirect('/login?err=' + encodeURIComponent(msg))
   }
 
   redirect('/')

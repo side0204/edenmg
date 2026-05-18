@@ -16,12 +16,7 @@ function todayInSeoul(): string {
   return new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Seoul' }).format(new Date())
 }
 
-export default async function NewRequestPage({
-  searchParams,
-}: {
-  searchParams: Promise<{ error?: string }>
-}) {
-  const { error } = await searchParams
+export default async function NewRequestPage() {
   const supabase = await createClient()
 
   const {
@@ -35,7 +30,7 @@ export default async function NewRequestPage({
     .eq('auth_user_id', user.id)
     .maybeSingle()
   const me = meRow as { id: string; is_active: boolean } | null
-  if (!me || !me.is_active) redirect('/?error=' + encodeURIComponent('계정이 활성 상태가 아닙니다'))
+  if (!me || !me.is_active) redirect('/?err=' + encodeURIComponent('계정이 활성 상태가 아닙니다'))
 
   // 결재자 후보: 본인 제외, 같은 회사 활성, foreman/admin/ceo 권한
   const { data: foremenData } = await supabase
@@ -61,11 +56,6 @@ export default async function NewRequestPage({
           <p className="mt-1 text-xs text-slate-500">휴가·외근·기타 결재 신청서를 작성합니다.</p>
         </header>
 
-        {error && (
-          <p className="text-sm text-red-600 bg-red-50 border border-red-200 rounded-lg p-3">
-            {error}
-          </p>
-        )}
 
         <RequestForm foremen={foremen} defaultDate={todayInSeoul()} />
       </div>

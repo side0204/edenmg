@@ -14,17 +14,17 @@ export async function updateEmployeeField(formData: FormData) {
   const value = rawValue === '' ? null : rawValue
 
   if (!id) {
-    redirect('/admin/employees?error=' + encodeURIComponent('직원 id 가 없습니다'))
+    redirect('/admin/employees?err=' + encodeURIComponent('직원 id 가 없습니다'))
   }
   if (!FIELD_KEYS.includes(field)) {
-    redirect('/admin/employees?error=' + encodeURIComponent('잘못된 필드입니다'))
+    redirect('/admin/employees?err=' + encodeURIComponent('잘못된 필드입니다'))
   }
   if (value !== null && !FIELD_VALUES[field].includes(value)) {
-    redirect('/admin/employees?error=' + encodeURIComponent('잘못된 값입니다'))
+    redirect('/admin/employees?err=' + encodeURIComponent('잘못된 값입니다'))
   }
   // 권한은 NULL 불가 (사용자 로그인 시 분기 기준).
   if (field === 'permission' && value === null) {
-    redirect('/admin/employees?error=' + encodeURIComponent('권한은 비울 수 없습니다'))
+    redirect('/admin/employees?err=' + encodeURIComponent('권한은 비울 수 없습니다'))
   }
 
   const supabase = await createClient()
@@ -43,11 +43,11 @@ export async function updateEmployeeField(formData: FormData) {
   const me = meRow as { id: string; permission: Permission } | null
 
   if (!me || (me.permission !== 'admin' && me.permission !== 'ceo')) {
-    redirect('/admin/employees?error=' + encodeURIComponent('권한이 없습니다'))
+    redirect('/admin/employees?err=' + encodeURIComponent('권한이 없습니다'))
   }
   if (field === 'permission' && me.id === id) {
     redirect(
-      '/admin/employees?error=' +
+      '/admin/employees?err=' +
         encodeURIComponent('본인 권한은 직접 변경할 수 없습니다. 다른 관리자에게 요청하세요.'),
     )
   }
@@ -58,9 +58,9 @@ export async function updateEmployeeField(formData: FormData) {
     .eq('id', id)
 
   if (error) {
-    redirect('/admin/employees?error=' + encodeURIComponent('변경 실패: ' + error.message))
+    redirect('/admin/employees?err=' + encodeURIComponent('변경 실패: ' + error.message))
   }
 
   revalidatePath('/admin/employees')
-  redirect('/admin/employees?updated=1')
+  redirect('/admin/employees?ok=' + encodeURIComponent('변경됐습니다'))
 }
