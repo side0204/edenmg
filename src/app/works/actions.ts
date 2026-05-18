@@ -176,42 +176,64 @@ export async function createWork(formData: FormData) {
     if (assigneeErr) redirect('/works/new?err=' + encodeURIComponent(assigneeErr))
   }
 
-  // 작업자 다중 선택 (worker_ids JSON 배열)
+  // 작업자 다중 선택 — worker_ids JSON 객체 배열
+  //   [{ id: uuid, worker_type: '접속팀'|'외선팀'|'기타', worker_type_custom?: string }]
   const workerIdsRaw = String(formData.get('worker_ids') ?? '')
-  let workerIds: string[] = []
+  type WorkerInput = {
+    id: string
+    worker_type: WorkWorkerType
+    worker_type_custom: string | null
+  }
+  let workers: WorkerInput[] = []
   if (workerIdsRaw) {
     try {
-      const parsedIds = JSON.parse(workerIdsRaw)
-      if (Array.isArray(parsedIds)) {
-        workerIds = Array.from(
-          new Set(
-            parsedIds.filter(
-              (x): x is string => typeof x === 'string' && /^[0-9a-f-]{36}$/i.test(x),
-            ),
-          ),
-        )
+      const parsedArr = JSON.parse(workerIdsRaw)
+      if (Array.isArray(parsedArr)) {
+        const seen = new Set<string>()
+        for (const x of parsedArr) {
+          if (!x || typeof x !== 'object') continue
+          const id = String((x as { id?: unknown }).id ?? '').trim()
+          if (!/^[0-9a-f-]{36}$/i.test(id)) continue
+          if (seen.has(id)) continue
+          const wt = String((x as { worker_type?: unknown }).worker_type ?? '').trim()
+          if (!WORKER_TYPE_VALUES.includes(wt as WorkWorkerType)) continue
+          const wtCustomRaw = String(
+            (x as { worker_type_custom?: unknown }).worker_type_custom ?? '',
+          ).trim()
+          const worker_type_custom = wt === '기타' ? wtCustomRaw || null : null
+          if (wt === '기타' && !worker_type_custom) continue // 기타는 custom 필수
+          seen.add(id)
+          workers.push({
+            id,
+            worker_type: wt as WorkWorkerType,
+            worker_type_custom,
+          })
+        }
       }
     } catch {
-      // 무시 — 잘못된 JSON 은 작업자 없이 등록 진행
+      // 무시
     }
   }
 
   // 작업자 검증 — 같은 회사·활성
-  if (workerIds.length > 0) {
+  if (workers.length > 0) {
+    const ids = workers.map((w) => w.id)
     const { data: workersRows } = await supabase
       .from('employees')
       .select('id, company_id, is_active')
-      .in('id', workerIds)
-    const valid = ((workersRows ?? []) as { id: string; company_id: string; is_active: boolean }[])
-      .filter((w) => w.company_id === me.company_id && w.is_active)
-      .map((w) => w.id)
-    if (valid.length !== workerIds.length) {
+      .in('id', ids)
+    const validIds = new Set(
+      ((workersRows ?? []) as { id: string; company_id: string; is_active: boolean }[])
+        .filter((w) => w.company_id === me.company_id && w.is_active)
+        .map((w) => w.id),
+    )
+    if (validIds.size !== workers.length) {
       redirect(
         '/works/new?err=' +
           encodeURIComponent('일부 작업자가 같은 회사 활성 직원이 아닙니다. 다시 선택하세요.'),
       )
     }
-    workerIds = valid
+    workers = workers.filter((w) => validIds.has(w.id))
   }
 
   const { clientCustomMissing, ...payload } = parsed
@@ -226,18 +248,18 @@ export async function createWork(formData: FormData) {
     redirect('/works/new?err=' + encodeURIComponent('등록 실패: ' + (error?.message ?? '알 수 없음')))
   }
 
-  // 작업자 일괄 배정 — 작업 전체 기간 (assigned_start/end null)
-  if (workerIds.length > 0) {
+  // 작업자 일괄 배정 — 작업 전체 기간 + 작업자별 worker_type
+  if (workers.length > 0) {
     const { error: assignErr } = await supabase.from('work_assignments').insert(
-      workerIds.map((eid) => ({
+      workers.map((w) => ({
         work_id: inserted.id,
-        employee_id: eid,
+        employee_id: w.id,
+        worker_type: w.worker_type,
         assigned_start: null,
         assigned_end: null,
       })),
     )
     if (assignErr) {
-      // 작업은 등록됐으니 상세 페이지로 이동하면서 오류 안내
       redirect(
         `/works/${inserted.id}?err=` +
           encodeURIComponent('작업 등록은 완료. 일부 작업자 배정 실패: ' + assignErr.message),
@@ -247,13 +269,14 @@ export async function createWork(formData: FormData) {
 
   revalidatePath('/works')
 
-  // 접속팀 작업이면 작업구간(=chain) 등록 화면으로 자동 진입.
-  // 등록자가 골격을 미리 만들어두고, 일보 작성 시 작업자가 사이끼우기로 보강.
-  if (parsed.worker_type === '접속팀') {
+  // 접속팀 작업이거나, 작업자 중 접속팀이 1명이라도 있으면 작업구간 등록 화면으로 진입.
+  const hasConnectionWorker =
+    parsed.worker_type === '접속팀' || workers.some((w) => w.worker_type === '접속팀')
+  if (hasConnectionWorker) {
     redirect(
       `/works/${inserted.id}/chains/new?ok=` +
         encodeURIComponent(
-          `${parsed.name} 등록 완료 (작업자 ${workerIds.length}명). 이어서 작업구간을 등록하세요.`,
+          `${parsed.name} 등록 완료 (작업자 ${workers.length}명). 이어서 작업구간을 등록하세요.`,
         ),
     )
   }
@@ -261,7 +284,7 @@ export async function createWork(formData: FormData) {
   redirect(
     `/works/${inserted.id}?ok=` +
       encodeURIComponent(
-        `${parsed.name} 작업을 등록했습니다${workerIds.length > 0 ? ` (작업자 ${workerIds.length}명 배정)` : ''}`,
+        `${parsed.name} 작업을 등록했습니다${workers.length > 0 ? ` (작업자 ${workers.length}명 배정)` : ''}`,
       ),
   )
 }

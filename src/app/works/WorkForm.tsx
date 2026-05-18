@@ -217,7 +217,10 @@ export function WorkForm({
 
       {showWorkers && (
         <Field label="작업자 (선택)">
-          <WorkersMultiSelect candidates={candidates} />
+          <WorkersMultiSelect
+            candidates={candidates}
+            defaultWorkerType={workerType || null}
+          />
           <p className="mt-1 text-xs text-slate-500">
             동일 작업에 함께 일하는 작업자들을 추가하세요. 작업 전체 기간으로 배정되며, 등록 후 작업
             상세에서 기간을 조정하거나 추가·해제할 수 있습니다.

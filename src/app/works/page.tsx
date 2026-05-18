@@ -143,16 +143,29 @@ export default async function WorksPage({
     ? (workerCandidates.find((c) => c.id === selectedWorkerId) ?? null)
     : null
 
-  // 본인이 배정된 작업 ID + 가장 최근 배정 created_at 매핑 (신규 배지·정렬용)
-  const myAssignmentByWork = new Map<string, string>() // work_id → latest assigned_at
+  // 본인이 배정된 작업 ID + 가장 최근 배정 created_at + 그 배정의 worker_type
+  type MyAssignment = {
+    createdAt: string
+    workerType: WorkWorkerType | null
+  }
+  const myAssignmentByWork = new Map<string, MyAssignment>()
   {
     const { data: myAssigns } = await supabase
       .from('work_assignments')
-      .select('work_id, created_at')
+      .select('work_id, created_at, worker_type')
       .eq('employee_id', me.id)
-    for (const a of (myAssigns ?? []) as { work_id: string; created_at: string }[]) {
+    for (const a of (myAssigns ?? []) as {
+      work_id: string
+      created_at: string
+      worker_type: WorkWorkerType | null
+    }[]) {
       const prev = myAssignmentByWork.get(a.work_id)
-      if (!prev || prev < a.created_at) myAssignmentByWork.set(a.work_id, a.created_at)
+      if (!prev || prev.createdAt < a.created_at) {
+        myAssignmentByWork.set(a.work_id, {
+          createdAt: a.created_at,
+          workerType: a.worker_type,
+        })
+      }
     }
   }
   const myWorkIds = Array.from(myAssignmentByWork.keys())
@@ -208,8 +221,8 @@ export default async function WorksPage({
     new Date().getTime() - NEW_ASSIGNMENT_DAYS * 24 * 60 * 60 * 1000,
   ).toISOString()
   const isNewAssignment = (workId: string): boolean => {
-    const at = myAssignmentByWork.get(workId)
-    return !!at && at >= newCutoff
+    const a = myAssignmentByWork.get(workId)
+    return !!a && a.createdAt >= newCutoff
   }
   // mine 모드의 신규 배정 카운트
   const newAssignmentCount = rows.filter((r) => isNewAssignment(r.id)).length
@@ -559,7 +572,12 @@ export default async function WorksPage({
         ) : (
           <ul className="space-y-3">
             {rows.map((w, idx) => {
-              const isConn = w.worker_type === '접속팀'
+              // 본인이 배정자라면 본인 work_assignments.worker_type 우선,
+              // 아니면 작업의 worker_type. 일보 라우팅·라벨 모두 동일 기준.
+              const myAssign = myAssignmentByWork.get(w.id)
+              const effectiveWorkerType: WorkWorkerType | null =
+                myAssign?.workerType ?? w.worker_type
+              const isConn = effectiveWorkerType === '접속팀'
               const reportHref = isConn
                 ? `/works/${w.id}/connection-reports/new`
                 : `/works/${w.id}/reports/new`
@@ -628,7 +646,7 @@ export default async function WorksPage({
                       </span>
                       <span className="inline-flex items-center gap-0.5 rounded-md bg-slate-900 px-2 py-1 text-xs font-medium text-white">
                         <FileText className="h-3 w-3" />
-                        {reportLabel(w.worker_type)} 작성
+                        {reportLabel(effectiveWorkerType)} 작성
                       </span>
                     </div>
                   </div>
