@@ -39,10 +39,14 @@ export default async function ChainEditPage({
   searchParams,
 }: {
   params: Promise<{ id: string; chainId: string }>
-  searchParams: Promise<{ parent?: string; between_child?: string }>
+  searchParams: Promise<{ parent?: string; between_child?: string; return_to?: string }>
 }) {
   const { id, chainId } = await params
-  const { parent: parentParam, between_child: betweenChildParam } = await searchParams
+  const { parent: parentParam, between_child: betweenChildParam, return_to: returnToParam } = await searchParams
+  const returnTo =
+    returnToParam && returnToParam.startsWith('/') && !returnToParam.startsWith('//')
+      ? returnToParam
+      : ''
   const supabase = await createClient()
 
   const {
@@ -212,6 +216,7 @@ export default async function ChainEditPage({
           <form action={createNode} className="space-y-3">
             <input type="hidden" name="work_id" value={work.id} />
             <input type="hidden" name="chain_id" value={chain.id} />
+            {returnTo && <input type="hidden" name="return_to" value={returnTo} />}
 
             <div className="grid grid-cols-2 gap-3">
               <Field label="노드 타입 *">

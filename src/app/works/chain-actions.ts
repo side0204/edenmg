@@ -109,6 +109,43 @@ export async function createChain(formData: FormData) {
     redirect(`/works/${workId}/chains/new?err=` + encodeURIComponent('하위국명을 입력하세요'))
   }
 
+  // 함체 리스트 (boxes_json) — 0개 이상
+  const boxesRaw = String(formData.get('boxes_json') ?? '').trim()
+  let boxes: Array<{
+    name?: string
+    code?: string
+    spec_enum?: string
+    lat?: string | number
+    lng?: string | number
+    address?: string
+    notes?: string
+  }> = []
+  if (boxesRaw) {
+    try {
+      const parsed = JSON.parse(boxesRaw)
+      if (Array.isArray(parsed)) boxes = parsed
+    } catch {
+      redirect(
+        `/works/${workId}/chains/new?err=` + encodeURIComponent('함체 데이터 파싱 실패'),
+      )
+    }
+  }
+
+  // 빈 함체(이름 없는) 행은 skip
+  const cleanBoxes = boxes
+    .map((b) => ({
+      name: String(b.name ?? '').trim(),
+      code: String(b.code ?? '').trim() || null,
+      spec_enum: (CABLE_SPEC_VALUES.includes(String(b.spec_enum ?? '') as CableSpec)
+        ? (String(b.spec_enum) as CableSpec)
+        : null) as CableSpec | null,
+      lat: parseNumberOrNull(b.lat),
+      lng: parseNumberOrNull(b.lng),
+      address: String(b.address ?? '').trim() || null,
+      notes: String(b.notes ?? '').trim() || null,
+    }))
+    .filter((b) => b.name)
+
   const { supabase, me } = await requireUser()
   await ensureChainManager(supabase, me, workId)
 
@@ -125,7 +162,7 @@ export async function createChain(formData: FormData) {
     )
   }
 
-  // 상위국 + 하위국 노드 자동 생성
+  // 상위국 (root)
   const { data: upper, error: upperErr } = await supabase
     .from('connection_plan_nodes')
     .insert({
@@ -144,20 +181,63 @@ export async function createChain(formData: FormData) {
     )
   }
 
-  // 하위국은 상위국의 직접 자식으로 일단 생성 (사용자가 함체 끼워넣기로 트리 키움)
-  await supabase.from('connection_plan_nodes').insert({
+  // 함체들 — 순차적으로 직선 체인 (이전 노드의 자식)
+  let prevId: string = upper.id
+  for (let i = 0; i < cleanBoxes.length; i++) {
+    const b = cleanBoxes[i]
+    const { data: ins, error: insErr } = await supabase
+      .from('connection_plan_nodes')
+      .insert({
+        chain_id: chain.id,
+        parent_id: prevId,
+        node_type: 'box' as PlanNodeType,
+        name: b.name,
+        code: b.code,
+        spec_enum: b.spec_enum,
+        lat: b.lat,
+        lng: b.lng,
+        address: b.address,
+        notes: b.notes,
+        position: 0,
+      })
+      .select('id')
+      .single()
+    if (insErr || !ins) {
+      redirect(
+        `/works/${workId}/chains/${chain.id}/edit?err=` +
+          encodeURIComponent(`함체 ${i + 1} 생성 실패: ${insErr?.message ?? ''}`),
+      )
+    }
+    prevId = ins.id
+  }
+
+  // 하위국 — 마지막 함체(또는 상위국)의 자식
+  const { error: lowerErr } = await supabase.from('connection_plan_nodes').insert({
     chain_id: chain.id,
-    parent_id: upper.id,
+    parent_id: prevId,
     node_type: 'lower_station' as PlanNodeType,
     name: lowerStationName,
     position: 0,
   })
+  if (lowerErr) {
+    redirect(
+      `/works/${workId}/chains/${chain.id}/edit?err=` +
+        encodeURIComponent('하위국 노드 생성 실패: ' + lowerErr.message),
+    )
+  }
 
   revalidatePath(`/works/${workId}`)
-  redirect(
-    `/works/${workId}/chains/${chain.id}/edit?ok=` +
-      encodeURIComponent('chain 을 등록했습니다. 사이에 함체를 추가하세요'),
-  )
+  const ok =
+    cleanBoxes.length > 0
+      ? `chain 을 등록했습니다 (함체 ${cleanBoxes.length}개)`
+      : 'chain 을 등록했습니다. 필요 시 함체를 추가하세요'
+  redirect(`/works/${workId}/chains/${chain.id}/edit?ok=` + encodeURIComponent(ok))
+}
+
+function parseNumberOrNull(v: string | number | undefined): number | null {
+  if (v === undefined || v === null || v === '') return null
+  const n = typeof v === 'number' ? v : Number(v)
+  return Number.isFinite(n) ? n : null
 }
 
 export async function updateChain(formData: FormData) {
@@ -236,6 +316,7 @@ export async function createNode(formData: FormData) {
   const insertBetween = String(formData.get('insert_between') ?? '').trim() === '1'
   // 사이에 끼우기: parent_id 와 child_id 사이에 새 노드. child 들의 parent_id 를 새 노드로 변경.
   const targetChildId = String(formData.get('target_child_id') ?? '').trim() || null
+  const returnTo = sanitizeReturnTo(String(formData.get('return_to') ?? '').trim())
 
   const p = parseNodeForm(formData)
   if (!chainId || !workId) redirect('/works?err=' + encodeURIComponent('chain id 가 없습니다'))
@@ -318,15 +399,18 @@ export async function createNode(formData: FormData) {
 
   revalidatePath(`/works/${workId}/chains/${chainId}/edit`)
   revalidatePath(`/works/${workId}`)
-  redirect(
-    `/works/${workId}/chains/${chainId}/edit?ok=` + encodeURIComponent(`'${p.name}' 노드를 추가했습니다`),
-  )
+  const okMsg = `'${p.name}' 노드를 추가했습니다`
+  if (returnTo) {
+    redirect(appendQuery(returnTo, 'ok', okMsg))
+  }
+  redirect(`/works/${workId}/chains/${chainId}/edit?ok=` + encodeURIComponent(okMsg))
 }
 
 export async function updateNode(formData: FormData) {
   const id = String(formData.get('id') ?? '').trim()
   const workId = String(formData.get('work_id') ?? '').trim()
   const chainId = String(formData.get('chain_id') ?? '').trim()
+  const returnTo = sanitizeReturnTo(String(formData.get('return_to') ?? '').trim())
   const p = parseNodeForm(formData)
   if (!id || !workId || !chainId) {
     redirect('/works?err=' + encodeURIComponent('노드 id 가 없습니다'))
@@ -361,15 +445,18 @@ export async function updateNode(formData: FormData) {
   }
 
   revalidatePath(`/works/${workId}/chains/${chainId}/edit`)
-  redirect(
-    `/works/${workId}/chains/${chainId}/edit?ok=` + encodeURIComponent('노드를 수정했습니다'),
-  )
+  const okMsg = '노드를 수정했습니다'
+  if (returnTo) {
+    redirect(appendQuery(returnTo, 'ok', okMsg))
+  }
+  redirect(`/works/${workId}/chains/${chainId}/edit?ok=` + encodeURIComponent(okMsg))
 }
 
 export async function deleteNode(formData: FormData) {
   const id = String(formData.get('id') ?? '').trim()
   const workId = String(formData.get('work_id') ?? '').trim()
   const chainId = String(formData.get('chain_id') ?? '').trim()
+  const returnTo = sanitizeReturnTo(String(formData.get('return_to') ?? '').trim())
   if (!id || !workId || !chainId) {
     redirect('/works?err=' + encodeURIComponent('노드 id 가 없습니다'))
   }
@@ -399,7 +486,22 @@ export async function deleteNode(formData: FormData) {
   }
 
   revalidatePath(`/works/${workId}/chains/${chainId}/edit`)
-  redirect(
-    `/works/${workId}/chains/${chainId}/edit?ok=` + encodeURIComponent('노드를 삭제했습니다'),
-  )
+  const okMsg = '노드를 삭제했습니다'
+  if (returnTo) {
+    redirect(appendQuery(returnTo, 'ok', okMsg))
+  }
+  redirect(`/works/${workId}/chains/${chainId}/edit?ok=` + encodeURIComponent(okMsg))
+}
+
+// returnTo URL 검증 — 같은 도메인(상대 경로) 만 허용. 외부 URL 차단.
+function sanitizeReturnTo(input: string): string | null {
+  if (!input) return null
+  if (!input.startsWith('/')) return null
+  if (input.startsWith('//')) return null
+  return input
+}
+
+function appendQuery(url: string, key: string, value: string): string {
+  const sep = url.includes('?') ? '&' : '?'
+  return `${url}${sep}${key}=${encodeURIComponent(value)}`
 }

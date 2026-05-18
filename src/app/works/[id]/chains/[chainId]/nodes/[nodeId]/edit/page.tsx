@@ -21,10 +21,14 @@ type NodeRow = {
 
 export default async function EditNodePage({
   params,
+  searchParams,
 }: {
   params: Promise<{ id: string; chainId: string; nodeId: string }>
+  searchParams: Promise<{ return_to?: string }>
 }) {
   const { id, chainId, nodeId } = await params
+  const { return_to } = await searchParams
+  const returnTo = return_to && return_to.startsWith('/') && !return_to.startsWith('//') ? return_to : ''
   const supabase = await createClient()
 
   const {
@@ -98,6 +102,7 @@ export default async function EditNodePage({
           <input type="hidden" name="id" value={node.id} />
           <input type="hidden" name="work_id" value={work.id} />
           <input type="hidden" name="chain_id" value={chain.id} />
+          {returnTo && <input type="hidden" name="return_to" value={returnTo} />}
 
           <Field label="이름 *">
             <input

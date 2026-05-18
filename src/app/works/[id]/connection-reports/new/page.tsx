@@ -172,12 +172,14 @@ export default async function NewConnectionReportPage({
 
         <UnifiedReportForm
           workId={work.id}
+          chainId={activeChain.id}
           chainName={activeChain.name}
           segmentNodes={segmentNodes}
           nodeMap={nodeMap}
           masters={masters}
           defaultReportDate={reportDate}
           action={submitConnectionReport}
+          returnTo={`/works/${work.id}/connection-reports/new?chain=${activeChain.id}`}
         />
       </div>
     </main>

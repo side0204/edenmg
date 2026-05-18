@@ -3,6 +3,7 @@ import { notFound, redirect } from 'next/navigation'
 import { ChevronLeft } from 'lucide-react'
 import { createClient } from '@/lib/supabase/server'
 import { createChain } from '../../../chain-actions'
+import { ChainSetupForm } from '../../../ChainSetupForm'
 
 export default async function NewChainPage({
   params,
@@ -60,7 +61,7 @@ export default async function NewChainPage({
 
   return (
     <main className="min-h-screen p-4 sm:p-6">
-      <div className="mx-auto max-w-md space-y-5">
+      <div className="mx-auto max-w-2xl space-y-5">
         <header>
           <Link
             href={`/works/${work.id}`}
@@ -71,65 +72,12 @@ export default async function NewChainPage({
           </Link>
           <h1 className="mt-1 text-3xl font-bold text-slate-900 tracking-tight">chain 등록</h1>
           <p className="mt-1 text-sm text-slate-500">
-            상위국 ↔ 하위국 골격을 만든 뒤, 편집 화면에서 사이에 함체를 추가하세요.
+            상위국·접속함체·하위국을 한번에 입력하세요. 함체는 0개 이상이며 작성 순서대로 직선 chain 이 만들어집니다. 일보 작성 단계에서도 함체 끼우기·수정이 가능합니다.
           </p>
         </header>
 
-        <form
-          action={createChain}
-          className="space-y-4 bg-white p-6 rounded-2xl shadow-sm border border-slate-200"
-        >
-          <input type="hidden" name="work_id" value={work.id} />
-
-          <Field label="chain 이름 (선택)">
-            <input
-              name="name"
-              maxLength={100}
-              placeholder="예: 강남 A동 ↔ B동"
-              className={inputClass}
-            />
-          </Field>
-
-          <Field label="상위국명 *">
-            <input
-              name="upper_station_name"
-              required
-              maxLength={100}
-              placeholder="예: 강남A국"
-              className={inputClass}
-            />
-          </Field>
-
-          <Field label="하위국명 *">
-            <input
-              name="lower_station_name"
-              required
-              maxLength={100}
-              placeholder="예: B동 1층"
-              className={inputClass}
-            />
-          </Field>
-
-          <button
-            type="submit"
-            className="w-full rounded-lg bg-slate-900 px-4 py-2.5 text-base font-medium text-white hover:bg-slate-800 active:bg-slate-700"
-          >
-            등록 후 편집
-          </button>
-        </form>
+        <ChainSetupForm workId={work.id} action={createChain} />
       </div>
     </main>
   )
 }
-
-function Field({ label, children }: { label: string; children: React.ReactNode }) {
-  return (
-    <label className="block">
-      <span className="block text-sm font-medium text-slate-700">{label}</span>
-      <div className="mt-1">{children}</div>
-    </label>
-  )
-}
-
-const inputClass =
-  'w-full rounded-lg border border-slate-300 px-3 py-2.5 text-base bg-white focus:border-slate-900 focus:outline-none focus:ring-1 focus:ring-slate-900'

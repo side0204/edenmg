@@ -1,7 +1,8 @@
 'use client'
 
 import { useMemo, useState } from 'react'
-import { Plus, Trash2 } from 'lucide-react'
+import Link from 'next/link'
+import { Pencil, Plus, Trash2 } from 'lucide-react'
 import {
   CABLE_SPEC_VALUES,
   CONNECTION_TASK_TYPE_VALUES,
@@ -48,20 +49,25 @@ type MaterialRow = {
 
 export function UnifiedReportForm({
   workId,
+  chainId,
   chainName,
   segmentNodes,
   nodeMap,
   masters,
   defaultReportDate,
   action,
+  returnTo,
 }: {
   workId: string
+  chainId: string
   chainName: string | null
   segmentNodes: UnifiedNode[]
   nodeMap: Record<string, UnifiedNode>
   masters: MaterialMaster[]
   defaultReportDate: string
   action: (formData: FormData) => void
+  /** 노드 수정·끼우기 후 돌아올 경로 (예: /works/[id]/connection-reports/new) */
+  returnTo: string
 }) {
   // 노드별 dynamic state
   const [tasksByNode, setTasksByNode] = useState<Record<string, TaskRow[]>>(() => {
@@ -145,6 +151,10 @@ export function UnifiedReportForm({
                 <NodeCard
                   key={n.id}
                   nodeId={n.id}
+                  parentId={n.parent_id}
+                  workId={workId}
+                  chainId={chainId}
+                  returnTo={returnTo}
                   parentLabel={parentLabel}
                   nodeLabel={nodeLabel}
                   tasks={tasksByNode[n.id] ?? []}
@@ -175,6 +185,10 @@ export function UnifiedReportForm({
 
 function NodeCard({
   nodeId,
+  parentId,
+  workId,
+  chainId,
+  returnTo,
   parentLabel,
   nodeLabel,
   tasks,
@@ -184,6 +198,10 @@ function NodeCard({
   masters,
 }: {
   nodeId: string
+  parentId: string | null
+  workId: string
+  chainId: string
+  returnTo: string
   parentLabel: string
   nodeLabel: string
   tasks: TaskRow[]
@@ -226,13 +244,41 @@ function NodeCard({
     setMaterials(materials.map((m, i) => (i === idx ? { ...m, ...patch } : m)))
   const removeMaterial = (idx: number) => setMaterials(materials.filter((_, i) => i !== idx))
 
+  const returnToParam = encodeURIComponent(returnTo)
+  const editNodeHref = `/works/${workId}/chains/${chainId}/nodes/${nodeId}/edit?return_to=${returnToParam}`
+  const insertBetweenHref = parentId
+    ? `/works/${workId}/chains/${chainId}/edit?parent=${parentId}&between_child=${nodeId}&return_to=${returnToParam}#노드추가`
+    : null
+
   return (
     <section className="rounded-2xl bg-white border border-slate-200 p-4 space-y-3">
-      <p className="text-xs text-slate-600">
-        <span className="font-medium">{parentLabel}</span>
-        <span className="mx-1 text-slate-400">→</span>
-        <span className="font-medium">{nodeLabel}</span>
-      </p>
+      <div className="flex items-start justify-between gap-2">
+        <p className="text-xs text-slate-600 min-w-0">
+          <span className="font-medium">{parentLabel}</span>
+          <span className="mx-1 text-slate-400">→</span>
+          <span className="font-medium">{nodeLabel}</span>
+        </p>
+        <div className="flex shrink-0 gap-1">
+          {insertBetweenHref && (
+            <Link
+              href={insertBetweenHref}
+              className="inline-flex items-center gap-0.5 rounded border border-dashed border-slate-300 px-1.5 py-0.5 text-[11px] text-slate-500 hover:border-slate-900 hover:text-slate-900"
+              title="이 cable 중간에 함체 끼우기"
+            >
+              <Plus className="h-3 w-3" />
+              사이 끼우기
+            </Link>
+          )}
+          <Link
+            href={editNodeHref}
+            className="inline-flex items-center gap-0.5 rounded border border-slate-300 px-1.5 py-0.5 text-[11px] text-slate-600 hover:bg-slate-50"
+            title="노드 정보 수정"
+          >
+            <Pencil className="h-3 w-3" />
+            노드 수정
+          </Link>
+        </div>
+      </div>
 
       {/* cable 입력 */}
       <div className="rounded-lg border border-slate-200 bg-slate-50 p-3 space-y-2">
