@@ -50,6 +50,8 @@ async function requireWorkManager() {
 
 // ===== 폼 파서·검증 =====================================================
 
+const ORDER_ID_CATEGORIES: readonly WorkCategory[] = ['청약', '지장이설']
+
 function parseWorkForm(formData: FormData) {
   const name = String(formData.get('name') ?? '').trim()
   const clientChoice = String(formData.get('client_choice') ?? '').trim()
@@ -65,6 +67,9 @@ function parseWorkForm(formData: FormData) {
   const category = String(formData.get('category') ?? '') as WorkCategory
   const subcategoryRaw = String(formData.get('subcategory') ?? '').trim()
   const subcategory = (subcategoryRaw || null) as WorkSubcategory | null
+  const order_id_raw = String(formData.get('order_id') ?? '').trim()
+  // 청약·지장이설 외 카테고리는 ID 필드 자체를 폼에서 숨기므로 항상 null 로 저장
+  const order_id = ORDER_ID_CATEGORIES.includes(category) ? order_id_raw || null : null
   const expected_volume = String(formData.get('expected_volume') ?? '').trim() || null
   const start_date = String(formData.get('start_date') ?? '').trim() || null
   const end_date = String(formData.get('end_date') ?? '').trim() || null
@@ -78,6 +83,7 @@ function parseWorkForm(formData: FormData) {
     address,
     category,
     subcategory,
+    order_id,
     expected_volume,
     start_date,
     end_date,
@@ -92,6 +98,7 @@ function validateWork(p: ReturnType<typeof parseWorkForm>): string | null {
 
   if (p.clientCustomMissing) return "발주처 '기타' 선택 시 직접 입력하세요."
   if (p.client && p.client.length > 50) return '발주처는 50자 이하로 입력하세요.'
+  if (p.order_id && p.order_id.length > 50) return 'ID는 50자 이하로 입력하세요.'
 
   if (!WORK_CATEGORY_VALUES.includes(p.category)) return '작업 대분류를 선택하세요.'
 

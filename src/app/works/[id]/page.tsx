@@ -20,6 +20,7 @@ type WorkRow = {
   address: string | null
   category: WorkCategory
   subcategory: WorkSubcategory | null
+  order_id: string | null
   expected_volume: string | null
   start_date: string | null
   end_date: string | null
@@ -68,7 +69,7 @@ export default async function WorkDetailPage({
   const { data: workData } = await supabase
     .from('works')
     .select(
-      'id, company_id, name, client, address, category, subcategory, expected_volume, start_date, end_date, status, notes, is_active',
+      'id, company_id, name, client, address, category, subcategory, order_id, expected_volume, start_date, end_date, status, notes, is_active',
     )
     .eq('id', id)
     .maybeSingle()
@@ -162,6 +163,7 @@ export default async function WorkDetailPage({
             </span>
           </div>
           <InfoRow label="기간">{formatWorkPeriod(work.start_date, work.end_date)}</InfoRow>
+          {work.order_id && <InfoRow label="ID">{work.order_id}</InfoRow>}
           {work.address && <InfoRow label="주소">{work.address}</InfoRow>}
           {work.expected_volume && <InfoRow label="예상물량">{work.expected_volume}</InfoRow>}
           {work.notes && (

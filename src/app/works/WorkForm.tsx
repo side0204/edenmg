@@ -18,12 +18,15 @@ export type WorkFormValues = {
   address: string | null
   category: WorkCategory
   subcategory: WorkSubcategory | null
+  order_id: string | null
   expected_volume: string | null
   start_date: string | null
   end_date: string | null
   status: WorkStatus
   notes: string | null
 }
+
+const ORDER_ID_CATEGORIES: readonly WorkCategory[] = ['청약', '지장이설']
 
 type ClientChoice = '' | 'LG유플러스' | '기타'
 
@@ -110,6 +113,18 @@ export function WorkForm({
           </select>
         </Field>
       </div>
+
+      {ORDER_ID_CATEGORIES.includes(category) && (
+        <Field label="ID (선택)">
+          <input
+            name="order_id"
+            defaultValue={initial.order_id ?? ''}
+            maxLength={50}
+            placeholder="발주처 오더 ID — 모르면 비워두세요"
+            className={inputClass}
+          />
+        </Field>
+      )}
 
       <Field label="발주처 (선택)">
         <select

@@ -14,6 +14,7 @@ type WorkRow = {
   address: string | null
   category: WorkCategory
   subcategory: WorkSubcategory | null
+  order_id: string | null
   expected_volume: string | null
   start_date: string | null
   end_date: string | null
@@ -53,7 +54,7 @@ export default async function EditWorkPage({
   const { data: workData } = await supabase
     .from('works')
     .select(
-      'id, company_id, name, client, address, category, subcategory, expected_volume, start_date, end_date, status, notes',
+      'id, company_id, name, client, address, category, subcategory, order_id, expected_volume, start_date, end_date, status, notes',
     )
     .eq('id', id)
     .maybeSingle()
@@ -67,6 +68,7 @@ export default async function EditWorkPage({
     address: work.address,
     category: work.category,
     subcategory: work.subcategory,
+    order_id: work.order_id,
     expected_volume: work.expected_volume,
     start_date: work.start_date,
     end_date: work.end_date,

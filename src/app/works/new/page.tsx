@@ -31,6 +31,7 @@ export default async function NewWorkPage() {
     address: null,
     category: '청약',
     subcategory: 'FTTH',
+    order_id: null,
     expected_volume: null,
     start_date: null,
     end_date: null,
