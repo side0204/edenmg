@@ -71,9 +71,7 @@ export default async function NewConnectionReportPage({
       }
     | null
   if (!work || work.company_id !== me.company_id) notFound()
-  if (work.worker_type !== '접속팀') {
-    redirect(`/works/${id}?err=` + encodeURIComponent('접속팀 작업만 접속일보를 작성합니다'))
-  }
+  // worker_type 차단 제거 — 작업자별 worker_type 운영. 접속일보 작성은 chain 존재 여부로만 판단.
 
   const isAdmin = me.permission === 'admin'
   if (!isAdmin) {

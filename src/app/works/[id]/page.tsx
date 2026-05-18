@@ -53,6 +53,7 @@ type ReportRow = {
 type AssignmentRow = {
   id: string
   employee_id: string
+  worker_type: WorkWorkerType | null
   assigned_start: string | null
   assigned_end: string | null
 }
@@ -99,12 +100,16 @@ export default async function WorkDetailPage({
 
   const { data: assignmentsData } = await supabase
     .from('work_assignments')
-    .select('id, employee_id, assigned_start, assigned_end')
+    .select('id, employee_id, worker_type, assigned_start, assigned_end')
     .eq('work_id', id)
     .order('assigned_start', { ascending: true, nullsFirst: true })
   const assignments = (assignmentsData ?? []) as AssignmentRow[]
 
-  const isConnectionTeam = work.worker_type === '접속팀'
+  // 접속팀 작업 판단: 작업 자체의 worker_type 또는 작업자 중 1명이라도 접속팀이면 true.
+  // (작업의 worker_type 은 폼에서 더 이상 입력 안 받고 작업자별로 지정)
+  const isConnectionTeam =
+    work.worker_type === '접속팀' ||
+    assignments.some((a) => a.worker_type === '접속팀')
 
   // 일반 일보: 접속팀은 안 씀 (별도 접속일보 사용)
   const reports: ReportRow[] = []

@@ -126,13 +126,8 @@ function validateWork(p: ReturnType<typeof parseWorkForm>): string | null {
 
   if (!WORK_STATUS_VALUES.includes(p.status)) return '상태를 선택하세요.'
 
-  if (!p.worker_type) return '작업자 구분을 선택하세요.'
-  if (p.worker_type === '기타' && !p.worker_type_custom) {
-    return "작업자 구분 '기타' 선택 시 구분명을 입력하세요."
-  }
-  if (p.worker_type_custom && p.worker_type_custom.length > 30) {
-    return '작업자 구분명은 30자 이하로 입력하세요.'
-  }
+  // 작업자 구분(worker_type) 은 작업 단위가 아닌 각 작업자별로 지정 (work_assignments.worker_type).
+  // 작업 자체의 worker_type 은 폼에 없으므로 항상 null 로 저장.
 
   if (!p.assignee_employee_id) return '담당자를 선택하세요.'
 

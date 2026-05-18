@@ -49,9 +49,7 @@ export default async function NewChainPage({
       }
     | null
   if (!work || work.company_id !== me.company_id) notFound()
-  if (work.worker_type !== '접속팀') {
-    redirect(`/works/${id}?err=` + encodeURIComponent('접속팀 작업만 작업구간을 가질 수 있습니다'))
-  }
+  // worker_type 차단 제거 — 작업자별 worker_type 운영. 어떤 작업이든 작업구간 등록 가능.
 
   const isAdmin = me.permission === 'admin'
   const canManage = isAdmin || me.can_manage_works || work.assignee_employee_id === me.id

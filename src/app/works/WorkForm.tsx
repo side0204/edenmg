@@ -3,7 +3,6 @@
 import { useState } from 'react'
 import {
   SUBCATEGORY_BY_CATEGORY,
-  WORKER_TYPE_VALUES,
   WORK_CATEGORY_VALUES,
   WORK_STATUS_VALUES,
   type WorkCategory,
@@ -64,8 +63,6 @@ export function WorkForm({
   const initialClient = deriveClientChoice(initial.client)
   const [clientChoice, setClientChoice] = useState<ClientChoice>(initialClient.choice)
   const [clientCustom, setClientCustom] = useState<string>(initialClient.custom)
-
-  const [workerType, setWorkerType] = useState<WorkWorkerType | ''>(initial.worker_type ?? '')
 
   // 대분류 바뀌면 소분류 reset (기타는 빈 값으로)
   const handleCategory = (next: WorkCategory) => {
@@ -173,35 +170,6 @@ export function WorkForm({
         />
       </Field>
 
-      <Field label="작업자 구분 *">
-        <select
-          name="worker_type"
-          value={workerType}
-          onChange={(e) => setWorkerType(e.currentTarget.value as WorkWorkerType | '')}
-          required
-          className={inputClass}
-        >
-          <option value="" disabled>
-            선택
-          </option>
-          {WORKER_TYPE_VALUES.map((w) => (
-            <option key={w} value={w}>
-              {w}
-            </option>
-          ))}
-        </select>
-        {workerType === '기타' && (
-          <input
-            name="worker_type_custom"
-            defaultValue={initial.worker_type_custom ?? ''}
-            maxLength={30}
-            required
-            placeholder="구분명 입력"
-            className={`${inputClass} mt-2`}
-          />
-        )}
-      </Field>
-
       <Field label="담당자 *">
         <EmployeeCombobox
           name="assignee_employee_id"
@@ -217,10 +185,7 @@ export function WorkForm({
 
       {showWorkers && (
         <Field label="작업자 (선택)">
-          <WorkersMultiSelect
-            candidates={candidates}
-            defaultWorkerType={workerType || null}
-          />
+          <WorkersMultiSelect candidates={candidates} />
           <p className="mt-1 text-xs text-slate-500">
             동일 작업에 함께 일하는 작업자들을 추가하세요. 작업 전체 기간으로 배정되며, 등록 후 작업
             상세에서 기간을 조정하거나 추가·해제할 수 있습니다.
