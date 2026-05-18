@@ -5,8 +5,10 @@ import { createClient } from '@/lib/supabase/server'
 import {
   REPORT_PROGRESS_COLOR,
   REPORT_STATUS_COLOR,
+  reportLabel,
   type WorkReportProgress,
   type WorkReportStatus,
+  type WorkWorkerType,
 } from '@/lib/work'
 import { approveReport, rejectReport, updateReport } from '../../../report-actions'
 import { ReportForm, type ReportFormValues } from '../../../ReportForm'
@@ -15,6 +17,7 @@ type WorkRow = {
   id: string
   company_id: string
   name: string
+  worker_type: WorkWorkerType | null
   assignee_employee_id: string | null
 }
 
@@ -65,7 +68,7 @@ export default async function ReportDetailPage({
 
   const { data: workData } = await supabase
     .from('works')
-    .select('id, company_id, name, assignee_employee_id')
+    .select('id, company_id, name, worker_type, assignee_employee_id')
     .eq('id', id)
     .maybeSingle()
   const work = workData as WorkRow | null
@@ -117,7 +120,7 @@ export default async function ReportDetailPage({
             {work.name}
           </Link>
           <h1 className="mt-1 text-3xl font-bold text-slate-900 tracking-tight">
-            {report.report_date} 일보
+            {report.report_date} {reportLabel(work.worker_type)}
           </h1>
           <p className="mt-1 text-sm text-slate-500">
             {author?.name ?? '?'}
@@ -187,7 +190,9 @@ export default async function ReportDetailPage({
 
         {canEdit && (
           <section className="space-y-2">
-            <h2 className="text-base font-semibold text-slate-700 tracking-tight">일보 수정</h2>
+            <h2 className="text-base font-semibold text-slate-700 tracking-tight">
+              {reportLabel(work.worker_type)} 수정
+            </h2>
             <ReportForm
               initial={
                 {
@@ -211,7 +216,7 @@ export default async function ReportDetailPage({
           <section className="rounded-2xl bg-white border border-slate-200 p-5 space-y-3">
             <h2 className="text-base font-semibold text-slate-700 tracking-tight">결재</h2>
             <p className="text-xs text-slate-500">
-              담당자로서 일보를 승인하거나 반려합니다. 반려 시 사유를 작성자에게 전달하세요.
+              담당자로서 {reportLabel(work.worker_type)}를 승인하거나 반려합니다. 반려 시 사유를 작성자에게 전달하세요.
             </p>
 
             <form action={approveReport} className="space-y-2">

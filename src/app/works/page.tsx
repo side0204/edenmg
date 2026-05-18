@@ -7,6 +7,7 @@ import {
   STATUS_COLOR,
   formatWorkLabel,
   formatWorkPeriod,
+  reportLabel,
   type WorkCategory,
   type WorkStatus,
   type WorkSubcategory,
@@ -627,7 +628,7 @@ export default async function WorksPage({
                       </span>
                       <span className="inline-flex items-center gap-0.5 rounded-md bg-slate-900 px-2 py-1 text-xs font-medium text-white">
                         <FileText className="h-3 w-3" />
-                        일보 작성
+                        {reportLabel(w.worker_type)} 작성
                       </span>
                     </div>
                   </div>

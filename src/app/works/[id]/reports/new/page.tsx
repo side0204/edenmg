@@ -5,11 +5,13 @@ import { createClient } from '@/lib/supabase/server'
 import { submitReport } from '../../../report-actions'
 import { ReportForm, type ReportFormValues } from '../../../ReportForm'
 import { InstructionsBanner } from '../../../InstructionsBanner'
+import { reportLabel, type WorkWorkerType } from '@/lib/work'
 
 type WorkRow = {
   id: string
   company_id: string
   name: string
+  worker_type: WorkWorkerType | null
   instructions: string | null
 }
 
@@ -46,7 +48,7 @@ export default async function NewReportPage({
 
   const { data: workData } = await supabase
     .from('works')
-    .select('id, company_id, name, instructions')
+    .select('id, company_id, name, worker_type, instructions')
     .eq('id', id)
     .maybeSingle()
   const work = workData as WorkRow | null
@@ -92,7 +94,9 @@ export default async function NewReportPage({
             <ChevronLeft className="h-4 w-4" />
             {work.name}
           </Link>
-          <h1 className="mt-1 text-3xl font-bold text-slate-900 tracking-tight">일보 작성</h1>
+          <h1 className="mt-1 text-3xl font-bold text-slate-900 tracking-tight">
+            {reportLabel(work.worker_type)} 작성
+          </h1>
         </header>
 
         <InstructionsBanner instructions={work.instructions} />

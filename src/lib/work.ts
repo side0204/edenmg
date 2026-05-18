@@ -74,6 +74,19 @@ export function formatWorkerType(
   return workerType
 }
 
+/**
+ * 작업 종류별 일보 라벨.
+ *   접속팀 → '접속일보'
+ *   외선팀 → '외선일보'
+ *   그 외 → '일보'
+ * 카드 배지·페이지 타이틀·섹션 헤더 모두 동일 규칙으로 사용.
+ */
+export function reportLabel(workerType: WorkWorkerType | null): string {
+  if (workerType === '접속팀') return '접속일보'
+  if (workerType === '외선팀') return '외선일보'
+  return '일보'
+}
+
 export function formatWorkPeriod(start: string | null, end: string | null): string {
   if (!start && !end) return '기간 미정'
   if (start && end) {

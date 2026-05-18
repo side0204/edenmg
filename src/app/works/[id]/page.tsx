@@ -8,6 +8,7 @@ import {
   formatWorkLabel,
   formatWorkPeriod,
   formatWorkerType,
+  reportLabel,
   type WorkCategory,
   type WorkReportProgress,
   type WorkReportStatus,
@@ -524,7 +525,7 @@ export default async function WorkDetailPage({
             <div className="flex items-center justify-between gap-3">
               <h2 className="text-base font-semibold text-slate-700 tracking-tight inline-flex items-center gap-1.5">
                 <FileText className="h-4 w-4 text-slate-500" />
-                작업일보 ({reports.length})
+                {reportLabel(work.worker_type)} ({reports.length})
               </h2>
               {canWriteReport && !myTodayReport && (
                 <Link
@@ -532,7 +533,7 @@ export default async function WorkDetailPage({
                   className="shrink-0 inline-flex items-center gap-1 rounded-lg bg-slate-900 px-3 py-1.5 text-xs font-medium text-white hover:bg-slate-800"
                 >
                   <Plus className="h-3.5 w-3.5" />
-                  오늘 일보 작성
+                  오늘 {reportLabel(work.worker_type)} 작성
                 </Link>
               )}
               {myTodayReport && (
@@ -540,14 +541,14 @@ export default async function WorkDetailPage({
                   href={`/works/${work.id}/reports/${myTodayReport.id}`}
                   className="shrink-0 inline-flex items-center gap-1 rounded-lg border border-slate-300 px-3 py-1.5 text-xs font-medium text-slate-700 hover:bg-slate-50"
                 >
-                  오늘 일보 보기
+                  오늘 {reportLabel(work.worker_type)} 보기
                 </Link>
               )}
             </div>
 
             {reports.length === 0 ? (
               <p className="rounded-lg bg-slate-50 px-4 py-6 text-center text-sm text-slate-500">
-                아직 작성된 일보가 없습니다.
+                아직 작성된 {reportLabel(work.worker_type)}가 없습니다.
               </p>
             ) : (
               <ul className="divide-y divide-slate-100 rounded-lg border border-slate-200">
