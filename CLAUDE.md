@@ -159,11 +159,77 @@ PRD 외 추가 모듈. owner 결정사항:
 - **검색 페이지**: [`/vehicles/trips`](./src/app/vehicles/trips/page.tsx) — 탭 토글, 통계 4셀(기간·건수·총 주행거리·주유 합계), 결과 테이블, 우상단 ⬇ CSV 버튼 (현재 필터 그대로 같은 쿼리 파라미터로 다운로드).
 - **진입점**: [`/vehicles`](./src/app/vehicles/page.tsx) 헤더 "🔍 운행 이력" 버튼 + 최근 운행 섹션 헤더의 "전체 검색·CSV →" 링크.
 
-### 🟡 M2 후속 / 미완
+### ✅ 완료 (홈 보강 + 토스트 + 디자인 1차, 2026-05-18)
 
-- **`/admin/sites` 수정사항** — owner 가 별도로 보강 예정 (현장 등록 폼·목록 UX). 다음 세션에서 owner 요청 기반으로 진행. 현 구현은 SiteForm + 인라인 편집 패턴.
-- **알림** — 의도적으로 인앱 배지만. PWA 푸시는 M3 들어갈 때 같이 도입 검토.
-- **차량 모듈 운영 검증** — owner 가 Supabase 에서 0006 마이그레이션 실행한 뒤 출고/반납/주유 흐름 실측 필요.
+- **홈 차량 운행 현황 카드**: 회사 전 차량 (사용중/대기/비활성). 본인 사용 중이면 상단에 큰 "반납하기" 버튼. 대기 차량 탭 → 인라인 출고 폼 (출발 km·목적), 사용중 차량 탭 → 운전자·출고시각·경과시간·목적 펼침. [`src/app/VehicleStatusList.tsx`](./src/app/VehicleStatusList.tsx).
+- **Sonner 토스트 전사 도입**: server action redirect 의 모든 결과를 `?ok=메시지` / `?err=메시지` 두 키로 통일. 루트 layout 에 `<Toaster position="bottom-center" />` + `ToastBridge` ([`src/components/ToastBridge.tsx`](./src/components/ToastBridge.tsx)) 가 URL 쿼리 감지 → 토스트 → URL 정리. 페이지의 query-param banner 분기 모두 제거 (데이터 로딩 banner 만 유지).
+- **Pretendard 폰트 + 타이포그래피 위계**: Geist 제거 → Pretendard Variable Dynamic Subset (CDN). 페이지 메인 h1 `text-2xl` → `text-3xl tracking-tight` (16개 페이지). 홈 카드 헤더는 영문 `uppercase tracking-wider` 패턴 → `text-base font-semibold tracking-tight` (한글 친화).
+- **Lucide 아이콘 통일**: 이모지 → Lucide (📍→MapPin, 🔍→Search, ⛽→Fuel, ⬇→Download). + 등록 버튼 → Plus/UserPlus, ← 뒤로가기 → ChevronLeft (15개 페이지). 홈 카드 헤더 5개에 아이콘 추가 (Clock·Car·ClipboardCheck·Settings·FileText·CalendarDays). 액션의 → 화살표는 한글과 어울려 텍스트 유지.
+- **하단 탭 바**: [`BottomNav.tsx`](./src/components/BottomNav.tsx). 처음엔 4탭(홈/근태/차량/결재) 으로 했다가 owner 결정으로 **2탭(홈/사무) + 사무 그룹 상단 sticky 서브탭(근태/차량/결재)** 구조로 재편. 미래 M3 작업·M4 자재·M5 안전이 단일 최상위 탭으로 추가될 자리. [`OfficeSubTabs.tsx`](./src/components/OfficeSubTabs.tsx).
+- **PWA 1단계**: [`public/manifest.json`](./public/manifest.json) + [`public/icon.svg`](./public/icon.svg) (임시 어두운 슬레이트 + 'eM' 모노그램) + layout metadata/viewport. 홈 화면 추가 시 standalone 풀스크린. **회사 로고 PNG 교체는 추후**. 푸시·오프라인 캐싱은 별도.
+- **Empty State + Skeleton**: [`src/components/EmptyState.tsx`](./src/components/EmptyState.tsx) — 큰 원형 아이콘 + 제목 + 설명 + 선택적 CTA. 7개 페이지 적용. [`src/components/Skeleton.tsx`](./src/components/Skeleton.tsx) + Next.js 16 의 `loading.tsx` 라우트 세그먼트 (6개 핵심 페이지).
+- **다크모드 1단계 (보너스)**: layout body, BottomNav, OfficeSubTabs, 홈 카드/헤더에 `dark:` 클래스 추가. 시스템 자동 (prefers-color-scheme). 라이트 모드에는 영향 없음. **정식 도입은 추후** — owner 가 기능상 필요 없다고 판단해 보류, dark: 클래스는 그대로 두고 미래 재사용.
+- **모바일 동작 노하우 (대무자 콤보박스 디버깅으로 확인)**:
+  - `<button>` 안 `<div>`/`<p>` 같은 block 요소는 모바일 안드로이드 크롬에서 클릭 영역 비정상. `<div role="button" tabIndex={0}>` + `onKeyDown` 으로 처리.
+  - dropdown 패턴은 모바일 키보드 + 외부클릭 감지의 상호작용으로 자주 깨짐. **풀스크린 모달 검색** 패턴 (토스·카카오 스타일) 이 안정적.
+  - 모달 안 항목 탭 → 모달 닫힘 후 같은 좌표의 trigger button 으로 **ghost click** 전파. `onClick` 대신 `onPointerDown + e.preventDefault()` 로 후속 click 차단.
+  - `next dev` 의 JS chunk 가 LAN IP (예: `192.168.x.x:3000`) 접속 시 모바일에서 hydration 실패하는 경우 있음 → **모바일 검증은 Vercel 배포본(HTTPS) 사용**. GPS API 도 HTTPS 필수.
+  - `package.json` 의 dev script 에 `-H 0.0.0.0` 추가했지만 LAN HMR 은 여전히 불안정. dev 는 데스크탑에서, 모바일은 Vercel 로.
+
+### ✅ 완료 (휴가 대무자 + 휴가·외근 현황, 2026-05-18)
+
+| 항목 | 결정 | 비고 |
+|---|---|---|
+| **대무자 필수 여부** | 모든 휴가 신청에 대무자 필수 | server action 검증 |
+| **제외 대상** | 본인, 비활성 직원 | 신청 폼·서버 액션 양쪽 검증 |
+| **검색 UI** | 풀스크린 모달 검색 (이름·직급·팀·분야 부분 매칭) | 일반 dropdown 은 모바일 버그 많아 모달 사용 |
+| **홈 카드** | 당일 진행 중인 휴가·외근만 표시 + "이번 달 전체 보기 →" 링크 | 이름은 "휴가·외근 현황" |
+| **/leaves 별도 페이지** | 이번 달 전체. 진행 중 / 예정 / 종료 3섹션 그룹화 | 다일 휴가는 전체 기간 표시 (이번 달 범위로 자르지 않음) |
+
+- **DB 마이그레이션**: [`0007_leave_substitute.sql`](./supabase/migrations/0007_leave_substitute.sql) — `leave_requests.substitute_employee_id` 컬럼 + 휴가자 현황 인덱스.
+- **EmployeeCombobox 풀스크린 모달**: [`src/app/requests/new/EmployeeCombobox.tsx`](./src/app/requests/new/EmployeeCombobox.tsx). 트리거 탭 → 화면 전체 모달 + 상단 sticky 검색 input + 결과 리스트. body 스크롤 잠금.
+- **신청 폼**: 결재자 다음에 "대무자 *" 필드 추가. submitRequest 검증 (본인 금지·같은 회사·활성).
+- **상세 표시**: 신청 상세·결재함 상세에 "대무자" 행 추가. CSV 신청서 리포트에 "대무자" 컬럼 추가.
+- **/leaves 페이지**: 권한은 전 직원 (RLS 가 같은 회사 스코프).
+
+### ✅ 완료 (타이틀 변경, 2026-05-18)
+
+- 타이틀: `(주)이든정보기술 — 광케이블 시공 통합관리` → `(주)이든정보기술 — 통합관리시스템` (layout + manifest 둘 다).
+
+### ✅ 완료 (M3 작업관리 Phase 1: 작업 CRUD + 배정, 2026-05-18)
+
+owner 결정사항:
+
+| 항목 | 결정 | 비고 |
+|---|---|---|
+| **작업 vs 현장** | 무관 (별도 entity) | sites 와 FK 연결 안 함. 현장은 GPS 출퇴근용, 작업은 공사 건 |
+| **권한 모델** | admin/ceo + `employees.can_manage_works` 토글 | admin 이 일반 직원에게 부여 가능. /admin/employees 행마다 토글 |
+| **배정 방식** | N:M + 기간 지정 | 한 작업에 여러 명, 각 배정마다 시작·종료일 (비우면 작업 전체 기간) |
+| **작업유형 enum** | **DB enum 고정** — 4 대분류 + 12 소분류 | 추후 추가 시 마이그레이션 |
+| **카테고리 분류** | 청약(소호·FTTH·모바일·전용회선·다회선·아파트) / 계획(망보강·코어분산·이원화) / 지장이설(단순·일반·원인자) / 기타 | DB CHECK 제약으로 카테고리-소분류 정합성 강제. 기타는 소분류 null |
+| **상태** | 예정 / 진행중 / 완료 / 취소 | enum |
+
+- **DB 마이그레이션**: [`0008_works.sql`](./supabase/migrations/0008_works.sql) — `works` + `work_assignments` + 3개 enum + `employees.can_manage_works` + RLS 4개.
+- **공통 상수**: [`src/lib/work.ts`](./src/lib/work.ts) — `SUBCATEGORY_BY_CATEGORY` (카테고리별 소분류 매핑), `STATUS_COLOR`, `formatWorkLabel`/`formatWorkPeriod`.
+- **권한 토글 server action**: [`toggleCanManageWorks`](./src/app/admin/employees/actions.ts) — admin/ceo 만. /admin/employees 페이지 각 직원 행 하단에 표시.
+- **작업 페이지** (모두 모바일 우선)
+  - `/works` — 목록 (상태 배지·카테고리·기간·발주처). 권한자는 + 작업 등록 버튼.
+  - `/works/new`·`/[id]/edit` — 권한자만. [`WorkForm`](./src/app/works/WorkForm.tsx) 에서 대분류 변경 시 소분류 동적 필터링, '기타' 는 소분류 비활성.
+  - `/works/[id]` — 상세 + N:M 배정 UI. 직원 선택 + 기간 + 배정/해제 (X 버튼).
+- **하단 탭**: BottomNav 에 "작업" 탭 추가 (Hammer 아이콘). 홈 / 사무 / **작업** 3탭. M4 자재·M5 안전이 추가될 자리.
+
+### 🟡 미완 / 후속
+
+- **운영 작업 (owner 가 Supabase Dashboard 에서 SQL 실행 필요)**
+  - [`0007_leave_substitute.sql`](./supabase/migrations/0007_leave_substitute.sql) — 휴가 대무자 컬럼
+  - [`0008_works.sql`](./supabase/migrations/0008_works.sql) — M3 작업관리 테이블·enum·권한 컬럼
+- **M3 Phase 2 (일일 작업일보)** — PRD M3-03/04/06: 작업내역·진행률·사진·특이사항 + 결재 (현장소장 → 본사 확인) + EXIF·워터마크(P1). 분량 큰 별도 작업.
+- **M3 Phase 3 (대시보드)** — PRD M3-05: 현장별 진행률·누적 인시·자재 사용량.
+- **`/admin/sites` 수정사항** — owner 가 별도로 보강 예정 (현장 등록 폼·목록 UX).
+- **알림** — 의도적으로 인앱 토스트만. PWA 푸시는 M3 들어갈 때 같이 도입 검토.
+- **다크모드 정식 도입** — 1단계만 적용. 사용자가 OS 다크 모드 켜야 다크 보임. 전 페이지 일관 적용은 큰 작업이라 추후 owner 요청 시.
+- **회사 로고 적용** — `public/icon.svg` 가 임시 'eM' 모노그램. 회사 로고 PNG (192·512 px) 생성 후 manifest.json 의 icons 경로 교체.
+- **모바일 LAN 검증 한계** — `npm run dev` 의 JS chunk 가 LAN IP 접속 시 모바일 hydration 자주 실패. 모바일 검증은 Vercel 배포본 사용.
 
 ### 도메인 용어 — 헷갈리기 쉬운 부분
 - **권한 (permission)** : 시스템 접근 제어. 작업자/소장/관리자/대표 4개 enum. 관리자/대표만 직원 관리 화면 진입 가능.

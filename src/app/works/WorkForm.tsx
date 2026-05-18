@@ -24,6 +24,14 @@ export type WorkFormValues = {
   notes: string | null
 }
 
+type ClientChoice = '' | 'LG유플러스' | '기타'
+
+function deriveClientChoice(client: string | null): { choice: ClientChoice; custom: string } {
+  if (!client) return { choice: '', custom: '' }
+  if (client === 'LG유플러스') return { choice: 'LG유플러스', custom: '' }
+  return { choice: '기타', custom: client }
+}
+
 export function WorkForm({
   initial,
   action,
@@ -35,6 +43,10 @@ export function WorkForm({
 }) {
   const [category, setCategory] = useState<WorkCategory>(initial.category)
   const [subcategory, setSubcategory] = useState<WorkSubcategory | ''>(initial.subcategory ?? '')
+
+  const initialClient = deriveClientChoice(initial.client)
+  const [clientChoice, setClientChoice] = useState<ClientChoice>(initialClient.choice)
+  const [clientCustom, setClientCustom] = useState<string>(initialClient.custom)
 
   // 대분류 바뀌면 소분류 reset (기타는 빈 값으로)
   const handleCategory = (next: WorkCategory) => {
@@ -99,13 +111,26 @@ export function WorkForm({
       </div>
 
       <Field label="발주처 (선택)">
-        <input
-          name="client"
-          defaultValue={initial.client ?? ''}
-          maxLength={50}
-          placeholder="예: KT, SKB"
+        <select
+          name="client_choice"
+          value={clientChoice}
+          onChange={(e) => setClientChoice(e.currentTarget.value as ClientChoice)}
           className={inputClass}
-        />
+        >
+          <option value="">선택 안 함</option>
+          <option value="LG유플러스">LG유플러스</option>
+          <option value="기타">기타 (직접 입력)</option>
+        </select>
+        {clientChoice === '기타' && (
+          <input
+            name="client_custom"
+            value={clientCustom}
+            onChange={(e) => setClientCustom(e.currentTarget.value)}
+            maxLength={50}
+            placeholder="발주처를 입력하세요"
+            className={`${inputClass} mt-2`}
+          />
+        )}
       </Field>
 
       <Field label="주소 (선택)">

@@ -52,7 +52,15 @@ async function requireWorkManager() {
 
 function parseWorkForm(formData: FormData) {
   const name = String(formData.get('name') ?? '').trim()
-  const client = String(formData.get('client') ?? '').trim() || null
+  const clientChoice = String(formData.get('client_choice') ?? '').trim()
+  const clientCustom = String(formData.get('client_custom') ?? '').trim()
+  let client: string | null = null
+  let clientCustomMissing = false
+  if (clientChoice === 'LG유플러스') client = 'LG유플러스'
+  else if (clientChoice === '기타') {
+    if (!clientCustom) clientCustomMissing = true
+    client = clientCustom || null
+  }
   const address = String(formData.get('address') ?? '').trim() || null
   const category = String(formData.get('category') ?? '') as WorkCategory
   const subcategoryRaw = String(formData.get('subcategory') ?? '').trim()
@@ -66,6 +74,7 @@ function parseWorkForm(formData: FormData) {
   return {
     name,
     client,
+    clientCustomMissing,
     address,
     category,
     subcategory,
@@ -80,6 +89,9 @@ function parseWorkForm(formData: FormData) {
 function validateWork(p: ReturnType<typeof parseWorkForm>): string | null {
   if (!p.name) return '작업명을 입력하세요.'
   if (p.name.length > 100) return '작업명은 100자 이하로 입력하세요.'
+
+  if (p.clientCustomMissing) return "발주처 '기타' 선택 시 직접 입력하세요."
+  if (p.client && p.client.length > 50) return '발주처는 50자 이하로 입력하세요.'
 
   if (!WORK_CATEGORY_VALUES.includes(p.category)) return '작업 대분류를 선택하세요.'
 
@@ -108,9 +120,11 @@ export async function createWork(formData: FormData) {
 
   const { supabase, me } = await requireWorkManager()
 
+  const { clientCustomMissing, ...payload } = parsed
+  void clientCustomMissing
   const { data: inserted, error } = await supabase
     .from('works')
-    .insert({ ...parsed, company_id: me.company_id })
+    .insert({ ...payload, company_id: me.company_id })
     .select('id')
     .single()
 
@@ -132,7 +146,9 @@ export async function updateWork(formData: FormData) {
 
   const { supabase } = await requireWorkManager()
 
-  const { error } = await supabase.from('works').update(parsed).eq('id', id)
+  const { clientCustomMissing, ...payload } = parsed
+  void clientCustomMissing
+  const { error } = await supabase.from('works').update(payload).eq('id', id)
   if (error) {
     redirect(`/works/${id}/edit?err=` + encodeURIComponent('수정 실패: ' + error.message))
   }
