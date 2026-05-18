@@ -3,6 +3,7 @@ import { notFound } from 'next/navigation'
 import { ChevronLeft, UserPlus, Users } from 'lucide-react'
 import { createClient } from '@/lib/supabase/server'
 import { EmptyState } from '@/components/EmptyState'
+import { toggleCanManageWorks } from './actions'
 import { FieldSelect } from './FieldSelect'
 import {
   PERMISSION_LABEL,
@@ -22,6 +23,7 @@ type EmployeeRow = {
   position: string | null
   team: string | null
   work_type: string | null
+  can_manage_works: boolean
   is_active: boolean
   invited_at: string | null
   accepted_at: string | null
@@ -49,7 +51,7 @@ export default async function EmployeesPage() {
 
   const { data, error: listError } = await supabase
     .from('employees')
-    .select('id, name, email, phone, permission, position, team, work_type, is_active, invited_at, accepted_at, created_at')
+    .select('id, name, email, phone, permission, position, team, work_type, can_manage_works, is_active, invited_at, accepted_at, created_at')
     .order('created_at', { ascending: false })
 
   const rows = (data ?? []) as EmployeeRow[]
@@ -165,6 +167,30 @@ export default async function EmployeesPage() {
                       placeholder="미지정"
                     />
                   </FieldGroup>
+                </div>
+
+                <div className="flex items-center justify-between gap-3 rounded-lg bg-slate-50 px-3 py-2">
+                  <div className="min-w-0">
+                    <p className="text-xs font-medium text-slate-700">작업관리 권한</p>
+                    <p className="text-[11px] text-slate-500">
+                      작업 등록·수정·배정 가능 (admin/ceo 는 자동 부여)
+                    </p>
+                  </div>
+                  <form action={toggleCanManageWorks}>
+                    <input type="hidden" name="id" value={emp.id} />
+                    <input type="hidden" name="next" value={emp.can_manage_works ? '0' : '1'} />
+                    <button
+                      type="submit"
+                      className={
+                        'shrink-0 rounded-full px-3 py-1 text-xs font-bold ' +
+                        (emp.can_manage_works
+                          ? 'bg-emerald-100 text-emerald-800 hover:bg-emerald-200'
+                          : 'bg-slate-200 text-slate-600 hover:bg-slate-300')
+                      }
+                    >
+                      {emp.can_manage_works ? '✓ 부여됨' : '미부여'}
+                    </button>
+                  </form>
                 </div>
               </li>
             )
