@@ -12,6 +12,8 @@ import {
   type WorkSubcategory,
   type WorkWorkerType,
 } from '@/lib/work'
+import { aggregateConnectionTotals } from '@/lib/connection-aggregate'
+import { AggregationCard } from './AggregationCard'
 import { DeleteWorkButton } from './DeleteWorkButton'
 
 type WorkRow = {
@@ -120,6 +122,13 @@ export default async function WorksPage({
 
   const { data, error: listError } = await dbQuery
   const rows = (data ?? []) as WorkRow[]
+
+  // 검색어가 있을 때 검색 결과 접속팀 작업의 자재·공종 합계 (공사번호별 보기 시나리오)
+  const connWorkIds = rows.filter((r) => r.worker_type === '접속팀').map((r) => r.id)
+  const searchTotals =
+    query && connWorkIds.length > 0
+      ? await aggregateConnectionTotals(supabase, connWorkIds)
+      : null
 
   const buildHref = (next: {
     cat?: '' | WorkCategory
@@ -323,7 +332,7 @@ export default async function WorksPage({
                       <p className="mt-0.5 text-xs text-slate-500 truncate">
                         {formatWorkLabel(w.category, w.subcategory)}
                         {w.client && <span className="ml-1.5">· {w.client}</span>}
-                        {w.order_id && <span className="ml-1.5">· ID {w.order_id}</span>}
+                        {w.order_id && <span className="ml-1.5">· 공사 {w.order_id}</span>}
                       </p>
                       <p className="mt-0.5 text-xs text-slate-500">
                         {formatWorkPeriod(w.start_date, w.end_date)}
@@ -359,6 +368,14 @@ export default async function WorksPage({
               )
             })}
           </ul>
+        )}
+
+        {searchTotals && (
+          <AggregationCard
+            title={`검색 결과 합계 「${query}」`}
+            subtitle={`검색 결과 중 접속팀 작업 ${connWorkIds.length}건의 일보 합산. 공사번호로 검색하면 그 공사 전체 자재·공종을 한눈에 볼 수 있습니다.`}
+            aggregation={searchTotals}
+          />
         )}
       </div>
     </main>

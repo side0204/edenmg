@@ -32,8 +32,6 @@ export type WorkFormValues = {
   notes: string | null
 }
 
-const ORDER_ID_CATEGORIES: readonly WorkCategory[] = ['청약', '지장이설']
-
 type ClientChoice = '' | 'LG유플러스' | '기타'
 
 function deriveClientChoice(client: string | null): { choice: ClientChoice; custom: string } {
@@ -126,17 +124,18 @@ export function WorkForm({
         </Field>
       </div>
 
-      {ORDER_ID_CATEGORIES.includes(category) && (
-        <Field label="ID (선택)">
-          <input
-            name="order_id"
-            defaultValue={initial.order_id ?? ''}
-            maxLength={50}
-            placeholder="ID 입력"
-            className={inputClass}
-          />
-        </Field>
-      )}
+      <Field label="공사번호 (선택)">
+        <input
+          name="order_id"
+          defaultValue={initial.order_id ?? ''}
+          maxLength={50}
+          placeholder="공사번호 (없으면 공란)"
+          className={inputClass}
+        />
+        <p className="mt-1 text-xs text-slate-500">
+          같은 공사번호의 작업들은 자재·공종 합계를 묶어서 볼 수 있습니다.
+        </p>
+      </Field>
 
       <Field label="발주처 (선택)">
         <select

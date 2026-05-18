@@ -15,6 +15,8 @@ import {
   type WorkSubcategory,
   type WorkWorkerType,
 } from '@/lib/work'
+import { aggregateConnectionTotals } from '@/lib/connection-aggregate'
+import { AggregationCard } from '../AggregationCard'
 import { assignEmployee, unassignEmployee } from '../actions'
 
 type WorkRow = {
@@ -231,6 +233,32 @@ export default async function WorkDetailPage({
     candidates = (candidatesData ?? []) as typeof candidates
   }
 
+  // ===== 자재·공종 합계 =====
+  // 작업별 합계 — 이 작업이 접속팀이면 자기 일보 집계
+  const workTotals = isConnectionTeam
+    ? await aggregateConnectionTotals(supabase, [work.id])
+    : null
+
+  // 공사번호별 합계 — order_id 가 있고 같은 회사의 같은 order_id 작업이 1개 이상 있을 때.
+  // 형제 작업 중 접속팀만 합산 대상.
+  let orderTotals: typeof workTotals = null
+  let orderSiblingCount = 0
+  let orderConnSiblingCount = 0
+  if (work.order_id) {
+    const { data: siblings } = await supabase
+      .from('works')
+      .select('id, worker_type')
+      .eq('company_id', work.company_id)
+      .eq('order_id', work.order_id)
+    const sibList = (siblings ?? []) as { id: string; worker_type: string | null }[]
+    orderSiblingCount = sibList.length
+    const connIds = sibList.filter((s) => s.worker_type === '접속팀').map((s) => s.id)
+    orderConnSiblingCount = connIds.length
+    if (connIds.length > 0) {
+      orderTotals = await aggregateConnectionTotals(supabase, connIds)
+    }
+  }
+
   return (
     <main className="min-h-screen p-4 sm:p-6">
       <div className="mx-auto max-w-md space-y-5">
@@ -273,7 +301,7 @@ export default async function WorkDetailPage({
             </span>
           </div>
           <InfoRow label="기간">{formatWorkPeriod(work.start_date, work.end_date)}</InfoRow>
-          {work.order_id && <InfoRow label="ID">{work.order_id}</InfoRow>}
+          {work.order_id && <InfoRow label="공사번호">{work.order_id}</InfoRow>}
           <InfoRow label="작업자">
             {formatWorkerType(work.worker_type, work.worker_type_custom)}
           </InfoRow>
@@ -469,6 +497,22 @@ export default async function WorkDetailPage({
               </ul>
             )}
           </section>
+        )}
+
+        {workTotals && (
+          <AggregationCard
+            title="이 작업 자재·공종 합계"
+            subtitle="이 작업에 작성된 접속일보를 모두 합산한 결과입니다."
+            aggregation={workTotals}
+          />
+        )}
+
+        {orderTotals && work.order_id && (
+          <AggregationCard
+            title={`공사번호 「${work.order_id}」 합계`}
+            subtitle={`같은 공사번호 작업 ${orderSiblingCount}건 중 접속팀 ${orderConnSiblingCount}건의 일보 합산`}
+            aggregation={orderTotals}
+          />
         )}
 
         <section className="rounded-2xl bg-white border border-slate-200 p-5 space-y-3">
