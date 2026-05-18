@@ -108,7 +108,7 @@ export default async function ConnectionReportDetailPage({
     | {
         id: string
         company_id: string
-        permission: 'worker' | 'foreman' | 'admin' | 'ceo'
+        permission: 'worker' | 'team_member' | 'team_leader' | 'admin'
         is_active: boolean
       }
     | null
@@ -256,7 +256,7 @@ export default async function ConnectionReportDetailPage({
   const masters = (mastersData ?? []) as MaterialMaster[]
   const masterMap = new Map<string, MaterialMaster>(masters.map((m) => [m.id, m]))
 
-  const isAdmin = me.permission === 'admin' || me.permission === 'ceo'
+  const isAdmin = me.permission === 'admin'
   const isAuthor = report.author_employee_id === me.id
   const isAssignee = work.assignee_employee_id === me.id
   const canEdit = isAuthor && report.status === '대기'

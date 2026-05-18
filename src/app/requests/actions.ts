@@ -10,7 +10,7 @@ import {
   type LeaveType,
 } from '@/lib/leave'
 
-type Permission = 'worker' | 'foreman' | 'admin' | 'ceo'
+type Permission = 'worker' | 'team_member' | 'team_leader' | 'admin'
 
 const ATTACHMENT_MAX_BYTES = 10 * 1024 * 1024 // 10MB
 const ATTACHMENT_MIME_WHITELIST = new Set([

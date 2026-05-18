@@ -60,7 +60,7 @@ export default async function ReportDetailPage({
     | {
         id: string
         company_id: string
-        permission: 'worker' | 'foreman' | 'admin' | 'ceo'
+        permission: 'worker' | 'team_member' | 'team_leader' | 'admin'
         is_active: boolean
       }
     | null
@@ -102,7 +102,7 @@ export default async function ReportDetailPage({
   const author = empMap.get(report.author_employee_id)
   const reviewer = report.reviewed_by ? empMap.get(report.reviewed_by) : null
 
-  const isAdmin = me.permission === 'admin' || me.permission === 'ceo'
+  const isAdmin = me.permission === 'admin'
   const isAuthor = report.author_employee_id === me.id
   const isAssignee = work.assignee_employee_id === me.id
   const canEdit = isAuthor && report.status === '대기'

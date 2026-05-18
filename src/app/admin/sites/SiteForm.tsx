@@ -21,7 +21,7 @@ export type SiteFormValues = {
 export type ManagerOption = {
   id: string
   name: string
-  permission: string  // 라벨용 ('소장' 등)
+  permission: string  // 라벨용 ('팀장' 등)
 }
 
 export function SiteForm({
@@ -151,7 +151,7 @@ export function SiteForm({
         </p>
       </Field>
 
-      <Field label="현장소장">
+      <Field label="현장팀장">
         <select
           name="manager_employee_id"
           defaultValue={defaults.manager_employee_id ?? ''}
@@ -165,7 +165,7 @@ export function SiteForm({
           ))}
         </select>
         <p className="mt-1 text-xs text-slate-400">
-          소장/관리자/대표 권한 직원만 후보. 직원의 휴가 신청 시 1차 결재자 선택지로도 보입니다.
+          팀장/관리자 권한 직원만 후보. 직원의 휴가 신청 시 1차 결재자 선택지로도 보입니다.
         </p>
       </Field>
 

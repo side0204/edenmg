@@ -86,7 +86,7 @@ export default async function StatsPage({
     | {
         id: string
         company_id: string
-        permission: 'worker' | 'foreman' | 'admin' | 'ceo'
+        permission: 'worker' | 'team_member' | 'team_leader' | 'admin'
         can_view_stats: boolean
         is_active: boolean
       }
@@ -98,7 +98,7 @@ export default async function StatsPage({
   // 통계 조회 권한:
   //   admin/ceo OR can_view_stats=true → 회사 전체
   //   그 외 → 본인이 작성한 일보 기반 통계만
-  const isAdminLike = me.permission === 'admin' || me.permission === 'ceo'
+  const isAdminLike = me.permission === 'admin'
   const canViewAll = isAdminLike || me.can_view_stats
 
   // 회사의 접속팀 작업만 — 자재·공종 통계는 접속일보 한정

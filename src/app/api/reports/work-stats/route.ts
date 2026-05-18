@@ -76,14 +76,14 @@ export async function GET(req: Request) {
     | {
         id: string
         company_id: string
-        permission: 'worker' | 'foreman' | 'admin' | 'ceo'
+        permission: 'worker' | 'team_member' | 'team_leader' | 'admin'
         can_view_stats: boolean
         is_active: boolean
       }
     | null
   if (!me || !me.is_active) return new Response('Forbidden', { status: 403 })
   const canViewAll =
-    me.permission === 'admin' || me.permission === 'ceo' || me.can_view_stats
+    me.permission === 'admin' || me.can_view_stats
 
   // 회사의 접속팀 작업
   const { data: worksData } = await supabase

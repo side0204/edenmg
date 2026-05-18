@@ -12,7 +12,7 @@ import {
   type WorkReportProgress,
 } from '@/lib/connection'
 
-type Permission = 'worker' | 'foreman' | 'admin' | 'ceo'
+type Permission = 'worker' | 'team_member' | 'team_leader' | 'admin'
 
 type Me = {
   id: string
@@ -54,7 +54,7 @@ async function ensureCanAuthor(
   if (!work || work.company_id !== me.company_id) {
     redirect('/works?err=' + encodeURIComponent('잘못된 작업입니다'))
   }
-  const isAdmin = me.permission === 'admin' || me.permission === 'ceo'
+  const isAdmin = me.permission === 'admin'
   if (!isAdmin) {
     const { data: assigned } = await supabase
       .from('work_assignments')
@@ -413,7 +413,7 @@ async function reviewConnectionReport(formData: FormData, decision: '승인' | '
     )
   }
 
-  const isAdmin = me.permission === 'admin' || me.permission === 'ceo'
+  const isAdmin = me.permission === 'admin'
   if (!isAdmin) {
     const { data: workRow } = await supabase
       .from('works')

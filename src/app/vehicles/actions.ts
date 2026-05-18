@@ -4,7 +4,7 @@ import { redirect } from 'next/navigation'
 import { revalidatePath } from 'next/cache'
 import { createClient } from '@/lib/supabase/server'
 
-type Permission = 'worker' | 'foreman' | 'admin' | 'ceo'
+type Permission = 'worker' | 'team_member' | 'team_leader' | 'admin'
 
 // ===== 공통 =============================================================
 
@@ -28,7 +28,7 @@ async function requireMe() {
 
 async function requireAdmin() {
   const { supabase, me } = await requireMe()
-  if (me.permission !== 'admin' && me.permission !== 'ceo') {
+  if (me.permission !== 'admin') {
     redirect('/vehicles?err=' + encodeURIComponent('권한이 없습니다'))
   }
   return { supabase, me }
@@ -213,7 +213,7 @@ export async function returnVehicle(formData: FormData) {
   if (trip.returned_at) {
     redirect('/vehicles?err=' + encodeURIComponent('이미 반납된 운행입니다'))
   }
-  if (trip.driver_employee_id !== me.id && me.permission !== 'admin' && me.permission !== 'ceo') {
+  if (trip.driver_employee_id !== me.id && me.permission !== 'admin') {
     redirect('/vehicles?err=' + encodeURIComponent('본인 운행만 반납할 수 있습니다'))
   }
 

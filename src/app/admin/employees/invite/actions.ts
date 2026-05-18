@@ -55,7 +55,7 @@ export async function inviteEmployee(formData: FormData) {
     .maybeSingle()
   const me = meRow as { permission: Permission; company_id: string; is_active: boolean } | null
 
-  if (!me || !me.is_active || (me.permission !== 'admin' && me.permission !== 'ceo')) {
+  if (!me || !me.is_active || (me.permission !== 'admin')) {
     redirect('/admin/employees/invite?err=' + encodeURIComponent('초대 권한이 없습니다'))
   }
 

@@ -8,7 +8,7 @@ import {
   type WorkReportProgress,
 } from '@/lib/work'
 
-type Permission = 'worker' | 'foreman' | 'admin' | 'ceo'
+type Permission = 'worker' | 'team_member' | 'team_leader' | 'admin'
 
 type Me = {
   id: string
@@ -57,7 +57,7 @@ async function ensureCanAuthor(
     redirect('/works?err=' + encodeURIComponent('잘못된 작업입니다'))
   }
 
-  const isAdmin = me.permission === 'admin' || me.permission === 'ceo'
+  const isAdmin = me.permission === 'admin'
   if (!isAdmin) {
     const { data: assigned } = await supabase
       .from('work_assignments')
@@ -234,7 +234,7 @@ async function reviewReport(formData: FormData, decision: '승인' | '반려') {
   }
 
   // 담당자 OR admin/ceo 만 가능
-  const isAdmin = me.permission === 'admin' || me.permission === 'ceo'
+  const isAdmin = me.permission === 'admin'
   if (!isAdmin) {
     const { data: workRow } = await supabase
       .from('works')

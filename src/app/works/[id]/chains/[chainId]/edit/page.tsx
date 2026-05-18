@@ -63,7 +63,7 @@ export default async function ChainEditPage({
     | {
         id: string
         company_id: string
-        permission: 'worker' | 'foreman' | 'admin' | 'ceo'
+        permission: 'worker' | 'team_member' | 'team_leader' | 'admin'
         can_manage_works: boolean
         is_active: boolean
       }
@@ -86,7 +86,7 @@ export default async function ChainEditPage({
     | null
   if (!work || work.company_id !== me.company_id) notFound()
 
-  const isAdmin = me.permission === 'admin' || me.permission === 'ceo'
+  const isAdmin = me.permission === 'admin'
   const isManager = isAdmin || me.can_manage_works || work.assignee_employee_id === me.id
 
   // 노드 CUD 권한: 매니저 OR 배정자 (ad-hoc 추가용)

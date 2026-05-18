@@ -31,7 +31,7 @@ export async function GET(request: NextRequest) {
   const me = meRow as
     | {
         id: string
-        permission: 'worker' | 'foreman' | 'admin' | 'ceo'
+        permission: 'worker' | 'team_member' | 'team_leader' | 'admin'
         company_id: string
       }
     | null
@@ -60,7 +60,7 @@ export async function GET(request: NextRequest) {
     .gte('end_date', startDate)
     .order('start_date', { ascending: true })
 
-  if (me.permission === 'foreman') {
+  if (me.permission === 'team_leader') {
     query = query.eq('assigned_foreman_id', me.id)
   }
 
@@ -144,7 +144,7 @@ const LEAVE_HEADERS = [
   '시작시각',
   '종료시각',
   '긴급',
-  '1차결재자(소장)',
+  '1차결재자(팀장)',
   '대무자',
   '상태',
   '사유',
@@ -154,7 +154,7 @@ const LEAVE_HEADERS = [
 
 const PERMISSION_LABEL = {
   worker: '작업자',
-  foreman: '소장',
+  team_leader: '팀장',
+  team_member: '팀원',
   admin: '관리자',
-  ceo: '대표',
 } as const

@@ -52,13 +52,13 @@ export default async function EditWorkPage({
   const me = meRow as
     | {
         company_id: string
-        permission: 'worker' | 'foreman' | 'admin' | 'ceo'
+        permission: 'worker' | 'team_member' | 'team_leader' | 'admin'
         can_manage_works: boolean
         is_active: boolean
       }
     | null
   if (!me || !me.is_active) redirect('/?err=' + encodeURIComponent('계정이 활성 상태가 아닙니다'))
-  const canManage = me.permission === 'admin' || me.permission === 'ceo' || me.can_manage_works
+  const canManage = me.permission === 'admin' || me.can_manage_works
   if (!canManage) redirect('/works?err=' + encodeURIComponent('작업관리 권한이 없습니다'))
 
   const { data: workData } = await supabase

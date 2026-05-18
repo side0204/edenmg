@@ -10,7 +10,7 @@ import {
   type LeaveType,
 } from '@/lib/leave'
 
-type Permission = 'worker' | 'foreman' | 'admin' | 'ceo'
+type Permission = 'worker' | 'team_member' | 'team_leader' | 'admin'
 
 type PendingRow = {
   id: string
@@ -45,7 +45,7 @@ export default async function ApprovalsPage() {
   if (!me || !me.is_active) redirect('/?err=' + encodeURIComponent('계정이 활성 상태가 아닙니다'))
   if (me.permission === 'worker') notFound()
 
-  const isAdmin = me.permission === 'admin' || me.permission === 'ceo'
+  const isAdmin = me.permission === 'admin'
 
   // 결재함 쿼리:
   //   - foreman: 본인 단계 + 본인이 지정 결재자
@@ -125,7 +125,7 @@ export default async function ApprovalsPage() {
                         : 'text-indigo-700 bg-indigo-50 border-indigo-200'
                     }`}
                   >
-                    {r.pending_stage === 'foreman' ? '소장 단계' : '관리자 단계'}
+                    {r.pending_stage === 'foreman' ? '팀장 단계' : '관리자 단계'}
                   </span>
                 </div>
               </Link>

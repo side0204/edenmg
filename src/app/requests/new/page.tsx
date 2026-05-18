@@ -5,13 +5,13 @@ import { createClient } from '@/lib/supabase/server'
 import { RequestForm, type ForemanOption } from './RequestForm'
 import type { EmployeeOption } from './EmployeeCombobox'
 
-type Permission = 'worker' | 'foreman' | 'admin' | 'ceo'
+type Permission = 'worker' | 'team_member' | 'team_leader' | 'admin'
 
 const PERMISSION_LABEL: Record<Permission, string> = {
   worker: '작업자',
-  foreman: '소장',
+  team_leader: '팀장',
+  team_member: '팀원',
   admin: '관리자',
-  ceo: '대표',
 }
 
 function todayInSeoul(): string {
@@ -38,7 +38,7 @@ export default async function NewRequestPage() {
   const { data: foremenData } = await supabase
     .from('employees')
     .select('id, name, permission')
-    .in('permission', ['foreman', 'admin', 'ceo'])
+    .in('permission', ['team_leader', 'admin'])
     .eq('is_active', true)
     .neq('id', me.id)
     .order('name')

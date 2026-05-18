@@ -4,7 +4,7 @@ import { ChevronLeft } from 'lucide-react'
 import { createClient } from '@/lib/supabase/server'
 import { returnVehicle } from '../../actions'
 
-type Permission = 'worker' | 'foreman' | 'admin' | 'ceo'
+type Permission = 'worker' | 'team_member' | 'team_leader' | 'admin'
 
 type VehicleRow = {
   id: string
@@ -73,7 +73,7 @@ export default async function ReturnPage({
     redirect('/vehicles?err=' + encodeURIComponent('이 차량은 사용 중이 아닙니다'))
   }
 
-  const isAdmin = me.permission === 'admin' || me.permission === 'ceo'
+  const isAdmin = me.permission === 'admin'
   if (trip.driver_employee_id !== me.id && !isAdmin) {
     redirect('/vehicles?err=' + encodeURIComponent('본인 운행만 반납할 수 있습니다'))
   }

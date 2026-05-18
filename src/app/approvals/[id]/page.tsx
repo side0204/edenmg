@@ -14,7 +14,7 @@ import {
 import { approveRequest, rejectRequest } from '../actions'
 import { getAttachmentUrl } from '@/app/requests/actions'
 
-type Permission = 'worker' | 'foreman' | 'admin' | 'ceo'
+type Permission = 'worker' | 'team_member' | 'team_leader' | 'admin'
 
 type RequestRow = {
   id: string
@@ -118,10 +118,10 @@ export default async function ApprovalDetailPage({
   const attachmentLink = req.attachment_path ? await getAttachmentUrl(req.id) : null
 
   // 본인이 결재 가능한지 + 승인 버튼 라벨 결정
-  const isAdmin = me.permission === 'admin' || me.permission === 'ceo'
+  const isAdmin = me.permission === 'admin'
   const isPending = req.status === '대기' && req.pending_stage !== null
   const canApproveAsForeman =
-    me.permission === 'foreman' && req.pending_stage === 'foreman' && req.assigned_foreman_id === me.id
+    me.permission === 'team_leader' && req.pending_stage === 'foreman' && req.assigned_foreman_id === me.id
   const canAct = isPending && (isAdmin || canApproveAsForeman)
   // foreman 단계인데 admin/ceo 가 승인 → "전결" 라벨로 보여줌
   const approveLabel = isAdmin && req.pending_stage === 'foreman' ? '전결' : '승인'
@@ -149,7 +149,7 @@ export default async function ApprovalDetailPage({
           <div className="flex items-center justify-between">
             <span className={`rounded-full border px-3 py-1 text-sm font-medium ${STATUS_COLOR[req.status]}`}>
               {req.status}
-              {req.pending_stage === 'foreman' && ' (소장 결재 대기)'}
+              {req.pending_stage === 'foreman' && ' (팀장 결재 대기)'}
               {req.pending_stage === 'admin' && ' (관리자 결재 대기)'}
             </span>
           </div>
@@ -238,7 +238,7 @@ export default async function ApprovalDetailPage({
             </div>
             {approveLabel === '전결' && (
               <p className="text-xs text-slate-500">
-                현재 소장 결재 대기 중인 건입니다. 승인 시 소장 단계를 건너뛰고 <span className="font-medium">전결</span> 로 기록됩니다.
+                현재 팀장 결재 대기 중인 건입니다. 승인 시 팀장 단계를 건너뛰고 <span className="font-medium">전결</span> 로 기록됩니다.
               </p>
             )}
           </section>

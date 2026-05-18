@@ -49,7 +49,7 @@ export default async function NewConnectionReportPage({
     | {
         id: string
         company_id: string
-        permission: 'worker' | 'foreman' | 'admin' | 'ceo'
+        permission: 'worker' | 'team_member' | 'team_leader' | 'admin'
         is_active: boolean
       }
     | null
@@ -75,7 +75,7 @@ export default async function NewConnectionReportPage({
     redirect(`/works/${id}?err=` + encodeURIComponent('접속팀 작업만 접속일보를 작성합니다'))
   }
 
-  const isAdmin = me.permission === 'admin' || me.permission === 'ceo'
+  const isAdmin = me.permission === 'admin'
   if (!isAdmin) {
     const { data: assigned } = await supabase
       .from('work_assignments')
@@ -143,7 +143,7 @@ export default async function NewConnectionReportPage({
   //  - canEditNode: 기존 노드의 정보(이름·규격·메모 등) 수정 — admin/ceo/담당자
   //  - canAddNode : 작업구간 사이에 새 함체 끼우기 — admin/ceo/담당자 + 배정 작업자
   //                 (owner: "일보작성자는 등록된 작업구간에서 추가되는 부분만 추가하도록")
-  const isAdminLike = me.permission === 'admin' || me.permission === 'ceo'
+  const isAdminLike = me.permission === 'admin'
   const isAssignee = work.assignee_employee_id === me.id
   const canEditNode = isAdminLike || isAssignee
   // assigned 여부는 위 권한 체크에서 redirect 로 컷팅된 상태 — 여기 도달했다는 건 isAdminLike OR 배정자

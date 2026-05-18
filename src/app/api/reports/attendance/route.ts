@@ -35,7 +35,7 @@ export async function GET(request: NextRequest) {
   const me = meRow as
     | {
         id: string
-        permission: 'worker' | 'foreman' | 'admin' | 'ceo'
+        permission: 'worker' | 'team_member' | 'team_leader' | 'admin'
         company_id: string
         companies: { name: string } | null
       }
@@ -68,7 +68,7 @@ export async function GET(request: NextRequest) {
     .lte('work_date', endDate)
     .order('work_date', { ascending: true })
 
-  if (me.permission === 'foreman') {
+  if (me.permission === 'team_leader') {
     // 본인 관리 현장만. 매니저인 sites.id 를 먼저 조회.
     const { data: mySites } = await supabase
       .from('sites')
@@ -147,9 +147,9 @@ const ATTENDANCE_HEADERS = [
 
 const PERMISSION_LABEL = {
   worker: '작업자',
-  foreman: '소장',
+  team_leader: '팀장',
+  team_member: '팀원',
   admin: '관리자',
-  ceo: '대표',
 } as const
 
 function formatCoord(lat: number | null, lng: number | null): string {

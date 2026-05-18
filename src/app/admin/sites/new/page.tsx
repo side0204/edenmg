@@ -6,7 +6,7 @@ import { createSite } from '../actions'
 import { fetchManagerCandidates } from '../managers'
 import { SiteForm, type SiteFormValues } from '../SiteForm'
 
-type Permission = 'worker' | 'foreman' | 'admin' | 'ceo'
+type Permission = 'worker' | 'team_member' | 'team_leader' | 'admin'
 
 const defaults: SiteFormValues = {
   id: null,
@@ -36,7 +36,7 @@ export default async function NewSitePage() {
     .eq('auth_user_id', user.id)
     .maybeSingle()
   const me = meRow as { permission: Permission } | null
-  if (!me || (me.permission !== 'admin' && me.permission !== 'ceo')) {
+  if (!me || (me.permission !== 'admin')) {
     notFound()
   }
 

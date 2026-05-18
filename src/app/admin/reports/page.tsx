@@ -4,7 +4,7 @@ import { ChevronLeft } from 'lucide-react'
 import { createClient } from '@/lib/supabase/server'
 import ReportPanel from './ReportPanel'
 
-type Permission = 'worker' | 'foreman' | 'admin' | 'ceo'
+type Permission = 'worker' | 'team_member' | 'team_leader' | 'admin'
 
 function thisMonthKST(): string {
   // 'YYYY-MM' 형태로 KST 기준 현재 월.
@@ -34,7 +34,7 @@ export default async function ReportsPage() {
     notFound()
   }
 
-  const isAdmin = me.permission === 'admin' || me.permission === 'ceo'
+  const isAdmin = me.permission === 'admin'
   const scopeNote = isAdmin
     ? '전사 데이터를 받습니다.'
     : '본인이 관리하는 현장·1차 결재자로 지정된 신청서만 포함됩니다.'

@@ -5,7 +5,7 @@ import { revalidatePath } from 'next/cache'
 import { createClient } from '@/lib/supabase/server'
 import { CABLE_SPEC_VALUES, type CableSpec, type PlanNodeType } from '@/lib/connection'
 
-type Permission = 'worker' | 'foreman' | 'admin' | 'ceo'
+type Permission = 'worker' | 'team_member' | 'team_leader' | 'admin'
 
 type Me = {
   id: string
@@ -51,7 +51,7 @@ async function ensureChainManager(
   if (!work || work.company_id !== me.company_id) {
     redirect('/works?err=' + encodeURIComponent('잘못된 작업입니다'))
   }
-  const isAdmin = me.permission === 'admin' || me.permission === 'ceo'
+  const isAdmin = me.permission === 'admin'
   const isAssignee = work.assignee_employee_id === me.id
   if (!isAdmin && !me.can_manage_works && !isAssignee) {
     redirect(`/works/${workId}?err=` + encodeURIComponent('작업구간 관리 권한이 없습니다'))
@@ -76,7 +76,7 @@ async function ensureNodeAuthor(
   if (!work || work.company_id !== me.company_id) {
     redirect('/works?err=' + encodeURIComponent('잘못된 작업입니다'))
   }
-  const isAdmin = me.permission === 'admin' || me.permission === 'ceo'
+  const isAdmin = me.permission === 'admin'
   const isAssignee = work.assignee_employee_id === me.id
   const isManager = isAdmin || me.can_manage_works || isAssignee
   if (isManager) return { isAdHoc: false }

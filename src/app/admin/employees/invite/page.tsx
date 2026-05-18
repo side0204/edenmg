@@ -25,7 +25,7 @@ export default async function InviteEmployeePage() {
     .eq('auth_user_id', user.id)
     .maybeSingle()
   const me = meRow as { permission: Permission } | null
-  if (!me || (me.permission !== 'admin' && me.permission !== 'ceo')) {
+  if (!me || (me.permission !== 'admin')) {
     notFound()
   }
 

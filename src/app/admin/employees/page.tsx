@@ -51,7 +51,7 @@ export default async function EmployeesPage() {
     .maybeSingle()
 
   const me = meRow as { id: string; permission: Permission } | null
-  if (!me || (me.permission !== 'admin' && me.permission !== 'ceo')) {
+  if (!me || (me.permission !== 'admin')) {
     notFound()
   }
 

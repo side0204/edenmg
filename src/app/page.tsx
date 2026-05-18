@@ -5,13 +5,13 @@ import { LEAVE_TYPE_LABEL, formatPeriod, type LeaveType } from '@/lib/leave'
 import { signOut } from './login/actions'
 import VehicleStatusList from './VehicleStatusList'
 
-type Permission = 'worker' | 'foreman' | 'admin' | 'ceo'
+type Permission = 'worker' | 'team_member' | 'team_leader' | 'admin'
 
 const PERMISSION_LABEL: Record<Permission, string> = {
   worker: '작업자',
-  foreman: '소장',
+  team_member: '팀원',
+  team_leader: '팀장',
   admin: '관리자',
-  ceo: '대표',
 }
 
 function todayInSeoul(): string {
@@ -94,7 +94,7 @@ export default async function Home() {
     )
   }
 
-  const isAdmin = employee.permission === 'admin' || employee.permission === 'ceo'
+  const isAdmin = employee.permission === 'admin'
   const subtitleParts = [
     employee.position,
     employee.team ? `${employee.team}팀` : null,
@@ -537,7 +537,7 @@ export default async function Home() {
           </section>
         )}
 
-        {!isAdmin && employee.permission === 'foreman' && (
+        {!isAdmin && employee.permission === 'team_leader' && (
           <section className="rounded-2xl bg-white shadow-sm border border-slate-200 dark:bg-slate-900 dark:border-slate-800 p-6 space-y-3">
             <h2 className="flex items-center gap-2 text-base font-semibold text-slate-700 tracking-tight dark:text-slate-300">
               <FileText className="h-5 w-5 text-slate-400" />

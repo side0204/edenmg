@@ -5,7 +5,7 @@ import { revalidatePath } from 'next/cache'
 import { createClient } from '@/lib/supabase/server'
 import type { LeaveAction, LeaveStage, LeaveStatus } from '@/lib/leave'
 
-type Permission = 'worker' | 'foreman' | 'admin' | 'ceo'
+type Permission = 'worker' | 'team_member' | 'team_leader' | 'admin'
 
 async function requireApprover() {
   const supabase = await createClient()
@@ -36,9 +36,9 @@ function decideAuthority(
   lr: { assigned_foreman_id: string | null; pending_stage: LeaveStage | null; status: LeaveStatus },
 ): { canAct: boolean; isAdmin: boolean } {
   if (lr.status !== '대기' || lr.pending_stage === null) return { canAct: false, isAdmin: false }
-  const isAdmin = me.permission === 'admin' || me.permission === 'ceo'
+  const isAdmin = me.permission === 'admin'
   if (isAdmin) return { canAct: true, isAdmin }
-  if (me.permission === 'foreman' && lr.pending_stage === 'foreman' && lr.assigned_foreman_id === me.id) {
+  if (me.permission === 'team_leader' && lr.pending_stage === 'foreman' && lr.assigned_foreman_id === me.id) {
     return { canAct: true, isAdmin: false }
   }
   return { canAct: false, isAdmin: false }
@@ -85,7 +85,7 @@ export async function approveRequest(formData: FormData) {
   let finalActedAt: string | null = null
 
   if (authority.isAdmin) {
-    // 관리자/대표는 어느 단계든 단독 종결. foreman 단계였으면 '전결' 로 기록.
+    // 관리자는 어느 단계든 단독 종결. foreman 단계였으면 '전결' 로 기록.
     if (lr.pending_stage === 'foreman') {
       action = '전결'
     } else {
@@ -96,7 +96,7 @@ export async function approveRequest(formData: FormData) {
     finalActorId = me.id
     finalActedAt = now
   } else {
-    // 소장 승인 — 다음 단계로 이동
+    // 팀장 승인 — 다음 단계로 이동
     action = '승인'
     nextStatus = '대기'
     nextStage = 'admin'

@@ -11,6 +11,8 @@ export type LeaveType =
   | '외근'
 
 export type LeaveStatus = '대기' | '승인' | '반려' | '취소'
+// DB enum 값은 'foreman' 그대로 유지 (legacy — 의미는 '팀장 단계').
+// UI 표시는 '팀장 단계' 로 표시. 마이그로 enum value rename 가능하지만 위험 회피.
 export type LeaveStage = 'foreman' | 'admin'
 export type LeaveAction = '신청' | '승인' | '반려' | '전결' | '취소'
 

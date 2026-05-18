@@ -3,7 +3,7 @@ import { Search, Fuel, Plus, ChevronLeft, Car } from 'lucide-react'
 import { createClient } from '@/lib/supabase/server'
 import { EmptyState } from '@/components/EmptyState'
 
-type Permission = 'worker' | 'foreman' | 'admin' | 'ceo'
+type Permission = 'worker' | 'team_member' | 'team_leader' | 'admin'
 
 type VehicleRow = {
   id: string
@@ -60,7 +60,7 @@ export default async function VehiclesPage() {
   const me = meRow as { id: string; company_id: string; permission: Permission } | null
   if (!me) return null
 
-  const isAdmin = me.permission === 'admin' || me.permission === 'ceo'
+  const isAdmin = me.permission === 'admin'
 
   // 차량 목록
   const { data: vData, error: vErr } = await supabase

@@ -45,7 +45,7 @@ export default async function EditNodePage({
     | {
         id: string
         company_id: string
-        permission: 'worker' | 'foreman' | 'admin' | 'ceo'
+        permission: 'worker' | 'team_member' | 'team_leader' | 'admin'
         can_manage_works: boolean
         is_active: boolean
       }

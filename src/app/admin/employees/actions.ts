@@ -42,7 +42,7 @@ export async function updateEmployeeField(formData: FormData) {
     .maybeSingle()
   const me = meRow as { id: string; permission: Permission } | null
 
-  if (!me || (me.permission !== 'admin' && me.permission !== 'ceo')) {
+  if (!me || (me.permission !== 'admin')) {
     redirect('/admin/employees?err=' + encodeURIComponent('권한이 없습니다'))
   }
   if (field === 'permission' && me.id === id) {
@@ -87,7 +87,7 @@ export async function toggleCanManageWorks(formData: FormData) {
     .maybeSingle()
   const me = meRow as { id: string; permission: Permission } | null
 
-  if (!me || (me.permission !== 'admin' && me.permission !== 'ceo')) {
+  if (!me || (me.permission !== 'admin')) {
     redirect('/admin/employees?err=' + encodeURIComponent('권한이 없습니다'))
   }
 
@@ -130,7 +130,7 @@ export async function toggleCanViewStats(formData: FormData) {
     .maybeSingle()
   const me = meRow as { id: string; permission: Permission } | null
 
-  if (!me || (me.permission !== 'admin' && me.permission !== 'ceo')) {
+  if (!me || (me.permission !== 'admin')) {
     redirect('/admin/employees?err=' + encodeURIComponent('권한이 없습니다'))
   }
 
@@ -173,7 +173,7 @@ export async function toggleCanDeleteWorks(formData: FormData) {
     .maybeSingle()
   const me = meRow as { id: string; permission: Permission } | null
 
-  if (!me || (me.permission !== 'admin' && me.permission !== 'ceo')) {
+  if (!me || (me.permission !== 'admin')) {
     redirect('/admin/employees?err=' + encodeURIComponent('권한이 없습니다'))
   }
 

@@ -143,7 +143,7 @@ export default async function RequestDetailPage({
           <div className="flex items-center justify-between">
             <span className={`rounded-full border px-3 py-1 text-sm font-medium ${STATUS_COLOR[req.status]}`}>
               {req.status}
-              {req.pending_stage === 'foreman' && ' (소장 결재 대기)'}
+              {req.pending_stage === 'foreman' && ' (팀장 결재 대기)'}
               {req.pending_stage === 'admin' && ' (관리자 결재 대기)'}
             </span>
           </div>

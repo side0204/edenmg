@@ -79,13 +79,13 @@ export default async function WorkDetailPage({
     | {
         id: string
         company_id: string
-        permission: 'worker' | 'foreman' | 'admin' | 'ceo'
+        permission: 'worker' | 'team_member' | 'team_leader' | 'admin'
         can_manage_works: boolean
         is_active: boolean
       }
     | null
   if (!me || !me.is_active) redirect('/?err=' + encodeURIComponent('계정이 활성 상태가 아닙니다'))
-  const canManage = me.permission === 'admin' || me.permission === 'ceo' || me.can_manage_works
+  const canManage = me.permission === 'admin' || me.can_manage_works
 
   const { data: workData } = await supabase
     .from('works')
@@ -211,7 +211,7 @@ export default async function WorkDetailPage({
     : null
 
   // 일보 작성 권한: 본인이 이 작업에 배정됐거나 admin/ceo
-  const isAdminLike = me.permission === 'admin' || me.permission === 'ceo'
+  const isAdminLike = me.permission === 'admin'
   const isAssigned = assignments.some((a) => a.employee_id === me.id)
   const canWriteReport = isAdminLike || isAssigned
 

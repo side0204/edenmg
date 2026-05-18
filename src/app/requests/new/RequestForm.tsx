@@ -107,9 +107,9 @@ export function RequestForm({
         />
       </Field>
 
-      <Field label="1차 결재자 (현장소장)">
+      <Field label="1차 결재자 (현장팀장)">
         <select name="assigned_foreman_id" defaultValue="" className={inputClass}>
-          <option value="">바로 관리자/대표 결재</option>
+          <option value="">바로 관리자 결재</option>
           {foremen.map((f) => (
             <option key={f.id} value={f.id}>
               {f.name} ({f.permission_label})
@@ -117,7 +117,7 @@ export function RequestForm({
           ))}
         </select>
         <p className="mt-1 text-xs text-slate-400">
-          미지정 시 관리자/대표 단계로 바로 올라갑니다. 평소 1차 결재 받는 소장이 있으면 선택하세요.
+          미지정 시 관리자 단계로 바로 올라갑니다. 평소 1차 결재 받는 팀장이 있으면 선택하세요.
         </p>
       </Field>
 

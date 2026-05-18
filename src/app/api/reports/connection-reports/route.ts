@@ -45,14 +45,14 @@ export async function GET(req: NextRequest) {
     | {
         id: string
         company_id: string
-        permission: 'worker' | 'foreman' | 'admin' | 'ceo'
+        permission: 'worker' | 'team_member' | 'team_leader' | 'admin'
         is_active: boolean
       }
     | null
   if (!me || !me.is_active) return new Response('inactive', { status: 403 })
 
-  const isAdmin = me.permission === 'admin' || me.permission === 'ceo'
-  const isForeman = me.permission === 'foreman'
+  const isAdmin = me.permission === 'admin'
+  const isForeman = me.permission === 'team_leader'
   if (!isAdmin && !isForeman) {
     return new Response('forbidden', { status: 403 })
   }

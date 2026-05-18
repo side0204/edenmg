@@ -91,7 +91,7 @@ export default async function WorksPage({
     | {
         id: string
         company_id: string
-        permission: 'worker' | 'foreman' | 'admin' | 'ceo'
+        permission: 'worker' | 'team_member' | 'team_leader' | 'admin'
         can_manage_works: boolean
         can_delete_works: boolean
         can_view_stats: boolean
@@ -100,7 +100,7 @@ export default async function WorksPage({
     | null
   if (!me || !me.is_active) redirect('/?err=' + encodeURIComponent('계정이 활성 상태가 아닙니다'))
 
-  const isAdminLike = me.permission === 'admin' || me.permission === 'ceo'
+  const isAdminLike = me.permission === 'admin'
   const canManage = isAdminLike || me.can_manage_works
   const canDelete = isAdminLike || me.can_delete_works
   // 작업자 탭 노출 권한: admin/ceo 또는 통계 조회 권한자 (회사 전체 데이터 조회 권한과 일관)

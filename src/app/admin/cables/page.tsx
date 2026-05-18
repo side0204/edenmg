@@ -30,12 +30,12 @@ export default async function CablesPage() {
     | {
         id: string
         company_id: string
-        permission: 'worker' | 'foreman' | 'admin' | 'ceo'
+        permission: 'worker' | 'team_member' | 'team_leader' | 'admin'
         is_active: boolean
       }
     | null
   if (!me || !me.is_active) redirect('/?err=' + encodeURIComponent('계정이 활성 상태가 아닙니다'))
-  if (me.permission !== 'admin' && me.permission !== 'ceo') {
+  if (me.permission !== 'admin') {
     redirect('/?err=' + encodeURIComponent('관리자 권한이 필요합니다'))
   }
 

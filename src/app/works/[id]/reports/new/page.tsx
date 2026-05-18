@@ -40,7 +40,7 @@ export default async function NewReportPage({
     | {
         id: string
         company_id: string
-        permission: 'worker' | 'foreman' | 'admin' | 'ceo'
+        permission: 'worker' | 'team_member' | 'team_leader' | 'admin'
         is_active: boolean
       }
     | null
@@ -55,7 +55,7 @@ export default async function NewReportPage({
   if (!work || work.company_id !== me.company_id) notFound()
 
   // 작성 권한: 배정 OR admin/ceo
-  const isAdmin = me.permission === 'admin' || me.permission === 'ceo'
+  const isAdmin = me.permission === 'admin'
   if (!isAdmin) {
     const { data: assigned } = await supabase
       .from('work_assignments')

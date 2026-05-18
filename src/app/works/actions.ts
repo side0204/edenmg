@@ -14,7 +14,7 @@ import {
   type WorkWorkerType,
 } from '@/lib/work'
 
-type Permission = 'worker' | 'foreman' | 'admin' | 'ceo'
+type Permission = 'worker' | 'team_member' | 'team_leader' | 'admin'
 
 // ===== 공통 =============================================================
 
@@ -43,7 +43,7 @@ async function requireWorkManager() {
   if (!me || !me.is_active) {
     redirect('/?err=' + encodeURIComponent('계정이 활성 상태가 아닙니다'))
   }
-  const isAdmin = me.permission === 'admin' || me.permission === 'ceo'
+  const isAdmin = me.permission === 'admin'
   if (!isAdmin && !me.can_manage_works) {
     redirect('/works?err=' + encodeURIComponent('작업관리 권한이 없습니다'))
   }
@@ -327,7 +327,7 @@ export async function deleteWork(formData: FormData) {
   if (!me || !me.is_active) {
     redirect('/?err=' + encodeURIComponent('계정이 활성 상태가 아닙니다'))
   }
-  const isAdmin = me.permission === 'admin' || me.permission === 'ceo'
+  const isAdmin = me.permission === 'admin'
   if (!isAdmin && !me.can_delete_works) {
     redirect('/works?err=' + encodeURIComponent('작업 삭제 권한이 없습니다'))
   }

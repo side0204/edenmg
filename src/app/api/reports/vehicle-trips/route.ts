@@ -167,7 +167,7 @@ const VEHICLE_TRIP_HEADERS = [
 
 const PERMISSION_LABEL = {
   worker: '작업자',
-  foreman: '소장',
+  team_leader: '팀장',
+  team_member: '팀원',
   admin: '관리자',
-  ceo: '대표',
 } as const

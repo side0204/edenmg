@@ -4,7 +4,7 @@ import { redirect } from 'next/navigation'
 import { revalidatePath } from 'next/cache'
 import { createClient } from '@/lib/supabase/server'
 
-type Permission = 'worker' | 'foreman' | 'admin' | 'ceo'
+type Permission = 'worker' | 'team_member' | 'team_leader' | 'admin'
 
 // 폼 → DB row 매핑. 빈 문자열은 null 로.
 function parseSiteForm(formData: FormData) {
@@ -72,7 +72,7 @@ async function requireAdmin() {
     .maybeSingle()
   const me = meRow as { id: string; company_id: string; permission: Permission } | null
 
-  if (!me || (me.permission !== 'admin' && me.permission !== 'ceo')) {
+  if (!me || (me.permission !== 'admin')) {
     redirect('/admin/sites?err=' + encodeURIComponent('권한이 없습니다'))
   }
   return { supabase, me }

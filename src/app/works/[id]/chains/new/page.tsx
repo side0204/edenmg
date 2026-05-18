@@ -27,7 +27,7 @@ export default async function NewChainPage({
     | {
         id: string
         company_id: string
-        permission: 'worker' | 'foreman' | 'admin' | 'ceo'
+        permission: 'worker' | 'team_member' | 'team_leader' | 'admin'
         can_manage_works: boolean
         is_active: boolean
       }
@@ -53,7 +53,7 @@ export default async function NewChainPage({
     redirect(`/works/${id}?err=` + encodeURIComponent('접속팀 작업만 작업구간을 가질 수 있습니다'))
   }
 
-  const isAdmin = me.permission === 'admin' || me.permission === 'ceo'
+  const isAdmin = me.permission === 'admin'
   const canManage = isAdmin || me.can_manage_works || work.assignee_employee_id === me.id
   if (!canManage) {
     redirect(`/works/${id}?err=` + encodeURIComponent('작업구간 관리 권한이 없습니다'))
