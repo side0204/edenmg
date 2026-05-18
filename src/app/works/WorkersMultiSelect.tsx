@@ -59,9 +59,24 @@ export function WorkersMultiSelect({
   }, [open])
 
   const closeModal = () => {
-    setOpen(false)
+    // 강력한 ghost-tap 차단 패턴 (다단계):
+    //  1) document.body 의 pointer-events 를 'none' 으로 잠그기 → 모든 클릭 흡수
+    //  2) 100ms 뒤에 모달 unmount (그 동안 모달이 click 이벤트 흡수)
+    //  3) 추가 600ms 동안 overlay 유지 (총 700ms body lock + overlay)
+    //  4) body 풀기
+    if (typeof document !== 'undefined') {
+      document.body.style.pointerEvents = 'none'
+    }
     setGhostBlock(true)
-    setTimeout(() => setGhostBlock(false), 800)
+    setTimeout(() => {
+      setOpen(false)
+    }, 100)
+    setTimeout(() => {
+      if (typeof document !== 'undefined') {
+        document.body.style.pointerEvents = ''
+      }
+      setGhostBlock(false)
+    }, 700)
   }
 
   const selectedIdSet = useMemo(() => new Set(selected.map((s) => s.id)), [selected])
