@@ -2,8 +2,13 @@ import Link from 'next/link'
 import { redirect } from 'next/navigation'
 import { BarChart3, ChevronLeft, Download } from 'lucide-react'
 import { createClient } from '@/lib/supabase/server'
-import { aggregateConnectionStats, type Aggregation } from '@/lib/connection-aggregate'
+import {
+  aggregateConnectionStats,
+  buildStatsTable,
+  type Aggregation,
+} from '@/lib/connection-aggregate'
 import { AggregationCard } from '../AggregationCard'
+import { StatsTable } from './StatsTable'
 
 type Dim = 'worker' | 'order' | 'work' | 'year' | 'month' | 'day'
 
@@ -19,6 +24,8 @@ const DIM_TABS: { key: Dim; label: string; defaultLimit: number }[] = [
 const DEFAULT_DIM: Dim = 'worker'
 const LIMIT_OPTIONS = [10, 30, 100, 0] // 0 = 전체
 
+type View = 'cards' | 'table'
+
 export default async function StatsPage({
   searchParams,
 }: {
@@ -27,11 +34,19 @@ export default async function StatsPage({
     from?: string
     to?: string
     limit?: string
+    view?: string
   }>
 }) {
-  const { dim: dimParam, from: fromParam, to: toParam, limit: limitParam } = await searchParams
+  const {
+    dim: dimParam,
+    from: fromParam,
+    to: toParam,
+    limit: limitParam,
+    view: viewParam,
+  } = await searchParams
   const dimEntry = DIM_TABS.find((t) => t.key === dimParam) ?? DIM_TABS.find((t) => t.key === DEFAULT_DIM)!
   const dim: Dim = dimEntry.key
+  const view: View = viewParam === 'table' ? 'table' : 'cards'
 
   const from = fromParam && /^\d{4}-\d{2}-\d{2}$/.test(fromParam) ? fromParam : null
   const to = toParam && /^\d{4}-\d{2}-\d{2}$/.test(toParam) ? toParam : null
@@ -138,7 +153,21 @@ export default async function StatsPage({
   }
 
   const reportIds = reports.map((r) => r.id)
-  const statsMap = await aggregateConnectionStats(supabase, reportIds, getGroupKey)
+
+  // 표 모드는 일보 단위 wide 표만 빌드. 차원/limit 무시 (메타로만 활용).
+  const tableData =
+    view === 'table'
+      ? await buildStatsTable(
+          supabase,
+          reports,
+          new Map(works.map((w) => [w.id, { name: w.name, order_id: w.order_id }])),
+        )
+      : null
+
+  const statsMap =
+    view === 'cards'
+      ? await aggregateConnectionStats(supabase, reportIds, getGroupKey)
+      : new Map<string, Aggregation>()
 
   // 라벨 매핑
   const labelByKey = new Map<string, string>()
@@ -189,15 +218,23 @@ export default async function StatsPage({
   const totalReports = reports.length
 
   // URL 빌더
-  const buildHref = (next: { dim?: Dim; from?: string | null; to?: string | null; limit?: number }) => {
+  const buildHref = (next: {
+    dim?: Dim
+    from?: string | null
+    to?: string | null
+    limit?: number
+    view?: View
+  }) => {
     const params = new URLSearchParams()
     const fd = next.dim ?? dim
     const ffrom = next.from === undefined ? from : next.from
     const fto = next.to === undefined ? to : next.to
     const flimit = next.limit === undefined ? limitNum : next.limit
+    const fview = next.view ?? view
     if (fd !== DEFAULT_DIM) params.set('dim', fd)
     if (ffrom) params.set('from', ffrom)
     if (fto) params.set('to', fto)
+    if (fview !== 'cards') params.set('view', fview)
     // 차원의 defaultLimit 와 다를 때만 URL 에 표시
     const defaultForDim = DIM_TABS.find((t) => t.key === fd)?.defaultLimit ?? 0
     if (flimit !== defaultForDim) {
@@ -243,26 +280,54 @@ export default async function StatsPage({
           )}
         </header>
 
-        {/* 차원 탭 */}
-        <nav className="flex gap-1 overflow-x-auto rounded-xl bg-slate-100 p-1 text-sm">
-          {DIM_TABS.map((t) => {
-            const active = dim === t.key
-            return (
-              <Link
-                key={t.key}
-                href={buildHref({ dim: t.key, limit: t.defaultLimit })}
-                className={
-                  'shrink-0 rounded-lg px-3 py-1.5 font-medium transition-colors ' +
-                  (active
-                    ? 'bg-white text-slate-900 shadow-sm'
-                    : 'text-slate-600 hover:text-slate-900')
-                }
-              >
-                {t.label}
-              </Link>
-            )
-          })}
+        {/* 보기 모드 토글 */}
+        <nav className="flex gap-1 rounded-xl bg-slate-100 p-1 text-sm">
+          <Link
+            href={buildHref({ view: 'cards' })}
+            className={
+              'flex-1 rounded-lg px-3 py-2 text-center font-medium transition-colors ' +
+              (view === 'cards'
+                ? 'bg-white text-slate-900 shadow-sm'
+                : 'text-slate-600 hover:text-slate-900')
+            }
+          >
+            그룹 카드
+          </Link>
+          <Link
+            href={buildHref({ view: 'table' })}
+            className={
+              'flex-1 rounded-lg px-3 py-2 text-center font-medium transition-colors ' +
+              (view === 'table'
+                ? 'bg-white text-slate-900 shadow-sm'
+                : 'text-slate-600 hover:text-slate-900')
+            }
+          >
+            일보 표
+          </Link>
         </nav>
+
+        {/* 차원 탭 — 카드 모드에서만 의미 */}
+        {view === 'cards' && (
+          <nav className="flex gap-1 overflow-x-auto rounded-xl bg-slate-100 p-1 text-sm">
+            {DIM_TABS.map((t) => {
+              const active = dim === t.key
+              return (
+                <Link
+                  key={t.key}
+                  href={buildHref({ dim: t.key, limit: t.defaultLimit })}
+                  className={
+                    'shrink-0 rounded-lg px-3 py-1.5 font-medium transition-colors ' +
+                    (active
+                      ? 'bg-white text-slate-900 shadow-sm'
+                      : 'text-slate-600 hover:text-slate-900')
+                  }
+                >
+                  {t.label}
+                </Link>
+              )
+            })}
+          </nav>
+        )}
 
         {/* 기간 필터 폼 (GET — dim/limit 유지) */}
         <form method="get" className="rounded-xl border border-slate-200 bg-white p-3 space-y-2">
@@ -311,51 +376,69 @@ export default async function StatsPage({
 
         {/* TOP N 토글 + CSV 다운로드 */}
         <div className="flex items-center justify-between gap-2">
-          <nav className="flex gap-1 rounded-md border border-slate-200 bg-white p-0.5 text-xs">
-            {LIMIT_OPTIONS.map((n) => {
-              const active = limitNum === n
-              return (
-                <Link
-                  key={n}
-                  href={buildHref({ limit: n })}
-                  className={
-                    'rounded px-2 py-1 font-medium transition-colors ' +
-                    (active
-                      ? 'bg-slate-900 text-white'
-                      : 'text-slate-600 hover:bg-slate-50')
-                  }
+          {view === 'cards' ? (
+            <nav className="flex gap-1 rounded-md border border-slate-200 bg-white p-0.5 text-xs">
+              {LIMIT_OPTIONS.map((n) => {
+                const active = limitNum === n
+                return (
+                  <Link
+                    key={n}
+                    href={buildHref({ limit: n })}
+                    className={
+                      'rounded px-2 py-1 font-medium transition-colors ' +
+                      (active
+                        ? 'bg-slate-900 text-white'
+                        : 'text-slate-600 hover:bg-slate-50')
+                    }
+                  >
+                    {n === 0 ? '전체' : `TOP ${n}`}
+                  </Link>
+                )
+              })}
+            </nav>
+          ) : (
+            <span className="text-xs text-slate-500">일보 {tableData?.rows.length ?? 0}건</span>
+          )}
+          <div className="flex flex-wrap gap-1.5 justify-end">
+            {view === 'cards' ? (
+              <>
+                <a
+                  href={`/api/reports/work-stats?type=tasks&${csvBaseParams.toString()}`}
+                  className="inline-flex items-center gap-1 rounded-md border border-slate-300 bg-white px-2.5 py-1.5 text-xs font-medium text-slate-700 hover:bg-slate-50"
                 >
-                  {n === 0 ? '전체' : `TOP ${n}`}
-                </Link>
-              )
-            })}
-          </nav>
-          <div className="flex gap-1.5">
-            <a
-              href={`/api/reports/work-stats?type=tasks&${csvBaseParams.toString()}`}
-              className="inline-flex items-center gap-1 rounded-md border border-slate-300 bg-white px-2.5 py-1.5 text-xs font-medium text-slate-700 hover:bg-slate-50"
-            >
-              <Download className="h-3.5 w-3.5" />
-              공종 CSV
-            </a>
-            <a
-              href={`/api/reports/work-stats?type=materials&${csvBaseParams.toString()}`}
-              className="inline-flex items-center gap-1 rounded-md border border-slate-300 bg-white px-2.5 py-1.5 text-xs font-medium text-slate-700 hover:bg-slate-50"
-            >
-              <Download className="h-3.5 w-3.5" />
-              자재 CSV
-            </a>
+                  <Download className="h-3.5 w-3.5" />
+                  공종 CSV
+                </a>
+                <a
+                  href={`/api/reports/work-stats?type=materials&${csvBaseParams.toString()}`}
+                  className="inline-flex items-center gap-1 rounded-md border border-slate-300 bg-white px-2.5 py-1.5 text-xs font-medium text-slate-700 hover:bg-slate-50"
+                >
+                  <Download className="h-3.5 w-3.5" />
+                  자재 CSV
+                </a>
+              </>
+            ) : (
+              <a
+                href={`/api/reports/work-stats?type=table&${csvBaseParams.toString()}`}
+                className="inline-flex items-center gap-1 rounded-md border border-slate-300 bg-white px-2.5 py-1.5 text-xs font-medium text-slate-700 hover:bg-slate-50"
+              >
+                <Download className="h-3.5 w-3.5" />
+                일보 표 CSV
+              </a>
+            )}
           </div>
         </div>
 
-        {truncated && (
+        {view === 'cards' && truncated && (
           <p className="rounded-md bg-amber-50 border border-amber-200 px-3 py-2 text-xs text-amber-800">
             {dimEntry.label} 그룹 {allEntries.length}개 중 상위 {entries.length}개만 표시. CSV
             다운로드는 동일하게 상위 {entries.length}개만 포함됩니다. 전체 보려면 「전체」 클릭.
           </p>
         )}
 
-        {entries.length === 0 ? (
+        {view === 'table' && tableData ? (
+          <StatsTable data={tableData} />
+        ) : entries.length === 0 ? (
           <div className="rounded-2xl bg-white border border-slate-200 p-8 text-center">
             <p className="text-sm text-slate-500">
               집계할 접속일보가 없습니다. 접속팀 작업 등록·일보 작성 후 다시 확인하세요.

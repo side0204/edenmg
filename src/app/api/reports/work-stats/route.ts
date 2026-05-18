@@ -1,12 +1,13 @@
 import { createClient } from '@/lib/supabase/server'
 import {
   aggregateConnectionStats,
+  buildStatsTable,
   type Aggregation,
 } from '@/lib/connection-aggregate'
 import { buildCsv, csvResponse } from '@/lib/csv'
 
 type Dim = 'worker' | 'order' | 'work' | 'year' | 'month' | 'day'
-type Type = 'tasks' | 'materials'
+type Type = 'tasks' | 'materials' | 'table'
 
 const DIM_LABEL: Record<Dim, string> = {
   worker: '작업자별',
@@ -43,9 +44,9 @@ export async function GET(req: Request) {
       ? url.searchParams.get('dim')
       : 'worker'
   ) as Dim
-  const type = (
-    url.searchParams.get('type') === 'materials' ? 'materials' : 'tasks'
-  ) as Type
+  const typeRaw = url.searchParams.get('type')
+  const type: Type =
+    typeRaw === 'materials' ? 'materials' : typeRaw === 'table' ? 'table' : 'tasks'
   const fromRaw = url.searchParams.get('from')
   const toRaw = url.searchParams.get('to')
   const from = fromRaw && /^\d{4}-\d{2}-\d{2}$/.test(fromRaw) ? fromRaw : null
@@ -114,6 +115,57 @@ export async function GET(req: Request) {
     reports = (reportsData ?? []) as ReportMeta[]
   }
   const reportById = new Map(reports.map((r) => [r.id, r]))
+
+  // ===== type=table — 일보 단위 wide CSV =====
+  if (type === 'table') {
+    const tableData = await buildStatsTable(
+      supabase,
+      reports,
+      new Map(works.map((w) => [w.id, { name: w.name, order_id: w.order_id }])),
+    )
+    const headers = [
+      '일자',
+      '연',
+      '월',
+      '작업자',
+      '공사번호',
+      '작업명',
+      ...tableData.taskColumns.map((c) => c.label),
+      ...tableData.materialColumns.map((c) => {
+        const parts = [c.name]
+        if (c.spec) parts.push(`(${c.spec})`)
+        if (c.unit) parts.push(c.unit)
+        return parts.join(' ')
+      }),
+    ]
+    const rowsCsv: unknown[][] = tableData.rows.map((r) => [
+      r.date,
+      r.year,
+      r.month,
+      r.workerName,
+      r.orderId ?? '',
+      r.workName,
+      ...tableData.taskColumns.map((c) => r.taskCounts.get(c.key) ?? ''),
+      ...tableData.materialColumns.map((c) => r.materialQtys.get(c.key) ?? ''),
+    ])
+    // 마지막 합계 행
+    if (tableData.rows.length > 0) {
+      rowsCsv.push([
+        '합계',
+        '',
+        '',
+        '',
+        '',
+        `(${tableData.rows.length}건)`,
+        ...tableData.taskColumns.map((c) => c.totalCount),
+        ...tableData.materialColumns.map((c) => c.totalQuantity),
+      ])
+    }
+    const body = buildCsv(headers, rowsCsv)
+    const periodSuffix = from || to ? `_${from ?? ''}_${to ?? ''}` : ''
+    const filename = `작업통계_일보표${periodSuffix}.csv`
+    return csvResponse(body, filename)
+  }
 
   // groupKey
   let getGroupKey: (reportId: string) => string | null

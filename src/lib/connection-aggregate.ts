@@ -350,3 +350,222 @@ export async function aggregateConnectionStats(
   }
   return result
 }
+
+// =====================================================================
+// 일보 단위 wide 표 (작업통계 페이지 「표 보기」 모드)
+// =====================================================================
+
+export type StatsTableTaskColumn = {
+  key: string // task_type or '기타::custom'
+  label: string
+  totalCount: number
+}
+
+export type StatsTableMaterialColumn = {
+  key: string // 'M:<material_id>' or 'C:name|spec|unit'
+  name: string
+  spec: string | null
+  unit: string | null
+  isCustom: boolean
+  totalQuantity: number
+}
+
+export type StatsTableRow = {
+  reportId: string
+  date: string // YYYY-MM-DD
+  year: string
+  month: string // YYYY-MM
+  workerName: string
+  orderId: string | null
+  workName: string
+  /** 공종 컬럼 키 → 그 일보의 수량 합 */
+  taskCounts: Map<string, number>
+  /** 자재 컬럼 키 → 그 일보의 수량 합 */
+  materialQtys: Map<string, number>
+}
+
+export type StatsTableData = {
+  rows: StatsTableRow[]
+  taskColumns: StatsTableTaskColumn[]
+  materialColumns: StatsTableMaterialColumn[]
+}
+
+/**
+ * 일보 단위 wide 표 빌더.
+ * - reportMeta: 일보 메타 (이미 회사 스코프·기간 필터·권한 적용된 상태로 전달)
+ * - 한 번에 tasks·materials·masters·employees·works 메타 fetch
+ * - 일보별 row + 동적 공종·자재 컬럼 (총량 내림차순)
+ */
+export async function buildStatsTable(
+  supabase: SupabaseServer,
+  reportMeta: {
+    id: string
+    work_id: string
+    author_employee_id: string
+    report_date: string
+  }[],
+  worksById: Map<string, { name: string; order_id: string | null }>,
+): Promise<StatsTableData> {
+  if (reportMeta.length === 0) {
+    return { rows: [], taskColumns: [], materialColumns: [] }
+  }
+
+  const reportIds = reportMeta.map((r) => r.id)
+  const workerIds = Array.from(new Set(reportMeta.map((r) => r.author_employee_id)))
+
+  // 병렬 fetch
+  const [tasksRes, matsRes, empsRes] = await Promise.all([
+    supabase
+      .from('connection_node_tasks')
+      .select('report_id, task_type, custom_task_name, task_count')
+      .in('report_id', reportIds),
+    supabase
+      .from('connection_node_materials')
+      .select('report_id, material_id, custom_name, custom_spec, custom_unit, quantity')
+      .in('report_id', reportIds),
+    supabase.from('employees').select('id, name').in('id', workerIds),
+  ])
+
+  const employeeNameById = new Map<string, string>(
+    ((empsRes.data ?? []) as { id: string; name: string }[]).map((e) => [e.id, e.name]),
+  )
+
+  // 마스터 lookup
+  const materialIds = Array.from(
+    new Set(
+      ((matsRes.data ?? []) as { material_id: string | null }[])
+        .map((m) => m.material_id)
+        .filter((x): x is string => !!x),
+    ),
+  )
+  const masterMap = new Map<
+    string,
+    { name: string; spec: string | null; unit: string | null }
+  >()
+  if (materialIds.length > 0) {
+    const { data: mastersData } = await supabase
+      .from('materials')
+      .select('id, name, spec, unit')
+      .in('id', materialIds)
+    for (const m of (mastersData ?? []) as {
+      id: string
+      name: string
+      spec: string | null
+      unit: string | null
+    }[]) {
+      masterMap.set(m.id, { name: m.name, spec: m.spec, unit: m.unit })
+    }
+  }
+
+  // 공종 컬럼 totals (그리고 일보별 셀 값 누적)
+  type TaskCol = {
+    key: string
+    label: string
+    totalCount: number
+  }
+  const taskColMap = new Map<string, TaskCol>()
+  const taskByReport = new Map<string, Map<string, number>>()
+  for (const t of (tasksRes.data ?? []) as {
+    report_id: string
+    task_type: ConnectionTaskType
+    custom_task_name: string | null
+    task_count: number
+  }[]) {
+    const key = t.task_type === '기타' ? `기타::${t.custom_task_name ?? ''}` : t.task_type
+    const label = t.task_type === '기타' ? (t.custom_task_name ?? '기타') : t.task_type
+    const count = Number(t.task_count) || 0
+    // 컬럼 누적
+    const col = taskColMap.get(key)
+    if (col) col.totalCount += count
+    else taskColMap.set(key, { key, label, totalCount: count })
+    // 일보별 누적
+    let cellMap = taskByReport.get(t.report_id)
+    if (!cellMap) {
+      cellMap = new Map()
+      taskByReport.set(t.report_id, cellMap)
+    }
+    cellMap.set(key, (cellMap.get(key) ?? 0) + count)
+  }
+
+  // 자재 컬럼 totals (그리고 일보별 셀 값 누적)
+  type MatCol = {
+    key: string
+    name: string
+    spec: string | null
+    unit: string | null
+    isCustom: boolean
+    totalQuantity: number
+  }
+  const matColMap = new Map<string, MatCol>()
+  const matByReport = new Map<string, Map<string, number>>()
+  for (const m of (matsRes.data ?? []) as {
+    report_id: string
+    material_id: string | null
+    custom_name: string | null
+    custom_spec: string | null
+    custom_unit: string | null
+    quantity: number
+  }[]) {
+    let key: string
+    let name: string
+    let spec: string | null
+    let unit: string | null
+    let isCustom: boolean
+    if (m.material_id) {
+      const master = masterMap.get(m.material_id)
+      key = `M:${m.material_id}`
+      name = master?.name ?? '?'
+      spec = master?.spec ?? null
+      unit = master?.unit ?? null
+      isCustom = false
+    } else {
+      const cn = (m.custom_name ?? '').trim()
+      const cs = (m.custom_spec ?? '').trim()
+      const cu = (m.custom_unit ?? '').trim()
+      key = `C:${cn}|${cs}|${cu}`
+      name = cn || '?'
+      spec = cs || null
+      unit = cu || null
+      isCustom = true
+    }
+    const qty = Number(m.quantity) || 0
+    const col = matColMap.get(key)
+    if (col) col.totalQuantity += qty
+    else matColMap.set(key, { key, name, spec, unit, isCustom, totalQuantity: qty })
+    let cellMap = matByReport.get(m.report_id)
+    if (!cellMap) {
+      cellMap = new Map()
+      matByReport.set(m.report_id, cellMap)
+    }
+    cellMap.set(key, (cellMap.get(key) ?? 0) + qty)
+  }
+
+  // 컬럼 정렬: 총량 내림차순
+  const taskColumns: StatsTableTaskColumn[] = Array.from(taskColMap.values()).sort(
+    (a, b) => b.totalCount - a.totalCount,
+  )
+  const materialColumns: StatsTableMaterialColumn[] = Array.from(matColMap.values()).sort(
+    (a, b) => b.totalQuantity - a.totalQuantity,
+  )
+
+  // 행 빌드 (일자 내림차순)
+  const rows: StatsTableRow[] = reportMeta
+    .slice()
+    .sort((a, b) => (a.report_date < b.report_date ? 1 : a.report_date > b.report_date ? -1 : 0))
+    .map((r) => {
+      const w = worksById.get(r.work_id)
+      return {
+        reportId: r.id,
+        date: r.report_date,
+        year: r.report_date.slice(0, 4),
+        month: r.report_date.slice(0, 7),
+        workerName: employeeNameById.get(r.author_employee_id) ?? '?',
+        orderId: w?.order_id ?? null,
+        workName: w?.name ?? '?',
+        taskCounts: taskByReport.get(r.id) ?? new Map(),
+        materialQtys: matByReport.get(r.id) ?? new Map(),
+      }
+    })
+
+  return { rows, taskColumns, materialColumns }
+}
