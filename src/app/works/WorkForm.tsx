@@ -9,6 +9,7 @@ import {
   type WorkStatus,
   type WorkSubcategory,
 } from '@/lib/work'
+import { AddressInput } from './AddressInput'
 
 export type WorkFormValues = {
   id: string | null
@@ -134,12 +135,10 @@ export function WorkForm({
       </Field>
 
       <Field label="주소 (선택)">
-        <input
+        <AddressInput
           name="address"
           defaultValue={initial.address ?? ''}
-          maxLength={200}
           placeholder="예: 서울 강남구 …"
-          className={inputClass}
         />
       </Field>
 
