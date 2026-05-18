@@ -52,7 +52,7 @@ export default async function StatsPage({
 
   const { data: meRow } = await supabase
     .from('employees')
-    .select('id, company_id, permission, is_active')
+    .select('id, company_id, permission, can_view_stats, is_active')
     .eq('auth_user_id', user.id)
     .maybeSingle()
   const me = meRow as
@@ -60,12 +60,19 @@ export default async function StatsPage({
         id: string
         company_id: string
         permission: 'worker' | 'foreman' | 'admin' | 'ceo'
+        can_view_stats: boolean
         is_active: boolean
       }
     | null
   if (!me || !me.is_active) {
     redirect('/?err=' + encodeURIComponent('계정이 활성 상태가 아닙니다'))
   }
+
+  // 통계 조회 권한:
+  //   admin/ceo OR can_view_stats=true → 회사 전체
+  //   그 외 → 본인이 작성한 일보 기반 통계만
+  const isAdminLike = me.permission === 'admin' || me.permission === 'ceo'
+  const canViewAll = isAdminLike || me.can_view_stats
 
   // 회사의 접속팀 작업만 — 자재·공종 통계는 접속일보 한정
   const { data: worksData } = await supabase
@@ -95,6 +102,7 @@ export default async function StatsPage({
       )
     if (from) q = q.gte('report_date', from)
     if (to) q = q.lte('report_date', to)
+    if (!canViewAll) q = q.eq('author_employee_id', me.id)
     const { data: reportsData } = await q
     reports = (reportsData ?? []) as ReportMeta[]
   }
@@ -221,13 +229,18 @@ export default async function StatsPage({
             작업 통계
           </h1>
           <p className="mt-1 text-sm text-slate-500">
-            접속팀 작업의 자재·공종 합계 · 회사 접속일보 {totalReports}건
+            접속팀 작업의 자재·공종 합계 · 접속일보 {totalReports}건
             {(from || to) && (
               <span className="ml-1">
                 · 기간 {from ?? '처음'} ~ {to ?? '오늘'}
               </span>
             )}
           </p>
+          {!canViewAll && (
+            <div className="mt-2 inline-flex items-center gap-1.5 rounded-md border border-blue-200 bg-blue-50 px-2.5 py-1 text-xs text-blue-800">
+              본인 작성 일보 기준 통계입니다. 회사 전체 통계는 관리자에게 권한 요청.
+            </div>
+          )}
         </header>
 
         {/* 차원 탭 */}

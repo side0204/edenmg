@@ -3,7 +3,11 @@ import { notFound } from 'next/navigation'
 import { ChevronLeft, UserPlus, Users } from 'lucide-react'
 import { createClient } from '@/lib/supabase/server'
 import { EmptyState } from '@/components/EmptyState'
-import { toggleCanDeleteWorks, toggleCanManageWorks } from './actions'
+import {
+  toggleCanDeleteWorks,
+  toggleCanManageWorks,
+  toggleCanViewStats,
+} from './actions'
 import { FieldSelect } from './FieldSelect'
 import {
   PERMISSION_LABEL,
@@ -25,6 +29,7 @@ type EmployeeRow = {
   work_type: string | null
   can_manage_works: boolean
   can_delete_works: boolean
+  can_view_stats: boolean
   is_active: boolean
   invited_at: string | null
   accepted_at: string | null
@@ -52,7 +57,7 @@ export default async function EmployeesPage() {
 
   const { data, error: listError } = await supabase
     .from('employees')
-    .select('id, name, email, phone, permission, position, team, work_type, can_manage_works, can_delete_works, is_active, invited_at, accepted_at, created_at')
+    .select('id, name, email, phone, permission, position, team, work_type, can_manage_works, can_delete_works, can_view_stats, is_active, invited_at, accepted_at, created_at')
     .order('created_at', { ascending: false })
 
   const rows = (data ?? []) as EmployeeRow[]
@@ -214,6 +219,31 @@ export default async function EmployeesPage() {
                       }
                     >
                       {emp.can_delete_works ? '✓ 부여됨' : '미부여'}
+                    </button>
+                  </form>
+                </div>
+
+                <div className="flex items-center justify-between gap-3 rounded-lg bg-blue-50/40 px-3 py-2">
+                  <div className="min-w-0">
+                    <p className="text-xs font-medium text-blue-700">통계 조회 권한</p>
+                    <p className="text-[11px] text-blue-600/80">
+                      회사 전체 통계 조회. 미부여 시 본인 작성 일보 기반 통계만 노출 (admin/ceo
+                      는 자동)
+                    </p>
+                  </div>
+                  <form action={toggleCanViewStats}>
+                    <input type="hidden" name="id" value={emp.id} />
+                    <input type="hidden" name="next" value={emp.can_view_stats ? '0' : '1'} />
+                    <button
+                      type="submit"
+                      className={
+                        'shrink-0 rounded-full px-3 py-1 text-xs font-bold ' +
+                        (emp.can_view_stats
+                          ? 'bg-blue-100 text-blue-800 hover:bg-blue-200'
+                          : 'bg-slate-200 text-slate-600 hover:bg-slate-300')
+                      }
+                    >
+                      {emp.can_view_stats ? '✓ 부여됨' : '미부여'}
                     </button>
                   </form>
                 </div>

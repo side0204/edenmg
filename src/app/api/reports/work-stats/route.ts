@@ -65,11 +65,21 @@ export async function GET(req: Request) {
 
   const { data: meRow } = await supabase
     .from('employees')
-    .select('id, company_id, is_active')
+    .select('id, company_id, permission, can_view_stats, is_active')
     .eq('auth_user_id', user.id)
     .maybeSingle()
-  const me = meRow as { id: string; company_id: string; is_active: boolean } | null
+  const me = meRow as
+    | {
+        id: string
+        company_id: string
+        permission: 'worker' | 'foreman' | 'admin' | 'ceo'
+        can_view_stats: boolean
+        is_active: boolean
+      }
+    | null
   if (!me || !me.is_active) return new Response('Forbidden', { status: 403 })
+  const canViewAll =
+    me.permission === 'admin' || me.permission === 'ceo' || me.can_view_stats
 
   // 회사의 접속팀 작업
   const { data: worksData } = await supabase
@@ -99,6 +109,7 @@ export async function GET(req: Request) {
       )
     if (from) q = q.gte('report_date', from)
     if (to) q = q.lte('report_date', to)
+    if (!canViewAll) q = q.eq('author_employee_id', me.id)
     const { data: reportsData } = await q
     reports = (reportsData ?? []) as ReportMeta[]
   }
