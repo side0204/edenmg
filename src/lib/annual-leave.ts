@@ -129,3 +129,21 @@ export function formatLeaveDays(n: number): string {
   if (Number.isInteger(n)) return `${n}일`
   return `${n.toFixed(2)}일`
 }
+
+/** period_end 는 exclusive (다음 회차 시작일). 사용자 표시용 -1일 inclusive 날짜. */
+export function inclusiveEndDate(periodEnd: string): string {
+  const d = new Date(periodEnd + 'T00:00:00Z')
+  d.setUTCDate(d.getUTCDate() - 1)
+  return d.toISOString().slice(0, 10)
+}
+
+/** 회차 라벨 (근로기준법 기준 인지 명시). 예: "근로기준법 1년 미만 회차" / "근로기준법 2주년 회차" */
+export function periodLabel(seq: number): string {
+  if (seq === 0) return '근로기준법 1년 미만 회차'
+  return `근로기준법 ${seq}주년 회차`
+}
+
+/** 회차 기간을 사람이 읽기 좋은 형태로. */
+export function formatPeriodRange(periodStart: string, periodEnd: string): string {
+  return `${periodStart} ~ ${inclusiveEndDate(periodEnd)}`
+}

@@ -6,7 +6,10 @@ import {
   calcRemaining,
   currentPeriodSeq,
   formatLeaveDays,
+  formatPeriodRange,
+  inclusiveEndDate,
   legalGrantForYear,
+  periodLabel,
   yearsBetween,
 } from '@/lib/annual-leave'
 import {
@@ -182,7 +185,10 @@ export default async function AdminAnnualLeavesPage() {
 
                 {emp.hire_date && yrs !== null && (
                   <p className="text-xs text-slate-500">
-                    근속 {yrs}년차 · 현재 회차: {currentSeq === 0 ? '1년 미만 (월 누적)' : `${currentSeq}주년`}
+                    입사{' '}
+                    <span className="font-medium text-slate-700 tabular-nums">{emp.hire_date}</span>
+                    {' · '}근속 {yrs}년차 · 현재{' '}
+                    {currentSeq === 0 ? '1년 미만 (월 누적)' : `${currentSeq}주년 회차`}
                     {currentSeq !== null && currentSeq >= 1 && (
                       <span className="ml-1">
                         · 법정 부여 {legalGrantForYear(currentSeq)}일
@@ -200,22 +206,22 @@ export default async function AdminAnnualLeavesPage() {
                         <li
                           key={b.id}
                           className={
-                            'px-3 py-2 text-sm space-y-2 ' +
+                            'px-3 py-2.5 text-sm space-y-2 ' +
                             (isCurrent ? 'bg-emerald-50/40' : '')
                           }
                         >
                           <div className="flex items-start justify-between gap-2">
                             <div className="min-w-0 flex-1">
                               <p className="font-medium text-slate-900">
-                                {b.period_seq === 0 ? '1년 미만' : `${b.period_seq}주년 회차`}
+                                {periodLabel(b.period_seq)}
                                 {isCurrent && (
                                   <span className="ml-1.5 rounded-full bg-emerald-100 px-1.5 py-0.5 text-[10px] font-bold text-emerald-700">
                                     현재
                                   </span>
                                 )}
                               </p>
-                              <p className="text-[11px] text-slate-500">
-                                {b.period_start} ~ {b.period_end}
+                              <p className="mt-0.5 text-xs font-medium text-slate-700 tabular-nums">
+                                {formatPeriodRange(b.period_start, b.period_end)}
                               </p>
                               <p className="mt-0.5 text-[11px] text-slate-600">
                                 부여 <span className="font-semibold">{formatLeaveDays(b.granted)}</span>{' '}
@@ -235,27 +241,34 @@ export default async function AdminAnnualLeavesPage() {
                           </div>
                           <form
                             action={setInitialRemaining}
-                            className="flex items-center gap-1.5 rounded-md bg-amber-50/60 border border-amber-200 px-2 py-1.5"
+                            className="rounded-md bg-amber-50/60 border border-amber-200 p-2 space-y-1.5"
                           >
                             <input type="hidden" name="balance_id" value={b.id} />
-                            <span className="text-[11px] font-medium text-amber-800 shrink-0">
-                              잔여 직접 설정
-                            </span>
-                            <input
-                              type="number"
-                              step="0.25"
-                              min="0"
-                              name="remaining"
-                              placeholder={`${remaining}`}
-                              className="w-20 rounded-md border border-amber-300 bg-white px-2 py-1 text-xs"
-                            />
-                            <span className="text-[11px] text-slate-500 shrink-0">일</span>
-                            <button
-                              type="submit"
-                              className="shrink-0 rounded-md bg-amber-600 px-2 py-1 text-xs font-medium text-white hover:bg-amber-700"
-                            >
-                              적용
-                            </button>
+                            <p className="text-[11px] font-medium text-amber-900">
+                              📅 <span className="tabular-nums">{b.period_start}</span> ~{' '}
+                              <span className="tabular-nums">{inclusiveEndDate(b.period_end)}</span>{' '}
+                              사용분을 제외한 잔여일 입력
+                            </p>
+                            <div className="flex items-center gap-1.5">
+                              <input
+                                type="number"
+                                step="0.25"
+                                min="0"
+                                name="remaining"
+                                placeholder={`현재 ${remaining}`}
+                                className="w-24 rounded-md border border-amber-300 bg-white px-2 py-1 text-xs"
+                              />
+                              <span className="text-[11px] text-slate-500 shrink-0">일 남음</span>
+                              <button
+                                type="submit"
+                                className="ml-auto shrink-0 rounded-md bg-amber-600 px-3 py-1 text-xs font-bold text-white hover:bg-amber-700"
+                              >
+                                적용
+                              </button>
+                            </div>
+                            <p className="text-[10px] text-amber-700/80">
+                              부여 {formatLeaveDays(b.granted)} 기준 → 사용량 자동 계산. 운영 전 사용 이력 반영 또는 잔여 보정용.
+                            </p>
                           </form>
 
                           <form

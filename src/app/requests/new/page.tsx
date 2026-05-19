@@ -6,6 +6,8 @@ import {
   calcRemaining,
   currentPeriodSeq,
   formatLeaveDays,
+  formatPeriodRange,
+  periodLabel,
 } from '@/lib/annual-leave'
 import { RequestForm, type ForemanOption } from './RequestForm'
 import type { EmployeeOption } from './EmployeeCombobox'
@@ -46,20 +48,36 @@ export default async function NewRequestPage() {
 
   // 본인 잔여 연차 (현재 회차)
   const currentSeq = me.hire_date ? currentPeriodSeq(me.hire_date) : null
-  let myBalance: { granted: number; used: number; remaining: number } | null = null
+  let myBalance: {
+    granted: number
+    used: number
+    remaining: number
+    period_start: string
+    period_end: string
+    period_seq: number
+  } | null = null
   if (currentSeq !== null) {
     const { data: balRow } = await supabase
       .from('annual_leave_balances')
-      .select('granted, used')
+      .select('granted, used, period_start, period_end, period_seq')
       .eq('employee_id', me.id)
       .eq('period_seq', currentSeq)
       .maybeSingle()
     if (balRow) {
-      const b = balRow as { granted: number; used: number }
+      const b = balRow as {
+        granted: number
+        used: number
+        period_start: string
+        period_end: string
+        period_seq: number
+      }
       myBalance = {
         granted: b.granted,
         used: b.used,
         remaining: calcRemaining(b.granted, b.used),
+        period_start: b.period_start,
+        period_end: b.period_end,
+        period_seq: b.period_seq,
       }
     }
   }
@@ -123,7 +141,7 @@ export default async function NewRequestPage() {
                       : 'text-emerald-700')
                 }
               />
-              <span className="font-medium text-slate-700">올해 잔여 연차</span>
+              <span className="font-medium text-slate-700">잔여 연차</span>
               <span
                 className={
                   'ml-auto text-base font-bold tabular-nums ' +
@@ -133,7 +151,13 @@ export default async function NewRequestPage() {
                 {formatLeaveDays(myBalance.remaining)}
               </span>
             </div>
-            <p className="mt-1 text-[11px] text-slate-500">
+            <p className="mt-0.5 text-[11px] text-slate-600">
+              {periodLabel(myBalance.period_seq)}{' '}
+              <span className="tabular-nums">
+                ({formatPeriodRange(myBalance.period_start, myBalance.period_end)})
+              </span>
+            </p>
+            <p className="mt-0.5 text-[11px] text-slate-500">
               부여 {formatLeaveDays(myBalance.granted)} · 사용 {formatLeaveDays(myBalance.used)}
               {myBalance.remaining < 0 && (
                 <span className="ml-1.5 font-medium text-rose-600">

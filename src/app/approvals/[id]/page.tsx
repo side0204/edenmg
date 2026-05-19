@@ -16,6 +16,8 @@ import {
   calcRemaining,
   currentPeriodSeq,
   formatLeaveDays,
+  formatPeriodRange,
+  periodLabel,
 } from '@/lib/annual-leave'
 import { approveRequest, rejectRequest } from '../actions'
 import { getAttachmentUrl } from '@/app/requests/actions'
@@ -131,20 +133,36 @@ export default async function ApprovalDetailPage({
     .maybeSingle()
   const applicantHireDate = (applicantRow as { hire_date: string | null } | null)?.hire_date ?? null
   const applicantCurrentSeq = applicantHireDate ? currentPeriodSeq(applicantHireDate) : null
-  let applicantBalance: { granted: number; used: number; remaining: number } | null = null
+  let applicantBalance: {
+    granted: number
+    used: number
+    remaining: number
+    period_start: string
+    period_end: string
+    period_seq: number
+  } | null = null
   if (applicantCurrentSeq !== null) {
     const { data: balRow } = await supabase
       .from('annual_leave_balances')
-      .select('granted, used')
+      .select('granted, used, period_start, period_end, period_seq')
       .eq('employee_id', req.employee_id)
       .eq('period_seq', applicantCurrentSeq)
       .maybeSingle()
     if (balRow) {
-      const b = balRow as { granted: number; used: number }
+      const b = balRow as {
+        granted: number
+        used: number
+        period_start: string
+        period_end: string
+        period_seq: number
+      }
       applicantBalance = {
         granted: b.granted,
         used: b.used,
         remaining: calcRemaining(b.granted, b.used),
+        period_start: b.period_start,
+        period_end: b.period_end,
+        period_seq: b.period_seq,
       }
     }
   }
@@ -222,6 +240,12 @@ export default async function ApprovalDetailPage({
                   </>
                 )}
               </span>
+              <p className="mt-0.5 text-[11px] text-slate-500">
+                {periodLabel(applicantBalance.period_seq)}{' '}
+                <span className="tabular-nums">
+                  ({formatPeriodRange(applicantBalance.period_start, applicantBalance.period_end)})
+                </span>
+              </p>
               {projectedRemaining !== null && projectedRemaining < 0 && (
                 <p className="mt-0.5 text-[11px] text-rose-600 font-medium">
                   ⚠ 승인 시 잔여 음수 (한도 초과). 회사 정책에 따라 검토 후 처리하세요.

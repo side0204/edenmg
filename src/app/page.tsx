@@ -18,6 +18,8 @@ import {
   calcRemaining,
   currentPeriodSeq,
   formatLeaveDays,
+  formatPeriodRange,
+  periodLabel,
 } from '@/lib/annual-leave'
 import {
   isCardVisible,
@@ -356,20 +358,36 @@ export default async function Home() {
 
   // 내 연차 잔여 (현재 회차)
   const annualCurrentSeq = employee.hire_date ? currentPeriodSeq(employee.hire_date) : null
-  let annualBalance: { granted: number; used: number; remaining: number } | null = null
+  let annualBalance: {
+    granted: number
+    used: number
+    remaining: number
+    period_start: string
+    period_end: string
+    period_seq: number
+  } | null = null
   if (annualCurrentSeq !== null) {
     const { data: balRow } = await supabase
       .from('annual_leave_balances')
-      .select('granted, used')
+      .select('granted, used, period_start, period_end, period_seq')
       .eq('employee_id', employee.id)
       .eq('period_seq', annualCurrentSeq)
       .maybeSingle()
     if (balRow) {
-      const b = balRow as { granted: number; used: number }
+      const b = balRow as {
+        granted: number
+        used: number
+        period_start: string
+        period_end: string
+        period_seq: number
+      }
       annualBalance = {
         granted: b.granted,
         used: b.used,
         remaining: calcRemaining(b.granted, b.used),
+        period_start: b.period_start,
+        period_end: b.period_end,
+        period_seq: b.period_seq,
       }
     }
   }
@@ -666,6 +684,12 @@ export default async function Home() {
             {formatLeaveDays(annualBalance.remaining)}
           </span>
         </h2>
+        <p className="text-xs text-slate-600">
+          {periodLabel(annualBalance.period_seq)}{' '}
+          <span className="tabular-nums text-slate-700">
+            ({formatPeriodRange(annualBalance.period_start, annualBalance.period_end)})
+          </span>
+        </p>
         <p className="text-xs text-slate-500">
           부여 <span className="font-semibold text-slate-700">{formatLeaveDays(annualBalance.granted)}</span> · 사용{' '}
           <span className="font-semibold text-slate-700">{formatLeaveDays(annualBalance.used)}</span>
