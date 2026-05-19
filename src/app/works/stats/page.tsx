@@ -510,6 +510,13 @@ export default async function StatsPage({
           </p>
         )}
 
+        <div className="rounded-md border border-amber-200 bg-amber-50/60 px-3 py-2 text-[11px]">
+          <span className="font-semibold text-amber-800">⚠ 개인정보 포함</span>
+          <span className="ml-1.5 text-amber-700/90">
+            CSV 에 작업자명·일보 내용이 포함됩니다. 외부 유출 주의. (PIPA 의무)
+          </span>
+        </div>
+
         {view === 'table' && tableData ? (
           <StatsTable data={tableData} metric={metric} />
         ) : entries.length === 0 ? (

@@ -722,6 +722,35 @@ Vercel 환경변수에도 동일 키 등록. 변수 추가 시 양쪽 동기화 
 - **산안법/중대재해처벌법**: 안전 기록은 5년 보존, **append-only audit log**, 소프트 삭제만
 - **RLS**: 모든 비즈니스 테이블에 회사·역할별 정책 강제 (Supabase 프로젝트 설정에서 자동 RLS ON 상태)
 
+### 보안·개인정보 점검 결과 (2026-05-19)
+
+#### ✅ 검증된 안전 영역
+- **RLS**: 0001~0031 모든 테이블 `enable row level security`. 회사 스코프 (`company_id = current_employee()`) + 본인 row 한정 적용.
+- **append-only**: `leave_request_approvals` · `annual_leave_grants` · `work_daily_checks` · `attendances` · `vehicle_trips` · `connection_report_*` 모두 DELETE GRANT 미부여 (산안법 5년 보존 보장).
+- **서비스 롤 키 격리**: `SUPABASE_SERVICE_ROLE_KEY` 는 `src/lib/supabase/admin.ts` (`'use server'`) 와 server actions 에서만 사용. 클라이언트 노출 0건.
+- **XSS / CSRF**: `dangerouslySetInnerHTML` 사용 0건. Next.js 16 Server Actions 의 기본 CSRF 보호.
+- **Storage 버킷**: `leave-attachments` · `connection-photos` 모두 private + MIME 화이트리스트 + 10MB 제한 + RLS (작성자·관계자만).
+- **입력 검증**: 모든 server action 에서 `String()`·enum·길이·UUID 형식·MIME 화이트리스트 검증. RLS 가 한 번 더 막아주는 이중 안전망.
+- **로깅 PII 미노출**: `console.log` 가 PII 를 찍는 곳 0건.
+
+#### ⚠️ 적용된 보완 (2026-05-19 커밋)
+- **CSV PIPA 안내**: `/admin/reports` · `/admin/annual-leaves` · `/vehicles/trips` · `/works/stats` 4곳의 CSV 다운로드 영역에 amber 안내 박스 (PIPA §22 의무 — 개인정보 처리자의 안전조치 의무).
+
+#### 🟡 검토·정리 후순위 항목
+- **`/signup` `email_confirm=true`**: 신청자가 즉시 인증 상태로 user 생성됨. `is_active=false` + 관리자 승인 게이트가 막아주지만, 누가 타인 이메일로 미리 가입(squatting) 가능성. v2 에 Supabase 이메일 검증 링크 흐름으로 재설계 검토.
+- **RLS 정책의 leftover `'ceo'`**: 마이그 0018 에서 enum 통합됐지만 일부 정책에 `in ('admin', 'ceo')` 가 남아있음. 데이터엔 더 이상 `'ceo'` 값이 없어 보안 영향 0. 마이그 0032 로 정리 시 일괄 변경 가능.
+- **CSV 위치·이름 노출**: 출퇴근 CSV 에 GPS 좌표 + 직원명 포함. 출퇴근 검증 목적상 의도된 동작이지만 외부 유출 시 민감. 권한이 admin·team_leader 로 좁혀져 있고 PIPA 안내가 노출되어 운영상 차단.
+- **`hire_date` 노출**: 본인 + admin 만 접근. CSV 의 직원 잔여 보고서에만 포함 (admin 만 다운로드 가능).
+
+#### 한국 규정 준수
+| 규정 | 항목 | 상태 |
+|---|---|---|
+| **PIPA §22** (안전조치) | CSV 안내 + RLS + 암호화 채널 (HTTPS) | ✅ |
+| **PIPA §39** (민감정보) | 주민번호 미수집 · 위치는 출퇴근·일보 한정 | ✅ |
+| **산안법 §164** (기록 5년) | append-only audit log | ✅ |
+| **근로기준법 §60** (연차) | 1년 미만 월 1일 + 1년 이상 15+가산일 자동 부여 | ✅ |
+| **중대재해처벌법** | 안전 기록 무삭제 보존 | ✅ |
+
 ## 의사결정 컨벤션
 - **빠른 MVP 우선**: 정식 자체 백엔드보다 Supabase 위에서 빠르게 구현. 추상화 미루기.
 - **모바일 우선 반응형**: 모든 화면을 320~430px 폭에서 먼저 설계, 데스크톱은 그 다음.
