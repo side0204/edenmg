@@ -52,7 +52,7 @@ export default async function Home() {
   const { data } = await supabase
     .from('employees')
     .select(
-      'id, name, permission, position, team, work_type, can_manage_stock, is_active, accepted_at, company_id, companies(name)',
+      'id, name, permission, position, team, work_type, can_manage_stock, workplace_type, is_active, accepted_at, company_id, companies(name)',
     )
     .eq('auth_user_id', user.id)
     .maybeSingle()
@@ -66,6 +66,7 @@ export default async function Home() {
         team: string | null
         work_type: string | null
         can_manage_stock: boolean
+        workplace_type: '본사' | '현장' | string | null
         is_active: boolean
         company_id: string
         companies: { name: string } | null
@@ -116,6 +117,7 @@ export default async function Home() {
   }
 
   const isAdmin = employee.permission === 'admin'
+  const isFieldWorker = employee.workplace_type === '현장'
   const subtitleParts = [
     employee.position,
     employee.team ? `${employee.team}팀` : null,
@@ -397,6 +399,7 @@ export default async function Home() {
           </Link>
         </section>
 
+        {!isFieldWorker && (
         <section className="rounded-2xl bg-white shadow-sm border border-slate-200 dark:bg-slate-900 dark:border-slate-800 p-6 space-y-4">
           <h2 className="flex items-center gap-2 text-base font-semibold text-slate-700 tracking-tight dark:text-slate-300">
             <Car className="h-5 w-5 text-slate-400" />
@@ -449,6 +452,7 @@ export default async function Home() {
             전체 차량 관리 →
           </Link>
         </section>
+        )}
 
         {(myHoldingsCount ?? 0) > 0 && (
           <section className="rounded-2xl bg-white shadow-sm border border-slate-200 dark:bg-slate-900 dark:border-slate-800 p-6 space-y-3">
@@ -518,6 +522,7 @@ export default async function Home() {
           </section>
         )}
 
+        {!isFieldWorker && (
         <section className="rounded-2xl bg-white shadow-sm border border-slate-200 dark:bg-slate-900 dark:border-slate-800 p-6 space-y-3">
           <h2 className="flex items-center gap-2 text-base font-semibold text-slate-700 tracking-tight dark:text-slate-300">
             <ClipboardCheck className="h-5 w-5 text-slate-400" />
@@ -548,6 +553,7 @@ export default async function Home() {
             </Link>
           )}
         </section>
+        )}
 
         <section className="rounded-2xl bg-white shadow-sm border border-slate-200 dark:bg-slate-900 dark:border-slate-800 p-6 space-y-3">
           <h2 className="flex items-center gap-2 text-base font-semibold text-slate-700 tracking-tight dark:text-slate-300">

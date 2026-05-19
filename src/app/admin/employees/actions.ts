@@ -198,11 +198,13 @@ export async function updateVehiclePlate(formData: FormData) {
   )
 }
 
-// 가입 신청 승인 — is_active=true 로 활성화 + 권한·토글 함께 적용.
+// 가입 신청 승인 — is_active=true 로 활성화 + 권한·토글 + 본사/현장 함께 적용.
 export async function approveSignup(formData: FormData) {
   const id = String(formData.get('id') ?? '')
   const permRaw = String(formData.get('permission') ?? 'worker') as Permission
   const permission = PERMISSION_VALUES.includes(permRaw) ? permRaw : 'worker'
+  const workplaceRaw = String(formData.get('workplace_type') ?? '본사')
+  const workplace = workplaceRaw === '현장' ? '현장' : '본사'
   const canManageWorks = formData.get('can_manage_works') === 'on'
   const canDeleteWorks = formData.get('can_delete_works') === 'on'
   const canViewStats = formData.get('can_view_stats') === 'on'
@@ -232,6 +234,7 @@ export async function approveSignup(formData: FormData) {
       is_active: true,
       accepted_at: new Date().toISOString(),
       permission,
+      workplace_type: workplace,
       can_manage_works: canManageWorks,
       can_delete_works: canDeleteWorks,
       can_view_stats: canViewStats,
@@ -244,6 +247,40 @@ export async function approveSignup(formData: FormData) {
 
   revalidatePath('/admin/employees')
   redirect('/admin/employees?ok=' + encodeURIComponent('가입을 승인했습니다'))
+}
+
+// 활성 직원의 본사/현장 변경
+export async function updateWorkplaceType(formData: FormData) {
+  const id = String(formData.get('id') ?? '')
+  const workplaceRaw = String(formData.get('workplace_type') ?? '본사')
+  const workplace = workplaceRaw === '현장' ? '현장' : '본사'
+  if (!id) redirect('/admin/employees?err=' + encodeURIComponent('직원 id 가 없습니다'))
+
+  const supabase = await createClient()
+  const {
+    data: { user },
+  } = await supabase.auth.getUser()
+  if (!user) redirect('/login')
+
+  const { data: meRow } = await supabase
+    .from('employees')
+    .select('id, permission')
+    .eq('auth_user_id', user.id)
+    .maybeSingle()
+  const me = meRow as { id: string; permission: Permission } | null
+  if (!me || me.permission !== 'admin') {
+    redirect('/admin/employees?err=' + encodeURIComponent('권한이 없습니다'))
+  }
+
+  const { error } = await supabase
+    .from('employees')
+    .update({ workplace_type: workplace })
+    .eq('id', id)
+  if (error) {
+    redirect('/admin/employees?err=' + encodeURIComponent('변경 실패: ' + error.message))
+  }
+  revalidatePath('/admin/employees')
+  redirect('/admin/employees?ok=' + encodeURIComponent(`${workplace} 으로 변경했습니다`))
 }
 
 // 가입 신청 거부 — auth user + employees row 모두 삭제 (영구).

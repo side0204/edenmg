@@ -4,6 +4,7 @@ import { Toaster } from "sonner";
 import ToastBridge from "@/components/ToastBridge";
 import BottomNav from "@/components/BottomNav";
 import OfficeSubTabs from "@/components/OfficeSubTabs";
+import { createClient } from "@/lib/supabase/server";
 import "./globals.css";
 
 export const metadata: Metadata = {
@@ -31,18 +32,33 @@ export const viewport: Viewport = {
   viewportFit: "cover",
 };
 
-export default function RootLayout({
+export default async function RootLayout({
   children,
 }: Readonly<{
   children: React.ReactNode;
 }>) {
+  // 현장 직원이면 사무 탭과 사무 서브탭을 숨김.
+  const supabase = await createClient();
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+  let isFieldWorker = false;
+  if (user) {
+    const { data } = await supabase
+      .from("employees")
+      .select("workplace_type")
+      .eq("auth_user_id", user.id)
+      .maybeSingle();
+    isFieldWorker = (data as { workplace_type?: string } | null)?.workplace_type === "현장";
+  }
+
   return (
     <html lang="ko" className="h-full antialiased">
       <body
         className="min-h-full flex flex-col bg-slate-50 text-slate-900 dark:bg-slate-950 dark:text-slate-100"
         style={{ paddingBottom: 'calc(4rem + env(safe-area-inset-bottom))' }}
       >
-        <OfficeSubTabs />
+        <OfficeSubTabs hideOffice={isFieldWorker} />
         {children}
         <Toaster
           position="bottom-center"
@@ -59,7 +75,7 @@ export default function RootLayout({
         <Suspense fallback={null}>
           <ToastBridge />
         </Suspense>
-        <BottomNav />
+        <BottomNav hideOffice={isFieldWorker} />
       </body>
     </html>
   );

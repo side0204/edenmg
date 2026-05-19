@@ -20,10 +20,12 @@ const SUB_TABS: SubTab[] = [
 /**
  * 사무 그룹(근태·차량·결재) 경로에서만 상단에 sticky 로 표시되는 서브탭.
  * 그 외 경로(/, /admin, /login 등) 에서는 null.
+ * hideOffice = 현장 직원이면 서브탭 자체 숨김 (라우트 직접 진입은 가능하지만 네비게이션은 비표시).
  */
-export default function OfficeSubTabs() {
+export default function OfficeSubTabs({ hideOffice = false }: { hideOffice?: boolean }) {
   const pathname = usePathname() ?? '/'
 
+  if (hideOffice) return null
   const isOffice = SUB_TABS.some((t) => t.matchPrefixes.some((p) => pathname.startsWith(p)))
   if (!isOffice) return null
 

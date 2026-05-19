@@ -11,6 +11,7 @@ import {
   toggleCanViewStats,
   updateVehiclePlate,
 } from './actions'
+import WorkplaceToggle from './WorkplaceToggle'
 import { toggleCanManageStock } from '../../stock/actions'
 import { FieldSelect } from './FieldSelect'
 import {
@@ -32,6 +33,7 @@ type EmployeeRow = {
   team: string | null
   work_type: string | null
   vehicle_plate: string | null
+  workplace_type: '본사' | '현장' | string
   can_manage_works: boolean
   can_delete_works: boolean
   can_view_stats: boolean
@@ -64,7 +66,7 @@ export default async function EmployeesPage() {
   const { data, error: listError } = await supabase
     .from('employees')
     .select(
-      'id, name, email, phone, permission, position, team, work_type, vehicle_plate, can_manage_works, can_delete_works, can_view_stats, can_manage_stock, is_active, invited_at, accepted_at, created_at',
+      'id, name, email, phone, permission, position, team, work_type, vehicle_plate, workplace_type, can_manage_works, can_delete_works, can_view_stats, can_manage_stock, is_active, invited_at, accepted_at, created_at',
     )
     .order('created_at', { ascending: false })
 
@@ -129,20 +131,33 @@ export default async function EmployeesPage() {
                   <form action={approveSignup} className="space-y-2 border-t border-slate-100 pt-3">
                     <input type="hidden" name="id" value={emp.id} />
 
-                    <label className="block">
-                      <span className="block text-xs font-medium text-slate-700">권한 부여</span>
-                      <select
-                        name="permission"
-                        defaultValue="worker"
-                        className="mt-1 w-full rounded-md border border-slate-300 px-2 py-1.5 text-sm"
-                      >
-                        {PERMISSION_VALUES.map((p) => (
-                          <option key={p} value={p}>
-                            {PERMISSION_LABEL[p]}
-                          </option>
-                        ))}
-                      </select>
-                    </label>
+                    <div className="grid grid-cols-2 gap-2">
+                      <label className="block">
+                        <span className="block text-xs font-medium text-slate-700">근무지</span>
+                        <select
+                          name="workplace_type"
+                          defaultValue="본사"
+                          className="mt-1 w-full rounded-md border border-slate-300 px-2 py-1.5 text-sm"
+                        >
+                          <option value="본사">본사</option>
+                          <option value="현장">현장</option>
+                        </select>
+                      </label>
+                      <label className="block">
+                        <span className="block text-xs font-medium text-slate-700">권한</span>
+                        <select
+                          name="permission"
+                          defaultValue="worker"
+                          className="mt-1 w-full rounded-md border border-slate-300 px-2 py-1.5 text-sm"
+                        >
+                          {PERMISSION_VALUES.map((p) => (
+                            <option key={p} value={p}>
+                              {PERMISSION_LABEL[p]}
+                            </option>
+                          ))}
+                        </select>
+                      </label>
+                    </div>
 
                     <div className="grid grid-cols-2 gap-1.5 text-xs">
                       <ToggleCheckbox name="can_manage_works" label="작업관리" />
@@ -150,6 +165,9 @@ export default async function EmployeesPage() {
                       <ToggleCheckbox name="can_view_stats" label="통계조회" />
                       <ToggleCheckbox name="can_manage_stock" label="자재관리" />
                     </div>
+                    <p className="text-[10px] text-slate-500">
+                      현장 = 사무탭·업무용 차량·결재 카드 숨김 (작업·자재만 사용)
+                    </p>
 
                     <div className="flex gap-2 pt-1">
                       <button
@@ -209,11 +227,16 @@ export default async function EmployeesPage() {
                     <p className="mt-0.5 text-xs text-slate-500 truncate">{emp.email}</p>
                     {emp.phone && <p className="text-xs text-slate-400">{emp.phone}</p>}
                   </div>
-                  <span
-                    className={`shrink-0 rounded-full border px-2 py-0.5 text-xs font-medium ${statusColor}`}
-                  >
-                    {status}
-                  </span>
+                  <div className="flex flex-col items-end gap-1 shrink-0">
+                    <span
+                      className={`rounded-full border px-2 py-0.5 text-xs font-medium ${statusColor}`}
+                    >
+                      {status}
+                    </span>
+                    {emp.is_active && (
+                      <WorkplaceToggle id={emp.id} current={emp.workplace_type ?? '본사'} />
+                    )}
+                  </div>
                 </div>
 
                 <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
