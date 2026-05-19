@@ -21,11 +21,26 @@ export default async function NewMaterialPage() {
     | { permission: 'worker' | 'team_member' | 'team_leader' | 'admin'; is_active: boolean }
     | null
   if (!me || !me.is_active) redirect('/?err=' + encodeURIComponent('계정이 활성 상태가 아닙니다'))
-  if (me.permission !== 'admin') {
-    redirect('/?err=' + encodeURIComponent('관리자 권한이 필요합니다'))
+  // can_manage_stock 도 허용
+  const { data: meExtra } = await supabase
+    .from('employees')
+    .select('can_manage_stock')
+    .eq('auth_user_id', user.id)
+    .maybeSingle()
+  const canManage = me.permission === 'admin' || (meExtra as { can_manage_stock: boolean } | null)?.can_manage_stock
+  if (!canManage) {
+    redirect('/?err=' + encodeURIComponent('자재 관리 권한이 필요합니다'))
   }
 
-  const initial: MaterialFormValues = { id: null, name: '', spec: '', unit: '' }
+  const initial: MaterialFormValues = {
+    id: null,
+    name: '',
+    spec: '',
+    unit: '',
+    category: '',
+    default_supplier: '',
+    supplier_code: '',
+  }
 
   return (
     <main className="min-h-screen p-4 sm:p-6">

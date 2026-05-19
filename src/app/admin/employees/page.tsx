@@ -8,6 +8,7 @@ import {
   toggleCanManageWorks,
   toggleCanViewStats,
 } from './actions'
+import { toggleCanManageStock } from '../../stock/actions'
 import { FieldSelect } from './FieldSelect'
 import {
   PERMISSION_LABEL,
@@ -30,6 +31,7 @@ type EmployeeRow = {
   can_manage_works: boolean
   can_delete_works: boolean
   can_view_stats: boolean
+  can_manage_stock: boolean
   is_active: boolean
   invited_at: string | null
   accepted_at: string | null
@@ -57,7 +59,7 @@ export default async function EmployeesPage() {
 
   const { data, error: listError } = await supabase
     .from('employees')
-    .select('id, name, email, phone, permission, position, team, work_type, can_manage_works, can_delete_works, can_view_stats, is_active, invited_at, accepted_at, created_at')
+    .select('id, name, email, phone, permission, position, team, work_type, can_manage_works, can_delete_works, can_view_stats, can_manage_stock, is_active, invited_at, accepted_at, created_at')
     .order('created_at', { ascending: false })
 
   const rows = (data ?? []) as EmployeeRow[]
@@ -244,6 +246,34 @@ export default async function EmployeesPage() {
                       }
                     >
                       {emp.can_view_stats ? '✓ 부여됨' : '미부여'}
+                    </button>
+                  </form>
+                </div>
+
+                <div className="flex items-center justify-between gap-3 rounded-lg bg-violet-50/40 px-3 py-2">
+                  <div className="min-w-0">
+                    <p className="text-xs font-medium text-violet-700">자재 관리 권한</p>
+                    <p className="text-[11px] text-violet-600/80">
+                      입고·출고·자재 마스터 CUD·CSV import. 관리자는 자동.
+                    </p>
+                  </div>
+                  <form action={toggleCanManageStock}>
+                    <input type="hidden" name="id" value={emp.id} />
+                    <input
+                      type="hidden"
+                      name="target"
+                      value={emp.can_manage_stock ? 'false' : 'true'}
+                    />
+                    <button
+                      type="submit"
+                      className={
+                        'shrink-0 rounded-full px-3 py-1 text-xs font-bold ' +
+                        (emp.can_manage_stock
+                          ? 'bg-violet-100 text-violet-800 hover:bg-violet-200'
+                          : 'bg-slate-200 text-slate-600 hover:bg-slate-300')
+                      }
+                    >
+                      {emp.can_manage_stock ? '✓ 부여됨' : '미부여'}
                     </button>
                   </form>
                 </div>

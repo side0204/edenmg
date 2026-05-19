@@ -384,6 +384,53 @@ owner 결정: 외선·기타 일보 단일 CSV (접속일보는 별도 4모드 �
 - **Route Handler**: [`/api/reports/work-daily-reports`](./src/app/api/reports/work-daily-reports/route.ts) — `?month=YYYY-MM&work_id=옵션`. 접속팀 work 의 일보는 자동 제외 (정의상 별도 entity). foreman 은 본인 담당 작업만.
 - **/admin/reports**: 「일반 일보 (외선·기타)」 섹션 추가. 단일 다운로드 버튼.
 
+### ✅ 완료 (M4 자재관리 Phase 1, 2026-05-19)
+
+owner 결정사항:
+
+| 항목 | 결정 | 비고 |
+|---|---|---|
+| **자재 구분** | 사급(발주처제공) / 지입(자체구매) | lot.source_type enum |
+| **입고 형태** | 일반입고 / 직납입고 | lot.receipt_type enum. 직납은 related_work_id 필수 |
+| **재고 단위** | Lot 단위 추적 | 입고마다 별도 lot. FIFO. quantity_remaining 추적 |
+| **사급 격리** | 발주처(supplier) 단위 | lot.supplier 와 work.client 일치 검증 (둘 다 명시된 경우만) |
+| **holding 강제** | 강제 + 「기타」 폴백 | 일보 자재 입력 시 본인 holding 에서 선택. 마스터/직접입력 폴백 |
+| **권한** | admin + `can_manage_stock` 토글 | violet 색상 (rose/amber/blue 와 분리) |
+| **창고** | 본사창고만 (현재) + 현장창고 확장 대비 | 회사당 본사창고 1개 자동 seed. site type 은 Phase 3 |
+| **자재 마스터** | 발주처+발주처코드 (사급) 컬럼 추가 | UNIQUE (company, supplier, code). 자재 ↔ 발주처 1:1 매핑 |
+| **CSV import** | 자재 마스터 + 보유자재(lot) 2종 | UTF-8, 자체 파서, 미리보기·에러 행 표시 |
+
+- **마이그**:
+  - [`0022_materials_warehouses.sql`](./supabase/migrations/0022_materials_warehouses.sql) — materials 확장 + warehouses + 본사창고 seed
+  - [`0023_stock_receipts_lots.sql`](./supabase/migrations/0023_stock_receipts_lots.sql) — 입고 + 재고 lot
+  - [`0024_holdings_issuances.sql`](./supabase/migrations/0024_holdings_issuances.sql) — 작업자 holding + 출고 이력
+  - [`0025_can_manage_stock_and_report_link.sql`](./supabase/migrations/0025_can_manage_stock_and_report_link.sql) — can_manage_stock 토글 + daily_report_materials + connection_node_materials.holding_id + RLS 보강
+- **공통 유틸**:
+  - [`src/lib/stock.ts`](./src/lib/stock.ts) — enum 상수, 색상, formatMaterialLabel·formatQty
+  - [`src/lib/csv-parse.ts`](./src/lib/csv-parse.ts) — RFC 4180 자체 파서 + 콤마/세미콜론 자동 감지
+- **server actions**:
+  - [`stock/actions.ts`](./src/app/stock/actions.ts) — createReceipt·createIssuance·consumeHolding·restoreHolding·toggleCanManageStock
+  - [`stock/import-actions.ts`](./src/app/stock/import-actions.ts) — importMaterialsCsv·importStockCsv
+  - [`works/daily-material-actions.ts`](./src/app/works/daily-material-actions.ts) — add·remove daily_report_materials (holding 차감 통합)
+- **화면**:
+  - `/stock` (메인 대시보드) + `/stock/lots` (재고 lot 검색·필터)
+  - `/stock/receipts/new`·`/stock/receipts` (입고 등록·이력)
+  - `/stock/issuances/new`·`/stock/issuances` (출고 등록·이력)
+  - `/stock/my` (작업자 본인 holding, 작업별 grouping)
+  - `/stock/import` (보유자재 CSV) + `/admin/materials/import` (자재 마스터 CSV)
+  - 템플릿 API: `/api/templates/stock-import.csv`·`/api/templates/materials-import.csv`
+- **일보 통합 (일반일보)**: 일반일보 상세 페이지에 「사용 자재」 구조화 섹션. holding/master/custom 3 모드 토글 + HoldingPicker 풀스크린 모달 (모바일 안전 패턴 — 항상 mount + hidden 토글). holding 사용 시 자동 차감.
+- **권한 토글**: `/admin/employees` 에 자재관리 권한 (violet). admin 만 부여 가능.
+- **홈 카드**: 「내 자재」 카드 (보유 시) + admin 관리 메뉴에 「자재 입출고」 진입점.
+- **BottomNav**: 4탭 (홈/사무/작업/자재).
+
+**Phase 1 미포함 (후속)**:
+- 접속일보 holding 통합 (Phase 1.5) — UnifiedReportForm·addMaterial 에 holding picker
+- QR/바코드 발행 + 스캐너 (Phase 2)
+- 작업자간 인수인계 (Phase 2)
+- 반납 (Phase 2)
+- 현장 창고 + 창고 간 이동 (Phase 3)
+
 ### ✅ 완료 (함체·국사 마스터, 2026-05-19)
 
 | 항목 | 결정 | 비고 |
@@ -428,6 +475,10 @@ owner 결정: 외선·기타 일보 단일 CSV (접속일보는 별도 4모드 �
   - [`0019_assignment_worker_type.sql`](./supabase/migrations/0019_assignment_worker_type.sql) — 작업자별 worker_type
   - [`0020_connection_report_photos.sql`](./supabase/migrations/0020_connection_report_photos.sql) — 접속일보 사진 첨부 (테이블·버킷·RLS)
   - [`0021_connection_facilities.sql`](./supabase/migrations/0021_connection_facilities.sql) — 함체·국사 마스터 + plan_node 의 master_id
+  - [`0022_materials_warehouses.sql`](./supabase/migrations/0022_materials_warehouses.sql) — M4: materials 확장 (카테고리·발주처·코드) + warehouses + 본사창고 seed
+  - [`0023_stock_receipts_lots.sql`](./supabase/migrations/0023_stock_receipts_lots.sql) — M4: 입고 + 재고 lot
+  - [`0024_holdings_issuances.sql`](./supabase/migrations/0024_holdings_issuances.sql) — M4: 작업자 holding + 출고 이력
+  - [`0025_can_manage_stock_and_report_link.sql`](./supabase/migrations/0025_can_manage_stock_and_report_link.sql) — M4: can_manage_stock 토글 + daily_report_materials + 일보 자재 holding FK
 - **외선일보 별도 entity (v2)** — 접속일보와 동일 패턴으로 외선팀 전용 모듈. 외선 작업 특성(케이블 포설구간·전주번호 등)에 맞는 구조 별도 설계.
 - **접속일보 후속 (v2)** — segment-level 작업자 태그, 사진 첨부 + EXIF, 국사·함체 마스터 테이블화, 재접속 이력 조회, 지도 시각화
 - **M3 Phase 2 후속** — 사진 첨부 + EXIF·워터마크 (PRD M3-06), 일보 결재함 통합 (현재는 작업 상세에서 진입), 일반 일보 월별 CSV 리포트

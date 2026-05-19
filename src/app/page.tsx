@@ -1,5 +1,15 @@
 import Link from 'next/link'
-import { Bell, Clock, Car, ClipboardCheck, Hammer, Settings, FileText, CalendarDays } from 'lucide-react'
+import {
+  Bell,
+  Clock,
+  Car,
+  ClipboardCheck,
+  Hammer,
+  Settings,
+  FileText,
+  CalendarDays,
+  Package,
+} from 'lucide-react'
 import { createClient } from '@/lib/supabase/server'
 import { LEAVE_TYPE_LABEL, formatPeriod, type LeaveType } from '@/lib/leave'
 import { signOut } from './login/actions'
@@ -210,6 +220,13 @@ export default async function Home() {
     (t) => t >= newCutoff,
   ).length
 
+  // ===== 내 자재 카운트 =====
+  const { count: myHoldingsCount } = await supabase
+    .from('worker_holdings')
+    .select('id', { count: 'exact', head: true })
+    .eq('employee_id', employee.id)
+    .gt('quantity_remaining', 0)
+
   // 결재 대기 건수 (홈 배지용)
   const canApprove = employee.permission !== 'worker'
   let approvalsPendingCount = 0
@@ -386,6 +403,24 @@ export default async function Home() {
           </Link>
         </section>
 
+        {(myHoldingsCount ?? 0) > 0 && (
+          <section className="rounded-2xl bg-white shadow-sm border border-slate-200 dark:bg-slate-900 dark:border-slate-800 p-6 space-y-3">
+            <h2 className="flex items-center gap-2 text-base font-semibold text-slate-700 tracking-tight dark:text-slate-300">
+              <Package className="h-5 w-5 text-slate-400" />
+              내 자재
+              <span className="ml-auto inline-flex items-center rounded-full bg-emerald-100 text-emerald-800 text-xs font-bold px-2 py-0.5">
+                {myHoldingsCount}건
+              </span>
+            </h2>
+            <Link
+              href="/stock/my"
+              className="block rounded-lg border border-slate-200 hover:border-slate-900 px-4 py-3 text-base font-medium text-slate-900 dark:border-slate-800 dark:hover:border-slate-100 dark:text-slate-100 text-center"
+            >
+              보유 자재 보기 →
+            </Link>
+          </section>
+        )}
+
         {myWorkCount > 0 && (
           <section className="rounded-2xl bg-white shadow-sm border border-slate-200 dark:bg-slate-900 dark:border-slate-800 p-6 space-y-3">
             <h2 className="flex items-center gap-2 text-base font-semibold text-slate-700 tracking-tight dark:text-slate-300">
@@ -533,6 +568,12 @@ export default async function Home() {
               className="block rounded-lg border border-slate-200 hover:border-slate-900 px-4 py-3 text-base font-medium text-slate-900 dark:border-slate-800 dark:hover:border-slate-100 dark:text-slate-100"
             >
               함체·국사 마스터 →
+            </Link>
+            <Link
+              href="/stock"
+              className="block rounded-lg border border-slate-200 hover:border-slate-900 px-4 py-3 text-base font-medium text-slate-900 dark:border-slate-800 dark:hover:border-slate-100 dark:text-slate-100"
+            >
+              자재 입출고 →
             </Link>
             <Link
               href="/admin/reports"

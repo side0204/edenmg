@@ -5,6 +5,9 @@ export type MaterialFormValues = {
   name: string
   spec: string
   unit: string
+  category: string
+  default_supplier: string
+  supplier_code: string
 }
 
 export function MaterialForm({
@@ -34,25 +37,60 @@ export function MaterialForm({
         />
       </Field>
 
-      <Field label="규격 (선택)">
+      <div className="grid grid-cols-2 gap-3">
+        <Field label="규격 (선택)">
+          <input
+            name="spec"
+            defaultValue={initial.spec}
+            maxLength={100}
+            placeholder="예: 12C, M6, SM-9/125"
+            className={inputClass}
+          />
+        </Field>
+        <Field label="단위 (선택)">
+          <input
+            name="unit"
+            defaultValue={initial.unit}
+            maxLength={20}
+            placeholder="예: EA, m, 식, box"
+            className={inputClass}
+          />
+        </Field>
+      </div>
+
+      <Field label="카테고리 (선택)">
         <input
-          name="spec"
-          defaultValue={initial.spec}
-          maxLength={100}
-          placeholder="예: 4코어, KT-12C, SM-9/125"
+          name="category"
+          defaultValue={initial.category}
+          maxLength={50}
+          placeholder="예: 케이블, 접속자재, 일반자재"
           className={inputClass}
         />
       </Field>
 
-      <Field label="단위 (선택)">
-        <input
-          name="unit"
-          defaultValue={initial.unit}
-          maxLength={20}
-          placeholder="예: EA, m, 식"
-          className={inputClass}
-        />
-      </Field>
+      <div className="grid grid-cols-2 gap-3">
+        <Field label="발주처 (사급 시)">
+          <input
+            name="default_supplier"
+            defaultValue={initial.default_supplier}
+            maxLength={100}
+            placeholder="예: KT, LG U+, SKB"
+            className={inputClass}
+          />
+        </Field>
+        <Field label="발주처 코드">
+          <input
+            name="supplier_code"
+            defaultValue={initial.supplier_code}
+            maxLength={100}
+            placeholder="발주처가 정한 자재코드"
+            className={inputClass}
+          />
+        </Field>
+      </div>
+      <p className="-mt-2 text-xs text-slate-500">
+        지입 자재면 발주처·코드 비움. 사급은 둘 다 입력하면 같은 코드 자재 정확 매칭 가능.
+      </p>
 
       <button
         type="submit"

@@ -11,6 +11,9 @@ type Row = {
   name: string
   spec: string | null
   unit: string | null
+  category: string | null
+  default_supplier: string | null
+  supplier_code: string | null
 }
 
 export default async function EditMaterialPage({
@@ -38,13 +41,19 @@ export default async function EditMaterialPage({
       }
     | null
   if (!me || !me.is_active) redirect('/?err=' + encodeURIComponent('계정이 활성 상태가 아닙니다'))
-  if (me.permission !== 'admin') {
-    redirect('/?err=' + encodeURIComponent('관리자 권한이 필요합니다'))
+  const { data: meExtra } = await supabase
+    .from('employees')
+    .select('can_manage_stock')
+    .eq('auth_user_id', user.id)
+    .maybeSingle()
+  const canManage = me.permission === 'admin' || (meExtra as { can_manage_stock: boolean } | null)?.can_manage_stock
+  if (!canManage) {
+    redirect('/?err=' + encodeURIComponent('자재 관리 권한이 필요합니다'))
   }
 
   const { data } = await supabase
     .from('materials')
-    .select('id, company_id, name, spec, unit')
+    .select('id, company_id, name, spec, unit, category, default_supplier, supplier_code')
     .eq('id', id)
     .maybeSingle()
   const row = data as Row | null
@@ -55,6 +64,9 @@ export default async function EditMaterialPage({
     name: row.name,
     spec: row.spec ?? '',
     unit: row.unit ?? '',
+    category: row.category ?? '',
+    default_supplier: row.default_supplier ?? '',
+    supplier_code: row.supplier_code ?? '',
   }
 
   return (

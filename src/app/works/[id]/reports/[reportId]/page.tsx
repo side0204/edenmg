@@ -1,6 +1,6 @@
 import Link from 'next/link'
 import { notFound, redirect } from 'next/navigation'
-import { ChevronLeft } from 'lucide-react'
+import { ChevronLeft, Trash2 } from 'lucide-react'
 import { createClient } from '@/lib/supabase/server'
 import {
   REPORT_PROGRESS_COLOR,
@@ -10,8 +10,12 @@ import {
   type WorkReportStatus,
   type WorkWorkerType,
 } from '@/lib/work'
+import { formatQty, type StockSourceType } from '@/lib/stock'
 import { approveReport, rejectReport, updateReport } from '../../../report-actions'
+import { removeDailyReportMaterial } from '../../../daily-material-actions'
 import { ReportForm, type ReportFormValues } from '../../../ReportForm'
+import DailyMaterialsClient from '../../../DailyMaterialsClient'
+import type { HoldingOption } from '../../../HoldingPicker'
 
 type WorkRow = {
   id: string
@@ -108,6 +112,105 @@ export default async function ReportDetailPage({
   const canEdit = isAuthor && report.status === '대기'
   const canReview = (isAdmin || isAssignee) && report.status === '대기'
 
+  // 자재 사용 (구조화) + 작성자 holding (picker 용)
+  const [{ data: matRows }, { data: myHoldings }, { data: masterList }] = await Promise.all([
+    supabase
+      .from('daily_report_materials')
+      .select(
+        `id, holding_id, material_id, custom_name, custom_spec, custom_unit, quantity, notes, created_at,
+         materials ( id, name, spec, unit ),
+         worker_holdings (
+           id, employee_id, work_id, quantity_remaining,
+           stock_lots ( source_type, supplier, materials ( name, spec, unit, default_spec, default_supplier, supplier_code ) )
+         )`,
+      )
+      .eq('report_id', reportId)
+      .order('created_at'),
+    supabase
+      .from('worker_holdings')
+      .select(
+        `id, work_id, quantity_remaining,
+         stock_lots (
+           source_type, supplier,
+           materials ( id, name, spec, unit, default_spec, default_supplier, supplier_code )
+         ),
+         works ( id, name, order_id )`,
+      )
+      .eq('employee_id', report.author_employee_id)
+      .gt('quantity_remaining', 0),
+    supabase
+      .from('materials')
+      .select('id, name, spec, unit')
+      .eq('company_id', me.company_id)
+      .eq('is_active', true)
+      .order('name'),
+  ])
+
+  type MaterialRow = {
+    id: string
+    holding_id: string | null
+    material_id: string | null
+    custom_name: string | null
+    custom_spec: string | null
+    custom_unit: string | null
+    quantity: number
+    notes: string | null
+    materials: { name: string; spec: string | null; unit: string | null } | null
+    worker_holdings: {
+      stock_lots: {
+        source_type: StockSourceType
+        supplier: string | null
+        materials: {
+          name: string
+          spec: string | null
+          unit: string | null
+          default_spec: string | null
+          default_supplier: string | null
+          supplier_code: string | null
+        } | null
+      } | null
+    } | null
+  }
+  const reportMaterials = (matRows ?? []) as unknown as MaterialRow[]
+
+  type HoldingRaw = {
+    id: string
+    work_id: string
+    quantity_remaining: number
+    stock_lots: {
+      source_type: StockSourceType
+      supplier: string | null
+      materials: {
+        id: string
+        name: string
+        spec: string | null
+        unit: string | null
+        default_spec: string | null
+        default_supplier: string | null
+        supplier_code: string | null
+      } | null
+    } | null
+    works: { id: string; name: string; order_id: string | null } | null
+  }
+  const holdingOptions: HoldingOption[] = ((myHoldings ?? []) as unknown as HoldingRaw[])
+    .filter((h) => h.stock_lots?.materials && h.works)
+    .map((h) => ({
+      id: h.id,
+      work_id: h.work_id,
+      work_name: h.works!.name,
+      work_order_id: h.works!.order_id,
+      quantity_remaining: Number(h.quantity_remaining),
+      source_type: h.stock_lots!.source_type,
+      supplier: h.stock_lots!.supplier,
+      material: h.stock_lots!.materials!,
+    }))
+  const masters = (masterList ?? []) as Array<{
+    id: string
+    name: string
+    spec: string | null
+    unit: string | null
+  }>
+
   return (
     <main className="min-h-screen p-4 sm:p-6">
       <div className="mx-auto max-w-md space-y-5">
@@ -159,7 +262,7 @@ export default async function ReportDetailPage({
             <span className="whitespace-pre-wrap">{report.content}</span>
           </InfoRow>
           {report.materials_used && (
-            <InfoRow label="사용 자재">
+            <InfoRow label="사용 자재 (메모)">
               <span className="whitespace-pre-wrap">{report.materials_used}</span>
             </InfoRow>
           )}
@@ -167,6 +270,80 @@ export default async function ReportDetailPage({
             <InfoRow label="특이사항">
               <span className="whitespace-pre-wrap">{report.notes}</span>
             </InfoRow>
+          )}
+        </section>
+
+        {/* 사용 자재 (구조화) */}
+        <section className="rounded-2xl bg-white border border-slate-200 p-5 space-y-3">
+          <h2 className="text-base font-semibold text-slate-700 tracking-tight">
+            사용 자재 ({reportMaterials.length})
+          </h2>
+
+          {reportMaterials.length === 0 ? (
+            <p className="text-sm text-slate-400">기록된 자재 없음</p>
+          ) : (
+            <ul className="space-y-1">
+              {reportMaterials.map((m) => {
+                const lotMat = m.worker_holdings?.stock_lots?.materials
+                const masterMat = m.materials
+                const name = lotMat?.name ?? masterMat?.name ?? m.custom_name ?? '?'
+                const spec = lotMat?.spec ?? lotMat?.default_spec ?? masterMat?.spec ?? m.custom_spec
+                const unit = lotMat?.unit ?? masterMat?.unit ?? m.custom_unit
+                const isHolding = !!m.holding_id
+                const isMaster = !isHolding && !!m.material_id
+                return (
+                  <li
+                    key={m.id}
+                    className="flex items-center justify-between gap-2 rounded-lg bg-slate-50/60 px-2.5 py-1.5 text-sm"
+                  >
+                    <div className="min-w-0 flex-1">
+                      <span className="font-medium text-slate-900">{name}</span>
+                      {spec && <span className="ml-1 text-slate-500">({spec})</span>}
+                      <span className="ml-2 font-semibold">{formatQty(m.quantity, unit)}</span>
+                      {isHolding && (
+                        <span className="ml-1.5 rounded bg-emerald-100 px-1.5 py-0.5 text-[10px] text-emerald-700">
+                          내 자재
+                        </span>
+                      )}
+                      {isMaster && (
+                        <span className="ml-1.5 rounded bg-blue-100 px-1.5 py-0.5 text-[10px] text-blue-700">
+                          마스터
+                        </span>
+                      )}
+                      {!isHolding && !isMaster && (
+                        <span className="ml-1.5 rounded bg-amber-100 px-1.5 py-0.5 text-[10px] text-amber-700">
+                          직접
+                        </span>
+                      )}
+                      {m.notes && <span className="ml-2 text-xs text-slate-500">· {m.notes}</span>}
+                    </div>
+                    {canEdit && (
+                      <form action={removeDailyReportMaterial}>
+                        <input type="hidden" name="id" value={m.id} />
+                        <input type="hidden" name="report_id" value={report.id} />
+                        <input type="hidden" name="work_id" value={work.id} />
+                        <button
+                          type="submit"
+                          className="rounded p-0.5 text-slate-400 hover:bg-rose-50 hover:text-rose-600"
+                          aria-label="삭제"
+                        >
+                          <Trash2 className="h-3 w-3" />
+                        </button>
+                      </form>
+                    )}
+                  </li>
+                )
+              })}
+            </ul>
+          )}
+
+          {canEdit && (
+            <DailyMaterialsClient
+              reportId={report.id}
+              workId={work.id}
+              holdings={holdingOptions}
+              masters={masters}
+            />
           )}
         </section>
 
