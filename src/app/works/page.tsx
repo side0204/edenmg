@@ -227,6 +227,42 @@ export default async function WorksPage({
   // mine 모드의 신규 배정 카운트
   const newAssignmentCount = rows.filter((r) => isNewAssignment(r.id)).length
 
+  // 각 작업의 작업자(들) — 복수 배정 표시용. 한 번에 fetch + 그룹핑.
+  type AssignedWorker = {
+    employee_id: string
+    name: string
+    worker_type: WorkWorkerType | null
+  }
+  const workersByWork = new Map<string, AssignedWorker[]>()
+  if (rows.length > 0) {
+    const allIds = rows.map((r) => r.id)
+    const { data: assignRows } = await supabase
+      .from('work_assignments')
+      .select(
+        `work_id, employee_id, worker_type, created_at,
+         employees ( name )`,
+      )
+      .in('work_id', allIds)
+      .order('created_at', { ascending: true })
+    for (const a of (assignRows ?? []) as unknown as Array<{
+      work_id: string
+      employee_id: string
+      worker_type: WorkWorkerType | null
+      employees: { name: string } | { name: string }[] | null
+    }>) {
+      const empName = Array.isArray(a.employees)
+        ? a.employees[0]?.name
+        : a.employees?.name
+      const arr = workersByWork.get(a.work_id) ?? []
+      arr.push({
+        employee_id: a.employee_id,
+        name: empName ?? '?',
+        worker_type: a.worker_type,
+      })
+      workersByWork.set(a.work_id, arr)
+    }
+  }
+
   // 각 작업의 본인 마지막 일보 일자 (mine 모드일 때만 fetch — 비용 절약)
   const myLastReportByWork = new Map<string, string>() // work_id → YYYY-MM-DD
   if (isMineMode && rows.length > 0) {
@@ -623,6 +659,16 @@ export default async function WorksPage({
                       <p className="mt-0.5 text-xs text-slate-500">
                         {formatWorkPeriod(w.start_date, w.end_date)}
                       </p>
+                      {(workersByWork.get(w.id)?.length ?? 0) > 0 && (
+                        <p className="mt-0.5 text-xs text-slate-600 truncate">
+                          <span className="text-slate-400">작업자 </span>
+                          {workersByWork.get(w.id)!
+                            .map((wk) =>
+                              wk.worker_type ? `${wk.name}(${wk.worker_type})` : wk.name,
+                            )
+                            .join(' · ')}
+                        </p>
+                      )}
                       {isMineMode && (
                         <p className="mt-0.5 text-xs text-slate-500">
                           {lastReport ? (
