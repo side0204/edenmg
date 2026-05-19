@@ -194,6 +194,12 @@ export default async function AdminAnnualLeavesPage() {
               </button>
             </form>
           </div>
+          <div className="rounded-lg border border-amber-200 bg-amber-50/60 p-2.5 text-[11px] space-y-0.5">
+            <p className="font-semibold text-amber-800">⚠ 개인정보 포함 — 외부 유출 주의</p>
+            <p className="text-amber-700/90">
+              CSV 에 직원명·입사일·연차 사용내역이 포함됩니다. 다운로드 후 안전 보관하고 외부 전송 시 암호화하세요. (PIPA 의무)
+            </p>
+          </div>
         </section>
 
         {/* 팀별 사용률 통계 */}

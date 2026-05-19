@@ -222,6 +222,13 @@ export default async function VehicleTripsPage({
           </a>
         </header>
 
+        <div className="rounded-lg border border-amber-200 bg-amber-50/60 p-2.5 text-[11px]">
+          <span className="font-semibold text-amber-800">⚠ 개인정보 포함</span>
+          <span className="ml-1.5 text-amber-700/90">
+            CSV 에 운전자명·차량번호·운행 기록이 포함됩니다. 외부 유출 주의. (PIPA 의무)
+          </span>
+        </div>
+
         {/* 검색 폼 — GET 으로 같은 페이지에 query string 붙여 reload */}
         <form
           method="GET"

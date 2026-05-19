@@ -928,7 +928,11 @@ export default async function Home() {
           ))
         )}
 
-        <p className="text-center text-xs text-slate-400">v0.1 · 사내 베타</p>
+        <p className="text-center text-xs text-slate-400">
+          v0.1 · 사내 베타
+          <span className="mx-1.5">·</span>
+          © {new Date().getFullYear()} 최경열
+        </p>
       </div>
     </main>
   )

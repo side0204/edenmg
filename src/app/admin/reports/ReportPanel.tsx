@@ -84,6 +84,16 @@ export default function ReportPanel({ initialMonth, scopeNote }: Props) {
         </div>
       </div>
 
+      <div className="rounded-lg border border-amber-200 bg-amber-50/60 p-3 text-xs space-y-1">
+        <p className="font-semibold text-amber-800">
+          ⚠ 개인정보 포함 — 외부 유출 주의
+        </p>
+        <p className="text-amber-700/90">
+          CSV 에 직원명·연락처·위치·차량번호 등이 포함됩니다. 다운로드 후 즉시 안전한 장소에 보관하고, 외부 전송 시 암호화하세요.
+          개인정보보호법(PIPA) 위반 시 처벌 대상이 될 수 있습니다.
+        </p>
+      </div>
+
       <p className="text-xs text-slate-400">
         파일은 UTF-8(BOM) 인코딩으로, 한글 Windows · Mac Excel 어디서 열어도 깨지지 않습니다.
       </p>
