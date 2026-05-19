@@ -1,5 +1,5 @@
 import Link from 'next/link'
-import { Search, Fuel, Plus, ChevronLeft, Car } from 'lucide-react'
+import { Search, Fuel, Plus, ChevronLeft, Car, Users } from 'lucide-react'
 import { createClient } from '@/lib/supabase/server'
 import { EmptyState } from '@/components/EmptyState'
 
@@ -159,7 +159,14 @@ export default async function VehiclesPage() {
               {isAdmin ? '회사 전체 차량 · 운행 현황' : '회사 차량 출고·반납'}
             </p>
           </div>
-          <div className="flex items-center gap-2 shrink-0">
+          <div className="flex flex-wrap items-center gap-2 shrink-0">
+            <Link
+              href="/vehicles/workers"
+              className="inline-flex items-center gap-1.5 rounded-lg border border-slate-300 px-3 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50"
+            >
+              <Users className="h-4 w-4" />
+              작업차량
+            </Link>
             <Link
               href="/vehicles/trips"
               className="inline-flex items-center gap-1.5 rounded-lg border border-slate-300 px-3 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50"
