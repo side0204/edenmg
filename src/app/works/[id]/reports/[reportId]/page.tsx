@@ -10,7 +10,12 @@ import {
   type WorkReportStatus,
   type WorkWorkerType,
 } from '@/lib/work'
-import { formatQty, type StockSourceType } from '@/lib/stock'
+import {
+  APPROVAL_STATUS_COLOR,
+  formatQty,
+  type ApprovalStatus,
+  type StockSourceType,
+} from '@/lib/stock'
 import { approveReport, rejectReport, updateReport } from '../../../report-actions'
 import { removeDailyReportMaterial } from '../../../daily-material-actions'
 import { ReportForm, type ReportFormValues } from '../../../ReportForm'
@@ -118,6 +123,8 @@ export default async function ReportDetailPage({
       .from('daily_report_materials')
       .select(
         `id, holding_id, material_id, custom_name, custom_spec, custom_unit, quantity, notes, created_at,
+         approval_status, over_quantity, over_reason, acquisition_reason_type, acquisition_reason,
+         approved_by, approved_at, approval_comment,
          materials ( id, name, spec, unit ),
          worker_holdings (
            id, employee_id, work_id, quantity_remaining,
@@ -155,6 +162,12 @@ export default async function ReportDetailPage({
     custom_unit: string | null
     quantity: number
     notes: string | null
+    approval_status: ApprovalStatus
+    over_quantity: number
+    over_reason: string | null
+    acquisition_reason_type: string | null
+    acquisition_reason: string | null
+    approval_comment: string | null
     materials: { name: string; spec: string | null; unit: string | null } | null
     worker_holdings: {
       stock_lots: {
@@ -291,45 +304,80 @@ export default async function ReportDetailPage({
                 const unit = lotMat?.unit ?? masterMat?.unit ?? m.custom_unit
                 const isHolding = !!m.holding_id
                 const isMaster = !isHolding && !!m.material_id
+                const isPending = m.approval_status === '대기'
+                const isRejected = m.approval_status === '반려'
                 return (
                   <li
                     key={m.id}
-                    className="flex items-center justify-between gap-2 rounded-lg bg-slate-50/60 px-2.5 py-1.5 text-sm"
+                    className={
+                      'rounded-lg px-2.5 py-1.5 text-sm space-y-0.5 ' +
+                      (isPending
+                        ? 'bg-amber-50/80 border border-amber-200'
+                        : isRejected
+                          ? 'bg-rose-50/80 border border-rose-200 opacity-70'
+                          : 'bg-slate-50/60')
+                    }
                   >
-                    <div className="min-w-0 flex-1">
-                      <span className="font-medium text-slate-900">{name}</span>
-                      {spec && <span className="ml-1 text-slate-500">({spec})</span>}
-                      <span className="ml-2 font-semibold">{formatQty(m.quantity, unit)}</span>
-                      {isHolding && (
-                        <span className="ml-1.5 rounded bg-emerald-100 px-1.5 py-0.5 text-[10px] text-emerald-700">
-                          내 자재
-                        </span>
-                      )}
-                      {isMaster && (
-                        <span className="ml-1.5 rounded bg-blue-100 px-1.5 py-0.5 text-[10px] text-blue-700">
-                          마스터
-                        </span>
-                      )}
-                      {!isHolding && !isMaster && (
-                        <span className="ml-1.5 rounded bg-amber-100 px-1.5 py-0.5 text-[10px] text-amber-700">
-                          직접
-                        </span>
-                      )}
-                      {m.notes && <span className="ml-2 text-xs text-slate-500">· {m.notes}</span>}
-                    </div>
-                    {canEdit && (
-                      <form action={removeDailyReportMaterial}>
-                        <input type="hidden" name="id" value={m.id} />
-                        <input type="hidden" name="report_id" value={report.id} />
-                        <input type="hidden" name="work_id" value={work.id} />
-                        <button
-                          type="submit"
-                          className="rounded p-0.5 text-slate-400 hover:bg-rose-50 hover:text-rose-600"
-                          aria-label="삭제"
+                    <div className="flex items-center justify-between gap-2">
+                      <div className="min-w-0 flex-1">
+                        <span className="font-medium text-slate-900">{name}</span>
+                        {spec && <span className="ml-1 text-slate-500">({spec})</span>}
+                        <span className="ml-2 font-semibold">{formatQty(m.quantity, unit)}</span>
+                        {m.over_quantity > 0 && (
+                          <span className="ml-1 text-[11px] font-medium text-rose-700">
+                            (초과 {formatQty(m.over_quantity, unit)})
+                          </span>
+                        )}
+                        {isHolding && (
+                          <span className="ml-1.5 rounded bg-emerald-100 px-1.5 py-0.5 text-[10px] text-emerald-700">
+                            내 자재
+                          </span>
+                        )}
+                        {isMaster && (
+                          <span className="ml-1.5 rounded bg-blue-100 px-1.5 py-0.5 text-[10px] text-blue-700">
+                            마스터
+                          </span>
+                        )}
+                        {!isHolding && !isMaster && (
+                          <span className="ml-1.5 rounded bg-amber-100 px-1.5 py-0.5 text-[10px] text-amber-700">
+                            직접
+                          </span>
+                        )}
+                        <span
+                          className={
+                            'ml-1.5 rounded-full border px-1.5 py-0.5 text-[10px] ' +
+                            APPROVAL_STATUS_COLOR[m.approval_status]
+                          }
                         >
-                          <Trash2 className="h-3 w-3" />
-                        </button>
-                      </form>
+                          {m.approval_status}
+                        </span>
+                        {m.notes && <span className="ml-2 text-xs text-slate-500">· {m.notes}</span>}
+                      </div>
+                      {canEdit && (
+                        <form action={removeDailyReportMaterial}>
+                          <input type="hidden" name="id" value={m.id} />
+                          <input type="hidden" name="report_id" value={report.id} />
+                          <input type="hidden" name="work_id" value={work.id} />
+                          <button
+                            type="submit"
+                            className="rounded p-0.5 text-slate-400 hover:bg-rose-50 hover:text-rose-600"
+                            aria-label="삭제"
+                          >
+                            <Trash2 className="h-3 w-3" />
+                          </button>
+                        </form>
+                      )}
+                    </div>
+                    {m.over_reason && (
+                      <p className="text-[11px] text-rose-700">초과 사유: {m.over_reason}</p>
+                    )}
+                    {m.acquisition_reason && (
+                      <p className="text-[11px] text-amber-700">
+                        취득사유 [{m.acquisition_reason_type}]: {m.acquisition_reason}
+                      </p>
+                    )}
+                    {m.approval_comment && (
+                      <p className="text-[11px] text-slate-600">처리: {m.approval_comment}</p>
                     )}
                   </li>
                 )

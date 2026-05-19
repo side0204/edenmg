@@ -431,6 +431,36 @@ owner 결정사항:
 - 반납 (Phase 2)
 - 현장 창고 + 창고 간 이동 (Phase 3)
 
+### ✅ 완료 (M4 Phase 2-A — 자재 사용 승인·초과 사유·취득사유, 2026-05-19)
+
+owner 추가 요구사항 4건 반영:
+
+| 요구 | 결정 | 비고 |
+|---|---|---|
+| **잔량 초과** | 클라 차단 + 사유 입력 후 통과. holding 은 잔량까지만 차감, 초과분은 `over_quantity` audit | 자재담당자가 사후 검토 가능 |
+| **출고 시 공사 연계** | 이미 work_id FK 로 연계됨 (추가 데이터 X). UX 만 「검색 picker」 로 개선 권장 — 후속 | 별도 entity 추가 불필요 |
+| **작업 외 사용 승인** | 사전 승인 + 지입+저비용 자재는 사후신고 자동 분기 | `materials.low_value` 토글 (자재담당자 등록 시 체크) |
+| **미출고 자재 사용** | 취득사유 강제 (enum + 자유 텍스트) + 사후신고 | enum: 현장구매·이전잔여·임시차용·기타 |
+| **알림** | 인앱 만 (홈 카드 배지 + /stock/approvals) | PWA 푸시 보류 |
+
+- **마이그** [`0026_stock_use_approval.sql`](./supabase/migrations/0026_stock_use_approval.sql):
+  - `materials.low_value boolean default false`
+  - `daily_report_materials`·`connection_node_materials` 에 `approval_status` (자동승인/대기/승인/반려/사후신고) + `over_quantity`·`over_reason` + `acquisition_reason_type`·`acquisition_reason` + 승인 메타 컬럼
+  - 자재담당자(admin/can_manage_stock) 가 일보 자재 row update 허용 RLS 추가
+- **공통**: [`lib/stock.ts`](./src/lib/stock.ts) — ApprovalStatus·AcquisitionReasonType enum + 색상.
+- **server actions** [`daily-material-actions.ts`](./src/app/works/daily-material-actions.ts):
+  - `addDailyReportMaterial` 재작성 — holding work 비교 분기 (자동승인/사후신고/대기). 잔량 초과 시 over_quantity 기록. 미출고 자재 취득사유 검증.
+  - `approveDailyMaterialUse` / `rejectDailyMaterialUse` — 자재담당자 처리. 승인 시 holding 차감.
+- **자재 마스터** [`MaterialForm`](./src/app/admin/materials/MaterialForm.tsx): low_value 체크박스. 「저비용 자재 (사후 신고 허용)」 안내.
+- **일보 자재 추가** [`DailyMaterialsClient`](./src/app/works/DailyMaterialsClient.tsx):
+  - 잔량 라이브 표시 + 초과 입력 시 빨강 + 「초과 사용 사유」 input 자동 노출
+  - 작업 외 holding 사용 시 amber 안내 박스 ("승인 대기 또는 사후신고")
+  - master/custom 모드 시 취득사유 enum + 자유 텍스트 강제
+- **일보 상세 표시**: 자재 row 에 approval_status 배지 (자동승인/대기/승인/반려/사후신고 색상) + 초과·취득사유·처리의견 노출. 대기 row 는 amber 배경, 반려 row 는 rose+opacity.
+- **/stock/approvals**: 자재담당자 페이지. 대기/처리완료/전체 탭. 카드별 승인·반려 액션 (의견 입력 가능).
+- **/stock 메인**: 「자재 사용 승인」 카드 (대기 카운트 amber).
+- **홈**: 자재담당자에게 「자재 사용 승인 대기」 카드 (amber 배지 + 진입 버튼).
+
 ### ✅ 완료 (함체·국사 마스터, 2026-05-19)
 
 | 항목 | 결정 | 비고 |
@@ -479,6 +509,7 @@ owner 결정사항:
   - [`0023_stock_receipts_lots.sql`](./supabase/migrations/0023_stock_receipts_lots.sql) — M4: 입고 + 재고 lot
   - [`0024_holdings_issuances.sql`](./supabase/migrations/0024_holdings_issuances.sql) — M4: 작업자 holding + 출고 이력
   - [`0025_can_manage_stock_and_report_link.sql`](./supabase/migrations/0025_can_manage_stock_and_report_link.sql) — M4: can_manage_stock 토글 + daily_report_materials + 일보 자재 holding FK
+  - [`0026_stock_use_approval.sql`](./supabase/migrations/0026_stock_use_approval.sql) — M4 Phase 2-A: 자재 사용 승인 + 초과 사유 + 취득사유 + low_value 토글
 - **외선일보 별도 entity (v2)** — 접속일보와 동일 패턴으로 외선팀 전용 모듈. 외선 작업 특성(케이블 포설구간·전주번호 등)에 맞는 구조 별도 설계.
 - **접속일보 후속 (v2)** — segment-level 작업자 태그, 사진 첨부 + EXIF, 국사·함체 마스터 테이블화, 재접속 이력 조회, 지도 시각화
 - **M3 Phase 2 후속** — 사진 첨부 + EXIF·워터마크 (PRD M3-06), 일보 결재함 통합 (현재는 작업 상세에서 진입), 일반 일보 월별 CSV 리포트

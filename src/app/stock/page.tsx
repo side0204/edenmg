@@ -2,6 +2,7 @@ import Link from 'next/link'
 import { redirect } from 'next/navigation'
 import {
   Boxes,
+  CheckCircle2,
   ChevronLeft,
   Download,
   FileSpreadsheet,
@@ -41,8 +42,8 @@ export default async function StockHomePage() {
   const isAdmin = me.permission === 'admin'
   const canManage = isAdmin || me.can_manage_stock
 
-  // 통계 — lot · 내 자재 카운트
-  const [{ count: activeLotsCount }, { count: depletedLotsCount }, { count: myHoldingsCount }] =
+  // 통계 — lot · 내 자재 · 승인 대기 카운트
+  const [{ count: activeLotsCount }, { count: depletedLotsCount }, { count: myHoldingsCount }, { count: pendingApprovalsCount }] =
     await Promise.all([
       supabase
         .from('stock_lots')
@@ -59,6 +60,12 @@ export default async function StockHomePage() {
         .select('id', { count: 'exact', head: true })
         .eq('employee_id', me.id)
         .gt('quantity_remaining', 0),
+      canManage
+        ? supabase
+            .from('daily_report_materials')
+            .select('id', { count: 'exact', head: true })
+            .eq('approval_status', '대기')
+        : Promise.resolve({ count: 0 }),
     ])
 
   return (
@@ -112,6 +119,38 @@ export default async function StockHomePage() {
         {canManage && (
           <section className="space-y-3">
             <h2 className="text-sm font-semibold text-slate-600 tracking-wider uppercase">관리</h2>
+
+            {/* 승인 대기 카드 — 카운트가 0이라도 표시해서 진입점 유지 */}
+            <Link
+              href="/stock/approvals"
+              className={
+                'flex items-center justify-between gap-2 rounded-xl border p-4 ' +
+                ((pendingApprovalsCount ?? 0) > 0
+                  ? 'border-amber-300 bg-amber-50 hover:border-amber-500'
+                  : 'border-slate-200 bg-white hover:border-slate-400')
+              }
+            >
+              <div className="inline-flex items-center gap-2">
+                <CheckCircle2
+                  className={
+                    'h-5 w-5 ' +
+                    ((pendingApprovalsCount ?? 0) > 0 ? 'text-amber-600' : 'text-slate-400')
+                  }
+                />
+                <span className="text-base font-semibold text-slate-900">자재 사용 승인</span>
+              </div>
+              <span
+                className={
+                  'rounded-full px-2.5 py-1 text-sm font-bold ' +
+                  ((pendingApprovalsCount ?? 0) > 0
+                    ? 'bg-amber-200 text-amber-900'
+                    : 'bg-slate-100 text-slate-500')
+                }
+              >
+                대기 {pendingApprovalsCount ?? 0}
+              </span>
+            </Link>
+
             <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
               <ActionLink href="/stock/receipts/new" icon={PackagePlus} label="입고 등록" />
               <ActionLink href="/stock/issuances/new" icon={Send} label="출고 등록" />

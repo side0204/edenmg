@@ -23,6 +23,37 @@ export const RECEIPT_TYPE_COLOR: Record<StockReceiptType, string> = {
   '직납입고': 'text-amber-700 bg-amber-50 border-amber-200',
 }
 
+// ===== 자재 사용 승인 상태 ==============================================
+
+export type ApprovalStatus = '자동승인' | '대기' | '승인' | '반려' | '사후신고'
+
+export const APPROVAL_STATUS_VALUES: readonly ApprovalStatus[] = [
+  '자동승인',
+  '대기',
+  '승인',
+  '반려',
+  '사후신고',
+]
+
+export const APPROVAL_STATUS_COLOR: Record<ApprovalStatus, string> = {
+  '자동승인': 'text-emerald-700 bg-emerald-50 border-emerald-200',
+  '대기': 'text-amber-700 bg-amber-50 border-amber-200',
+  '승인': 'text-emerald-800 bg-emerald-100 border-emerald-300',
+  '반려': 'text-rose-700 bg-rose-50 border-rose-200',
+  '사후신고': 'text-slate-700 bg-slate-100 border-slate-200',
+}
+
+// ===== 취득사유 ==========================================================
+
+export type AcquisitionReasonType = '현장구매' | '이전잔여' | '임시차용' | '기타'
+
+export const ACQUISITION_REASON_VALUES: readonly AcquisitionReasonType[] = [
+  '현장구매',
+  '이전잔여',
+  '임시차용',
+  '기타',
+]
+
 // 자재 표시 라벨 — 자재명 + (규격) + 발주처 코드 (사급)
 export function formatMaterialLabel(m: {
   name: string

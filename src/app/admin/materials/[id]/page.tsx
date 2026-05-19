@@ -14,6 +14,7 @@ type Row = {
   category: string | null
   default_supplier: string | null
   supplier_code: string | null
+  low_value: boolean
 }
 
 export default async function EditMaterialPage({
@@ -53,7 +54,7 @@ export default async function EditMaterialPage({
 
   const { data } = await supabase
     .from('materials')
-    .select('id, company_id, name, spec, unit, category, default_supplier, supplier_code')
+    .select('id, company_id, name, spec, unit, category, default_supplier, supplier_code, low_value')
     .eq('id', id)
     .maybeSingle()
   const row = data as Row | null
@@ -67,6 +68,7 @@ export default async function EditMaterialPage({
     category: row.category ?? '',
     default_supplier: row.default_supplier ?? '',
     supplier_code: row.supplier_code ?? '',
+    low_value: !!row.low_value,
   }
 
   return (

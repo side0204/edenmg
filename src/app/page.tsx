@@ -51,7 +51,9 @@ export default async function Home() {
 
   const { data } = await supabase
     .from('employees')
-    .select('id, name, permission, position, team, work_type, is_active, company_id, companies(name)')
+    .select(
+      'id, name, permission, position, team, work_type, can_manage_stock, is_active, company_id, companies(name)',
+    )
     .eq('auth_user_id', user.id)
     .maybeSingle()
 
@@ -63,6 +65,7 @@ export default async function Home() {
         position: string | null
         team: string | null
         work_type: string | null
+        can_manage_stock: boolean
         is_active: boolean
         company_id: string
         companies: { name: string } | null
@@ -226,6 +229,17 @@ export default async function Home() {
     .select('id', { count: 'exact', head: true })
     .eq('employee_id', employee.id)
     .gt('quantity_remaining', 0)
+
+  // ===== 자재 사용 승인 대기 카운트 (자재담당자/admin 만) =====
+  const isStockManager = isAdmin || employee.can_manage_stock
+  let stockApprovalsPendingCount = 0
+  if (isStockManager) {
+    const { count } = await supabase
+      .from('daily_report_materials')
+      .select('id', { count: 'exact', head: true })
+      .eq('approval_status', '대기')
+    stockApprovalsPendingCount = count ?? 0
+  }
 
   // 결재 대기 건수 (홈 배지용)
   const canApprove = employee.permission !== 'worker'
@@ -417,6 +431,24 @@ export default async function Home() {
               className="block rounded-lg border border-slate-200 hover:border-slate-900 px-4 py-3 text-base font-medium text-slate-900 dark:border-slate-800 dark:hover:border-slate-100 dark:text-slate-100 text-center"
             >
               보유 자재 보기 →
+            </Link>
+          </section>
+        )}
+
+        {isStockManager && stockApprovalsPendingCount > 0 && (
+          <section className="rounded-2xl bg-amber-50 border border-amber-300 dark:bg-amber-900/20 dark:border-amber-800 p-6 space-y-3">
+            <h2 className="flex items-center gap-2 text-base font-semibold text-amber-800 tracking-tight dark:text-amber-200">
+              <Package className="h-5 w-5" />
+              자재 사용 승인 대기
+              <span className="ml-auto inline-flex items-center rounded-full bg-amber-200 text-amber-900 text-xs font-bold px-2 py-0.5">
+                {stockApprovalsPendingCount}건
+              </span>
+            </h2>
+            <Link
+              href="/stock/approvals"
+              className="block rounded-lg bg-amber-600 hover:bg-amber-700 px-4 py-3 text-base font-bold text-white text-center"
+            >
+              승인하러 가기 →
             </Link>
           </section>
         )}

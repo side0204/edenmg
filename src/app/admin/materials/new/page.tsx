@@ -40,6 +40,7 @@ export default async function NewMaterialPage() {
     category: '',
     default_supplier: '',
     supplier_code: '',
+    low_value: false,
   }
 
   return (

@@ -8,6 +8,7 @@ export type MaterialFormValues = {
   category: string
   default_supplier: string
   supplier_code: string
+  low_value: boolean
 }
 
 export function MaterialForm({
@@ -91,6 +92,22 @@ export function MaterialForm({
       <p className="-mt-2 text-xs text-slate-500">
         지입 자재면 발주처·코드 비움. 사급은 둘 다 입력하면 같은 코드 자재 정확 매칭 가능.
       </p>
+
+      <label className="flex items-start gap-2 rounded-lg border border-slate-200 bg-slate-50/40 p-3">
+        <input
+          type="checkbox"
+          name="low_value"
+          defaultChecked={initial.low_value}
+          className="mt-0.5"
+        />
+        <div className="text-sm">
+          <p className="font-medium text-slate-700">저비용 자재 (사후 신고 허용)</p>
+          <p className="mt-0.5 text-xs text-slate-500">
+            체크 시 <b>지입 자재</b>는 작업 외 사용도 사전 승인 없이 즉시 사용 가능 (사후 신고).
+            나사·테이프 같은 저가 소모품에 권장. 사급 자재는 영향 없음.
+          </p>
+        </div>
+      </label>
 
       <button
         type="submit"

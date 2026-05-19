@@ -44,6 +44,7 @@ function parseForm(formData: FormData) {
   const category = String(formData.get('category') ?? '').trim() || null
   const default_supplier = String(formData.get('default_supplier') ?? '').trim() || null
   const supplier_code = String(formData.get('supplier_code') ?? '').trim() || null
+  const low_value = formData.get('low_value') === 'on'
   return {
     name,
     spec,
@@ -53,6 +54,7 @@ function parseForm(formData: FormData) {
     default_unit: unit,
     default_supplier,
     supplier_code,
+    low_value,
   }
 }
 
