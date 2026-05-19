@@ -523,6 +523,45 @@ owner 추가 요구사항 4건 반영:
 - **leave_stage enum 의 'foreman' 값**·`assigned_foreman_id` 컬럼명은 legacy 유지 (UI 만 '팀장 단계' 로 표시)
 - **관리자가 모든 권한** + 토글로 부여: `can_manage_works` / `can_delete_works` / `can_view_stats` (rose/amber/blue 색상 분리)
 
+### ✅ 완료 (연차 관리 — 근로기준법 자동 부여 + 사용내역, 2026-05-19)
+
+owner 결정사항:
+
+| 항목 | 결정 | 비고 |
+|---|---|---|
+| **부여 방식** | 근로기준법 자동 | 1년 미만: 매월 1일 누적 (최대 11일). 1년 이상: 매 1주년에 15+min(10, floor((seq-1)/2))일 (최대 25일) |
+| **회계 기준** | 입사일 기준 (개인별) | period_seq=0 (1년 미만) / 1·2·... (N주년 회차). 회계연도 일괄 X |
+| **소진 시점** | 결재 승인 시 자동 | security definer `annual_leave_apply_usage` RPC. 신청·반려·취소는 영향 X |
+| **잔여 부족** | 신청·승인 모두 허용 | /requests/new 에 amber 경고, /approvals 상세에 「승인 시 예상 잔여」 + rose 경고 |
+| **음수 잔여** | 허용 (정책상 유연성) | 관리자가 조정 가능 |
+| **단위** | 일(day) · numeric(5,2) | 반차 0.5 / 반반차 0.25 자동 매핑 |
+| **leave_type 매핑** | 연차=N일·반차=0.5·반반차=0.25·병가/공가/외근=0 | `LEAVE_TYPE_PER_DAY_COST` |
+| **취소·반려 시 복원** | MVP 미포함 | 승인 후 취소 흐름이 코드에 없음. v2 에 reverse delta 처리 |
+
+- **마이그** [`0031_annual_leaves.sql`](./supabase/migrations/0031_annual_leaves.sql):
+  - `employees.hire_date date` 컬럼
+  - `annual_leave_balances` 테이블 — (employee_id, period_seq) unique. granted·used numeric(5,2)
+  - `annual_leave_grants` audit log (delete GRANT 미부여, append-only)
+  - RLS: 본인 select / admin all + audit insert
+  - security definer `annual_leave_apply_usage(_employee_id, _on_date, _delta)` — leave_requests 와 별개 권한으로 used 갱신
+- **공통 lib** [`src/lib/annual-leave.ts`](./src/lib/annual-leave.ts):
+  - `LEAVE_TYPE_PER_DAY_COST` · `calcLeaveUsage` (다일 연차 일수 계산)
+  - `yearsBetween` · `legalGrantForYear` · `periodDates` · `monthsBetween` · `currentPeriodSeq`
+  - `plannedPeriods(hireDate)` — 입사일 기준 현재까지 만들어져야 할 모든 회차 + 권장 granted
+  - `calcRemaining` · `formatLeaveDays`
+- **server actions** [`src/app/admin/annual-leaves/actions.ts`](./src/app/admin/annual-leaves/actions.ts):
+  - `refreshEmployeeAnnualLeaves(formData)` — 한 직원 회차 갱신 (insert 또는 granted += delta, audit log)
+  - `refreshAllAnnualLeaves()` — 전직원 일괄
+  - `adjustAnnualLeaveBalance(formData)` — admin 수동 가산·차감
+  - `updateHireDate(formData)` — 입사일 갱신 + 즉시 회차 자동 갱신
+- **승인 액션 통합** [`src/app/approvals/actions.ts`](./src/app/approvals/actions.ts):
+  - `approveRequest` 의 nextStatus='승인' 시점에 `annual_leave_apply_usage` RPC 호출
+- **/admin/annual-leaves** 페이지: 직원별 입사일 입력 + 회차 리스트 + 잔여 큰 숫자 + 「조정」 폼 + 「이 직원만 갱신」/「전직원 일괄 갱신」 버튼. 1년 미만 회차(seq=0) 는 「1년 미만 (월 누적)」 라벨
+- **/requests/new** 신청 폼 위에 잔여 카드 (잔여 < 0 rose / < 1 amber / 그 외 emerald)
+- **/approvals/[id]** 상세에 「연차 차감」 InfoRow — 차감 일수 + 현재 잔여 + 승인 시 예상 잔여. 음수면 rose 경고
+- **홈 카드** [page.tsx](src/app/page.tsx) 에 `annual_leave` 카드 추가 (입사일·회차 부여 시에만 노출). 관리자 카드에 「연차 관리」 링크 추가
+- **홈 카드 개인화** [`home-cards.ts`](./src/lib/home-cards.ts): `annual_leave` id 등록 + 기본 순서·라벨·설명
+
 ### ✅ 완료 (홈 화면 카드 개인화, 2026-05-19)
 
 owner 결정사항:
@@ -608,6 +647,7 @@ owner 결정사항:
   - [`0028_employees_workplace.sql`](./supabase/migrations/0028_employees_workplace.sql) — 직원 본사/현장 구분 컬럼 (현장 = 사무탭·차량·결재 비표시)
   - [`0029_work_daily_checks.sql`](./supabase/migrations/0029_work_daily_checks.sql) — 오늘 작업 체크 + decision enum + security definer 함수 2개
   - [`0030_home_card_prefs.sql`](./supabase/migrations/0030_home_card_prefs.sql) — 홈 카드 개인화 (`employees.home_card_prefs jsonb`)
+  - [`0031_annual_leaves.sql`](./supabase/migrations/0031_annual_leaves.sql) — 연차 (hire_date · annual_leave_balances · audit · apply_usage RPC)
 - **외선일보 별도 entity (v2)** — 접속일보와 동일 패턴으로 외선팀 전용 모듈. 외선 작업 특성(케이블 포설구간·전주번호 등)에 맞는 구조 별도 설계.
 - **접속일보 후속 (v2)** — segment-level 작업자 태그, 사진 첨부 + EXIF, 국사·함체 마스터 테이블화, 재접속 이력 조회, 지도 시각화
 - **M3 Phase 2 후속** — 사진 첨부 + EXIF·워터마크 (PRD M3-06), 일보 결재함 통합 (현재는 작업 상세에서 진입), 일반 일보 월별 CSV 리포트

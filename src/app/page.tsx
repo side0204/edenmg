@@ -15,6 +15,11 @@ import {
 import { createClient } from '@/lib/supabase/server'
 import { LEAVE_TYPE_LABEL, formatPeriod, type LeaveType } from '@/lib/leave'
 import {
+  calcRemaining,
+  currentPeriodSeq,
+  formatLeaveDays,
+} from '@/lib/annual-leave'
+import {
   isCardVisible,
   resolveHomeCardPrefs,
   type HomeCardId,
@@ -57,7 +62,7 @@ export default async function Home() {
   const { data } = await supabase
     .from('employees')
     .select(
-      'id, name, permission, position, team, work_type, can_manage_stock, workplace_type, home_card_prefs, is_active, accepted_at, company_id, companies(name)',
+      'id, name, permission, position, team, work_type, can_manage_stock, workplace_type, hire_date, home_card_prefs, is_active, accepted_at, company_id, companies(name)',
     )
     .eq('auth_user_id', user.id)
     .maybeSingle()
@@ -72,6 +77,7 @@ export default async function Home() {
         work_type: string | null
         can_manage_stock: boolean
         workplace_type: '본사' | '현장' | string | null
+        hire_date: string | null
         home_card_prefs: unknown
         is_active: boolean
         company_id: string
@@ -346,6 +352,26 @@ export default async function Home() {
       .select('id', { count: 'exact', head: true })
       .eq('approval_status', '대기')
     stockApprovalsPendingCount = count ?? 0
+  }
+
+  // 내 연차 잔여 (현재 회차)
+  const annualCurrentSeq = employee.hire_date ? currentPeriodSeq(employee.hire_date) : null
+  let annualBalance: { granted: number; used: number; remaining: number } | null = null
+  if (annualCurrentSeq !== null) {
+    const { data: balRow } = await supabase
+      .from('annual_leave_balances')
+      .select('granted, used')
+      .eq('employee_id', employee.id)
+      .eq('period_seq', annualCurrentSeq)
+      .maybeSingle()
+    if (balRow) {
+      const b = balRow as { granted: number; used: number }
+      annualBalance = {
+        granted: b.granted,
+        used: b.used,
+        remaining: calcRemaining(b.granted, b.used),
+      }
+    }
   }
 
   // 결재 대기 건수 (홈 배지용)
@@ -624,6 +650,32 @@ export default async function Home() {
       </section>
     ) : undefined,
 
+    annual_leave: annualBalance ? (
+      <section className="rounded-2xl bg-white shadow-sm border border-slate-200 dark:bg-slate-900 dark:border-slate-800 p-6 space-y-3">
+        <h2 className="flex items-center gap-2 text-base font-semibold text-slate-700 tracking-tight dark:text-slate-300">
+          <CalendarDays className="h-5 w-5 text-slate-400" />
+          내 연차 잔여
+          <span
+            className={
+              'ml-auto inline-flex items-center rounded-full text-sm font-bold px-3 py-0.5 ' +
+              (annualBalance.remaining < 0
+                ? 'bg-rose-100 text-rose-700'
+                : 'bg-emerald-100 text-emerald-800')
+            }
+          >
+            {formatLeaveDays(annualBalance.remaining)}
+          </span>
+        </h2>
+        <p className="text-xs text-slate-500">
+          부여 <span className="font-semibold text-slate-700">{formatLeaveDays(annualBalance.granted)}</span> · 사용{' '}
+          <span className="font-semibold text-slate-700">{formatLeaveDays(annualBalance.used)}</span>
+          {annualBalance.remaining < 0 && (
+            <span className="ml-1.5 font-medium text-rose-600">· 한도 초과</span>
+          )}
+        </p>
+      </section>
+    ) : undefined,
+
     leaves: (
       <section className="rounded-2xl bg-white shadow-sm border border-slate-200 dark:bg-slate-900 dark:border-slate-800 p-6 space-y-3">
         <h2 className="flex items-center gap-2 text-base font-semibold text-slate-700 tracking-tight dark:text-slate-300">
@@ -716,6 +768,12 @@ export default async function Home() {
           className="block rounded-lg border border-slate-200 hover:border-slate-900 px-4 py-3 text-base font-medium text-slate-900 dark:border-slate-800 dark:hover:border-slate-100 dark:text-slate-100"
         >
           자재 입출고 →
+        </Link>
+        <Link
+          href="/admin/annual-leaves"
+          className="block rounded-lg border border-slate-200 hover:border-slate-900 px-4 py-3 text-base font-medium text-slate-900 dark:border-slate-800 dark:hover:border-slate-100 dark:text-slate-100"
+        >
+          연차 관리 →
         </Link>
         <Link
           href="/admin/reports"

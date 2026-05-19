@@ -3,7 +3,8 @@
 import { redirect } from 'next/navigation'
 import { revalidatePath } from 'next/cache'
 import { createClient } from '@/lib/supabase/server'
-import type { LeaveAction, LeaveStage, LeaveStatus } from '@/lib/leave'
+import type { LeaveAction, LeaveStage, LeaveStatus, LeaveType } from '@/lib/leave'
+import { calcLeaveUsage } from '@/lib/annual-leave'
 
 type Permission = 'worker' | 'team_member' | 'team_leader' | 'admin'
 
@@ -47,11 +48,23 @@ function decideAuthority(
 async function loadRequest(supabase: Awaited<ReturnType<typeof createClient>>, id: string) {
   const { data } = await supabase
     .from('leave_requests')
-    .select('id, company_id, assigned_foreman_id, pending_stage, status')
+    .select(
+      'id, company_id, assigned_foreman_id, pending_stage, status, employee_id, type, start_date, end_date',
+    )
     .eq('id', id)
     .maybeSingle()
   return data as
-    | { id: string; company_id: string; assigned_foreman_id: string | null; pending_stage: LeaveStage | null; status: LeaveStatus }
+    | {
+        id: string
+        company_id: string
+        assigned_foreman_id: string | null
+        pending_stage: LeaveStage | null
+        status: LeaveStatus
+        employee_id: string
+        type: LeaveType
+        start_date: string
+        end_date: string
+      }
     | null
 }
 
@@ -123,10 +136,23 @@ export async function approveRequest(formData: FormData) {
     comment,
   })
 
+  // 최종 승인 시 연차 used 자동 가산 (병가·공가·외근은 calcLeaveUsage 가 0 반환)
+  if (nextStatus === '승인') {
+    const usage = calcLeaveUsage(lr.type, lr.start_date, lr.end_date)
+    if (usage > 0) {
+      await supabase.rpc('annual_leave_apply_usage', {
+        _employee_id: lr.employee_id,
+        _on_date: lr.start_date,
+        _delta: usage,
+      })
+    }
+  }
+
   revalidatePath('/approvals')
   revalidatePath(`/approvals/${id}`)
   revalidatePath('/requests')
   revalidatePath(`/requests/${id}`)
+  revalidatePath('/admin/annual-leaves')
   revalidatePath('/')
   redirect('/approvals?ok=' + encodeURIComponent(`${action} 처리됐습니다`))
 }

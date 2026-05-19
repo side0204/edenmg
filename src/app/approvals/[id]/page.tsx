@@ -11,6 +11,12 @@ import {
   type LeaveStatus,
   type LeaveType,
 } from '@/lib/leave'
+import {
+  calcLeaveUsage,
+  calcRemaining,
+  currentPeriodSeq,
+  formatLeaveDays,
+} from '@/lib/annual-leave'
 import { approveRequest, rejectRequest } from '../actions'
 import { getAttachmentUrl } from '@/app/requests/actions'
 
@@ -117,6 +123,37 @@ export default async function ApprovalDetailPage({
 
   const attachmentLink = req.attachment_path ? await getAttachmentUrl(req.id) : null
 
+  // 신청자 연차 잔여 (현재 회차) + 이 신청건의 차감량
+  const { data: applicantRow } = await supabase
+    .from('employees')
+    .select('hire_date')
+    .eq('id', req.employee_id)
+    .maybeSingle()
+  const applicantHireDate = (applicantRow as { hire_date: string | null } | null)?.hire_date ?? null
+  const applicantCurrentSeq = applicantHireDate ? currentPeriodSeq(applicantHireDate) : null
+  let applicantBalance: { granted: number; used: number; remaining: number } | null = null
+  if (applicantCurrentSeq !== null) {
+    const { data: balRow } = await supabase
+      .from('annual_leave_balances')
+      .select('granted, used')
+      .eq('employee_id', req.employee_id)
+      .eq('period_seq', applicantCurrentSeq)
+      .maybeSingle()
+    if (balRow) {
+      const b = balRow as { granted: number; used: number }
+      applicantBalance = {
+        granted: b.granted,
+        used: b.used,
+        remaining: calcRemaining(b.granted, b.used),
+      }
+    }
+  }
+  const requestUsage = calcLeaveUsage(req.type, req.start_date, req.end_date)
+  const projectedRemaining =
+    applicantBalance && requestUsage > 0
+      ? Number((applicantBalance.remaining - requestUsage).toFixed(2))
+      : null
+
   // 본인이 결재 가능한지 + 승인 버튼 라벨 결정
   const isAdmin = me.permission === 'admin'
   const isPending = req.status === '대기' && req.pending_stage !== null
@@ -157,6 +194,48 @@ export default async function ApprovalDetailPage({
           <InfoRow label="기간">
             {formatPeriod(req.start_date, req.end_date, req.start_time, req.end_time)}
           </InfoRow>
+          {requestUsage > 0 && applicantBalance && (
+            <InfoRow label="연차 차감">
+              <span>
+                이 신청 <span className="font-semibold">{formatLeaveDays(requestUsage)}</span>
+                <span className="mx-1.5 text-slate-400">·</span>
+                현재 잔여{' '}
+                <span
+                  className={
+                    'font-semibold ' +
+                    (applicantBalance.remaining < 0 ? 'text-rose-600' : 'text-slate-700')
+                  }
+                >
+                  {formatLeaveDays(applicantBalance.remaining)}
+                </span>
+                {projectedRemaining !== null && (
+                  <>
+                    <span className="mx-1.5 text-slate-400">→</span>
+                    <span
+                      className={
+                        'font-semibold ' +
+                        (projectedRemaining < 0 ? 'text-rose-600' : 'text-emerald-700')
+                      }
+                    >
+                      승인 시 {formatLeaveDays(projectedRemaining)}
+                    </span>
+                  </>
+                )}
+              </span>
+              {projectedRemaining !== null && projectedRemaining < 0 && (
+                <p className="mt-0.5 text-[11px] text-rose-600 font-medium">
+                  ⚠ 승인 시 잔여 음수 (한도 초과). 회사 정책에 따라 검토 후 처리하세요.
+                </p>
+              )}
+            </InfoRow>
+          )}
+          {requestUsage > 0 && !applicantBalance && (
+            <InfoRow label="연차 잔여">
+              <span className="text-amber-700 text-sm">
+                신청자 연차 회차가 아직 부여되지 않았습니다. 관리자가 입사일 등록 후 갱신해야 합니다.
+              </span>
+            </InfoRow>
+          )}
           <InfoRow label="지정 결재자">
             {req.assigned_foreman_id ? nameById.get(req.assigned_foreman_id) ?? '?' : '없음 (관리자 직행)'}
           </InfoRow>
