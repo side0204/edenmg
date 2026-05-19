@@ -896,8 +896,8 @@ export default async function Home() {
           </div>
           <div className="flex items-center gap-2">
             <Link
-              href="/settings/home"
-              aria-label="홈 화면 설정"
+              href="/settings"
+              aria-label="설정"
               className="inline-flex items-center rounded-lg border border-slate-300 px-2.5 py-2 text-slate-600 hover:bg-slate-50 dark:border-slate-700 dark:text-slate-300 dark:hover:bg-slate-800"
             >
               <Settings2 className="h-4 w-4" />

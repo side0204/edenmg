@@ -38,11 +38,11 @@ export default async function HomeSettingsPage() {
       <div className="mx-auto max-w-2xl space-y-5">
         <header>
           <Link
-            href="/"
+            href="/settings"
             className="inline-flex items-center gap-1 text-sm text-slate-500 hover:text-slate-900"
           >
             <ChevronLeft className="h-4 w-4" />
-            홈
+            설정
           </Link>
           <h1 className="mt-1 text-3xl font-bold text-slate-900 tracking-tight">홈 화면 설정</h1>
           <p className="mt-1 text-sm text-slate-500">
