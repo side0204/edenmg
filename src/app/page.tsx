@@ -17,13 +17,6 @@ import VehicleStatusList from './VehicleStatusList'
 
 type Permission = 'worker' | 'team_member' | 'team_leader' | 'admin'
 
-const PERMISSION_LABEL: Record<Permission, string> = {
-  worker: '작업자',
-  team_member: '팀원',
-  team_leader: '팀장',
-  admin: '관리자',
-}
-
 function todayInSeoul(): string {
   return new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Seoul' }).format(new Date())
 }
@@ -118,11 +111,6 @@ export default async function Home() {
 
   const isAdmin = employee.permission === 'admin'
   const isFieldWorker = employee.workplace_type === '현장'
-  const subtitleParts = [
-    employee.position,
-    employee.team ? `${employee.team}팀` : null,
-    employee.work_type,
-  ].filter(Boolean)
 
   // 오늘 근태 1줄 요약 (홈 카드용)
   const workDate = todayInSeoul()
@@ -348,15 +336,9 @@ export default async function Home() {
         <header className="flex items-start justify-between gap-3">
           <div>
             <p className="text-sm text-slate-600 dark:text-slate-400">{employee.companies?.name ?? '회사 미지정'}</p>
-            <h1 className="text-3xl font-bold text-slate-900 tracking-tight dark:text-slate-100">
-              {employee.name}
-              <span className="ml-2 text-base font-medium text-slate-500 dark:text-slate-400">
-                {PERMISSION_LABEL[employee.permission]}
-              </span>
+            <h1 className="text-2xl font-bold text-slate-900 tracking-tight dark:text-slate-100">
+              {employee.name}님 반갑습니다.
             </h1>
-            {subtitleParts.length > 0 && (
-              <p className="mt-1 text-sm text-slate-500 dark:text-slate-400">{subtitleParts.join(' · ')}</p>
-            )}
           </div>
           <form action={signOut}>
             <button className="rounded-lg border border-slate-300 px-3 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50 dark:border-slate-700 dark:text-slate-300 dark:hover:bg-slate-800">
