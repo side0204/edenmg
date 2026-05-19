@@ -43,7 +43,17 @@ export async function signupRequest(formData: FormData) {
   // 회사 1개 가정 — 회사 ID 자동 매핑.
   // 회원가입은 비로그인 상태라 anon 으로는 RLS 가 companies 를 막는다.
   // service role 로 직접 조회.
-  const admin = createAdminClient()
+  let admin: ReturnType<typeof createAdminClient>
+  try {
+    admin = createAdminClient()
+  } catch (e) {
+    const msg = e instanceof Error ? e.message : String(e)
+    console.error('[signup] admin client init failed', msg)
+    return redirect(
+      '/signup?err=' + encodeURIComponent('서버 설정 오류: ' + msg.slice(0, 200)),
+    )
+  }
+
   const { data: companyRow, error: companyErr } = await admin
     .from('companies')
     .select('id')
