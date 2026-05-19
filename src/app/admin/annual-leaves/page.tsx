@@ -13,6 +13,7 @@ import {
   adjustAnnualLeaveBalance,
   refreshAllAnnualLeaves,
   refreshEmployeeAnnualLeaves,
+  setInitialRemaining,
   updateHireDate,
 } from './actions'
 
@@ -95,6 +96,9 @@ export default async function AdminAnnualLeavesPage() {
           </p>
           <p className="mt-1 text-xs text-slate-500">
             * 1년 미만: 매월 1일 누적 (최대 11일). 1년 이상: 매 1주년에 15일 + 3년차부터 2년마다 +1일 (최대 25일).
+          </p>
+          <p className="mt-1 text-xs text-amber-700">
+            * 시스템 운영 전에 사용한 연차가 있다면 회차별 「잔여 직접 설정」 input 에 현재 남은 일수를 입력하세요. 사용일수가 자동 계산됩니다.
           </p>
         </header>
 
@@ -230,6 +234,31 @@ export default async function AdminAnnualLeavesPage() {
                             </div>
                           </div>
                           <form
+                            action={setInitialRemaining}
+                            className="flex items-center gap-1.5 rounded-md bg-amber-50/60 border border-amber-200 px-2 py-1.5"
+                          >
+                            <input type="hidden" name="balance_id" value={b.id} />
+                            <span className="text-[11px] font-medium text-amber-800 shrink-0">
+                              잔여 직접 설정
+                            </span>
+                            <input
+                              type="number"
+                              step="0.25"
+                              min="0"
+                              name="remaining"
+                              placeholder={`${remaining}`}
+                              className="w-20 rounded-md border border-amber-300 bg-white px-2 py-1 text-xs"
+                            />
+                            <span className="text-[11px] text-slate-500 shrink-0">일</span>
+                            <button
+                              type="submit"
+                              className="shrink-0 rounded-md bg-amber-600 px-2 py-1 text-xs font-medium text-white hover:bg-amber-700"
+                            >
+                              적용
+                            </button>
+                          </form>
+
+                          <form
                             action={adjustAnnualLeaveBalance}
                             className="flex items-center gap-1.5"
                           >
@@ -238,8 +267,8 @@ export default async function AdminAnnualLeavesPage() {
                               type="number"
                               step="0.25"
                               name="delta"
-                              placeholder="예: +1 / -0.5"
-                              className="w-24 rounded-md border border-slate-300 px-2 py-1 text-xs"
+                              placeholder="부여 ±"
+                              className="w-20 rounded-md border border-slate-300 px-2 py-1 text-xs"
                             />
                             <input
                               type="text"
@@ -251,7 +280,7 @@ export default async function AdminAnnualLeavesPage() {
                               type="submit"
                               className="shrink-0 rounded-md bg-indigo-600 px-2 py-1 text-xs font-medium text-white hover:bg-indigo-700"
                             >
-                              조정
+                              가산
                             </button>
                           </form>
                         </li>

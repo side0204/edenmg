@@ -537,6 +537,7 @@ owner 결정사항:
 | **단위** | 일(day) · numeric(5,2) | 반차 0.5 / 반반차 0.25 자동 매핑 |
 | **leave_type 매핑** | 연차=N일·반차=0.5·반반차=0.25·병가/공가/외근=0 | `LEAVE_TYPE_PER_DAY_COST` |
 | **취소·반려 시 복원** | MVP 미포함 | 승인 후 취소 흐름이 코드에 없음. v2 에 reverse delta 처리 |
+| **운영 전 사용 이력** | 회차별 「현재 잔여」 입력 (A안) | admin 이 직원·회차마다 잔여 X일 입력 → used = max(0, granted - X) 자동 계산. audit 에 `source='admin_manual'` + reason 기록 |
 
 - **마이그** [`0031_annual_leaves.sql`](./supabase/migrations/0031_annual_leaves.sql):
   - `employees.hire_date date` 컬럼
@@ -552,7 +553,8 @@ owner 결정사항:
 - **server actions** [`src/app/admin/annual-leaves/actions.ts`](./src/app/admin/annual-leaves/actions.ts):
   - `refreshEmployeeAnnualLeaves(formData)` — 한 직원 회차 갱신 (insert 또는 granted += delta, audit log)
   - `refreshAllAnnualLeaves()` — 전직원 일괄
-  - `adjustAnnualLeaveBalance(formData)` — admin 수동 가산·차감
+  - `adjustAnnualLeaveBalance(formData)` — admin 수동 가산·차감 (granted 변경)
+  - `setInitialRemaining(formData)` — 운영 전 잔여 직접 입력 (used 역산)
   - `updateHireDate(formData)` — 입사일 갱신 + 즉시 회차 자동 갱신
 - **승인 액션 통합** [`src/app/approvals/actions.ts`](./src/app/approvals/actions.ts):
   - `approveRequest` 의 nextStatus='승인' 시점에 `annual_leave_apply_usage` RPC 호출

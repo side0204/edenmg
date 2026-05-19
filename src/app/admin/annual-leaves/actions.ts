@@ -178,6 +178,69 @@ export async function refreshAllAnnualLeaves() {
   )
 }
 
+// 운영 전 사용 이력 반영 — 관리자가 「현재 잔여」 를 직접 입력하면
+// used 가 (granted - remaining) 으로 역산되어 저장됨. 운영 시작 시 1회용.
+export async function setInitialRemaining(formData: FormData) {
+  const { supabase, me } = await loadAdmin()
+  const balanceId = String(formData.get('balance_id') ?? '')
+  const remainingRaw = String(formData.get('remaining') ?? '').trim()
+
+  if (!balanceId) {
+    redirect('/admin/annual-leaves?err=' + encodeURIComponent('대상이 없습니다'))
+  }
+  const remaining = Number(remainingRaw)
+  if (!Number.isFinite(remaining) || remaining < 0) {
+    redirect(
+      '/admin/annual-leaves?err=' +
+        encodeURIComponent('잔여는 0 이상의 숫자여야 합니다'),
+    )
+  }
+
+  const { data: b } = await supabase
+    .from('annual_leave_balances')
+    .select('id, company_id, granted, used')
+    .eq('id', balanceId)
+    .maybeSingle()
+  const bal = b as
+    | { id: string; company_id: string; granted: number; used: number }
+    | null
+  if (!bal || bal.company_id !== me.company_id) {
+    redirect('/admin/annual-leaves?err=' + encodeURIComponent('대상을 찾을 수 없습니다'))
+  }
+
+  const granted = Number(bal!.granted)
+  const newUsed = Math.max(0, Number((granted - remaining).toFixed(2)))
+  const oldUsed = Number(bal!.used)
+  const delta = Number((newUsed - oldUsed).toFixed(2))
+
+  const { error } = await supabase
+    .from('annual_leave_balances')
+    .update({ used: newUsed })
+    .eq('id', balanceId)
+  if (error) {
+    redirect(
+      '/admin/annual-leaves?err=' +
+        encodeURIComponent('저장 실패: ' + error.message),
+    )
+  }
+
+  // audit: grants 에 source='admin_manual' 로 기록. delta 의 부호는 used 변화 기준.
+  await supabase.from('annual_leave_grants').insert({
+    balance_id: balanceId,
+    delta,
+    reason: `운영 전 잔여 ${remaining}일 설정 (사용 ${oldUsed}→${newUsed})`,
+    source: 'admin_manual',
+    actor_employee_id: me.id,
+  })
+
+  revalidatePath('/admin/annual-leaves')
+  revalidatePath('/')
+  redirect(
+    '/admin/annual-leaves?ok=' +
+      encodeURIComponent(`잔여 ${remaining}일로 설정 완료 (사용 ${newUsed}일)`),
+  )
+}
+
 // 관리자 수동 조정 — granted 에 delta 가산 (음수 = 차감)
 export async function adjustAnnualLeaveBalance(formData: FormData) {
   const { supabase, me } = await loadAdmin()
