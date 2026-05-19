@@ -1,0 +1,467 @@
+import { Plus, Pencil, Trash2, Zap, User } from 'lucide-react'
+import {
+  CORE_LIFECYCLE_LABEL,
+  CORE_LIFECYCLE_VALUES,
+  CIRCUIT_STATUS_COLOR,
+  CIRCUIT_STATUS_VALUES,
+  isCircuitDiverse,
+  type CoreLifecycle,
+  type CircuitKind,
+  type CircuitStatus,
+} from '@/lib/relocation'
+import {
+  createCoreAssignment,
+  updateCoreAssignment,
+  deleteCoreAssignment,
+} from './core-actions'
+
+export type CoreAssignmentRow = {
+  id: string
+  circuit_id: string | null
+  segment_idx: number
+  cable_id: string
+  core_range_start: number
+  core_range_end: number
+  lifecycle: CoreLifecycle
+  status: CircuitStatus | null
+  is_auto_assigned: boolean
+  notes: string | null
+}
+
+type CableMini = {
+  id: string
+  cable_code: string
+  spec: string
+  segment_label: string  // '필동간이국사 ~ 0025A 79M3#1 · 288C' 같이 사전 조립된 구간명
+}
+
+type CircuitMini = {
+  id: string
+  circuit_id: string
+  subscriber_name: string | null
+  kind: CircuitKind
+}
+
+export default function CoresTab({
+  projectId,
+  assignments,
+  circuits,
+  cables,
+}: {
+  projectId: string
+  assignments: CoreAssignmentRow[]
+  circuits: CircuitMini[]
+  cables: CableMini[]
+}) {
+  const cableMap = new Map(cables.map((c) => [c.id, c]))
+  const circuitMap = new Map(circuits.map((c) => [c.id, c]))
+
+  // 드롭다운·요약용: 구간명 우선 (예: '필동간이국사 ~ 0025A 79M3#1 · 288C')
+  function cableLabel(id: string): string {
+    const c = cableMap.get(id)
+    return c ? c.segment_label : '(삭제됨)'
+  }
+
+  // 행 표시용: 구간명 + 케이블ID (식별 정밀도)
+  function cableDetail(id: string): { segment: string; code: string; spec: string } | null {
+    const c = cableMap.get(id)
+    if (!c) return null
+    return { segment: c.segment_label, code: c.cable_code, spec: c.spec }
+  }
+
+  function circuitLabel(id: string | null): string {
+    if (!id) return '(미지정)'
+    const c = circuitMap.get(id)
+    return c ? `${c.circuit_id} ${c.subscriber_name ?? ''}`.trim() : '(삭제됨)'
+  }
+
+  return (
+    <div className="space-y-6">
+      {/* 신규 등록 폼 */}
+      <section className="border border-slate-200 rounded-xl p-4 space-y-3 bg-slate-50">
+        <h3 className="flex items-center gap-1 text-sm font-semibold text-slate-700">
+          <Plus className="h-4 w-4" />
+          코어 배정 추가
+        </h3>
+
+        {cables.length === 0 ? (
+          <p className="text-sm text-slate-500 italic px-2 py-2">
+            먼저 케이블을 등록해야 합니다. 케이블 탭에서 추가해주세요.
+          </p>
+        ) : (
+          <form action={createCoreAssignment} className="grid gap-3 sm:grid-cols-2">
+            <input type="hidden" name="project_id" value={projectId} />
+
+            <div>
+              <label className="block text-xs font-medium text-slate-600">
+                케이블 <span className="text-rose-600">*</span>
+              </label>
+              <select
+                name="cable_id"
+                required
+                defaultValue=""
+                className="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2 text-sm"
+              >
+                <option value="" disabled>
+                  선택
+                </option>
+                {cables.map((c) => (
+                  <option key={c.id} value={c.id}>
+                    {cableLabel(c.id)}
+                  </option>
+                ))}
+              </select>
+            </div>
+
+            <div>
+              <label className="block text-xs font-medium text-slate-600">회선</label>
+              <select
+                name="circuit_id"
+                defaultValue=""
+                className="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2 text-sm"
+              >
+                <option value="">(미지정)</option>
+                {circuits.map((c) => (
+                  <option key={c.id} value={c.id}>
+                    {c.circuit_id} {c.subscriber_name ?? ''}
+                    {isCircuitDiverse(c.kind) ? ' [이원화]' : ''}
+                  </option>
+                ))}
+              </select>
+            </div>
+
+            <div>
+              <label className="block text-xs font-medium text-slate-600">
+                시작 코어 <span className="text-rose-600">*</span>
+              </label>
+              <input
+                type="number"
+                name="core_range_start"
+                required
+                min={1}
+                max={576}
+                className="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2 text-sm"
+              />
+            </div>
+
+            <div>
+              <label className="block text-xs font-medium text-slate-600">
+                끝 코어 <span className="text-rose-600">*</span>
+              </label>
+              <input
+                type="number"
+                name="core_range_end"
+                required
+                min={1}
+                max={576}
+                className="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2 text-sm"
+              />
+            </div>
+
+            <div>
+              <label className="block text-xs font-medium text-slate-600">Lifecycle</label>
+              <select
+                name="lifecycle"
+                defaultValue="new"
+                className="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2 text-sm"
+              >
+                {CORE_LIFECYCLE_VALUES.map((l) => (
+                  <option key={l} value={l}>
+                    {CORE_LIFECYCLE_LABEL[l]}
+                  </option>
+                ))}
+              </select>
+            </div>
+
+            <div>
+              <label className="block text-xs font-medium text-slate-600">상태</label>
+              <select
+                name="status"
+                defaultValue=""
+                className="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2 text-sm"
+              >
+                <option value="">(미지정)</option>
+                {CIRCUIT_STATUS_VALUES.map((s) => (
+                  <option key={s} value={s}>
+                    {s}
+                  </option>
+                ))}
+              </select>
+            </div>
+
+            <div>
+              <label className="block text-xs font-medium text-slate-600">세그먼트 번호</label>
+              <input
+                type="number"
+                name="segment_idx"
+                defaultValue={0}
+                min={0}
+                max={9}
+                className="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2 text-sm"
+              />
+              <p className="mt-0.5 text-[11px] text-slate-500">
+                이원화 회선은 0/1 두 행으로 입력 (서로 다른 케이블)
+              </p>
+            </div>
+
+            <div>
+              <label className="block text-xs font-medium text-slate-600">비고</label>
+              <input
+                type="text"
+                name="notes"
+                maxLength={1000}
+                className="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2 text-sm"
+              />
+            </div>
+
+            <div className="sm:col-span-2 flex justify-end">
+              <button
+                type="submit"
+                className="inline-flex items-center gap-1 rounded-lg bg-slate-900 px-4 py-2 text-sm font-medium text-white hover:bg-slate-800"
+              >
+                <Plus className="h-4 w-4" />
+                코어 배정
+              </button>
+            </div>
+          </form>
+        )}
+      </section>
+
+      {/* 배정 목록 */}
+      <section className="space-y-3">
+        <h3 className="text-sm font-semibold text-slate-700">
+          코어 배정 ({assignments.length}건) · 동일 케이블 내 범위 중복은 DB 가 차단
+        </h3>
+        {assignments.length === 0 ? (
+          <p className="text-sm text-slate-500 italic px-2 py-4">코어 배정이 없습니다.</p>
+        ) : (
+          <ul className="divide-y divide-slate-100 border border-slate-200 rounded-xl bg-white overflow-hidden">
+            {assignments.map((a) => (
+              <li key={a.id} className="px-4 py-3">
+                <CoreRowItem
+                  projectId={projectId}
+                  assignment={a}
+                  circuits={circuits}
+                  cables={cables}
+                  cableLabel={cableLabel}
+                  cableDetail={cableDetail}
+                  circuitLabel={circuitLabel}
+                />
+              </li>
+            ))}
+          </ul>
+        )}
+      </section>
+    </div>
+  )
+}
+
+
+function CoreRowItem({
+  projectId,
+  assignment,
+  circuits,
+  cables,
+  cableLabel,
+  cableDetail,
+  circuitLabel,
+}: {
+  projectId: string
+  assignment: CoreAssignmentRow
+  circuits: CircuitMini[]
+  cables: CableMini[]
+  cableLabel: (id: string) => string
+  cableDetail: (id: string) => { segment: string; code: string; spec: string } | null
+  circuitLabel: (id: string | null) => string
+}) {
+  const detail = cableDetail(assignment.cable_id)
+  return (
+    <details className="group">
+      <summary className="cursor-pointer flex items-start justify-between gap-3 list-none">
+        <div className="min-w-0 flex-1">
+          <p className="text-sm font-medium text-slate-900 flex items-center gap-2 flex-wrap">
+            {assignment.is_auto_assigned ? (
+              <Zap className="h-3.5 w-3.5 text-amber-500" aria-label="자동 배정" />
+            ) : (
+              <User className="h-3.5 w-3.5 text-slate-400" aria-label="사람 입력" />
+            )}
+            <span className="font-mono text-xs text-slate-700">
+              코어 {assignment.core_range_start}
+              {assignment.core_range_end !== assignment.core_range_start
+                ? `~${assignment.core_range_end}`
+                : ''}
+            </span>
+            <span className="text-xs text-slate-700">
+              {detail ? detail.segment : '(삭제됨)'}
+            </span>
+            <span className="text-[10px] text-slate-400 border border-slate-300 px-1.5 py-0.5 rounded">
+              {CORE_LIFECYCLE_LABEL[assignment.lifecycle]}
+            </span>
+            {assignment.status && (
+              <span
+                className={
+                  'inline-block text-[10px] font-medium px-1.5 py-0.5 rounded border ' +
+                  CIRCUIT_STATUS_COLOR[assignment.status]
+                }
+              >
+                {assignment.status}
+              </span>
+            )}
+          </p>
+          <p className="text-xs text-slate-500 mt-0.5">
+            회선: {circuitLabel(assignment.circuit_id)}
+            {assignment.segment_idx > 0 && ` · 세그먼트 ${assignment.segment_idx}`}
+            {detail && (
+              <span className="ml-2 font-mono text-[10px] text-slate-400">
+                · {detail.code}
+              </span>
+            )}
+          </p>
+        </div>
+        <span className="text-xs text-slate-400 group-open:rotate-90 transition-transform">
+          <Pencil className="h-3.5 w-3.5" />
+        </span>
+      </summary>
+
+      <div className="mt-3 ml-2 pl-3 border-l-2 border-slate-200 space-y-3">
+        <form action={updateCoreAssignment} className="grid gap-2 sm:grid-cols-2">
+          <input type="hidden" name="id" value={assignment.id} />
+          <input type="hidden" name="project_id" value={projectId} />
+
+          <div>
+            <label className="block text-[11px] text-slate-500">케이블</label>
+            <select
+              name="cable_id"
+              defaultValue={assignment.cable_id}
+              className="mt-0.5 w-full rounded-lg border border-slate-300 px-2 py-1.5 text-sm"
+            >
+              {cables.map((c) => (
+                <option key={c.id} value={c.id}>
+                  {cableLabel(c.id)}
+                </option>
+              ))}
+            </select>
+          </div>
+
+          <div>
+            <label className="block text-[11px] text-slate-500">회선</label>
+            <select
+              name="circuit_id"
+              defaultValue={assignment.circuit_id ?? ''}
+              className="mt-0.5 w-full rounded-lg border border-slate-300 px-2 py-1.5 text-sm"
+            >
+              <option value="">(미지정)</option>
+              {circuits.map((c) => (
+                <option key={c.id} value={c.id}>
+                  {c.circuit_id} {c.subscriber_name ?? ''}
+                </option>
+              ))}
+            </select>
+          </div>
+
+          <div>
+            <label className="block text-[11px] text-slate-500">시작 코어</label>
+            <input
+              type="number"
+              name="core_range_start"
+              required
+              min={1}
+              max={576}
+              defaultValue={assignment.core_range_start}
+              className="mt-0.5 w-full rounded-lg border border-slate-300 px-2 py-1.5 text-sm"
+            />
+          </div>
+
+          <div>
+            <label className="block text-[11px] text-slate-500">끝 코어</label>
+            <input
+              type="number"
+              name="core_range_end"
+              required
+              min={1}
+              max={576}
+              defaultValue={assignment.core_range_end}
+              className="mt-0.5 w-full rounded-lg border border-slate-300 px-2 py-1.5 text-sm"
+            />
+          </div>
+
+          <div>
+            <label className="block text-[11px] text-slate-500">Lifecycle</label>
+            <select
+              name="lifecycle"
+              defaultValue={assignment.lifecycle}
+              className="mt-0.5 w-full rounded-lg border border-slate-300 px-2 py-1.5 text-sm"
+            >
+              {CORE_LIFECYCLE_VALUES.map((l) => (
+                <option key={l} value={l}>
+                  {CORE_LIFECYCLE_LABEL[l]}
+                </option>
+              ))}
+            </select>
+          </div>
+
+          <div>
+            <label className="block text-[11px] text-slate-500">상태</label>
+            <select
+              name="status"
+              defaultValue={assignment.status ?? ''}
+              className="mt-0.5 w-full rounded-lg border border-slate-300 px-2 py-1.5 text-sm"
+            >
+              <option value="">(미지정)</option>
+              {CIRCUIT_STATUS_VALUES.map((s) => (
+                <option key={s} value={s}>
+                  {s}
+                </option>
+              ))}
+            </select>
+          </div>
+
+          <div>
+            <label className="block text-[11px] text-slate-500">세그먼트</label>
+            <input
+              type="number"
+              name="segment_idx"
+              defaultValue={assignment.segment_idx}
+              min={0}
+              max={9}
+              className="mt-0.5 w-full rounded-lg border border-slate-300 px-2 py-1.5 text-sm"
+            />
+          </div>
+
+          <div>
+            <label className="block text-[11px] text-slate-500">비고</label>
+            <input
+              type="text"
+              name="notes"
+              defaultValue={assignment.notes ?? ''}
+              maxLength={1000}
+              className="mt-0.5 w-full rounded-lg border border-slate-300 px-2 py-1.5 text-sm"
+            />
+          </div>
+
+          <div className="sm:col-span-2 flex justify-end gap-2">
+            <button
+              type="submit"
+              className="inline-flex items-center gap-1 rounded-lg bg-slate-900 px-3 py-1.5 text-xs font-medium text-white hover:bg-slate-800"
+            >
+              <Pencil className="h-3.5 w-3.5" />
+              저장
+            </button>
+          </div>
+        </form>
+
+        <form action={deleteCoreAssignment}>
+          <input type="hidden" name="id" value={assignment.id} />
+          <input type="hidden" name="project_id" value={projectId} />
+          <button
+            type="submit"
+            className="inline-flex items-center gap-1 rounded-lg border border-rose-300 px-3 py-1 text-xs text-rose-700 hover:bg-rose-50"
+          >
+            <Trash2 className="h-3.5 w-3.5" />
+            삭제
+          </button>
+        </form>
+      </div>
+    </details>
+  )
+}

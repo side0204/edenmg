@@ -1,5 +1,5 @@
 @import "tailwindcss";
-@import url('https://cdn.jsdelivr.net/gh/orioncactus/pretendard@v1.3.9/dist/web/variable/pretendardvariable-dynamic-subset.css');
+/* Pretendard 폰트는 layout.tsx 의 <link> 태그로 로드 (Turbopack 의 CSS @import 재정렬 회피) */
 
 :root {
   --background: #ffffff;

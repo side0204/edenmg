@@ -1,20 +1,45 @@
 import Link from 'next/link'
 import { redirect, notFound } from 'next/navigation'
-import { ChevronLeft, Cable, Network, Layers, Calendar, AlertCircle, Download } from 'lucide-react'
+import {
+  ChevronLeft,
+  Cable,
+  Network,
+  Layers,
+  Calendar,
+  AlertCircle,
+  Download,
+  Radio,
+} from 'lucide-react'
+import { Sparkles } from 'lucide-react'
 import { createClient } from '@/lib/supabase/server'
 import { updateProject, deleteProject } from '../actions'
+import FacilitiesTab, { type FacilityRow } from './FacilitiesTab'
+import CablesTab, { type CableRow } from './CablesTab'
+import CircuitsTab, { type CircuitRow } from './CircuitsTab'
+import CoresTab, { type CoreAssignmentRow } from './CoresTab'
+import LeftPanel from './LeftPanel'
+import { seedTestData } from './seed-actions'
+import TopologyCanvas from './TopologyCanvas'
 
 // 지장이설 프로젝트 상세 — 메인 작업 화면.
-// 사양 § 7: 시설·케이블·코어배정·직선도·차수·검증·내보내기 7 탭.
-// 본 화면은 Phase 1 골격 — 탭 콘텐츠는 Phase 2+ 에서 채움.
-//
-// 모바일은 § 7-3 정책에 따라 읽기 전용으로 자동 노출 (탭 콘텐츠 단순화).
+// 사양 § 7: 시설·케이블·회선·코어배정·직선도·차수·검증·내보내기 8 탭.
+// Step B: facilities/cables/circuits/cores 4 탭 콘텐츠 활성화.
+// 나머지 4 탭은 placeholder (Phase 3+).
 
-type TabId = 'facilities' | 'cables' | 'cores' | 'splice' | 'phases' | 'verify' | 'export'
+type TabId =
+  | 'facilities'
+  | 'cables'
+  | 'circuits'
+  | 'cores'
+  | 'splice'
+  | 'phases'
+  | 'verify'
+  | 'export'
 
 const TABS: { id: TabId; label: string; icon: typeof Cable }[] = [
   { id: 'facilities', label: '시설', icon: Network },
   { id: 'cables', label: '케이블', icon: Cable },
+  { id: 'circuits', label: '회선', icon: Radio },
   { id: 'cores', label: '코어배정', icon: Layers },
   { id: 'splice', label: '직선도', icon: Layers },
   { id: 'phases', label: '차수', icon: Calendar },
@@ -79,6 +104,7 @@ export default async function RelocationProjectPage({
   const project = pRow as ProjectRow | null
   if (!project) notFound()
 
+  // 설계자 이름
   let designerName: string | null = null
   if (project.designer_id) {
     const { data: e } = await supabase
@@ -87,6 +113,49 @@ export default async function RelocationProjectPage({
       .eq('id', project.designer_id)
       .maybeSingle()
     designerName = ((e as EmployeeMini | null)?.name) ?? null
+  }
+
+  // 시설 (좌측 패널 + 시설 탭 + 케이블/코어 dropdown + 캔버스에 공통 사용)
+  const { data: fRows } = await supabase
+    .from('relocation_facilities')
+    .select(
+      'id, closure_type, seq_no, name, install_address, closure_spec, parent_facility_id, is_marked, notes, x_hint, y_hint',
+    )
+    .eq('project_id', id)
+    .order('closure_type')
+    .order('seq_no')
+  const facilities = (fRows ?? []) as FacilityRow[]
+
+  // 케이블 (탭 + 코어 dropdown)
+  const { data: cRows } = await supabase
+    .from('relocation_cables')
+    .select(
+      'id, from_facility_id, to_facility_id, spec, status, cable_code, route_type, notes',
+    )
+    .eq('project_id', id)
+    .order('cable_code')
+  const cables = (cRows ?? []) as CableRow[]
+
+  // 회선 (탭 + 코어 dropdown) — cores 탭에서만 사용해도 항상 fetch (작아서 OK)
+  const { data: circRows } = await supabase
+    .from('relocation_circuits')
+    .select('id, circuit_id, subscriber_name, kind, status, notes')
+    .eq('project_id', id)
+    .order('circuit_id')
+  const circuits = (circRows ?? []) as CircuitRow[]
+
+  // 코어 배정 (cores 탭에서만 필요)
+  let assignments: CoreAssignmentRow[] = []
+  if (tab === 'cores') {
+    const { data: aRows } = await supabase
+      .from('relocation_core_assignments')
+      .select(
+        'id, circuit_id, segment_idx, cable_id, core_range_start, core_range_end, lifecycle, status, is_auto_assigned, notes',
+      )
+      .eq('project_id', id)
+      .order('cable_id')
+      .order('core_range_start')
+    assignments = (aRows ?? []) as CoreAssignmentRow[]
   }
 
   return (
@@ -117,6 +186,55 @@ export default async function RelocationProjectPage({
           </div>
         </header>
 
+        {/* 빈 프로젝트에 시드 데이터 채우기 안내 (실제 LGU+ 임포트 구현 전 임시) */}
+        {facilities.length === 0 && (
+          <section className="rounded-2xl border border-amber-200 bg-amber-50 p-4">
+            <div className="space-y-2 sm:space-y-0 sm:flex sm:items-center sm:justify-between sm:gap-3">
+              <div className="min-w-0">
+                <p className="text-sm font-semibold text-amber-900">테스트 데이터 채우기</p>
+                <p className="text-xs text-amber-700 mt-0.5">
+                  실제 LGU+ 엑셀 임포트 기능은 별도 구현 예정. 우선 UI 동작 확인을 위해 임의의 미니
+                  시나리오(시설 7·케이블 6·회선 4)를 자동 생성할 수 있습니다.
+                </p>
+              </div>
+              <form action={seedTestData} className="shrink-0">
+                <input type="hidden" name="project_id" value={project.id} />
+                <button
+                  type="submit"
+                  className="inline-flex items-center gap-1 rounded-lg bg-amber-600 px-4 py-2 text-sm font-medium text-white hover:bg-amber-700"
+                >
+                  <Sparkles className="h-4 w-4" />
+                  테스트 데이터 채우기
+                </button>
+              </form>
+            </div>
+          </section>
+        )}
+
+        {/* 시각 캔버스 (Phase 3 시작 — C1) — 시설·케이블 토폴로지 시각화 + 노드 드래그 */}
+        {facilities.length > 0 && (
+          <TopologyCanvas
+            projectId={project.id}
+            facilities={facilities.map((f) => ({
+              id: f.id,
+              closure_type: f.closure_type,
+              seq_no: f.seq_no,
+              name: f.name,
+              x_hint: f.x_hint ?? null,
+              y_hint: f.y_hint ?? null,
+            }))}
+            cables={cables.map((c) => ({
+              id: c.id,
+              from_facility_id: c.from_facility_id,
+              to_facility_id: c.to_facility_id,
+              spec: c.spec,
+              status: c.status,
+              cable_code: c.cable_code,
+            }))}
+            editable={true}
+          />
+        )}
+
         {/* 탭 바 */}
         <nav className="sticky top-0 z-10 -mx-4 sm:-mx-6 bg-slate-50/80 backdrop-blur border-b border-slate-200">
           <div className="mx-auto max-w-6xl px-4 sm:px-6 flex overflow-x-auto gap-1 py-2">
@@ -129,9 +247,7 @@ export default async function RelocationProjectPage({
                   href={`/relocation/${id}?tab=${t.id}`}
                   className={
                     'inline-flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-sm font-medium shrink-0 ' +
-                    (active
-                      ? 'bg-slate-900 text-white'
-                      : 'text-slate-600 hover:bg-slate-200')
+                    (active ? 'bg-slate-900 text-white' : 'text-slate-600 hover:bg-slate-200')
                   }
                 >
                   <Icon className="h-4 w-4" />
@@ -142,9 +258,45 @@ export default async function RelocationProjectPage({
           </div>
         </nav>
 
-        {/* 탭 콘텐츠 — Phase 1 골격. 실제 내용은 후속 Phase 에서 구현. */}
-        <section className="rounded-2xl bg-white shadow-sm border border-slate-200 p-6">
-          <TabPlaceholder tab={tab} />
+        {/* 좌측 패널 + 탭 콘텐츠 — 데스크톱은 grid, 모바일은 stack */}
+        <section className="grid gap-4 lg:grid-cols-[16rem_1fr]">
+          <div className="lg:sticky lg:top-16 lg:self-start lg:max-h-[calc(100vh-6rem)] lg:overflow-y-auto">
+            <LeftPanel facilities={facilities} />
+          </div>
+
+          <div className="rounded-2xl bg-white shadow-sm border border-slate-200 p-4 sm:p-6 min-w-0">
+            {tab === 'facilities' && (
+              <FacilitiesTab projectId={project.id} facilities={facilities} />
+            )}
+            {tab === 'cables' && (
+              <CablesTab projectId={project.id} cables={cables} facilities={facilities} />
+            )}
+            {tab === 'circuits' && (
+              <CircuitsTab projectId={project.id} circuits={circuits} />
+            )}
+            {tab === 'cores' && (
+              <CoresTab
+                projectId={project.id}
+                assignments={assignments}
+                circuits={circuits}
+                cables={cables.map((c) => {
+                  const from = facilities.find((f) => f.id === c.from_facility_id)
+                  const to = facilities.find((f) => f.id === c.to_facility_id)
+                  const fromName = from?.name ?? '?'
+                  const toName = to?.name ?? '?'
+                  return {
+                    id: c.id,
+                    cable_code: c.cable_code,
+                    spec: c.spec,
+                    segment_label: `${fromName} ~ ${toName} · ${c.spec}`,
+                  }
+                })}
+              />
+            )}
+            {(tab === 'splice' || tab === 'phases' || tab === 'verify' || tab === 'export') && (
+              <TabPlaceholder tab={tab} />
+            )}
+          </div>
         </section>
 
         {/* 프로젝트 메타 편집 + 삭제 */}
@@ -257,12 +409,10 @@ function TabPlaceholder({ tab }: { tab: TabId }) {
   return (
     <div className="text-center py-12">
       <p className="text-sm text-slate-500">
-        <strong className="font-semibold">{label}</strong> 탭 — Phase 2 에서 구현 예정
+        <strong className="font-semibold">{label}</strong> 탭 — Phase 3 에서 구현 예정
       </p>
       <p className="mt-2 text-xs text-slate-400">
-        현재는 프로젝트 생성·정보 편집·삭제만 가능합니다.
-        <br />
-        설계 작업은 다음 단계에서 시설·케이블 입력 화면이 추가되면 시작할 수 있습니다.
+        검증 룰·차수 자동 분할·SVG 시각화·엑셀 출력은 다음 단계에서 추가됩니다.
       </p>
     </div>
   )

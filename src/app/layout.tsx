@@ -54,6 +54,12 @@ export default async function RootLayout({
 
   return (
     <html lang="ko" className="h-full antialiased">
+      <head>
+        <link
+          rel="stylesheet"
+          href="https://cdn.jsdelivr.net/gh/orioncactus/pretendard@v1.3.9/dist/web/variable/pretendardvariable-dynamic-subset.css"
+        />
+      </head>
       <body
         className="min-h-full flex flex-col bg-slate-50 text-slate-900 dark:bg-slate-950 dark:text-slate-100"
         style={{ paddingBottom: 'calc(4rem + env(safe-area-inset-bottom))' }}

@@ -733,6 +733,7 @@ LGU+ 협력사 본업 — 광케이블 지장이설 코어구성도·직선도 �
 - ✅ 마이그 0036 (facilities · cables · circuits · core_assignments + 카운터 2종 + btree_gist exclusion) — owner 실행 완료 (2026-05-19)
 - ✅ 마이그 0037 (splices · splitters · splitter_ports · task_type_master + 시드 14종 · facility_tasks) — owner 실행 완료, 시드 14 행 확인 (2026-05-19)
 - ✅ 마이그 0038 (phases · phase_tasks · task_pairs) — owner 실행 완료 (2026-05-19)
+- ✅ 마이그 0039 (migrations · migration_circuits — 이전 워크플로우 audit) — owner 실행 완료 (2026-05-20)
 - ✅ **Step A 코드** (2026-05-19): 도메인 헬퍼 + 프로젝트 CRUD + 진입점
   - [`src/lib/relocation.ts`](./src/lib/relocation.ts) — enum 미러링·시설 번호 prefix·케이블/함체 메타·작업시간 공식·신설 케이블 ID 생성
   - [`src/app/relocation/actions.ts`](./src/app/relocation/actions.ts) — 프로젝트 CRUD (create/update/delete)
@@ -740,9 +741,15 @@ LGU+ 협력사 본업 — 광케이블 지장이설 코어구성도·직선도 �
   - [`/relocation/new`](./src/app/relocation/new/page.tsx) 생성 폼
   - [`/relocation/[id]`](./src/app/relocation/[id]/page.tsx) 상세 + 7 탭 골격 (Phase 2 에서 콘텐츠 채움)
   - 홈 카드 `relocation` 신규 등록 (전 직원 노출). [`home-cards.ts`](./src/lib/home-cards.ts) + [`page.tsx`](./src/app/page.tsx)
-- ⏳ **Step B**: 시설·케이블·회선·코어배정 CRUD + 좌측 패널 (시설 번호 목록)
-- ⏳ **Step C**: 검증 로직 (룰 12개)·차수 자동 분할
-- ⏳ **Step D**: SVG 시각화 (코어구성도·직선도)
+- ✅ **Step B 코드** (2026-05-20): 시설·케이블·회선·코어배정 CRUD + 좌측 패널 + 시드 데이터 채우기 기능
+  - [`facility-actions.ts`](./src/app/relocation/[id]/facility-actions.ts) · [`cable-actions.ts`](./src/app/relocation/[id]/cable-actions.ts) · [`circuit-actions.ts`](./src/app/relocation/[id]/circuit-actions.ts) · [`core-actions.ts`](./src/app/relocation/[id]/core-actions.ts)
+  - 탭 컴포넌트 4종: [`FacilitiesTab.tsx`](./src/app/relocation/[id]/FacilitiesTab.tsx) · [`CablesTab.tsx`](./src/app/relocation/[id]/CablesTab.tsx) · [`CircuitsTab.tsx`](./src/app/relocation/[id]/CircuitsTab.tsx) · [`CoresTab.tsx`](./src/app/relocation/[id]/CoresTab.tsx)
+  - [`LeftPanel.tsx`](./src/app/relocation/[id]/LeftPanel.tsx) — 시설 번호 목록 (S/B/H/C/M/O/E prefix 그룹)
+  - [`seed-actions.ts`](./src/app/relocation/[id]/seed-actions.ts) — 빈 프로젝트에 미니 시나리오 시드 (시설 7·케이블 6·회선 4). 실제 LGU+ 임포트 구현 전 임시 도구
+  - 케이블 라벨 = 구간명 (`출발시설명 ~ 도착시설명 · 규격`) 으로 통일
+- 🚧 **Step C (진행 중)**: 이전(migration) 워크플로우 — 영향 회선 자동 추출·옛→새 매핑·자동 코어 배정 알고리즘. 사양 § 2-7 (v0.9). 마이그 0039 작성 완료, owner 실행 대기
+- ⏳ **Step D**: 검증 로직 (룰 12개)·차수 자동 분할
+- ⏳ **Step E**: SVG 시각화 (코어구성도·직선도)
 
 **미해결 항목** (§ 9 of plan doc):
 - 9-1: `1:2:8:4`·`1:3:8:4` 정확한 의미
@@ -791,6 +798,7 @@ LGU+ 협력사 본업 — 광케이블 지장이설 코어구성도·직선도 �
   - [`0036_relocation_facilities_cables.sql`](./supabase/migrations/0036_relocation_facilities_cables.sql) — 지장이설 시설·케이블·회선·코어배정 + btree_gist + 동일 케이블 코어 범위 중복 금지 exclusion constraint + 시설/케이블 번호 카운터 2종
   - [`0037_relocation_splitters_tasks.sql`](./supabase/migrations/0037_relocation_splitters_tasks.sql) — 지장이설 splices + 1차 RN 스플리터 + 출력 포트 + 공종 마스터(시드 14종) + 시설별 공종 수량
   - [`0038_relocation_phases.sql`](./supabase/migrations/0038_relocation_phases.sql) — 지장이설 차수 + 차수별 작업 + 양쪽 작업자 페어링 (작업 지시서용)
+  - [`0039_relocation_migrations.sql`](./supabase/migrations/0039_relocation_migrations.sql) — 지장이설 이전(migration) 워크플로우 audit: relocation_migrations + relocation_migration_circuits
 - **외선일보 별도 entity (v2)** — 접속일보와 동일 패턴으로 외선팀 전용 모듈. 외선 작업 특성(케이블 포설구간·전주번호 등)에 맞는 구조 별도 설계.
 - **접속일보 후속 (v2)** — segment-level 작업자 태그, 사진 첨부 + EXIF, 국사·함체 마스터 테이블화, 재접속 이력 조회, 지도 시각화
 - **M3 Phase 2 후속** — 사진 첨부 + EXIF·워터마크 (PRD M3-06), 일보 결재함 통합 (현재는 작업 상세에서 진입), 일반 일보 월별 CSV 리포트

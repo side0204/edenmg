@@ -96,6 +96,19 @@ LGU+ 협력사로서 지장이설(기설 광케이블의 새 경로 재시공) �
 | **노란색 마크** | 의미 미상 — 무시·보존 (`is_marked` 플래그) |
 | **객체 번호 부여** | 모든 시설에 자동 번호 부여 — 종류별 prefix (예: S-001 국사 / B-001 함체 / C-001 가입자 / M-001 MOFD / O-001 OJC). 좌측 패널에서 번호별 정렬·검색 (v0.8) |
 
+### 2-7. 이전(Migration) 워크플로우 (v0.9, 핵심 추가)
+
+**문제**: 회선 경로가 확정 안 된 상태에서 "어느 회선을 어느 새 케이블에 수용할지" 결정하기 어렵다.
+**해결**: 기설 상태를 먼저 임포트한 뒤, 변경 마킹 → 영향 회선 자동 추출 → 일괄 이전 작업.
+
+| 항목 | 결정 |
+|---|---|
+| **임포트 데이터 단위** | 1 코어 1 행 매핑 (Q1). LGU+ DB 가 회선↔케이블↔코어 매핑까지 제공 → 시스템이 영향 회선을 자동 추출 |
+| **이전 매핑 방식** | 옛 케이블 → 새 케이블 **N:M 분할 일반화** (Q2). 한 옛 케이블의 N 회선이 M 개 새 케이블에 자유롭게 쪼개짐 |
+| **결재·승인** | 없음 (Q3). 설계자가 직접 확정. 미리보기만 제공 |
+| **이전 audit** | `relocation_migrations` (옛 케이블 → 새 케이블 단위) + `relocation_migration_circuits` (실제 이동한 회선들) 로 이력 보존 |
+| **워크플로우 순서** | ① 기설 임포트 → ② 변경 마킹(철거/이설) → ③ 영향 회선 자동 추출 → ④ 이전 액션(회선 그룹 → 새 케이블) → ⑤ 자동 코어 배정 → ⑥ 검증·차수 |
+
 ## 3. 도메인 용어 정의
 
 | 용어 | 의미 |
@@ -367,6 +380,26 @@ create index relocation_task_type_master_company_idx
 
 -- 시드 14종 (회사 생성 시 자동 insert 또는 migration 에서 일괄)
 -- 함체작업(주간) 20분/개·함체작업(야간) 20분/개·접속(12C이하) 3분/코어·접속(12C초과) 8분/코어 등
+
+-- v0.9: 이전(migration) 작업 단위 — 옛 케이블 → 새 케이블 그룹핑 audit
+create table public.relocation_migrations (
+  id            uuid primary key default gen_random_uuid(),
+  project_id    uuid not null references public.relocation_projects(id) on delete cascade,
+  from_cable_id uuid not null references public.relocation_cables(id),     -- 옛 케이블 (철거·이설)
+  to_cable_id   uuid not null references public.relocation_cables(id),     -- 새 케이블 (신설)
+  notes         text,
+  created_at    timestamptz not null default now(),
+  created_by    uuid references public.employees(id),
+  unique (project_id, from_cable_id, to_cable_id)
+);
+
+-- 한 migration 안에 실제 옮긴 회선들
+create table public.relocation_migration_circuits (
+  migration_id uuid not null references public.relocation_migrations(id) on delete cascade,
+  circuit_id   uuid not null references public.relocation_circuits(id) on delete cascade,
+  segment_idx  smallint not null default 0,  -- 이원화 회선의 짝 번호
+  primary key (migration_id, circuit_id, segment_idx)
+);
 
 -- 시설별 공종 수량 (접속함체·종단별. 모든 작업 발생 시설마다 입력) — v0.6 → v0.7 으로 task_type 변경
 -- 차수 시간 산출의 입력.
@@ -1015,10 +1048,11 @@ owner 답변 받지 못함. 추측 후보:
 
 | 마이그 | 내용 | 상태 |
 |---|---|---|
-| 0035 | relocation_projects · enum 일체 (closure_type 에 MOFD/OJC/국사내장비 + splitter_work_mode) · RLS · GRANT | 미작성 |
-| 0036 | facilities (+ parent_facility_id + seq_no + facility_seq) · cables · circuits · core_assignments (+ btree_gist + exclusion constraint + cable_seq) | 미작성 |
-| 0037 | splices · splitters (+ work_mode) · splitter_ports · task_type_master + 시드 14종 · facility_tasks | 미작성 |
-| 0038 | phases · phase_tasks · task_pairs (양쪽 작업자 페어링) | 미작성 |
+| 0035 | relocation_projects · enum 일체 (closure_type 에 MOFD/OJC/국사내장비 + splitter_work_mode) · RLS · GRANT | ✅ 실행 |
+| 0036 | facilities (+ parent_facility_id + seq_no + facility_seq) · cables · circuits · core_assignments (+ btree_gist + exclusion constraint + cable_seq) | ✅ 실행 |
+| 0037 | splices · splitters (+ work_mode) · splitter_ports · task_type_master + 시드 14종 · facility_tasks | ✅ 실행 |
+| 0038 | phases · phase_tasks · task_pairs (양쪽 작업자 페어링) | ✅ 실행 |
+| 0039 | **migrations · migration_circuits (이전 워크플로우 audit)** | 미작성 |
 
 추가로 시드 데이터 SQL:
 - `cable_spec_meta` (유니트·길이 표)
@@ -1104,3 +1138,4 @@ DB 사이드 영향:
 | 2026-05-19 | v0.6 | (1) 케이블 ID — 기설은 LGU+ 제공·신설은 자동 생성(NEW-XXXX-NNNNNN). cable_code NOT NULL + unique + cable_seq 테이블 (2) 동일 케이블 코어 범위 중복 금지 — DB exclusion constraint + 검증 룰 O1 (3) 자동 배정 결과 인라인 수정 — is_auto_assigned 플래그 + 코어배정 탭 UI (4) 시설별 공종 수량 — relocation_facility_tasks 테이블 + 시설 편집 모달 영역 + 검증 룰 T1 + 예상 작업시간 라이브 계산 | Claude |
 | 2026-05-19 | v0.7 | (1) 공종 마스터 확장 — relocation_task_type_master 회사 단위 마스터. 시드 14종 + 설계자 자유 추가. facility_tasks.task_type 을 enum → FK 변경. /admin/relocation-task-types 페이지 (2) 국사 내부 토폴로지 — closure_type 에 MOFD/OJC/국사내장비 추가 + facilities.parent_facility_id (3) RN 내부 접속만 — relocation_splitter_work_mode enum + splitter.work_mode 컬럼. UI 토글로 분기/내부접속만 전환. 모드별 검증·차수·시각화 차이 명시 | Claude |
 | 2026-05-19 | v0.8 | (1) 객체 번호 자동 부여 — facilities.seq_no + facility_seq 카운터 + 종류별 prefix(S/B/H/C/M/O/E) (2) 좌측 패널 — 시설 번호 목록·검색·그룹·캔버스 점프 (§ 7-2-1 신규) (3) 모바일 보기 정책 갱신 — 설계 화면은 데스크톱이지만 완료된 설계의 읽기 전용은 모바일 허용 (§ 7-3 통합 재작성, § 7-4 삭제) (4) Supabase 운영 검토 신규 (§ 11) — 무료 플랜 한도·예상 사용량·Pro 전환 시점·즉시 액션 | Claude |
+| 2026-05-20 | v0.9 | **이전(Migration) 워크플로우 추가 (§ 2-7)** — 기설 임포트 후 영향 회선 자동 추출 → 옛→새 케이블 N:M 분할 이전 → 자동 코어 배정. relocation_migrations + relocation_migration_circuits 테이블 (마이그 0039). 1코어 1행 임포트 가정. 결재 없이 설계자 직접 확정 | Claude |
