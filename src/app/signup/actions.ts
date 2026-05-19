@@ -1,7 +1,6 @@
 'use server'
 
 import { redirect } from 'next/navigation'
-import { createClient } from '@/lib/supabase/server'
 import { createAdminClient } from '@/lib/supabase/admin'
 import {
   VEHICLE_PLATE_REQUIRED_WORK_TYPES,
@@ -41,20 +40,30 @@ export async function signupRequest(formData: FormData) {
     )
   }
 
-  // 회사 1개 가정 — 회사 ID 자동 매핑
-  const supabase = await createClient()
-  const { data: companyRow } = await supabase
+  // 회사 1개 가정 — 회사 ID 자동 매핑.
+  // 회원가입은 비로그인 상태라 anon 으로는 RLS 가 companies 를 막는다.
+  // service role 로 직접 조회.
+  const admin = createAdminClient()
+  const { data: companyRow, error: companyErr } = await admin
     .from('companies')
     .select('id')
     .order('created_at')
     .limit(1)
     .maybeSingle()
+  if (companyErr) {
+    console.error('[signup] companies select error', companyErr)
+    return redirect(
+      '/signup?err=' + encodeURIComponent('회사 조회 실패: ' + companyErr.message),
+    )
+  }
   const companyId = (companyRow as { id: string } | null)?.id
   if (!companyId) {
-    return redirect('/signup?err=' + encodeURIComponent('가입 가능한 회사가 없습니다'))
+    return redirect(
+      '/signup?err=' +
+        encodeURIComponent('가입 가능한 회사가 없습니다 (companies 테이블이 비어있음)'),
+    )
   }
 
-  const admin = createAdminClient()
   const { error } = await admin.auth.admin.createUser({
     email,
     password,
