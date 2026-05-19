@@ -1,3 +1,4 @@
+import React from 'react'
 import Link from 'next/link'
 import {
   Bell,
@@ -6,12 +7,18 @@ import {
   ClipboardCheck,
   Hammer,
   Settings,
+  Settings2,
   FileText,
   CalendarDays,
   Package,
 } from 'lucide-react'
 import { createClient } from '@/lib/supabase/server'
 import { LEAVE_TYPE_LABEL, formatPeriod, type LeaveType } from '@/lib/leave'
+import {
+  isCardVisible,
+  resolveHomeCardPrefs,
+  type HomeCardId,
+} from '@/lib/home-cards'
 import { signOut } from './login/actions'
 import VehicleStatusList from './VehicleStatusList'
 import TodayWorksCard, {
@@ -50,7 +57,7 @@ export default async function Home() {
   const { data } = await supabase
     .from('employees')
     .select(
-      'id, name, permission, position, team, work_type, can_manage_stock, workplace_type, is_active, accepted_at, company_id, companies(name)',
+      'id, name, permission, position, team, work_type, can_manage_stock, workplace_type, home_card_prefs, is_active, accepted_at, company_id, companies(name)',
     )
     .eq('auth_user_id', user.id)
     .maybeSingle()
@@ -65,6 +72,7 @@ export default async function Home() {
         work_type: string | null
         can_manage_stock: boolean
         workplace_type: '본사' | '현장' | string | null
+        home_card_prefs: unknown
         is_active: boolean
         company_id: string
         companies: { name: string } | null
@@ -412,6 +420,333 @@ export default async function Home() {
     }
   }
 
+  // 사용자 prefs 적용 — 카드 순서 + 표시 여부
+  const prefs = resolveHomeCardPrefs(employee.home_card_prefs)
+
+  // 각 카드를 한 곳에 등록. 조건(권한·데이터 없음 등)으로 null 인 카드는 자동 제외.
+  const cards: Partial<Record<HomeCardId, React.ReactNode>> = {
+    attendance: (
+      <section className="rounded-2xl bg-white shadow-sm border border-slate-200 dark:bg-slate-900 dark:border-slate-800 p-6 space-y-4">
+        <h2 className="flex items-center gap-2 text-base font-semibold text-slate-700 tracking-tight dark:text-slate-300">
+          <Clock className="h-5 w-5 text-slate-400" />
+          오늘 근태
+        </h2>
+        {checkedIn && (
+          <div className="text-base space-y-1">
+            <p className="text-slate-900">
+              <span className="font-semibold">{fmtHourMin(today!.check_in_at!)}</span> 출근
+              {todaySiteName && <span className="text-slate-500"> · {todaySiteName}</span>}
+            </p>
+            {checkedOut && (
+              <p className="text-slate-900">
+                <span className="font-semibold">{fmtHourMin(today!.check_out_at!)}</span> 퇴근
+              </p>
+            )}
+          </div>
+        )}
+        <Link
+          href="/attendance"
+          className={
+            checkedOut
+              ? 'block rounded-lg border border-slate-200 hover:border-slate-900 px-4 py-3 text-base font-medium text-slate-700 text-center'
+              : checkedIn
+                ? 'block rounded-xl bg-slate-900 hover:bg-slate-800 active:bg-slate-700 px-4 py-4 text-lg font-bold text-white text-center'
+                : 'block rounded-xl bg-emerald-600 hover:bg-emerald-700 active:bg-emerald-800 px-4 py-4 text-lg font-bold text-white text-center'
+          }
+        >
+          {checkedOut ? '근무 마감 — 기록 보기' : checkedIn ? '퇴근하기 →' : '출근하기 →'}
+        </Link>
+      </section>
+    ),
+
+    today_works:
+      pendingWorkRows.length + activeCheckRows.length + closedCheckRows.length > 0 ? (
+        <TodayWorksCard
+          pendingWorks={pendingWorkRows}
+          activeChecks={activeCheckRows}
+          closedChecks={closedCheckRows}
+        />
+      ) : undefined,
+
+    vehicles: !isFieldWorker ? (
+      <section className="rounded-2xl bg-white shadow-sm border border-slate-200 dark:bg-slate-900 dark:border-slate-800 p-6 space-y-4">
+        <h2 className="flex items-center gap-2 text-base font-semibold text-slate-700 tracking-tight dark:text-slate-300">
+          <Car className="h-5 w-5 text-slate-400" />
+          업무용 차량
+        </h2>
+        {myVehicleTrip && (
+          <div className="space-y-2">
+            <p className="text-base text-slate-900">
+              사용 중: <span className="font-semibold">{myVehicleName ?? '?'}</span>
+              <span className="ml-2 text-sm text-slate-500">
+                출고 {fmtHourMin(myVehicleTrip.departed_at)}
+              </span>
+            </p>
+            <Link
+              href={`/vehicles/${myVehicleTrip.vehicle_id}/return`}
+              className="block rounded-xl bg-emerald-600 hover:bg-emerald-700 active:bg-emerald-800 px-4 py-4 text-lg font-bold text-white text-center"
+            >
+              반납하기 →
+            </Link>
+          </div>
+        )}
+        <VehicleStatusList
+          rows={vehicleStatusRows.map(({ vehicle, trip, status }) => {
+            const lastReturn = lastReturnByVehicleId.get(vehicle.id) ?? null
+            return {
+              vehicleId: vehicle.id,
+              plateNumber: vehicle.plate_number,
+              name: vehicle.name,
+              status,
+              driverName: trip?.employees?.[0]?.name ?? null,
+              departedAt: trip?.departed_at ?? null,
+              startOdometerKm: trip?.start_odometer_km ?? null,
+              purpose: trip?.purpose ?? null,
+              isMine: trip?.driver_employee_id === employee.id,
+              lastEndOdometerKm: lastEndKmByVehicleId.get(vehicle.id) ?? null,
+              lastDriverName: lastReturn?.driverName ?? null,
+              lastReturnedAt: lastReturn?.returnedAt ?? null,
+              lastReturnLocation: lastReturn?.returnLocation ?? null,
+            }
+          })}
+          hasMyActive={!!myVehicleTrip}
+        />
+        <Link
+          href="/vehicles"
+          className="block rounded-lg border border-slate-200 hover:border-slate-900 px-4 py-3 text-base font-medium text-slate-900 dark:border-slate-800 dark:hover:border-slate-100 dark:text-slate-100 text-center"
+        >
+          전체 차량 관리 →
+        </Link>
+      </section>
+    ) : undefined,
+
+    my_materials:
+      (myHoldingsCount ?? 0) > 0 ? (
+        <section className="rounded-2xl bg-white shadow-sm border border-slate-200 dark:bg-slate-900 dark:border-slate-800 p-6 space-y-3">
+          <h2 className="flex items-center gap-2 text-base font-semibold text-slate-700 tracking-tight dark:text-slate-300">
+            <Package className="h-5 w-5 text-slate-400" />
+            내 자재
+            <span className="ml-auto inline-flex items-center rounded-full bg-emerald-100 text-emerald-800 text-xs font-bold px-2 py-0.5">
+              {myHoldingsCount}건
+            </span>
+          </h2>
+          <Link
+            href="/stock/my"
+            className="block rounded-lg border border-slate-200 hover:border-slate-900 px-4 py-3 text-base font-medium text-slate-900 dark:border-slate-800 dark:hover:border-slate-100 dark:text-slate-100 text-center"
+          >
+            보유 자재 보기 →
+          </Link>
+        </section>
+      ) : undefined,
+
+    stock_approvals:
+      isStockManager && stockApprovalsPendingCount > 0 ? (
+        <section className="rounded-2xl bg-amber-50 border border-amber-300 dark:bg-amber-900/20 dark:border-amber-800 p-6 space-y-3">
+          <h2 className="flex items-center gap-2 text-base font-semibold text-amber-800 tracking-tight dark:text-amber-200">
+            <Package className="h-5 w-5" />
+            자재 사용 승인 대기
+            <span className="ml-auto inline-flex items-center rounded-full bg-amber-200 text-amber-900 text-xs font-bold px-2 py-0.5">
+              {stockApprovalsPendingCount}건
+            </span>
+          </h2>
+          <Link
+            href="/stock/approvals"
+            className="block rounded-lg bg-amber-600 hover:bg-amber-700 px-4 py-3 text-base font-bold text-white text-center"
+          >
+            승인하러 가기 →
+          </Link>
+        </section>
+      ) : undefined,
+
+    my_works:
+      myWorkCount > 0 ? (
+        <section className="rounded-2xl bg-white shadow-sm border border-slate-200 dark:bg-slate-900 dark:border-slate-800 p-6 space-y-3">
+          <h2 className="flex items-center gap-2 text-base font-semibold text-slate-700 tracking-tight dark:text-slate-300">
+            <Hammer className="h-5 w-5 text-slate-400" />
+            내 작업 진행 목록
+            {myNewAssignmentCount > 0 && (
+              <span className="ml-auto inline-flex items-center gap-0.5 rounded-full bg-amber-100 text-amber-800 text-xs font-bold px-2 py-0.5">
+                <Bell className="h-3 w-3" />
+                신규 {myNewAssignmentCount}
+              </span>
+            )}
+          </h2>
+          <Link
+            href="/works?mine=1"
+            className="flex items-center justify-between rounded-lg border border-slate-200 hover:border-slate-900 px-4 py-3 text-base font-medium text-slate-900 dark:border-slate-800 dark:hover:border-slate-100 dark:text-slate-100"
+          >
+            <span>
+              배정된 작업 {myWorkCount}건
+              {myNewAssignmentCount > 0 && (
+                <span className="ml-1.5 text-xs font-normal text-amber-700">
+                  (최근 {NEW_ASSIGNMENT_DAYS}일 신규 {myNewAssignmentCount}건)
+                </span>
+              )}
+            </span>
+            <span className="text-sm text-slate-400">→</span>
+          </Link>
+          <p className="text-[11px] text-slate-500">
+            카드 탭 시 바로 일보 작성. 신규 배정은 호박색 「신규」 배지로 강조됩니다.
+          </p>
+        </section>
+      ) : undefined,
+
+    approvals: !isFieldWorker ? (
+      <section className="rounded-2xl bg-white shadow-sm border border-slate-200 dark:bg-slate-900 dark:border-slate-800 p-6 space-y-3">
+        <h2 className="flex items-center gap-2 text-base font-semibold text-slate-700 tracking-tight dark:text-slate-300">
+          <ClipboardCheck className="h-5 w-5 text-slate-400" />
+          결재
+        </h2>
+        <Link
+          href="/requests"
+          className="flex items-center justify-between rounded-lg border border-slate-200 hover:border-slate-900 px-4 py-3 text-base font-medium text-slate-900 dark:border-slate-800 dark:hover:border-slate-100 dark:text-slate-100"
+        >
+          <span>내 신청 (휴가·외근 등)</span>
+          {(myPendingCount ?? 0) > 0 && (
+            <span className="rounded-full bg-amber-100 text-amber-800 text-xs font-bold px-2 py-0.5">
+              대기 {myPendingCount}
+            </span>
+          )}
+        </Link>
+        {canApprove && (
+          <Link
+            href="/approvals"
+            className="flex items-center justify-between rounded-lg border border-slate-200 hover:border-slate-900 px-4 py-3 text-base font-medium text-slate-900 dark:border-slate-800 dark:hover:border-slate-100 dark:text-slate-100"
+          >
+            <span>결재함</span>
+            {approvalsPendingCount > 0 && (
+              <span className="rounded-full bg-red-600 text-white text-xs font-bold px-2 py-0.5">
+                {approvalsPendingCount}
+              </span>
+            )}
+          </Link>
+        )}
+      </section>
+    ) : undefined,
+
+    leaves: (
+      <section className="rounded-2xl bg-white shadow-sm border border-slate-200 dark:bg-slate-900 dark:border-slate-800 p-6 space-y-3">
+        <h2 className="flex items-center gap-2 text-base font-semibold text-slate-700 tracking-tight dark:text-slate-300">
+          <CalendarDays className="h-5 w-5 text-slate-400" />
+          휴가·외근 현황
+          <span className="ml-auto text-xs font-normal text-slate-400">오늘</span>
+        </h2>
+        {todayLeaves.length === 0 ? (
+          <p className="rounded-lg bg-slate-50 px-4 py-6 text-center text-sm text-slate-500">
+            오늘 휴가·외근 중인 직원이 없습니다.
+          </p>
+        ) : (
+          <ul className="divide-y divide-slate-100 rounded-lg border border-slate-200">
+            {todayLeaves.map((l) => (
+              <li key={l.id} className="px-3 py-3 text-sm">
+                <div className="flex items-start justify-between gap-2">
+                  <div className="min-w-0 flex-1">
+                    <p className="text-slate-900">
+                      <span className="font-semibold">
+                        {leaveNameById.get(l.employee_id) ?? '?'}
+                      </span>
+                      <span className="ml-1.5 text-slate-500">
+                        · {LEAVE_TYPE_LABEL[l.type]}
+                      </span>
+                    </p>
+                    <p className="mt-0.5 text-xs text-slate-500">
+                      {formatPeriod(l.start_date, l.end_date, l.start_time, l.end_time)}
+                    </p>
+                    {l.substitute_employee_id && (
+                      <p className="mt-0.5 text-xs text-slate-500">
+                        대무: {leaveNameById.get(l.substitute_employee_id) ?? '?'}
+                      </p>
+                    )}
+                  </div>
+                  <span className="shrink-0 rounded-full bg-emerald-100 text-emerald-800 text-xs font-bold px-2 py-0.5">
+                    진행 중
+                  </span>
+                </div>
+              </li>
+            ))}
+          </ul>
+        )}
+        <Link
+          href="/leaves"
+          className="block rounded-lg border border-slate-200 hover:border-slate-900 px-4 py-3 text-base font-medium text-slate-900 dark:border-slate-800 dark:hover:border-slate-100 dark:text-slate-100 text-center"
+        >
+          이번 달 전체 보기 →
+        </Link>
+      </section>
+    ),
+
+    admin: isAdmin ? (
+      <section className="rounded-2xl bg-white shadow-sm border border-slate-200 dark:bg-slate-900 dark:border-slate-800 p-6 space-y-3">
+        <h2 className="flex items-center gap-2 text-base font-semibold text-slate-700 tracking-tight dark:text-slate-300">
+          <Settings className="h-5 w-5 text-slate-400" />
+          관리
+        </h2>
+        <Link
+          href="/admin/employees"
+          className="block rounded-lg border border-slate-200 hover:border-slate-900 px-4 py-3 text-base font-medium text-slate-900 dark:border-slate-800 dark:hover:border-slate-100 dark:text-slate-100"
+        >
+          직원 관리 →
+        </Link>
+        <Link
+          href="/admin/sites"
+          className="block rounded-lg border border-slate-200 hover:border-slate-900 px-4 py-3 text-base font-medium text-slate-900 dark:border-slate-800 dark:hover:border-slate-100 dark:text-slate-100"
+        >
+          현장 관리 →
+        </Link>
+        <Link
+          href="/admin/materials"
+          className="block rounded-lg border border-slate-200 hover:border-slate-900 px-4 py-3 text-base font-medium text-slate-900 dark:border-slate-800 dark:hover:border-slate-100 dark:text-slate-100"
+        >
+          자재 마스터 →
+        </Link>
+        <Link
+          href="/admin/cables"
+          className="block rounded-lg border border-slate-200 hover:border-slate-900 px-4 py-3 text-base font-medium text-slate-900 dark:border-slate-800 dark:hover:border-slate-100 dark:text-slate-100"
+        >
+          케이블 마스터 →
+        </Link>
+        <Link
+          href="/admin/facilities"
+          className="block rounded-lg border border-slate-200 hover:border-slate-900 px-4 py-3 text-base font-medium text-slate-900 dark:border-slate-800 dark:hover:border-slate-100 dark:text-slate-100"
+        >
+          함체·국사 마스터 →
+        </Link>
+        <Link
+          href="/stock"
+          className="block rounded-lg border border-slate-200 hover:border-slate-900 px-4 py-3 text-base font-medium text-slate-900 dark:border-slate-800 dark:hover:border-slate-100 dark:text-slate-100"
+        >
+          자재 입출고 →
+        </Link>
+        <Link
+          href="/admin/reports"
+          className="block rounded-lg border border-slate-200 hover:border-slate-900 px-4 py-3 text-base font-medium text-slate-900 dark:border-slate-800 dark:hover:border-slate-100 dark:text-slate-100"
+        >
+          월별 리포트 →
+        </Link>
+      </section>
+    ) : undefined,
+
+    reports:
+      !isAdmin && employee.permission === 'team_leader' ? (
+        <section className="rounded-2xl bg-white shadow-sm border border-slate-200 dark:bg-slate-900 dark:border-slate-800 p-6 space-y-3">
+          <h2 className="flex items-center gap-2 text-base font-semibold text-slate-700 tracking-tight dark:text-slate-300">
+            <FileText className="h-5 w-5 text-slate-400" />
+            리포트
+          </h2>
+          <Link
+            href="/admin/reports"
+            className="block rounded-lg border border-slate-200 hover:border-slate-900 px-4 py-3 text-base font-medium text-slate-900 dark:border-slate-800 dark:hover:border-slate-100 dark:text-slate-100"
+          >
+            내 현장 월별 리포트 →
+          </Link>
+        </section>
+      ) : undefined,
+  }
+
+  const visibleCardIds = prefs.order.filter(
+    (id) => isCardVisible(prefs, id) && cards[id] != null,
+  )
+
   return (
     <main className="min-h-screen p-4 sm:p-6">
       <div className="mx-auto max-w-2xl space-y-6">
@@ -422,322 +757,38 @@ export default async function Home() {
               {employee.name}님 반갑습니다.
             </h1>
           </div>
-          <form action={signOut}>
-            <button className="rounded-lg border border-slate-300 px-3 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50 dark:border-slate-700 dark:text-slate-300 dark:hover:bg-slate-800">
-              로그아웃
-            </button>
-          </form>
+          <div className="flex items-center gap-2">
+            <Link
+              href="/settings/home"
+              aria-label="홈 화면 설정"
+              className="inline-flex items-center rounded-lg border border-slate-300 px-2.5 py-2 text-slate-600 hover:bg-slate-50 dark:border-slate-700 dark:text-slate-300 dark:hover:bg-slate-800"
+            >
+              <Settings2 className="h-4 w-4" />
+            </Link>
+            <form action={signOut}>
+              <button className="rounded-lg border border-slate-300 px-3 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50 dark:border-slate-700 dark:text-slate-300 dark:hover:bg-slate-800">
+                로그아웃
+              </button>
+            </form>
+          </div>
         </header>
 
-        <section className="rounded-2xl bg-white shadow-sm border border-slate-200 dark:bg-slate-900 dark:border-slate-800 p-6 space-y-4">
-          <h2 className="flex items-center gap-2 text-base font-semibold text-slate-700 tracking-tight dark:text-slate-300">
-            <Clock className="h-5 w-5 text-slate-400" />
-            오늘 근태
-          </h2>
-
-          {checkedIn && (
-            <div className="text-base space-y-1">
-              <p className="text-slate-900">
-                <span className="font-semibold">{fmtHourMin(today!.check_in_at!)}</span> 출근
-                {todaySiteName && <span className="text-slate-500"> · {todaySiteName}</span>}
-              </p>
-              {checkedOut && (
-                <p className="text-slate-900">
-                  <span className="font-semibold">{fmtHourMin(today!.check_out_at!)}</span> 퇴근
-                </p>
-              )}
-            </div>
-          )}
-
-          <Link
-            href="/attendance"
-            className={
-              checkedOut
-                ? 'block rounded-lg border border-slate-200 hover:border-slate-900 px-4 py-3 text-base font-medium text-slate-700 text-center'
-                : checkedIn
-                  ? 'block rounded-xl bg-slate-900 hover:bg-slate-800 active:bg-slate-700 px-4 py-4 text-lg font-bold text-white text-center'
-                  : 'block rounded-xl bg-emerald-600 hover:bg-emerald-700 active:bg-emerald-800 px-4 py-4 text-lg font-bold text-white text-center'
-            }
-          >
-            {checkedOut ? '근무 마감 — 기록 보기' : checkedIn ? '퇴근하기 →' : '출근하기 →'}
-          </Link>
-        </section>
-
-        {!isFieldWorker && (
-        <section className="rounded-2xl bg-white shadow-sm border border-slate-200 dark:bg-slate-900 dark:border-slate-800 p-6 space-y-4">
-          <h2 className="flex items-center gap-2 text-base font-semibold text-slate-700 tracking-tight dark:text-slate-300">
-            <Car className="h-5 w-5 text-slate-400" />
-            업무용 차량
-          </h2>
-
-          {myVehicleTrip && (
-            <div className="space-y-2">
-              <p className="text-base text-slate-900">
-                사용 중: <span className="font-semibold">{myVehicleName ?? '?'}</span>
-                <span className="ml-2 text-sm text-slate-500">
-                  출고 {fmtHourMin(myVehicleTrip.departed_at)}
-                </span>
-              </p>
-              <Link
-                href={`/vehicles/${myVehicleTrip.vehicle_id}/return`}
-                className="block rounded-xl bg-emerald-600 hover:bg-emerald-700 active:bg-emerald-800 px-4 py-4 text-lg font-bold text-white text-center"
-              >
-                반납하기 →
-              </Link>
-            </div>
-          )}
-
-          <VehicleStatusList
-            rows={vehicleStatusRows.map(({ vehicle, trip, status }) => {
-              const lastReturn = lastReturnByVehicleId.get(vehicle.id) ?? null
-              return {
-                vehicleId: vehicle.id,
-                plateNumber: vehicle.plate_number,
-                name: vehicle.name,
-                status,
-                driverName: trip?.employees?.[0]?.name ?? null,
-                departedAt: trip?.departed_at ?? null,
-                startOdometerKm: trip?.start_odometer_km ?? null,
-                purpose: trip?.purpose ?? null,
-                isMine: trip?.driver_employee_id === employee.id,
-                lastEndOdometerKm: lastEndKmByVehicleId.get(vehicle.id) ?? null,
-                lastDriverName: lastReturn?.driverName ?? null,
-                lastReturnedAt: lastReturn?.returnedAt ?? null,
-                lastReturnLocation: lastReturn?.returnLocation ?? null,
-              }
-            })}
-            hasMyActive={!!myVehicleTrip}
-          />
-
-          <Link
-            href="/vehicles"
-            className="block rounded-lg border border-slate-200 hover:border-slate-900 px-4 py-3 text-base font-medium text-slate-900 dark:border-slate-800 dark:hover:border-slate-100 dark:text-slate-100 text-center"
-          >
-            전체 차량 관리 →
-          </Link>
-        </section>
-        )}
-
-        {(myHoldingsCount ?? 0) > 0 && (
-          <section className="rounded-2xl bg-white shadow-sm border border-slate-200 dark:bg-slate-900 dark:border-slate-800 p-6 space-y-3">
-            <h2 className="flex items-center gap-2 text-base font-semibold text-slate-700 tracking-tight dark:text-slate-300">
-              <Package className="h-5 w-5 text-slate-400" />
-              내 자재
-              <span className="ml-auto inline-flex items-center rounded-full bg-emerald-100 text-emerald-800 text-xs font-bold px-2 py-0.5">
-                {myHoldingsCount}건
-              </span>
-            </h2>
-            <Link
-              href="/stock/my"
-              className="block rounded-lg border border-slate-200 hover:border-slate-900 px-4 py-3 text-base font-medium text-slate-900 dark:border-slate-800 dark:hover:border-slate-100 dark:text-slate-100 text-center"
-            >
-              보유 자재 보기 →
-            </Link>
-          </section>
-        )}
-
-        {isStockManager && stockApprovalsPendingCount > 0 && (
-          <section className="rounded-2xl bg-amber-50 border border-amber-300 dark:bg-amber-900/20 dark:border-amber-800 p-6 space-y-3">
-            <h2 className="flex items-center gap-2 text-base font-semibold text-amber-800 tracking-tight dark:text-amber-200">
-              <Package className="h-5 w-5" />
-              자재 사용 승인 대기
-              <span className="ml-auto inline-flex items-center rounded-full bg-amber-200 text-amber-900 text-xs font-bold px-2 py-0.5">
-                {stockApprovalsPendingCount}건
-              </span>
-            </h2>
-            <Link
-              href="/stock/approvals"
-              className="block rounded-lg bg-amber-600 hover:bg-amber-700 px-4 py-3 text-base font-bold text-white text-center"
-            >
-              승인하러 가기 →
-            </Link>
-          </section>
-        )}
-
-        <TodayWorksCard
-          pendingWorks={pendingWorkRows}
-          activeChecks={activeCheckRows}
-          closedChecks={closedCheckRows}
-        />
-
-        {myWorkCount > 0 && (
-          <section className="rounded-2xl bg-white shadow-sm border border-slate-200 dark:bg-slate-900 dark:border-slate-800 p-6 space-y-3">
-            <h2 className="flex items-center gap-2 text-base font-semibold text-slate-700 tracking-tight dark:text-slate-300">
-              <Hammer className="h-5 w-5 text-slate-400" />
-              내 작업 진행 목록
-              {myNewAssignmentCount > 0 && (
-                <span className="ml-auto inline-flex items-center gap-0.5 rounded-full bg-amber-100 text-amber-800 text-xs font-bold px-2 py-0.5">
-                  <Bell className="h-3 w-3" />
-                  신규 {myNewAssignmentCount}
-                </span>
-              )}
-            </h2>
-            <Link
-              href="/works?mine=1"
-              className="flex items-center justify-between rounded-lg border border-slate-200 hover:border-slate-900 px-4 py-3 text-base font-medium text-slate-900 dark:border-slate-800 dark:hover:border-slate-100 dark:text-slate-100"
-            >
-              <span>
-                배정된 작업 {myWorkCount}건
-                {myNewAssignmentCount > 0 && (
-                  <span className="ml-1.5 text-xs font-normal text-amber-700">
-                    (최근 {NEW_ASSIGNMENT_DAYS}일 신규 {myNewAssignmentCount}건)
-                  </span>
-                )}
-              </span>
-              <span className="text-sm text-slate-400">→</span>
-            </Link>
-            <p className="text-[11px] text-slate-500">
-              카드 탭 시 바로 일보 작성. 신규 배정은 호박색 「신규」 배지로 강조됩니다.
+        {visibleCardIds.length === 0 ? (
+          <section className="rounded-2xl bg-amber-50 border border-amber-200 p-6 text-center space-y-3">
+            <p className="text-sm font-medium text-amber-800">
+              표시할 카드가 없습니다. 홈 화면 설정에서 카드를 켜주세요.
             </p>
-          </section>
-        )}
-
-        {!isFieldWorker && (
-        <section className="rounded-2xl bg-white shadow-sm border border-slate-200 dark:bg-slate-900 dark:border-slate-800 p-6 space-y-3">
-          <h2 className="flex items-center gap-2 text-base font-semibold text-slate-700 tracking-tight dark:text-slate-300">
-            <ClipboardCheck className="h-5 w-5 text-slate-400" />
-            결재
-          </h2>
-          <Link
-            href="/requests"
-            className="flex items-center justify-between rounded-lg border border-slate-200 hover:border-slate-900 px-4 py-3 text-base font-medium text-slate-900 dark:border-slate-800 dark:hover:border-slate-100 dark:text-slate-100"
-          >
-            <span>내 신청 (휴가·외근 등)</span>
-            {(myPendingCount ?? 0) > 0 && (
-              <span className="rounded-full bg-amber-100 text-amber-800 text-xs font-bold px-2 py-0.5">
-                대기 {myPendingCount}
-              </span>
-            )}
-          </Link>
-          {canApprove && (
             <Link
-              href="/approvals"
-              className="flex items-center justify-between rounded-lg border border-slate-200 hover:border-slate-900 px-4 py-3 text-base font-medium text-slate-900 dark:border-slate-800 dark:hover:border-slate-100 dark:text-slate-100"
+              href="/settings/home"
+              className="inline-flex items-center gap-1.5 rounded-lg bg-amber-600 px-4 py-2 text-sm font-bold text-white hover:bg-amber-700"
             >
-              <span>결재함</span>
-              {approvalsPendingCount > 0 && (
-                <span className="rounded-full bg-red-600 text-white text-xs font-bold px-2 py-0.5">
-                  {approvalsPendingCount}
-                </span>
-              )}
-            </Link>
-          )}
-        </section>
-        )}
-
-        <section className="rounded-2xl bg-white shadow-sm border border-slate-200 dark:bg-slate-900 dark:border-slate-800 p-6 space-y-3">
-          <h2 className="flex items-center gap-2 text-base font-semibold text-slate-700 tracking-tight dark:text-slate-300">
-            <CalendarDays className="h-5 w-5 text-slate-400" />
-            휴가·외근 현황
-            <span className="ml-auto text-xs font-normal text-slate-400">오늘</span>
-          </h2>
-          {todayLeaves.length === 0 ? (
-            <p className="rounded-lg bg-slate-50 px-4 py-6 text-center text-sm text-slate-500">
-              오늘 휴가·외근 중인 직원이 없습니다.
-            </p>
-          ) : (
-            <ul className="divide-y divide-slate-100 rounded-lg border border-slate-200">
-              {todayLeaves.map((l) => (
-                <li key={l.id} className="px-3 py-3 text-sm">
-                  <div className="flex items-start justify-between gap-2">
-                    <div className="min-w-0 flex-1">
-                      <p className="text-slate-900">
-                        <span className="font-semibold">
-                          {leaveNameById.get(l.employee_id) ?? '?'}
-                        </span>
-                        <span className="ml-1.5 text-slate-500">
-                          · {LEAVE_TYPE_LABEL[l.type]}
-                        </span>
-                      </p>
-                      <p className="mt-0.5 text-xs text-slate-500">
-                        {formatPeriod(l.start_date, l.end_date, l.start_time, l.end_time)}
-                      </p>
-                      {l.substitute_employee_id && (
-                        <p className="mt-0.5 text-xs text-slate-500">
-                          대무: {leaveNameById.get(l.substitute_employee_id) ?? '?'}
-                        </p>
-                      )}
-                    </div>
-                    <span className="shrink-0 rounded-full bg-emerald-100 text-emerald-800 text-xs font-bold px-2 py-0.5">
-                      진행 중
-                    </span>
-                  </div>
-                </li>
-              ))}
-            </ul>
-          )}
-          <Link
-            href="/leaves"
-            className="block rounded-lg border border-slate-200 hover:border-slate-900 px-4 py-3 text-base font-medium text-slate-900 dark:border-slate-800 dark:hover:border-slate-100 dark:text-slate-100 text-center"
-          >
-            이번 달 전체 보기 →
-          </Link>
-        </section>
-
-        {isAdmin && (
-          <section className="rounded-2xl bg-white shadow-sm border border-slate-200 dark:bg-slate-900 dark:border-slate-800 p-6 space-y-3">
-            <h2 className="flex items-center gap-2 text-base font-semibold text-slate-700 tracking-tight dark:text-slate-300">
-              <Settings className="h-5 w-5 text-slate-400" />
-              관리
-            </h2>
-            <Link
-              href="/admin/employees"
-              className="block rounded-lg border border-slate-200 hover:border-slate-900 px-4 py-3 text-base font-medium text-slate-900 dark:border-slate-800 dark:hover:border-slate-100 dark:text-slate-100"
-            >
-              직원 관리 →
-            </Link>
-            <Link
-              href="/admin/sites"
-              className="block rounded-lg border border-slate-200 hover:border-slate-900 px-4 py-3 text-base font-medium text-slate-900 dark:border-slate-800 dark:hover:border-slate-100 dark:text-slate-100"
-            >
-              현장 관리 →
-            </Link>
-            <Link
-              href="/admin/materials"
-              className="block rounded-lg border border-slate-200 hover:border-slate-900 px-4 py-3 text-base font-medium text-slate-900 dark:border-slate-800 dark:hover:border-slate-100 dark:text-slate-100"
-            >
-              자재 마스터 →
-            </Link>
-            <Link
-              href="/admin/cables"
-              className="block rounded-lg border border-slate-200 hover:border-slate-900 px-4 py-3 text-base font-medium text-slate-900 dark:border-slate-800 dark:hover:border-slate-100 dark:text-slate-100"
-            >
-              케이블 마스터 →
-            </Link>
-            <Link
-              href="/admin/facilities"
-              className="block rounded-lg border border-slate-200 hover:border-slate-900 px-4 py-3 text-base font-medium text-slate-900 dark:border-slate-800 dark:hover:border-slate-100 dark:text-slate-100"
-            >
-              함체·국사 마스터 →
-            </Link>
-            <Link
-              href="/stock"
-              className="block rounded-lg border border-slate-200 hover:border-slate-900 px-4 py-3 text-base font-medium text-slate-900 dark:border-slate-800 dark:hover:border-slate-100 dark:text-slate-100"
-            >
-              자재 입출고 →
-            </Link>
-            <Link
-              href="/admin/reports"
-              className="block rounded-lg border border-slate-200 hover:border-slate-900 px-4 py-3 text-base font-medium text-slate-900 dark:border-slate-800 dark:hover:border-slate-100 dark:text-slate-100"
-            >
-              월별 리포트 →
+              <Settings2 className="h-4 w-4" />홈 화면 설정 →
             </Link>
           </section>
-        )}
-
-        {!isAdmin && employee.permission === 'team_leader' && (
-          <section className="rounded-2xl bg-white shadow-sm border border-slate-200 dark:bg-slate-900 dark:border-slate-800 p-6 space-y-3">
-            <h2 className="flex items-center gap-2 text-base font-semibold text-slate-700 tracking-tight dark:text-slate-300">
-              <FileText className="h-5 w-5 text-slate-400" />
-              리포트
-            </h2>
-            <Link
-              href="/admin/reports"
-              className="block rounded-lg border border-slate-200 hover:border-slate-900 px-4 py-3 text-base font-medium text-slate-900 dark:border-slate-800 dark:hover:border-slate-100 dark:text-slate-100"
-            >
-              내 현장 월별 리포트 →
-            </Link>
-          </section>
+        ) : (
+          visibleCardIds.map((id) => (
+            <React.Fragment key={id}>{cards[id]}</React.Fragment>
+          ))
         )}
 
         <p className="text-center text-xs text-slate-400">v0.1 · 사내 베타</p>

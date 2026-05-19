@@ -523,6 +523,32 @@ owner 추가 요구사항 4건 반영:
 - **leave_stage enum 의 'foreman' 값**·`assigned_foreman_id` 컬럼명은 legacy 유지 (UI 만 '팀장 단계' 로 표시)
 - **관리자가 모든 권한** + 토글로 부여: `can_manage_works` / `can_delete_works` / `can_view_stats` (rose/amber/blue 색상 분리)
 
+### ✅ 완료 (홈 화면 카드 개인화, 2026-05-19)
+
+owner 결정사항:
+
+| 항목 | 결정 | 비고 |
+|---|---|---|
+| **저장 위치** | DB (`employees.home_card_prefs jsonb`) | 디바이스 무관 (PC·핸드폰·태블릿 동일). 서버 렌더 시점에 적용 — hydration mismatch 없음 |
+| **편집 UI** | 별도 페이지 `/settings/home` | 홈 인라인 편집은 모바일 드래그·long-press 충돌. 홈 우상단 ⚙ 아이콘 진입점 |
+| **재정렬 방식** | ▲▼ 화살표 버튼 | 한국 모바일 사용자에게 직관적, ghost-tap 위험 0 |
+| **고정 카드** | 없음 (전부 숨김 가능) | admin 카드 숨겨도 BottomNav·사무탭으로 진입점 유지 |
+| **새 카드 추가 시** | `HOME_CARD_DEFAULT_ORDER` 에 추가만 하면 자동 폴백 | resolveHomeCardPrefs 가 사용자 prefs 에 없는 새 id 를 기본 위치에 끼워 넣음 (forward-compat) |
+
+- **마이그** [`0030_home_card_prefs.sql`](./supabase/migrations/0030_home_card_prefs.sql): `employees.home_card_prefs jsonb default '{}'` 1 컬럼. 기존 `employees_update_self` RLS 가 본인 row 갱신 허용
+- **공통 lib** [`src/lib/home-cards.ts`](./src/lib/home-cards.ts):
+  - `HomeCardId` type (10종: attendance·today_works·vehicles·my_materials·stock_approvals·my_works·approvals·leaves·admin·reports)
+  - `HOME_CARD_LABEL`·`HOME_CARD_DESCRIPTION` 매핑
+  - `resolveHomeCardPrefs(raw)` — jsonb → `{ order, hidden }` 정규화 + 알 수 없는 id·중복 제거 + 누락 id 기본 순서로 보충
+  - `isCardVisible(prefs, id)` + `isValidHomeCardId(v)`
+- **server actions** [`src/app/settings/home/actions.ts`](./src/app/settings/home/actions.ts): `moveHomeCard(up|down)`·`toggleHomeCardVisible`·`resetHomeCardPrefs`. 본인 row 만 update (RLS 가 한 번 더 막아줌)
+- **/settings/home** [`src/app/settings/home/page.tsx`](./src/app/settings/home/page.tsx): 카드 리스트 + ▲▼ 화살표 + 「표시/숨김」 토글 + 「기본 설정으로 초기화」 버튼. 카드 비활성 row 는 회색·취소선
+- **홈** [`src/app/page.tsx`](./src/app/page.tsx):
+  - 카드들을 `Partial<Record<HomeCardId, ReactNode>>` 맵으로 별수화 (조건부 카드는 undefined)
+  - prefs 순서대로 visible 카드만 Fragment 로 렌더
+  - 우상단 ⚙ 아이콘 진입점 (로그아웃 버튼 옆)
+  - 모든 카드를 숨겼을 때는 amber 안내 박스 + 설정 진입 CTA 노출
+
 ### ✅ 완료 (오늘 작업 체크 — 시작·마감 의사결정 기록, 2026-05-19)
 
 owner 결정사항:
@@ -581,6 +607,7 @@ owner 결정사항:
   - [`0027_signup_and_work_type_rework.sql`](./supabase/migrations/0027_signup_and_work_type_rework.sql) — 회원가입 흐름 + work_type enum 재구성 + vehicle_plate + return_location + 트리거 갱신
   - [`0028_employees_workplace.sql`](./supabase/migrations/0028_employees_workplace.sql) — 직원 본사/현장 구분 컬럼 (현장 = 사무탭·차량·결재 비표시)
   - [`0029_work_daily_checks.sql`](./supabase/migrations/0029_work_daily_checks.sql) — 오늘 작업 체크 + decision enum + security definer 함수 2개
+  - [`0030_home_card_prefs.sql`](./supabase/migrations/0030_home_card_prefs.sql) — 홈 카드 개인화 (`employees.home_card_prefs jsonb`)
 - **외선일보 별도 entity (v2)** — 접속일보와 동일 패턴으로 외선팀 전용 모듈. 외선 작업 특성(케이블 포설구간·전주번호 등)에 맞는 구조 별도 설계.
 - **접속일보 후속 (v2)** — segment-level 작업자 태그, 사진 첨부 + EXIF, 국사·함체 마스터 테이블화, 재접속 이력 조회, 지도 시각화
 - **M3 Phase 2 후속** — 사진 첨부 + EXIF·워터마크 (PRD M3-06), 일보 결재함 통합 (현재는 작업 상세에서 진입), 일반 일보 월별 CSV 리포트
