@@ -3,12 +3,14 @@ import { redirect } from 'next/navigation'
 import { CalendarDays, ChevronLeft } from 'lucide-react'
 import { createClient } from '@/lib/supabase/server'
 import {
+  calcLeaveUsage,
   calcRemaining,
   currentPeriodSeq,
   formatLeaveDays,
   formatPeriodRange,
   periodLabel,
 } from '@/lib/annual-leave'
+import type { LeaveType } from '@/lib/leave'
 import { RequestForm, type ForemanOption } from './RequestForm'
 import type { EmployeeOption } from './EmployeeCombobox'
 
@@ -45,6 +47,20 @@ export default async function NewRequestPage() {
     is_active: boolean
   } | null
   if (!me || !me.is_active) redirect('/?err=' + encodeURIComponent('계정이 활성 상태가 아닙니다'))
+
+  // 본인 대기 중 신청들의 차감 예정 합계
+  let pendingUsage = 0
+  {
+    const { data: pendingRows } = await supabase
+      .from('leave_requests')
+      .select('type, start_date, end_date')
+      .eq('employee_id', me.id)
+      .eq('status', '대기')
+    type PR = { type: LeaveType; start_date: string; end_date: string }
+    for (const p of (pendingRows ?? []) as PR[]) {
+      pendingUsage += calcLeaveUsage(p.type, p.start_date, p.end_date)
+    }
+  }
 
   // 본인 잔여 연차 (현재 회차)
   const currentSeq = me.hire_date ? currentPeriodSeq(me.hire_date) : null
@@ -169,6 +185,28 @@ export default async function NewRequestPage() {
                   · 잔여 1일 미만 — 신청 전 확인 권장
                 </span>
               )}
+            </p>
+            {pendingUsage > 0 && (
+              <p className="mt-1 rounded-md bg-amber-100/60 px-2 py-1 text-[11px] font-medium text-amber-800">
+                대기 중 신청 {formatLeaveDays(pendingUsage)} · 모두 승인 시{' '}
+                <span
+                  className={
+                    'font-bold tabular-nums ' +
+                    (myBalance.remaining - pendingUsage < 0
+                      ? 'text-rose-700'
+                      : 'text-amber-900')
+                  }
+                >
+                  {formatLeaveDays(
+                    Number((myBalance.remaining - pendingUsage).toFixed(2)),
+                  )}
+                </span>
+              </p>
+            )}
+            <p className="mt-1 text-[11px]">
+              <Link href="/my-leaves" className="text-slate-600 underline-offset-2 hover:underline">
+                전체 회차·이력 보기 →
+              </Link>
             </p>
           </section>
         )}

@@ -1,6 +1,6 @@
 import Link from 'next/link'
 import { notFound } from 'next/navigation'
-import { CalendarDays, ChevronLeft, RefreshCw } from 'lucide-react'
+import { CalendarDays, ChevronLeft, Download, RefreshCw } from 'lucide-react'
 import { createClient } from '@/lib/supabase/server'
 import {
   calcRemaining,
@@ -82,6 +82,43 @@ export default async function AdminAnnualLeavesPage() {
 
   const totalEmpsWithHire = emps.filter((e) => e.hire_date).length
 
+  // 팀별 사용률 통계 — 활성 직원 + 현재 회차만
+  const teamStats = new Map<string, { count: number; granted: number; used: number }>()
+  for (const e of emps) {
+    if (!e.is_active || !e.hire_date) continue
+    const currentSeqE = currentPeriodSeq(e.hire_date)
+    const bal = balances.find(
+      (b) => b.employee_id === e.id && b.period_seq === currentSeqE,
+    )
+    if (!bal) continue
+    const teamKey = e.team || '미지정'
+    const prev = teamStats.get(teamKey) ?? { count: 0, granted: 0, used: 0 }
+    teamStats.set(teamKey, {
+      count: prev.count + 1,
+      granted: Number((prev.granted + Number(bal.granted)).toFixed(2)),
+      used: Number((prev.used + Number(bal.used)).toFixed(2)),
+    })
+  }
+  const teamRows = Array.from(teamStats.entries())
+    .map(([team, s]) => ({
+      team,
+      count: s.count,
+      granted: s.granted,
+      used: s.used,
+      remaining: Number((s.granted - s.used).toFixed(2)),
+      usageRate: s.granted > 0 ? Math.round((s.used / s.granted) * 100) : 0,
+    }))
+    .sort((a, b) => b.usageRate - a.usageRate)
+
+  // 현재 월 (CSV 기본값)
+  const thisMonth = new Intl.DateTimeFormat('en-CA', {
+    timeZone: 'Asia/Seoul',
+    year: 'numeric',
+    month: '2-digit',
+  })
+    .format(new Date())
+    .slice(0, 7)
+
   return (
     <main className="min-h-screen p-4 sm:p-6">
       <div className="mx-auto max-w-3xl space-y-5">
@@ -122,6 +159,99 @@ export default async function AdminAnnualLeavesPage() {
             </button>
           </form>
         </section>
+
+        {/* CSV 다운로드 */}
+        <section className="rounded-2xl bg-white border border-slate-200 p-4 space-y-3">
+          <div>
+            <p className="text-sm font-semibold text-slate-700">CSV 내보내기</p>
+            <p className="text-xs text-slate-500">근로감독·노무사 제출용</p>
+          </div>
+          <div className="flex flex-wrap items-center gap-2">
+            <a
+              href="/api/reports/annual-leave-balances"
+              className="inline-flex items-center gap-1 rounded-lg border border-slate-300 px-3 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50"
+            >
+              <Download className="h-4 w-4" />
+              직원별 잔여 (전체 회차)
+            </a>
+            <form
+              method="get"
+              action="/api/reports/annual-leave-usage"
+              className="inline-flex items-center gap-1.5 rounded-lg border border-slate-300 bg-white px-2 py-1"
+            >
+              <input
+                type="month"
+                name="month"
+                defaultValue={thisMonth}
+                className="rounded border border-slate-200 px-2 py-1 text-sm"
+              />
+              <button
+                type="submit"
+                className="inline-flex items-center gap-1 rounded bg-slate-100 px-2.5 py-1 text-sm font-medium text-slate-700 hover:bg-slate-200"
+              >
+                <Download className="h-3.5 w-3.5" />
+                월별 사용
+              </button>
+            </form>
+          </div>
+        </section>
+
+        {/* 팀별 사용률 통계 */}
+        {teamRows.length > 0 && (
+          <section className="rounded-2xl bg-white border border-slate-200 p-4 space-y-3">
+            <div>
+              <p className="text-sm font-semibold text-slate-700">팀별 사용률 (현재 회차)</p>
+              <p className="text-xs text-slate-500">
+                활성 직원·현재 회차 기준 합산. 사용률 = 사용 / 부여
+              </p>
+            </div>
+            <ul className="divide-y divide-slate-100 rounded-lg border border-slate-200">
+              {teamRows.map((t) => (
+                <li key={t.team} className="px-3 py-2.5 text-sm">
+                  <div className="flex items-center justify-between gap-2">
+                    <p className="font-medium text-slate-900">
+                      {t.team}
+                      <span className="ml-2 text-xs font-normal text-slate-500">
+                        {t.count}명
+                      </span>
+                    </p>
+                    <span
+                      className={
+                        'text-sm font-bold tabular-nums ' +
+                        (t.usageRate >= 80
+                          ? 'text-rose-600'
+                          : t.usageRate >= 50
+                            ? 'text-amber-700'
+                            : 'text-emerald-700')
+                      }
+                    >
+                      {t.usageRate}%
+                    </span>
+                  </div>
+                  <div className="mt-1 h-1.5 w-full rounded-full bg-slate-100 overflow-hidden">
+                    <div
+                      className={
+                        'h-full transition-all ' +
+                        (t.usageRate >= 80
+                          ? 'bg-rose-500'
+                          : t.usageRate >= 50
+                            ? 'bg-amber-500'
+                            : 'bg-emerald-500')
+                      }
+                      style={{ width: `${Math.min(100, t.usageRate)}%` }}
+                    />
+                  </div>
+                  <p className="mt-1 text-[11px] text-slate-500">
+                    부여 {formatLeaveDays(t.granted)} · 사용 {formatLeaveDays(t.used)} · 잔여{' '}
+                    <span className="font-semibold text-slate-700">
+                      {formatLeaveDays(t.remaining)}
+                    </span>
+                  </p>
+                </li>
+              ))}
+            </ul>
+          </section>
+        )}
 
         <ul className="space-y-3">
           {emps.map((emp) => {

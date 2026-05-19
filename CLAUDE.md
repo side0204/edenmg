@@ -564,6 +564,24 @@ owner 결정사항:
 - **홈 카드** [page.tsx](src/app/page.tsx) 에 `annual_leave` 카드 추가 (입사일·회차 부여 시에만 노출). 관리자 카드에 「연차 관리」 링크 추가
 - **홈 카드 개인화** [`home-cards.ts`](./src/lib/home-cards.ts): `annual_leave` id 등록 + 기본 순서·라벨·설명
 
+#### 후속 (2026-05-19): /my-leaves · 대기 합계 · CSV · 팀별 통계 · 다음 회차 미리보기
+
+- **/my-leaves** [`src/app/my-leaves/page.tsx`](./src/app/my-leaves/page.tsx) — 직원 본인 페이지
+  - 현재 회차 큰 잔여 카드 (휴가 신청 진입점)
+  - 다음 회차 미리보기 (blue) — N주년 시작 시 부여 예정 일수
+  - 이전 회차 리스트
+  - 본인 휴가 신청 이력 (100건, /requests/[id] 링크)
+  - audit (annual_leave_grants) 이력 — admin 부여·조정 추적
+- **대기 신청 합계** — 현재 잔여에서 「대기 중 신청 X일 · 승인 시 Y일」 amber 줄 표시
+  - 홈 「내 연차 잔여」 카드
+  - /requests/new 잔여 카드
+  - /my-leaves 헤더 카드
+- **다음 회차 미리보기**: 홈 카드 + /my-leaves 양쪽에 blue 박스로 N주년 일수·기간 표시
+- **관리자 CSV** ([api/reports/annual-leave-balances](src/app/api/reports/annual-leave-balances/route.ts) · [annual-leave-usage](src/app/api/reports/annual-leave-usage/route.ts))
+  - 잔여 CSV — 직원 × 모든 회차 (잔여 표)
+  - 사용 CSV — 월별 (status='승인' + 차감 대상만)
+- **팀별 사용률 통계** — /admin/annual-leaves 하단. 활성 직원 × 현재 회차 합산. progress bar + 사용률(% ≥80 rose, ≥50 amber)
+
 ### ✅ 완료 (홈 화면 카드 개인화, 2026-05-19)
 
 owner 결정사항:

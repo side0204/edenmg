@@ -15,10 +15,13 @@ import {
 import { createClient } from '@/lib/supabase/server'
 import { LEAVE_TYPE_LABEL, formatPeriod, type LeaveType } from '@/lib/leave'
 import {
+  calcLeaveUsage,
   calcRemaining,
   currentPeriodSeq,
   formatLeaveDays,
   formatPeriodRange,
+  legalGrantForYear,
+  periodDates,
   periodLabel,
 } from '@/lib/annual-leave'
 import {
@@ -391,6 +394,26 @@ export default async function Home() {
       }
     }
   }
+  // 본인 대기 신청 합계 (잔여 카드의 amber 줄)
+  let annualPendingUsage = 0
+  if (annualCurrentSeq !== null) {
+    const { data: pendingRows } = await supabase
+      .from('leave_requests')
+      .select('type, start_date, end_date')
+      .eq('employee_id', employee.id)
+      .eq('status', '대기')
+    type PR = { type: LeaveType; start_date: string; end_date: string }
+    for (const p of (pendingRows ?? []) as PR[]) {
+      annualPendingUsage += calcLeaveUsage(p.type, p.start_date, p.end_date)
+    }
+  }
+  // 다음 회차 미리보기
+  let nextAnnualPeriod: { seq: number; start: string; end: string; granted: number } | null = null
+  if (employee.hire_date && annualCurrentSeq !== null) {
+    const nextSeq = annualCurrentSeq + 1
+    const { start, end } = periodDates(employee.hire_date, nextSeq)
+    nextAnnualPeriod = { seq: nextSeq, start, end, granted: legalGrantForYear(nextSeq) }
+  }
 
   // 결재 대기 건수 (홈 배지용)
   const canApprove = employee.permission !== 'worker'
@@ -697,6 +720,38 @@ export default async function Home() {
             <span className="ml-1.5 font-medium text-rose-600">· 한도 초과</span>
           )}
         </p>
+        {annualPendingUsage > 0 && (
+          <p className="rounded-md bg-amber-50 border border-amber-200 px-2 py-1.5 text-[11px] font-medium text-amber-800">
+            대기 중 신청 {formatLeaveDays(annualPendingUsage)} · 승인 시{' '}
+            <span
+              className={
+                'font-bold tabular-nums ' +
+                (annualBalance.remaining - annualPendingUsage < 0
+                  ? 'text-rose-700'
+                  : 'text-amber-900')
+              }
+            >
+              {formatLeaveDays(
+                Number((annualBalance.remaining - annualPendingUsage).toFixed(2)),
+              )}
+            </span>
+          </p>
+        )}
+        {nextAnnualPeriod && (
+          <p className="rounded-md bg-blue-50 border border-blue-200 px-2 py-1.5 text-[11px] text-blue-800">
+            <span className="font-semibold">{periodLabel(nextAnnualPeriod.seq)}</span> 시작 시{' '}
+            <span className="font-bold tabular-nums">{formatLeaveDays(nextAnnualPeriod.granted)}</span> 부여 예정 ·{' '}
+            <span className="tabular-nums">
+              {formatPeriodRange(nextAnnualPeriod.start, nextAnnualPeriod.end)}
+            </span>
+          </p>
+        )}
+        <Link
+          href="/my-leaves"
+          className="block rounded-lg border border-slate-200 hover:border-slate-900 px-4 py-2 text-sm font-medium text-slate-900 dark:border-slate-800 dark:hover:border-slate-100 dark:text-slate-100 text-center"
+        >
+          전체 이력 보기 →
+        </Link>
       </section>
     ) : undefined,
 
