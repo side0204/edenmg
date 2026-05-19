@@ -51,7 +51,7 @@ export default async function MyRequestsPage() {
   return (
     <main className="min-h-screen p-4 sm:p-6">
       <div className="mx-auto max-w-2xl space-y-5">
-        <header className="flex items-center justify-between gap-3">
+        <header className="space-y-3 sm:space-y-0 sm:flex sm:items-center sm:justify-between sm:gap-3">
           <div>
             <Link href="/" className="inline-flex items-center gap-1 text-sm text-slate-500 hover:text-slate-900">
               <ChevronLeft className="h-4 w-4" />

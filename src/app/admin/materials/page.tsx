@@ -49,7 +49,7 @@ export default async function MaterialsPage() {
   return (
     <main className="min-h-screen p-4 sm:p-6">
       <div className="mx-auto max-w-3xl space-y-5">
-        <header className="flex items-center justify-between gap-3">
+        <header className="space-y-3 sm:space-y-0 sm:flex sm:items-center sm:justify-between sm:gap-3">
           <div>
             <Link
               href="/"
