@@ -5,8 +5,17 @@ import { NextResponse, type NextRequest } from 'next/server'
 // 이 파일은 모든 요청에 대해:
 //   1) Supabase 세션 쿠키를 읽고 필요하면 갱신해 응답 쿠키에 다시 쓰고
 //   2) 비로그인 사용자가 보호 경로에 접근하면 /login 으로 리다이렉트한다.
+//   3) 현장 직원이 사무 그룹(근태·차량·결재) URL 직접 접근 시 홈으로 리다이렉트.
 
 const PUBLIC_PREFIXES = ['/login', '/signup', '/auth/'] as const
+
+// 현장(workplace_type='현장') 직원이 접근 불가한 경로
+const FIELD_BLOCKED_PREFIXES = [
+  '/attendance',
+  '/vehicles',
+  '/requests',
+  '/approvals',
+] as const
 
 export async function proxy(request: NextRequest) {
   let response = NextResponse.next({ request })
@@ -51,6 +60,23 @@ export async function proxy(request: NextRequest) {
     const url = request.nextUrl.clone()
     url.pathname = '/'
     return NextResponse.redirect(url)
+  }
+
+  // 현장 직원의 사무 그룹 URL 직접 접근 차단 — 차단 prefix 일 때만 DB 조회
+  if (user && FIELD_BLOCKED_PREFIXES.some((p) => path === p || path.startsWith(p + '/') || path === p)) {
+    const { data } = await supabase
+      .from('employees')
+      .select('workplace_type')
+      .eq('auth_user_id', user.id)
+      .maybeSingle()
+    const workplace = (data as { workplace_type?: string } | null)?.workplace_type
+    if (workplace === '현장') {
+      const url = request.nextUrl.clone()
+      url.pathname = '/'
+      url.search =
+        '?err=' + encodeURIComponent('현장 직원은 사무 그룹 페이지에 접근할 수 없습니다')
+      return NextResponse.redirect(url)
+    }
   }
 
   return response
