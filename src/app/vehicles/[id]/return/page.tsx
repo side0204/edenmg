@@ -162,6 +162,21 @@ export default async function ReturnPage({
           </fieldset>
 
           <label className="block">
+            <span className="block text-sm font-medium text-slate-700">반납 위치 (선택)</span>
+            <div className="mt-1">
+              <input
+                name="return_location"
+                maxLength={200}
+                placeholder="예: 본사 주차장, 강남현장 지하 1층"
+                className="w-full rounded-lg border border-slate-300 px-3 py-2.5 text-base bg-white focus:border-slate-900 focus:outline-none focus:ring-1 focus:ring-slate-900"
+              />
+            </div>
+            <p className="mt-1 text-xs text-slate-400">
+              다음 사용자가 차량 위치를 파악할 수 있게 적어주세요.
+            </p>
+          </label>
+
+          <label className="block">
             <span className="block text-sm font-medium text-slate-700">메모 (선택)</span>
             <div className="mt-1">
               <textarea

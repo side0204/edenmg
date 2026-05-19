@@ -431,6 +431,42 @@ owner 결정사항:
 - 반납 (Phase 2)
 - 현장 창고 + 창고 간 이동 (Phase 3)
 
+### ✅ 완료 (회원가입 흐름 + work_type 재구성 + 차량 반납위치, 2026-05-19)
+
+owner 요구사항:
+- 직원 추가를 「초대」에서 「회원가입 + 관리자 승인」 흐름으로 전환
+- 관리자 승인 시 개별 권한(권한 enum + 토글) 한 번에 부여
+- 직무 6개 (사무·자재담당·외선팀·접속팀·장비팀·신호수) — 기존 work_type 재구성
+- 접속팀 차량번호 필수, 외선팀 선택
+- 차량 대기 카드에 최종 사용자 + 반납 위치 표시
+
+- **마이그** [`0027_signup_and_work_type_rework.sql`](./supabase/migrations/0027_signup_and_work_type_rework.sql):
+  - `employee_work_type` enum: 공무→사무, 외선→외선팀, 접속→접속팀 (rename) + 자재담당·장비팀·신호수 (add)
+  - `employees.vehicle_plate text`
+  - `vehicle_trips.return_location text`
+  - `handle_new_auth_user` 트리거 갱신: phone·vehicle_plate 메타데이터 수집 + 회사 1개면 자동 매핑 + 신규 가입은 `is_active=false`/`accepted_at=null` 로 저장 (관리자 승인 대기)
+- **회원가입 페이지** [`/signup`](./src/app/signup/page.tsx) + [`SignupForm`](./src/app/signup/SignupForm.tsx):
+  - 이름·이메일·비밀번호·전화번호·직무·차량번호
+  - 직무에 따라 차량번호 input 동적 표시 (접속팀 필수, 외선팀 선택, 그 외 미표시)
+  - admin client 의 `createUser({ email_confirm: true })` 로 즉시 활성 user 생성 → 트리거가 employees row 생성 (is_active=false)
+  - `/signup/pending` 으로 안내 (관리자 승인 대기)
+- **로그인**: 「가입 신청」 링크 추가
+- **proxy.ts**: `/signup` 도 PUBLIC_PREFIXES 에 포함
+- **/admin/employees**:
+  - 「가입 승인 대기」 섹션 (is_active=false + accepted_at=null) — 권한 select + 토글 4종 (manage/delete/stats/stock) + 승인/거부 버튼
+  - 승인 = `approveSignup` (is_active=true·accepted_at·permission·토글 한 번에 적용)
+  - 거부 = `rejectSignup` (admin client `auth.admin.deleteUser` + employees row 삭제)
+  - 활성 직원 카드에 차량번호 인라인 입력 (접속팀·외선팀 표시). 접속팀은 plate 필수 검증 (server action)
+- **invite 페이지** [`/admin/employees/invite`](./src/app/admin/employees/invite/page.tsx): 폐기 안내 + 회원가입 흐름 설명 + `/signup` 링크
+- **차량 반납 폼** [`/vehicles/[id]/return`](./src/app/vehicles/[id]/return/page.tsx): 「반납 위치」 input 추가 (선택)
+- **차량 페이지 + 홈 차량 카드**: 대기 상태 차량 카드에 「최종 반납」 정보 (사용자·시각·위치) 표시. `lastReturnByVehicleId` 매핑 fetch (반납 100건 desc → vehicle_id 별 첫 행)
+- **모바일 모달 안전 패턴** 변동 없음 (기존 패턴 그대로)
+
+**기존 work_type 코드 정정**:
+- WorkersMultiSelect: `'접속' / '외선'` → `'접속팀' / '외선팀'`. `'공무'` → `'사무'`. 신규 4 직무 색상 추가
+- WORK_TYPE_VALUES (fields.ts): 6 개로 확장
+- /works/page.tsx subtab URL key 는 단축 표기 (`외선`/`접속`) 유지, DB 값과만 매핑
+
 ### ✅ 완료 (M4 Phase 2-A — 자재 사용 승인·초과 사유·취득사유, 2026-05-19)
 
 owner 추가 요구사항 4건 반영:
@@ -510,6 +546,7 @@ owner 추가 요구사항 4건 반영:
   - [`0024_holdings_issuances.sql`](./supabase/migrations/0024_holdings_issuances.sql) — M4: 작업자 holding + 출고 이력
   - [`0025_can_manage_stock_and_report_link.sql`](./supabase/migrations/0025_can_manage_stock_and_report_link.sql) — M4: can_manage_stock 토글 + daily_report_materials + 일보 자재 holding FK
   - [`0026_stock_use_approval.sql`](./supabase/migrations/0026_stock_use_approval.sql) — M4 Phase 2-A: 자재 사용 승인 + 초과 사유 + 취득사유 + low_value 토글
+  - [`0027_signup_and_work_type_rework.sql`](./supabase/migrations/0027_signup_and_work_type_rework.sql) — 회원가입 흐름 + work_type enum 재구성 + vehicle_plate + return_location + 트리거 갱신
 - **외선일보 별도 entity (v2)** — 접속일보와 동일 패턴으로 외선팀 전용 모듈. 외선 작업 특성(케이블 포설구간·전주번호 등)에 맞는 구조 별도 설계.
 - **접속일보 후속 (v2)** — segment-level 작업자 태그, 사진 첨부 + EXIF, 국사·함체 마스터 테이블화, 재접속 이력 조회, 지도 시각화
 - **M3 Phase 2 후속** — 사진 첨부 + EXIF·워터마크 (PRD M3-06), 일보 결재함 통합 (현재는 작업 상세에서 진입), 일반 일보 월별 CSV 리포트

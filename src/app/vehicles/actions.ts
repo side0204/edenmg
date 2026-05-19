@@ -182,6 +182,7 @@ export async function returnVehicle(formData: FormData) {
   const refueled = formData.get('refueled') === 'on'
   const refuelAmount = refueled ? parseInt0OrNull(formData.get('refuel_amount_krw')) : null
   const purposeOverride = String(formData.get('purpose') ?? '').trim()
+  const returnLocation = String(formData.get('return_location') ?? '').trim() || null
 
   if (endKm !== null && endKm < 0) {
     redirect(`/vehicles/${vehicleId}/return?err=` + encodeURIComponent('도착 km 는 0 이상이어야 합니다'))
@@ -226,6 +227,7 @@ export async function returnVehicle(formData: FormData) {
     end_odometer_km: endKm,
     refueled,
     refuel_amount_krw: refueled ? refuelAmount : null,
+    return_location: returnLocation,
   }
   if (purposeOverride) update.purpose = purposeOverride
 

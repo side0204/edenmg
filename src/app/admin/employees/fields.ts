@@ -10,7 +10,20 @@ export const PERMISSION_VALUES: readonly Permission[] = [
 ]
 export const POSITION_VALUES = ['이사', '부장', '차장', '과장', '대리', '사원'] as const
 export const TEAM_VALUES = ['지장', '계획', '공가', '청약', '정산', '자재', '지원'] as const
-export const WORK_TYPE_VALUES = ['공무', '외선', '접속'] as const
+// 0027 마이그에서 enum rename: 공무→사무, 외선→외선팀, 접속→접속팀.
+// 신규 추가: 자재담당, 장비팀, 신호수.
+export const WORK_TYPE_VALUES = [
+  '사무',
+  '자재담당',
+  '외선팀',
+  '접속팀',
+  '장비팀',
+  '신호수',
+] as const
+
+// 차량번호 필수 여부 — 접속팀 필수, 외선팀 선택, 그 외 미사용
+export const VEHICLE_PLATE_REQUIRED_WORK_TYPES = new Set<string>(['접속팀'])
+export const VEHICLE_PLATE_OPTIONAL_WORK_TYPES = new Set<string>(['외선팀'])
 
 export const PERMISSION_LABEL: Record<Permission, string> = {
   worker: '작업자',

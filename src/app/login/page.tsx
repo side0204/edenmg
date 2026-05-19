@@ -1,3 +1,4 @@
+import Link from 'next/link'
 import { signIn } from './actions'
 
 export default function LoginPage() {
@@ -42,8 +43,14 @@ export default function LoginPage() {
           로그인
         </button>
 
-        <p className="text-xs text-slate-500 text-center">
-          계정이 없으시면 관리자에게 초대를 요청해주세요
+        <p className="text-sm text-slate-600 text-center">
+          계정이 없으신가요?{' '}
+          <Link href="/signup" className="font-medium text-slate-900 underline">
+            가입 신청
+          </Link>
+        </p>
+        <p className="text-xs text-slate-400 text-center">
+          신청 후 관리자 승인을 거쳐야 로그인할 수 있습니다.
         </p>
       </form>
     </main>

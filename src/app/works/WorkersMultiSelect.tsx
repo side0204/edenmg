@@ -70,12 +70,12 @@ export function WorkersMultiSelect({
 
   // 추가 시 default worker_type:
   //   1) 작업의 worker_type (props)
-  //   2) 직원의 work_type(분야) 매핑 (공무→기타, 외선→외선팀, 접속→접속팀)
+  //   2) 직원의 work_type(직무) 매핑
   //   3) '기타'
   const computeDefaultWorkerType = (emp: EmployeeOption): WorkWorkerType => {
     if (defaultWorkerType) return defaultWorkerType
-    if (emp.work_type === '접속') return '접속팀'
-    if (emp.work_type === '외선') return '외선팀'
+    if (emp.work_type === '접속팀') return '접속팀'
+    if (emp.work_type === '외선팀') return '외선팀'
     return '기타'
   }
 
@@ -362,8 +362,11 @@ export function WorkersMultiSelect({
 }
 
 function workTypeBadgeClass(workType: string): string {
-  if (workType === '접속') return 'border-blue-200 bg-blue-50 text-blue-700'
-  if (workType === '외선') return 'border-orange-200 bg-orange-50 text-orange-700'
-  if (workType === '공무') return 'border-violet-200 bg-violet-50 text-violet-700'
+  if (workType === '접속팀') return 'border-blue-200 bg-blue-50 text-blue-700'
+  if (workType === '외선팀') return 'border-orange-200 bg-orange-50 text-orange-700'
+  if (workType === '사무') return 'border-violet-200 bg-violet-50 text-violet-700'
+  if (workType === '자재담당') return 'border-emerald-200 bg-emerald-50 text-emerald-700'
+  if (workType === '장비팀') return 'border-amber-200 bg-amber-50 text-amber-700'
+  if (workType === '신호수') return 'border-rose-200 bg-rose-50 text-rose-700'
   return 'border-slate-200 bg-slate-50 text-slate-600'
 }

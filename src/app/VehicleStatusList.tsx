@@ -15,6 +15,10 @@ type Row = {
   purpose: string | null
   isMine: boolean
   lastEndOdometerKm: number | null
+  // 「대기」 상태일 때 최종 사용자 + 반납위치 (idle 만 의미)
+  lastDriverName: string | null
+  lastReturnedAt: string | null
+  lastReturnLocation: string | null
 }
 
 const TIME_FMT = new Intl.DateTimeFormat('ko-KR', {
@@ -99,6 +103,14 @@ export default function VehicleStatusList({
                       {r.driverName} · 출고 {TIME_FMT.format(new Date(r.departedAt))}
                     </p>
                   )}
+                  {r.status === 'idle' && (r.lastDriverName || r.lastReturnLocation) && (
+                    <p className="text-xs text-slate-500 mt-0.5 truncate">
+                      {r.lastDriverName && <>최종 {r.lastDriverName}</>}
+                      {r.lastReturnLocation && (
+                        <> · 반납위치 {r.lastReturnLocation}</>
+                      )}
+                    </p>
+                  )}
                   {isBlockedIdle && (
                     <p className="text-xs text-amber-700 mt-0.5">
                       먼저 본인 차량을 반납해야 출고 가능
@@ -147,6 +159,17 @@ export default function VehicleStatusList({
                   className="bg-slate-50 border-t border-slate-100 px-3 py-3 space-y-3"
                 >
                   <input type="hidden" name="vehicle_id" value={r.vehicleId} />
+
+                  {(r.lastDriverName || r.lastReturnLocation || r.lastReturnedAt) && (
+                    <div className="rounded-md bg-white border border-slate-200 p-2 text-xs text-slate-600 space-y-0.5">
+                      <p className="font-medium text-slate-700">최종 반납 정보</p>
+                      {r.lastDriverName && <p>사용자: {r.lastDriverName}</p>}
+                      {r.lastReturnedAt && (
+                        <p>시각: {TIME_FMT.format(new Date(r.lastReturnedAt))}</p>
+                      )}
+                      {r.lastReturnLocation && <p>위치: {r.lastReturnLocation}</p>}
+                    </div>
+                  )}
 
                   <label className="block">
                     <span className="block text-xs font-medium text-slate-700">출발 km (선택)</span>

@@ -52,7 +52,7 @@ export default async function Home() {
   const { data } = await supabase
     .from('employees')
     .select(
-      'id, name, permission, position, team, work_type, can_manage_stock, is_active, company_id, companies(name)',
+      'id, name, permission, position, team, work_type, can_manage_stock, is_active, accepted_at, company_id, companies(name)',
     )
     .eq('auth_user_id', user.id)
     .maybeSingle()
@@ -92,11 +92,19 @@ export default async function Home() {
   }
 
   if (!employee.is_active) {
+    // 가입 직후엔 accepted_at = null. 관리자 승인 시 채워짐.
+    const isFirstApproval = !(employee as { accepted_at?: string | null }).accepted_at
     return (
       <main className="min-h-screen flex items-center justify-center p-4">
         <div className="w-full max-w-md bg-white rounded-2xl shadow-sm border border-slate-200 p-6 sm:p-8 text-center space-y-4">
-          <h1 className="text-xl font-bold text-slate-900">비활성화된 계정입니다</h1>
-          <p className="text-sm text-slate-600">관리자에게 문의해주세요.</p>
+          <h1 className="text-xl font-bold text-slate-900">
+            {isFirstApproval ? '관리자 승인 대기 중' : '비활성화된 계정입니다'}
+          </h1>
+          <p className="text-sm text-slate-600">
+            {isFirstApproval
+              ? '관리자가 가입 신청을 검토하고 권한을 부여하면 사용할 수 있습니다.'
+              : '관리자에게 문의해주세요.'}
+          </p>
           <form action={signOut}>
             <button className="w-full rounded-lg border border-slate-300 px-4 py-2.5 text-sm font-medium text-slate-700 hover:bg-slate-50">
               로그아웃
@@ -152,7 +160,9 @@ export default async function Home() {
       .is('returned_at', null),
     supabase
       .from('vehicle_trips')
-      .select('vehicle_id, end_odometer_km, returned_at')
+      .select(
+        'vehicle_id, end_odometer_km, returned_at, return_location, driver_employee_id, employees!driver_employee_id(name)',
+      )
       .eq('company_id', employee.company_id)
       .not('returned_at', 'is', null)
       .order('returned_at', { ascending: false })
@@ -169,16 +179,33 @@ export default async function Home() {
     purpose: string | null
     employees: { name: string }[] | null
   }
-  type RecentReturned = { vehicle_id: string; end_odometer_km: number | null; returned_at: string }
+  type RecentReturned = {
+    vehicle_id: string
+    end_odometer_km: number | null
+    returned_at: string
+    return_location: string | null
+    driver_employee_id: string | null
+    employees: { name: string }[] | null
+  }
   const vehicles = (vehiclesRes.data ?? []) as VehicleRow[]
   const activeTrips = (activeTripsRes.data ?? []) as unknown as ActiveTrip[]
   const tripByVehicleId = new Map(activeTrips.map((t) => [t.vehicle_id, t]))
 
-  // 차량별 가장 최근 반납 km — 회사 전체 returned_at desc 정렬 50건에서 vehicle_id 별 첫 행 추출
+  // 차량별 가장 최근 반납 정보 — km + 반납위치 + 마지막 운전자
   const lastEndKmByVehicleId = new Map<string, number | null>()
-  for (const t of (recentReturnedRes.data ?? []) as RecentReturned[]) {
+  const lastReturnByVehicleId = new Map<
+    string,
+    { driverName: string | null; returnedAt: string | null; returnLocation: string | null }
+  >()
+  for (const t of (recentReturnedRes.data ?? []) as unknown as RecentReturned[]) {
     if (!lastEndKmByVehicleId.has(t.vehicle_id)) {
       lastEndKmByVehicleId.set(t.vehicle_id, t.end_odometer_km)
+      const drvName = t.employees && t.employees.length > 0 ? t.employees[0].name : null
+      lastReturnByVehicleId.set(t.vehicle_id, {
+        driverName: drvName,
+        returnedAt: t.returned_at,
+        returnLocation: t.return_location,
+      })
     }
   }
 
@@ -394,18 +421,24 @@ export default async function Home() {
           )}
 
           <VehicleStatusList
-            rows={vehicleStatusRows.map(({ vehicle, trip, status }) => ({
-              vehicleId: vehicle.id,
-              plateNumber: vehicle.plate_number,
-              name: vehicle.name,
-              status,
-              driverName: trip?.employees?.[0]?.name ?? null,
-              departedAt: trip?.departed_at ?? null,
-              startOdometerKm: trip?.start_odometer_km ?? null,
-              purpose: trip?.purpose ?? null,
-              isMine: trip?.driver_employee_id === employee.id,
-              lastEndOdometerKm: lastEndKmByVehicleId.get(vehicle.id) ?? null,
-            }))}
+            rows={vehicleStatusRows.map(({ vehicle, trip, status }) => {
+              const lastReturn = lastReturnByVehicleId.get(vehicle.id) ?? null
+              return {
+                vehicleId: vehicle.id,
+                plateNumber: vehicle.plate_number,
+                name: vehicle.name,
+                status,
+                driverName: trip?.employees?.[0]?.name ?? null,
+                departedAt: trip?.departed_at ?? null,
+                startOdometerKm: trip?.start_odometer_km ?? null,
+                purpose: trip?.purpose ?? null,
+                isMine: trip?.driver_employee_id === employee.id,
+                lastEndOdometerKm: lastEndKmByVehicleId.get(vehicle.id) ?? null,
+                lastDriverName: lastReturn?.driverName ?? null,
+                lastReturnedAt: lastReturn?.returnedAt ?? null,
+                lastReturnLocation: lastReturn?.returnLocation ?? null,
+              }
+            })}
             hasMyActive={!!myVehicleTrip}
           />
 

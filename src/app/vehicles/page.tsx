@@ -86,17 +86,44 @@ export default async function VehiclesPage() {
   const { data: recentData } = await supabase
     .from('vehicle_trips')
     .select(
-      'id, vehicle_id, driver_employee_id, departed_at, returned_at, start_odometer_km, end_odometer_km, purpose, refueled, refuel_amount_krw',
+      'id, vehicle_id, driver_employee_id, departed_at, returned_at, start_odometer_km, end_odometer_km, purpose, refueled, refuel_amount_krw, return_location',
     )
     .order('departed_at', { ascending: false })
     .limit(10)
 
   const recent = (recentData ?? []) as RecentTripRow[]
 
-  // 직원 이름 매핑 (active + recent 합쳐서 한 번에)
+  // 차량별 가장 최근 반납 정보 (대기 카드 표시용)
+  const { data: lastReturnedData } = await supabase
+    .from('vehicle_trips')
+    .select('vehicle_id, driver_employee_id, returned_at, return_location')
+    .not('returned_at', 'is', null)
+    .order('returned_at', { ascending: false })
+    .limit(100)
+  const lastReturnByVehicleId = new Map<
+    string,
+    { driverId: string; returnedAt: string; returnLocation: string | null }
+  >()
+  for (const t of (lastReturnedData ?? []) as Array<{
+    vehicle_id: string
+    driver_employee_id: string
+    returned_at: string
+    return_location: string | null
+  }>) {
+    if (!lastReturnByVehicleId.has(t.vehicle_id)) {
+      lastReturnByVehicleId.set(t.vehicle_id, {
+        driverId: t.driver_employee_id,
+        returnedAt: t.returned_at,
+        returnLocation: t.return_location,
+      })
+    }
+  }
+
+  // 직원 이름 매핑 (active + recent + 최종 반납 운전자 합쳐서 한 번에)
   const employeeIds = new Set<string>()
   for (const t of activeByVehicleId.values()) employeeIds.add(t.driver_employee_id)
   for (const t of recent) employeeIds.add(t.driver_employee_id)
+  for (const v of lastReturnByVehicleId.values()) employeeIds.add(v.driverId)
 
   const nameById = new Map<string, string>()
   if (employeeIds.size > 0) {
@@ -230,6 +257,31 @@ export default async function VehiclesPage() {
                         )}
                       </div>
                     )}
+
+                    {/* 대기 (active 없음 + 활성 차량) 인 경우 최종 반납 정보 */}
+                    {!active && v.is_active && (() => {
+                      const lr = lastReturnByVehicleId.get(v.id)
+                      if (!lr) return null
+                      const lastDriverName = nameById.get(lr.driverId) ?? '?'
+                      return (
+                        <div className="rounded-lg bg-slate-50 border border-slate-200 px-3 py-2 text-xs text-slate-600 space-y-0.5">
+                          <p className="font-medium text-slate-700">최종 반납</p>
+                          <p>
+                            <span className="text-slate-500">사용자</span>{' '}
+                            <span className="text-slate-800">{lastDriverName}</span>
+                            <span className="ml-2 text-slate-500">
+                              {TIME_FMT.format(new Date(lr.returnedAt))}
+                            </span>
+                          </p>
+                          {lr.returnLocation && (
+                            <p>
+                              <span className="text-slate-500">위치</span>{' '}
+                              <span className="text-slate-800">{lr.returnLocation}</span>
+                            </p>
+                          )}
+                        </div>
+                      )
+                    })()}
 
                     <div className="flex flex-wrap gap-2">
                       {usedByMe ? (

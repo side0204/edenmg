@@ -1,12 +1,15 @@
 import Link from 'next/link'
 import { notFound } from 'next/navigation'
-import { ChevronLeft, UserPlus, Users } from 'lucide-react'
+import { ChevronLeft, UserCheck, Users, X } from 'lucide-react'
 import { createClient } from '@/lib/supabase/server'
 import { EmptyState } from '@/components/EmptyState'
 import {
+  approveSignup,
+  rejectSignup,
   toggleCanDeleteWorks,
   toggleCanManageWorks,
   toggleCanViewStats,
+  updateVehiclePlate,
 } from './actions'
 import { toggleCanManageStock } from '../../stock/actions'
 import { FieldSelect } from './FieldSelect'
@@ -28,6 +31,7 @@ type EmployeeRow = {
   position: string | null
   team: string | null
   work_type: string | null
+  vehicle_plate: string | null
   can_manage_works: boolean
   can_delete_works: boolean
   can_view_stats: boolean
@@ -59,35 +63,118 @@ export default async function EmployeesPage() {
 
   const { data, error: listError } = await supabase
     .from('employees')
-    .select('id, name, email, phone, permission, position, team, work_type, can_manage_works, can_delete_works, can_view_stats, can_manage_stock, is_active, invited_at, accepted_at, created_at')
+    .select(
+      'id, name, email, phone, permission, position, team, work_type, vehicle_plate, can_manage_works, can_delete_works, can_view_stats, can_manage_stock, is_active, invited_at, accepted_at, created_at',
+    )
     .order('created_at', { ascending: false })
 
-  const rows = (data ?? []) as EmployeeRow[]
+  const all = (data ?? []) as EmployeeRow[]
+  // 가입 대기 = accepted_at IS NULL AND auth_user_id 있음 (트리거가 만든 신규 row)
+  //   accepted_at NULL + is_active=false 가 표식
+  const pending = all.filter((e) => !e.is_active && !e.accepted_at)
+  const rows = all.filter((e) => e.is_active || e.accepted_at)
 
   return (
     <main className="min-h-screen p-4 sm:p-6">
       <div className="mx-auto max-w-3xl space-y-5">
-        <header className="flex items-center justify-between gap-3">
-          <div>
-            <Link href="/" className="inline-flex items-center gap-1 text-sm text-slate-500 hover:text-slate-900">
-              <ChevronLeft className="h-4 w-4" />
-              홈
-            </Link>
-            <h1 className="mt-1 text-3xl font-bold text-slate-900 tracking-tight">직원 관리</h1>
-          </div>
-          <Link
-            href="/admin/employees/invite"
-            className="inline-flex items-center gap-1 rounded-lg bg-slate-900 px-4 py-2 text-sm font-medium text-white hover:bg-slate-800"
-          >
-            <UserPlus className="h-4 w-4" />
-            초대
+        <header>
+          <Link href="/" className="inline-flex items-center gap-1 text-sm text-slate-500 hover:text-slate-900">
+            <ChevronLeft className="h-4 w-4" />
+            홈
           </Link>
+          <h1 className="mt-1 text-3xl font-bold text-slate-900 tracking-tight">직원 관리</h1>
+          <p className="mt-1 text-sm text-slate-500">
+            회원가입 → 관리자 승인 흐름. 가입 신청자가 권한을 받으면 활성화됩니다.
+          </p>
         </header>
 
         {listError && (
           <p className="text-sm text-red-600 bg-red-50 border border-red-200 rounded-lg p-3">
             목록을 불러오지 못했습니다: {listError.message}
           </p>
+        )}
+
+        {/* 가입 대기 섹션 */}
+        {pending.length > 0 && (
+          <section className="rounded-2xl border border-amber-300 bg-amber-50/60 p-4 space-y-3">
+            <h2 className="flex items-center gap-2 text-base font-semibold text-amber-800 tracking-tight">
+              <UserCheck className="h-5 w-5" />
+              가입 승인 대기
+              <span className="ml-auto rounded-full bg-amber-200 px-2 py-0.5 text-xs font-bold text-amber-900">
+                {pending.length}
+              </span>
+            </h2>
+            <ul className="space-y-3">
+              {pending.map((emp) => (
+                <li key={emp.id} className="rounded-xl bg-white border border-amber-200 p-3 space-y-3">
+                  <div>
+                    <p className="font-medium text-slate-900">
+                      {emp.name}
+                      {emp.work_type && (
+                        <span className="ml-1.5 rounded bg-slate-100 px-1.5 py-0.5 text-[11px] font-medium text-slate-700">
+                          {emp.work_type}
+                        </span>
+                      )}
+                    </p>
+                    <p className="mt-0.5 text-xs text-slate-500">
+                      {emp.email}
+                      {emp.phone && ` · ${emp.phone}`}
+                      {emp.vehicle_plate && ` · 차량 ${emp.vehicle_plate}`}
+                    </p>
+                    <p className="text-[10px] text-slate-400">
+                      신청일시: {emp.invited_at ? new Date(emp.invited_at).toLocaleString('ko-KR') : '-'}
+                    </p>
+                  </div>
+
+                  <form action={approveSignup} className="space-y-2 border-t border-slate-100 pt-3">
+                    <input type="hidden" name="id" value={emp.id} />
+
+                    <label className="block">
+                      <span className="block text-xs font-medium text-slate-700">권한 부여</span>
+                      <select
+                        name="permission"
+                        defaultValue="worker"
+                        className="mt-1 w-full rounded-md border border-slate-300 px-2 py-1.5 text-sm"
+                      >
+                        {PERMISSION_VALUES.map((p) => (
+                          <option key={p} value={p}>
+                            {PERMISSION_LABEL[p]}
+                          </option>
+                        ))}
+                      </select>
+                    </label>
+
+                    <div className="grid grid-cols-2 gap-1.5 text-xs">
+                      <ToggleCheckbox name="can_manage_works" label="작업관리" />
+                      <ToggleCheckbox name="can_delete_works" label="작업삭제" />
+                      <ToggleCheckbox name="can_view_stats" label="통계조회" />
+                      <ToggleCheckbox name="can_manage_stock" label="자재관리" />
+                    </div>
+
+                    <div className="flex gap-2 pt-1">
+                      <button
+                        type="submit"
+                        className="flex-1 rounded-lg bg-emerald-600 px-3 py-2 text-sm font-bold text-white hover:bg-emerald-700"
+                      >
+                        승인하기
+                      </button>
+                    </div>
+                  </form>
+
+                  <form action={rejectSignup}>
+                    <input type="hidden" name="id" value={emp.id} />
+                    <button
+                      type="submit"
+                      className="inline-flex items-center gap-1 rounded-lg border border-rose-300 px-2.5 py-1.5 text-xs font-medium text-rose-700 hover:bg-rose-50"
+                    >
+                      <X className="h-3 w-3" />
+                      거부 (계정 영구 삭제)
+                    </button>
+                  </form>
+                </li>
+              ))}
+            </ul>
+          </section>
         )}
 
         <ul className="space-y-3">
@@ -165,7 +252,7 @@ export default async function EmployeesPage() {
                     />
                   </FieldGroup>
 
-                  <FieldGroup label="분야">
+                  <FieldGroup label="직무">
                     <FieldSelect
                       id={emp.id}
                       field="work_type"
@@ -176,6 +263,35 @@ export default async function EmployeesPage() {
                     />
                   </FieldGroup>
                 </div>
+
+                {/* 차량번호 — 접속팀 필수, 외선팀 선택, 그 외 미표시 */}
+                {(emp.work_type === '접속팀' || emp.work_type === '외선팀') && (
+                  <form
+                    action={updateVehiclePlate}
+                    className="flex items-center gap-2 rounded-lg bg-slate-50 px-3 py-2"
+                  >
+                    <input type="hidden" name="id" value={emp.id} />
+                    <span className="text-xs font-medium text-slate-700 shrink-0">
+                      차량번호
+                      {emp.work_type === '접속팀' && (
+                        <span className="ml-0.5 text-rose-600">*</span>
+                      )}
+                    </span>
+                    <input
+                      name="vehicle_plate"
+                      defaultValue={emp.vehicle_plate ?? ''}
+                      maxLength={30}
+                      placeholder="예: 12가 3456"
+                      className="flex-1 rounded-md border border-slate-300 px-2 py-1 text-sm"
+                    />
+                    <button
+                      type="submit"
+                      className="shrink-0 rounded-md bg-slate-900 px-2.5 py-1 text-xs font-medium text-white hover:bg-slate-800"
+                    >
+                      저장
+                    </button>
+                  </form>
+                )}
 
                 <div className="flex items-center justify-between gap-3 rounded-lg bg-slate-50 px-3 py-2">
                   <div className="min-w-0">
@@ -282,20 +398,11 @@ export default async function EmployeesPage() {
           })}
 
         </ul>
-        {rows.length === 0 && !listError && (
+        {rows.length === 0 && pending.length === 0 && !listError && (
           <EmptyState
             icon={Users}
             title="등록된 직원 없음"
-            description="직원을 초대하면 이메일 링크로 가입됩니다."
-            cta={
-              <Link
-                href="/admin/employees/invite"
-                className="inline-flex items-center gap-1 rounded-lg bg-slate-900 px-4 py-2 text-sm font-medium text-white hover:bg-slate-800"
-              >
-                <UserPlus className="h-4 w-4" />
-                직원 초대
-              </Link>
-            }
+            description="직원이 가입하면 여기서 권한을 부여해 승인하세요."
           />
         )}
       </div>
@@ -319,5 +426,14 @@ function ReadonlyValue({ children }: { children: React.ReactNode }) {
     <span className="inline-block rounded-md border border-slate-200 bg-slate-50 px-2 py-1 text-xs font-medium text-slate-500">
       {children}
     </span>
+  )
+}
+
+function ToggleCheckbox({ name, label }: { name: string; label: string }) {
+  return (
+    <label className="flex items-center gap-1.5 rounded-md border border-slate-200 bg-white px-2 py-1.5">
+      <input type="checkbox" name={name} className="rounded" />
+      <span>{label}</span>
+    </label>
   )
 }

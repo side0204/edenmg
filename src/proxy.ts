@@ -6,7 +6,7 @@ import { NextResponse, type NextRequest } from 'next/server'
 //   1) Supabase 세션 쿠키를 읽고 필요하면 갱신해 응답 쿠키에 다시 쓰고
 //   2) 비로그인 사용자가 보호 경로에 접근하면 /login 으로 리다이렉트한다.
 
-const PUBLIC_PREFIXES = ['/login', '/auth/'] as const
+const PUBLIC_PREFIXES = ['/login', '/signup', '/auth/'] as const
 
 export async function proxy(request: NextRequest) {
   let response = NextResponse.next({ request })

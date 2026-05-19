@@ -44,7 +44,7 @@ const TABS: Tab[] = [
 ]
 
 // 로그인/환영 등 인증 전 페이지에서는 탭 바를 숨긴다.
-const HIDDEN_PREFIXES = ['/login', '/welcome', '/auth']
+const HIDDEN_PREFIXES = ['/login', '/welcome', '/auth', '/signup']
 
 export default function BottomNav() {
   const pathname = usePathname() ?? '/'
