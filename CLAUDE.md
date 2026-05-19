@@ -706,6 +706,56 @@ owner 모바일 스크린샷 보고: `/vehicles` 헤더에서 "업무용 차량"
 - **적용 (10개 페이지)**: `/vehicles` · `/admin/employees` · `/admin/sites` · `/admin/facilities` · `/admin/materials` · `/admin/cables` · `/works` · `/works/[id]` · `/requests` · `/vehicles/trips`
 - **신규 페이지 작성 시**: 큰 제목(`text-2xl` 이상) + 우측 버튼 조합이면 처음부터 모바일 stack 패턴으로 시작. mobile_ux_patterns 메모리에 「8. 모바일 헤더 가로 강제」 로 기록.
 
+### 🚧 진행 중 (지장이설 자동화 모듈, 2026-05-19 시작)
+
+LGU+ 협력사 본업 — 광케이블 지장이설 코어구성도·직선도 설계 자동화. 설계자가 시설·케이블을 입력하면 시스템이 기설 코어 보존을 최우선으로 자동 코어 배정 + 검증 + 차수 분할 + 시각화까지 처리. 기존 모듈과 **완전 독립**.
+
+**사양서**: [`docs/RELOCATION_DESIGN_PLAN.md`](./docs/RELOCATION_DESIGN_PLAN.md) (v0.8, 8 라운드 owner 답변 종합)
+
+**핵심 결정사항 요약**:
+- 데이터 출처: LGU+ 전용 DB (엑셀 업로드)
+- 코어 매핑 기준: 기설 코어ID 보존이 최우선
+- 케이블 ID: 기설은 LGU+ 제공·신설은 자동 생성(`NEW-XXXX-NNNNNN`)
+- 시설 종류: 국사·맨홀·가공형/관로형 함체·가입자시설 + 국사 내부(MOFD·OJC·장비)
+- 시설 번호 자동 부여: 종류별 prefix (S/B/H/C/M/O/E) + 좌측 패널 번호 목록
+- 1차 RN 스플리터: 2:8 / 2:16 / 1:2:8:4 / 1:3:8:4 + 작업모드(분기/내부접속만)
+- 다이버시티(이원화): 케이블 + 함체 모두 분리. 1코어씩 또는 2코어씩
+- 함체 한도: 6조/8조 케이블, 48~576 접속 코어. 1단계 위 권장
+- 작업 차수: 02~05시 새벽, 2팀(기본)~4팀(최대), 코어 3분(연속)/8분(비연속), 함체신설+20분
+- 양쪽 작업자 페어링: 짝 작업자 함체·코어·휴대폰을 작업 지시서에 명시
+- 공종 마스터: 회사 단위, 시드 14종 + 설계자 자유 추가
+- 검증 룰 12개: C1·C2·C3·S1·U1·U2·R1·D1·D2·E1·O1·T1
+- 모바일: 설계는 데스크톱, 완료 설계 보기는 모바일 허용
+
+**진행 상태** (Phase 1 — DB · CRUD):
+- ✅ 사양서 v0.8 작성
+- ✅ 마이그 0035 (foundation: enums 9종 + `relocation_projects` + RLS + GRANT) — owner 실행 완료 (2026-05-19)
+- ✅ 마이그 0036 (facilities · cables · circuits · core_assignments + 카운터 2종 + btree_gist exclusion) — owner 실행 완료 (2026-05-19)
+- ✅ 마이그 0037 (splices · splitters · splitter_ports · task_type_master + 시드 14종 · facility_tasks) — owner 실행 완료, 시드 14 행 확인 (2026-05-19)
+- ✅ 마이그 0038 (phases · phase_tasks · task_pairs) — owner 실행 완료 (2026-05-19)
+- ✅ **Step A 코드** (2026-05-19): 도메인 헬퍼 + 프로젝트 CRUD + 진입점
+  - [`src/lib/relocation.ts`](./src/lib/relocation.ts) — enum 미러링·시설 번호 prefix·케이블/함체 메타·작업시간 공식·신설 케이블 ID 생성
+  - [`src/app/relocation/actions.ts`](./src/app/relocation/actions.ts) — 프로젝트 CRUD (create/update/delete)
+  - [`/relocation`](./src/app/relocation/page.tsx) 프로젝트 목록
+  - [`/relocation/new`](./src/app/relocation/new/page.tsx) 생성 폼
+  - [`/relocation/[id]`](./src/app/relocation/[id]/page.tsx) 상세 + 7 탭 골격 (Phase 2 에서 콘텐츠 채움)
+  - 홈 카드 `relocation` 신규 등록 (전 직원 노출). [`home-cards.ts`](./src/lib/home-cards.ts) + [`page.tsx`](./src/app/page.tsx)
+- ⏳ **Step B**: 시설·케이블·회선·코어배정 CRUD + 좌측 패널 (시설 번호 목록)
+- ⏳ **Step C**: 검증 로직 (룰 12개)·차수 자동 분할
+- ⏳ **Step D**: SVG 시각화 (코어구성도·직선도)
+
+**미해결 항목** (§ 9 of plan doc):
+- 9-1: `1:2:8:4`·`1:3:8:4` 정확한 의미
+- 9-2: 576C 케이블 유니트·함체 규격
+- 9-3: 양쪽 모두 비연속 코어의 시간
+- 9-4: 기설 코어ID 변경 가능 조건
+- 9-5: 4분기 초과 승인 절차
+- 9-6: 02~05 외 시간대 작업 가능 여부
+
+→ 위 6개는 코드 작업 진행하면서 자연스럽게 채워질 가능성 큼. 합리적 기본값으로 시작 후 owner 검토 시 정정.
+
+**운영 검토** (§ 11 of plan doc): Supabase 무료 플랜은 지장이설 모듈 자체 영향 0 (이미지 미저장). 다만 접속일보 사진 누적이 별도로 6-10개월 안 Storage 한도 도달 가능 → PhotoUploader 클라이언트 압축 권장.
+
 ### 🟡 미완 / 후속
 
 - **운영 작업 (owner 가 Supabase Dashboard 에서 SQL 실행 필요)** ⚠️
@@ -737,6 +787,10 @@ owner 모바일 스크린샷 보고: `/vehicles` 헤더에서 "업무용 차량"
   - [`0032_service_role_grants.sql`](./supabase/migrations/0032_service_role_grants.sql) — service_role 일괄 GRANT (회원가입 회사 조회 permission denied 해결)
   - [`0033_employee_resignation.sql`](./supabase/migrations/0033_employee_resignation.sql) — employees.resigned_at 컬럼 (퇴사 처리)
   - [`0034_vehicle_retirement.sql`](./supabase/migrations/0034_vehicle_retirement.sql) — vehicles.retired_at + retire_reason (사용 종료·영구 삭제)
+  - [`0035_relocation_foundation.sql`](./supabase/migrations/0035_relocation_foundation.sql) — 지장이설 모듈 foundation: enums 9종 + relocation_projects + RLS + GRANT
+  - [`0036_relocation_facilities_cables.sql`](./supabase/migrations/0036_relocation_facilities_cables.sql) — 지장이설 시설·케이블·회선·코어배정 + btree_gist + 동일 케이블 코어 범위 중복 금지 exclusion constraint + 시설/케이블 번호 카운터 2종
+  - [`0037_relocation_splitters_tasks.sql`](./supabase/migrations/0037_relocation_splitters_tasks.sql) — 지장이설 splices + 1차 RN 스플리터 + 출력 포트 + 공종 마스터(시드 14종) + 시설별 공종 수량
+  - [`0038_relocation_phases.sql`](./supabase/migrations/0038_relocation_phases.sql) — 지장이설 차수 + 차수별 작업 + 양쪽 작업자 페어링 (작업 지시서용)
 - **외선일보 별도 entity (v2)** — 접속일보와 동일 패턴으로 외선팀 전용 모듈. 외선 작업 특성(케이블 포설구간·전주번호 등)에 맞는 구조 별도 설계.
 - **접속일보 후속 (v2)** — segment-level 작업자 태그, 사진 첨부 + EXIF, 국사·함체 마스터 테이블화, 재접속 이력 조회, 지도 시각화
 - **M3 Phase 2 후속** — 사진 첨부 + EXIF·워터마크 (PRD M3-06), 일보 결재함 통합 (현재는 작업 상세에서 진입), 일반 일보 월별 CSV 리포트
