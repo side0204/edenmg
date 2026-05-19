@@ -1,6 +1,6 @@
 import Link from 'next/link'
 import { redirect } from 'next/navigation'
-import { BarChart3, Bell, ChevronLeft, ChevronRight, FileText, Hammer, Plus, Search, Users } from 'lucide-react'
+import { BarChart3, Bell, ChevronLeft, ChevronRight, FileText, Hammer, ListTodo, Plus, Search, Users } from 'lucide-react'
 import { createClient } from '@/lib/supabase/server'
 import { EmptyState } from '@/components/EmptyState'
 import {
@@ -8,6 +8,7 @@ import {
   formatWorkLabel,
   formatWorkPeriod,
   reportLabel,
+  todayInSeoul,
   type WorkCategory,
   type WorkStatus,
   type WorkSubcategory,
@@ -70,9 +71,10 @@ export default async function WorksPage({
     q?: string
     mine?: string
     worker?: string
+    today?: string
   }>
 }) {
-  const { cat, wt, status: statusParam, q, mine, worker: workerParam } = await searchParams
+  const { cat, wt, status: statusParam, q, mine, worker: workerParam, today: todayParam } = await searchParams
   const supabase = await createClient()
 
   const {
@@ -120,6 +122,7 @@ export default async function WorksPage({
     | WorkStatus
   const query = (q ?? '').trim()
   const isMineMode = mine === '1'
+  const isTodayMode = todayParam === '1'
   // 작업자 모드: worker 파라미터가 있고 권한자일 때만 활성
   //   - worker=<uuid> → 그 직원 작업만
   //   - worker=open  → 탭만 활성, picker 노출 (선택 전)
@@ -170,6 +173,23 @@ export default async function WorksPage({
   }
   const myWorkIds = Array.from(myAssignmentByWork.keys())
 
+  // 오늘 체크인 정보 — 회사 스코프 + 진행 중인 row 만 (마감 row 는 카드 배지에서 제외)
+  // 카드 배지("오늘 N명 진행") + 오늘 모드 필터 양쪽에서 사용
+  const today = todayInSeoul()
+  const { data: todayCheckRowsData } = await supabase
+    .from('work_daily_checks')
+    .select('work_id, employee_id, decision')
+    .eq('company_id', me.company_id)
+    .eq('check_date', today)
+    .eq('decision', '진행중')
+  type TodayCheckRow = { work_id: string; employee_id: string; decision: string }
+  const todayCheckRows = (todayCheckRowsData ?? []) as TodayCheckRow[]
+  const todayCountByWork = new Map<string, number>()
+  for (const r of todayCheckRows) {
+    todayCountByWork.set(r.work_id, (todayCountByWork.get(r.work_id) ?? 0) + 1)
+  }
+  const todayActiveWorkIds = Array.from(todayCountByWork.keys())
+
   let dbQuery = supabase
     .from('works')
     .select('id, name, client, category, subcategory, order_id, worker_type, start_date, end_date, status, is_active')
@@ -187,7 +207,13 @@ export default async function WorksPage({
     dbQuery = dbQuery.or(`name.ilike.%${escaped}%,order_id.ilike.%${escaped}%`)
   }
 
-  if (isMineMode) {
+  if (isTodayMode) {
+    if (todayActiveWorkIds.length === 0) {
+      dbQuery = dbQuery.eq('id', '00000000-0000-0000-0000-000000000000')
+    } else {
+      dbQuery = dbQuery.in('id', todayActiveWorkIds)
+    }
+  } else if (isMineMode) {
     if (myWorkIds.length === 0) {
       // 배정된 작업 없음 — 빈 결과 강제 (UUID 매치 안 되는 더미)
       dbQuery = dbQuery.eq('id', '00000000-0000-0000-0000-000000000000')
@@ -303,13 +329,16 @@ export default async function WorksPage({
     q?: string
     mine?: boolean
     worker?: string | null // null = 작업자 모드 해제, '' = 작업자 탭 활성(미선택)
+    today?: boolean
   }) => {
     const params = new URLSearchParams()
     const finalCat = next.cat ?? activeCat
     const finalWt = next.wt ?? (showSubtabs ? activeWt : '')
     const finalStatus = next.status ?? activeStatus
     const finalQ = next.q ?? query
-    const finalMine = next.mine ?? (isMineMode && next.worker === undefined)
+    const finalToday = next.today ?? isTodayMode
+    const finalMine =
+      next.mine ?? (isMineMode && next.worker === undefined && !next.today)
     // worker: undefined → 기존 유지, null → 제거, 빈문자열 → 'open' 마커, id → set
     let finalWorker: string | null | undefined
     if (next.worker === undefined) finalWorker = selectedWorkerId
@@ -318,8 +347,9 @@ export default async function WorksPage({
     if (finalWt) params.set('wt', finalWt)
     if (finalStatus) params.set('status', finalStatus)
     if (finalQ) params.set('q', finalQ)
-    if (finalMine) params.set('mine', '1')
-    if (finalWorker) params.set('worker', finalWorker)
+    if (finalToday) params.set('today', '1')
+    if (!finalToday && finalMine) params.set('mine', '1')
+    if (!finalToday && finalWorker) params.set('worker', finalWorker)
     const qs = params.toString()
     return qs ? `/works?${qs}` : '/works'
   }
@@ -343,20 +373,24 @@ export default async function WorksPage({
               홈
             </Link>
             <h1 className="mt-1 text-3xl font-bold text-slate-900 tracking-tight">
-              {isMineMode
-                ? '내 작업 진행 목록'
-                : workerTabActive
-                  ? `작업자별 진행 목록`
-                  : '작업 관리'}
+              {isTodayMode
+                ? '오늘 진행 중인 작업'
+                : isMineMode
+                  ? '내 작업 진행 목록'
+                  : workerTabActive
+                    ? `작업자별 진행 목록`
+                    : '작업 관리'}
             </h1>
             <p className="mt-1 text-sm text-slate-500">
-              {isMineMode
-                ? `본인이 배정된 작업 · ${rows.length}건${newAssignmentCount > 0 ? ` · 신규 ${newAssignmentCount}건` : ''}`
-                : workerTabActive
-                  ? selectedWorker
-                    ? `${selectedWorker.name} 배정 작업 · ${rows.length}건`
-                    : '작업자를 선택하세요'
-                  : `작업 카드를 탭하면 바로 일보 작성 · ${rows.length}건`}
+              {isTodayMode
+                ? `오늘 시작 체크된 작업 · ${rows.length}건`
+                : isMineMode
+                  ? `본인이 배정된 작업 · ${rows.length}건${newAssignmentCount > 0 ? ` · 신규 ${newAssignmentCount}건` : ''}`
+                  : workerTabActive
+                    ? selectedWorker
+                      ? `${selectedWorker.name} 배정 작업 · ${rows.length}건`
+                      : '작업자를 선택하세요'
+                    : `작업 카드를 탭하면 바로 일보 작성 · ${rows.length}건`}
             </p>
           </div>
           <div className="flex flex-col items-end gap-1.5">
@@ -379,19 +413,36 @@ export default async function WorksPage({
           </div>
         </header>
 
-        {/* 0차 토글: 전체 / 작업자 (권한자만) / 내 작업 */}
+        {/* 0차 토글: 전체 / 오늘 / 작업자 (권한자만) / 내 작업 */}
         <nav className="flex gap-1 rounded-xl bg-slate-100 p-1 text-sm">
           <Link
-            href={buildHref({ mine: false, worker: null })}
+            href={buildHref({ mine: false, worker: null, today: false })}
             className={
-              'flex-1 inline-flex items-center justify-center gap-1.5 rounded-lg px-3 py-2 font-medium transition-colors ' +
-              (!isMineMode && !workerTabActive
+              'flex-1 inline-flex items-center justify-center gap-1.5 rounded-lg px-2 py-2 font-medium transition-colors ' +
+              (!isMineMode && !workerTabActive && !isTodayMode
                 ? 'bg-white text-slate-900 shadow-sm'
                 : 'text-slate-600 hover:text-slate-900')
             }
           >
             <Users className="h-4 w-4" />
             전체
+          </Link>
+          <Link
+            href={buildHref({ mine: false, worker: null, today: true })}
+            className={
+              'flex-1 inline-flex items-center justify-center gap-1.5 rounded-lg px-2 py-2 font-medium transition-colors ' +
+              (isTodayMode
+                ? 'bg-white text-slate-900 shadow-sm'
+                : 'text-slate-600 hover:text-slate-900')
+            }
+          >
+            <ListTodo className="h-4 w-4" />
+            오늘
+            {!isTodayMode && todayActiveWorkIds.length > 0 && (
+              <span className="ml-0.5 inline-flex h-5 min-w-5 items-center justify-center rounded-full bg-emerald-600 px-1 text-[10px] font-bold text-white">
+                {todayActiveWorkIds.length}
+              </span>
+            )}
           </Link>
           {canViewOthers && (
             <Link
@@ -642,11 +693,17 @@ export default async function WorksPage({
                       {idx + 1}
                     </span>
                     <div className="min-w-0 flex-1">
-                      <p className="font-medium text-slate-900 truncate inline-flex items-center gap-1.5">
+                      <p className="font-medium text-slate-900 truncate inline-flex items-center gap-1.5 flex-wrap">
                         {newBadge && (
                           <span className="shrink-0 inline-flex items-center gap-0.5 rounded-full bg-amber-100 px-1.5 py-0.5 text-[10px] font-bold text-amber-700">
                             <Bell className="h-2.5 w-2.5" />
                             신규
+                          </span>
+                        )}
+                        {(todayCountByWork.get(w.id) ?? 0) > 0 && (
+                          <span className="shrink-0 inline-flex items-center gap-0.5 rounded-full bg-emerald-100 px-1.5 py-0.5 text-[10px] font-bold text-emerald-700">
+                            <ListTodo className="h-2.5 w-2.5" />
+                            오늘 {todayCountByWork.get(w.id)}명
                           </span>
                         )}
                         <span className="truncate">{w.name}</span>

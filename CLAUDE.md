@@ -523,6 +523,38 @@ owner 추가 요구사항 4건 반영:
 - **leave_stage enum 의 'foreman' 값**·`assigned_foreman_id` 컬럼명은 legacy 유지 (UI 만 '팀장 단계' 로 표시)
 - **관리자가 모든 권한** + 토글로 부여: `can_manage_works` / `can_delete_works` / `can_view_stats` (rose/amber/blue 색상 분리)
 
+### ✅ 완료 (오늘 작업 체크 — 시작·마감 의사결정 기록, 2026-05-19)
+
+owner 결정사항:
+
+| 항목 | 결정 | 비고 |
+|---|---|---|
+| **체크인 강제성** | 일보와 완전 분리 | 체크 없이도 일보 작성 가능. 체크는 의사결정 기록용 |
+| **체크인 단위** | 작업자별 row (한 작업에 여러 명 체크인 가능) | unique(work_id, employee_id, check_date) |
+| **「완료」 의미** | 작업자 본인 분만 끝 | 작업 status='완료' 확정은 별도 |
+| **작업 완료 확정** | 담당자(assignee) 또는 admin 또는 can_manage_works | 작업 상세 우상단 「작업 완료로 확정」 인디고 버튼 (security definer RPC) |
+| **이월 처리** | 별도 row 생성 X. 다음날 다시 체크인 | 의도성 매일 확인 |
+| **시작 시 status** | '예정' → '진행중' 자동 전환 | security definer RPC (작업자가 works UPDATE 권한 없으므로) |
+| **관리자 대시보드** | 별도 페이지 미설치. /works 의 「오늘」 서브탭만 | MVP 우선, 작업량 폭증 시 별도 페이지 검토 |
+
+- **마이그** [`0029_work_daily_checks.sql`](./supabase/migrations/0029_work_daily_checks.sql):
+  - `work_daily_checks` 테이블 + `daily_check_decision` enum ('진행중', '완료', '이월')
+  - RLS 3개 (select 회사 전체 / insert·update 본인만). delete GRANT 미부여 (append-only)
+  - security definer 함수 2개: `work_advance_to_in_progress(_work_id)` + `work_confirm_complete(_work_id)`
+- **공통 lib** [`src/lib/work.ts`](./src/lib/work.ts): `DailyCheckDecision` type + `DAILY_CHECK_COLOR` 매핑 + `todayInSeoul()` (Asia/Seoul YYYY-MM-DD)
+- **server actions** [`src/app/works/daily-check-actions.ts`](./src/app/works/daily-check-actions.ts):
+  - `startDailyChecks(formData)` — 본인 배정 미완료 작업 중 선택된 N건 일괄 체크인 (upsert ignoreDuplicates) + 작업 status 자동 전환
+  - `closeDailyChecksBulk(formData)` — row 별 decision 받아 일괄 마감
+  - `confirmWorkComplete(formData)` — security definer RPC 호출 (담당자/관리자만)
+- **홈 카드** [`src/app/TodayWorksCard.tsx`](./src/app/TodayWorksCard.tsx) (client):
+  - 진행 중 row: 「본인 분 완료」/「내일 이어서」 라디오 토글 + 일괄 「마감하기」 버튼
+  - 추가 시작: 미체크인 배정 작업 체크박스 다중선택 + 「시작하기」 버튼
+  - 오늘 마감 완료: 접기/펼치기 collapsed by default
+- **/works 「오늘」 서브탭**: 최상단 토글에 「오늘」 탭 신규 (전체/오늘/작업자/내 작업). 카드마다 emerald 「오늘 N명」 배지 (todayCountByWork map)
+- **작업 상세**:
+  - 상태 배지 옆에 「작업 완료로 확정」 인디고 버튼 (canConfirmComplete 일 때만)
+  - 진행률 위에 「오늘 진행자 N명」 섹션 (시작시각·마감시각·메모·decision 배지)
+
 ### 🟡 미완 / 후속
 
 - **운영 작업 (owner 가 Supabase Dashboard 에서 SQL 실행 필요)** ⚠️
@@ -548,6 +580,7 @@ owner 추가 요구사항 4건 반영:
   - [`0026_stock_use_approval.sql`](./supabase/migrations/0026_stock_use_approval.sql) — M4 Phase 2-A: 자재 사용 승인 + 초과 사유 + 취득사유 + low_value 토글
   - [`0027_signup_and_work_type_rework.sql`](./supabase/migrations/0027_signup_and_work_type_rework.sql) — 회원가입 흐름 + work_type enum 재구성 + vehicle_plate + return_location + 트리거 갱신
   - [`0028_employees_workplace.sql`](./supabase/migrations/0028_employees_workplace.sql) — 직원 본사/현장 구분 컬럼 (현장 = 사무탭·차량·결재 비표시)
+  - [`0029_work_daily_checks.sql`](./supabase/migrations/0029_work_daily_checks.sql) — 오늘 작업 체크 + decision enum + security definer 함수 2개
 - **외선일보 별도 entity (v2)** — 접속일보와 동일 패턴으로 외선팀 전용 모듈. 외선 작업 특성(케이블 포설구간·전주번호 등)에 맞는 구조 별도 설계.
 - **접속일보 후속 (v2)** — segment-level 작업자 태그, 사진 첨부 + EXIF, 국사·함체 마스터 테이블화, 재접속 이력 조회, 지도 시각화
 - **M3 Phase 2 후속** — 사진 첨부 + EXIF·워터마크 (PRD M3-06), 일보 결재함 통합 (현재는 작업 상세에서 진입), 일반 일보 월별 CSV 리포트

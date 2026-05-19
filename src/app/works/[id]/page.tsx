@@ -1,14 +1,17 @@
 import Link from 'next/link'
 import { notFound, redirect } from 'next/navigation'
-import { Cable, ChevronLeft, FileText, Pencil, Plus, X } from 'lucide-react'
+import { Cable, CheckCircle2, ChevronLeft, FileText, ListTodo, Pencil, Plus, X } from 'lucide-react'
 import { createClient } from '@/lib/supabase/server'
 import {
+  DAILY_CHECK_COLOR,
   REPORT_STATUS_COLOR,
   STATUS_COLOR,
   formatWorkLabel,
   formatWorkPeriod,
   formatWorkerType,
   reportLabel,
+  todayInSeoul,
+  type DailyCheckDecision,
   type WorkCategory,
   type WorkReportProgress,
   type WorkReportStatus,
@@ -20,6 +23,7 @@ import { aggregateConnectionTotals } from '@/lib/connection-aggregate'
 import { AggregationCard } from '../AggregationCard'
 import { InstructionsBanner } from '../InstructionsBanner'
 import { assignEmployee, unassignEmployee } from '../actions'
+import { confirmWorkComplete } from '../daily-check-actions'
 
 type WorkRow = {
   id: string
@@ -179,11 +183,30 @@ export default async function WorkDetailPage({
     connectionReports = (crData ?? []) as ConnReportSummary[]
   }
 
-  // 직원 이름·메타 매핑 — 배정자 + 일보 작성자 + 담당자 모두 묶어서 1회 조회
+  // 오늘 작업 체크 — 이 작업의 회사 내 오늘 row 전부
+  const todayKstDate = todayInSeoul()
+  const { data: todayChecksData } = await supabase
+    .from('work_daily_checks')
+    .select('id, employee_id, decision, note, created_at, closed_at')
+    .eq('work_id', id)
+    .eq('check_date', todayKstDate)
+    .order('created_at', { ascending: true })
+  type TodayCheckDetail = {
+    id: string
+    employee_id: string
+    decision: DailyCheckDecision
+    note: string | null
+    created_at: string
+    closed_at: string | null
+  }
+  const todayChecks = (todayChecksData ?? []) as TodayCheckDetail[]
+
+  // 직원 이름·메타 매핑 — 배정자 + 일보 작성자 + 담당자 + 오늘 체크인자 모두 묶어서 1회 조회
   const employeeIds = new Set<string>()
   for (const a of assignments) employeeIds.add(a.employee_id)
   for (const r of reports) employeeIds.add(r.author_employee_id)
   for (const r of connectionReports) employeeIds.add(r.author_employee_id)
+  for (const c of todayChecks) employeeIds.add(c.employee_id)
   if (work.assignee_employee_id) employeeIds.add(work.assignee_employee_id)
 
   const employeeMap = new Map<
@@ -219,6 +242,10 @@ export default async function WorkDetailPage({
   const isAdminLike = me.permission === 'admin'
   const isAssigned = assignments.some((a) => a.employee_id === me.id)
   const canWriteReport = isAdminLike || isAssigned
+  // 작업 완료 확정 권한: admin OR can_manage_works OR 담당자
+  const isAssignee = work.assignee_employee_id === me.id
+  const canConfirmComplete =
+    (isAdminLike || me.can_manage_works || isAssignee) && work.status !== '완료'
 
   // 오늘 일보가 이미 있는지 (자기 자신 작성건)
   const today = new Date()
@@ -348,7 +375,7 @@ export default async function WorkDetailPage({
         <InstructionsBanner instructions={work.instructions} />
 
         <section className="rounded-2xl bg-white border border-slate-200 p-5 space-y-3">
-          <div>
+          <div className="flex items-center justify-between gap-3">
             <span
               className={
                 'rounded-full border px-3 py-1 text-sm font-medium ' + STATUS_COLOR[work.status]
@@ -356,6 +383,18 @@ export default async function WorkDetailPage({
             >
               {work.status}
             </span>
+            {canConfirmComplete && (
+              <form action={confirmWorkComplete}>
+                <input type="hidden" name="work_id" value={work.id} />
+                <button
+                  type="submit"
+                  className="inline-flex items-center gap-1 rounded-lg bg-indigo-600 px-3 py-1.5 text-xs font-bold text-white hover:bg-indigo-700"
+                >
+                  <CheckCircle2 className="h-3.5 w-3.5" />
+                  작업 완료로 확정
+                </button>
+              </form>
+            )}
           </div>
           <InfoRow label="기간">{formatWorkPeriod(work.start_date, work.end_date)}</InfoRow>
           {work.order_id && <InfoRow label="공사번호">{work.order_id}</InfoRow>}
@@ -382,6 +421,67 @@ export default async function WorkDetailPage({
             </InfoRow>
           )}
         </section>
+
+        {todayChecks.length > 0 && (
+          <section className="rounded-2xl bg-white border border-slate-200 p-5 space-y-3">
+            <h2 className="text-base font-semibold text-slate-700 tracking-tight inline-flex items-center gap-1.5">
+              <ListTodo className="h-4 w-4 text-emerald-600" />
+              오늘 진행자 ({todayChecks.length}명)
+            </h2>
+            <ul className="divide-y divide-slate-100 rounded-lg border border-slate-200">
+              {todayChecks.map((c) => {
+                const emp = employeeMap.get(c.employee_id)
+                const startTime = new Intl.DateTimeFormat('ko-KR', {
+                  timeZone: 'Asia/Seoul',
+                  hour: '2-digit',
+                  minute: '2-digit',
+                  hour12: false,
+                }).format(new Date(c.created_at))
+                const closeTime = c.closed_at
+                  ? new Intl.DateTimeFormat('ko-KR', {
+                      timeZone: 'Asia/Seoul',
+                      hour: '2-digit',
+                      minute: '2-digit',
+                      hour12: false,
+                    }).format(new Date(c.closed_at))
+                  : null
+                return (
+                  <li key={c.id} className="px-3 py-2.5 text-sm">
+                    <div className="flex items-start justify-between gap-2">
+                      <div className="min-w-0 flex-1">
+                        <p className="text-slate-900">
+                          <span className="font-medium">{emp?.name ?? '?'}</span>
+                          {emp && !emp.is_active && (
+                            <span className="ml-1.5 text-xs text-slate-400">(비활성)</span>
+                          )}
+                        </p>
+                        <p className="mt-0.5 text-xs text-slate-500">
+                          시작 {startTime}
+                          {closeTime && (
+                            <span className="ml-1.5">· 마감 {closeTime}</span>
+                          )}
+                        </p>
+                        {c.note && (
+                          <p className="mt-0.5 text-xs text-slate-600 whitespace-pre-wrap">
+                            {c.note}
+                          </p>
+                        )}
+                      </div>
+                      <span
+                        className={
+                          'shrink-0 rounded-full border px-2 py-0.5 text-xs font-medium ' +
+                          DAILY_CHECK_COLOR[c.decision]
+                        }
+                      >
+                        {c.decision}
+                      </span>
+                    </div>
+                  </li>
+                )
+              })}
+            </ul>
+          </section>
+        )}
 
         {connectionProgress ? (
           <section className="rounded-2xl bg-white border border-slate-200 p-5 space-y-2">

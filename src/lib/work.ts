@@ -18,6 +18,7 @@ export type WorkStatus = '예정' | '진행중' | '완료' | '취소'
 export type WorkWorkerType = '접속팀' | '외선팀' | '기타'
 export type WorkReportProgress = '시작전' | '진행중' | '완료'
 export type WorkReportStatus = '대기' | '승인' | '반려'
+export type DailyCheckDecision = '진행중' | '완료' | '이월'
 
 export const WORK_CATEGORY_VALUES: readonly WorkCategory[] = [
   '청약',
@@ -63,6 +64,17 @@ export const REPORT_PROGRESS_COLOR: Record<WorkReportProgress, string> = {
   시작전: 'text-slate-600 bg-slate-100 border-slate-200',
   진행중: 'text-emerald-700 bg-emerald-50 border-emerald-200',
   완료: 'text-indigo-700 bg-indigo-50 border-indigo-200',
+}
+
+export const DAILY_CHECK_COLOR: Record<DailyCheckDecision, string> = {
+  진행중: 'text-emerald-700 bg-emerald-50 border-emerald-200',
+  완료: 'text-indigo-700 bg-indigo-50 border-indigo-200',
+  이월: 'text-amber-700 bg-amber-50 border-amber-200',
+}
+
+/** Asia/Seoul 기준 오늘 날짜 (YYYY-MM-DD). server/client 양쪽 동일. */
+export function todayInSeoul(): string {
+  return new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Seoul' }).format(new Date())
 }
 
 export function formatWorkerType(

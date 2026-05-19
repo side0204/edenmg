@@ -14,6 +14,11 @@ import { createClient } from '@/lib/supabase/server'
 import { LEAVE_TYPE_LABEL, formatPeriod, type LeaveType } from '@/lib/leave'
 import { signOut } from './login/actions'
 import VehicleStatusList from './VehicleStatusList'
+import TodayWorksCard, {
+  type ActiveCheckRow,
+  type ClosedCheckRow,
+  type PendingWorkRow,
+} from './TodayWorksCard'
 
 type Permission = 'worker' | 'team_member' | 'team_leader' | 'admin'
 
@@ -228,17 +233,94 @@ export default async function Home() {
   ).toISOString()
   const { data: myAssignsData } = await supabase
     .from('work_assignments')
-    .select('work_id, created_at')
+    .select(
+      'work_id, created_at, works!inner(id, name, category, subcategory, status, order_id, company_id)',
+    )
     .eq('employee_id', employee.id)
-  const myAssignsByWork = new Map<string, string>()
-  for (const a of (myAssignsData ?? []) as { work_id: string; created_at: string }[]) {
+  type MyAssignJoined = {
+    work_id: string
+    created_at: string
+    works: {
+      id: string
+      name: string
+      category: string
+      subcategory: string | null
+      status: '예정' | '진행중' | '완료' | '취소' | string
+      order_id: string | null
+      company_id: string
+    }
+  }
+  const myAssigns = ((myAssignsData ?? []) as unknown) as MyAssignJoined[]
+  const myAssignsByWork = new Map<string, MyAssignJoined>()
+  for (const a of myAssigns) {
     const prev = myAssignsByWork.get(a.work_id)
-    if (!prev || prev < a.created_at) myAssignsByWork.set(a.work_id, a.created_at)
+    if (!prev || prev.created_at < a.created_at) myAssignsByWork.set(a.work_id, a)
   }
   const myWorkCount = myAssignsByWork.size
   const myNewAssignmentCount = Array.from(myAssignsByWork.values()).filter(
-    (t) => t >= newCutoff,
+    (a) => a.created_at >= newCutoff,
   ).length
+
+  // ===== 오늘 작업 체크 (work_daily_checks) =====
+  const { data: todayChecksData } = await supabase
+    .from('work_daily_checks')
+    .select('id, work_id, decision, created_at, closed_at')
+    .eq('employee_id', employee.id)
+    .eq('check_date', workDate)
+  type TodayCheck = {
+    id: string
+    work_id: string
+    decision: '진행중' | '완료' | '이월'
+    created_at: string
+    closed_at: string | null
+  }
+  const todayChecks = (todayChecksData ?? []) as TodayCheck[]
+  const todayCheckByWork = new Map<string, TodayCheck>()
+  for (const c of todayChecks) todayCheckByWork.set(c.work_id, c)
+
+  const activeCheckRows: ActiveCheckRow[] = []
+  const closedCheckRows: ClosedCheckRow[] = []
+  const pendingWorkRows: PendingWorkRow[] = []
+
+  for (const a of myAssignsByWork.values()) {
+    const w = a.works
+    if (w.company_id !== employee.company_id) continue
+    const check = todayCheckByWork.get(w.id)
+    if (check) {
+      if (check.decision === '진행중') {
+        activeCheckRows.push({
+          checkId: check.id,
+          workId: w.id,
+          workName: w.name,
+          workCategory: w.category,
+          workSubcategory: w.subcategory,
+          orderId: w.order_id,
+          createdAt: check.created_at,
+        })
+      } else {
+        closedCheckRows.push({
+          checkId: check.id,
+          workId: w.id,
+          workName: w.name,
+          decision: check.decision,
+          closedAt: check.closed_at,
+        })
+      }
+    } else if (w.status !== '완료' && w.status !== '취소') {
+      pendingWorkRows.push({
+        workId: w.id,
+        name: w.name,
+        category: w.category,
+        subcategory: w.subcategory,
+        status: w.status,
+        orderId: w.order_id,
+      })
+    }
+  }
+  // 진행 중은 시작 시각 오래된 순
+  activeCheckRows.sort((a, b) => a.createdAt.localeCompare(b.createdAt))
+  // 미체크인은 작업명
+  pendingWorkRows.sort((a, b) => a.name.localeCompare(b.name))
 
   // ===== 내 자재 카운트 =====
   const { count: myHoldingsCount } = await supabase
@@ -471,6 +553,12 @@ export default async function Home() {
             </Link>
           </section>
         )}
+
+        <TodayWorksCard
+          pendingWorks={pendingWorkRows}
+          activeChecks={activeCheckRows}
+          closedChecks={closedCheckRows}
+        />
 
         {myWorkCount > 0 && (
           <section className="rounded-2xl bg-white shadow-sm border border-slate-200 dark:bg-slate-900 dark:border-slate-800 p-6 space-y-3">
