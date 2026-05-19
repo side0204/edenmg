@@ -1,11 +1,12 @@
 import Link from 'next/link'
 import { notFound } from 'next/navigation'
-import { ChevronLeft, UserCheck, Users, X } from 'lucide-react'
+import { ChevronLeft, UserCheck, UserMinus, Users, X } from 'lucide-react'
 import { createClient } from '@/lib/supabase/server'
 import { EmptyState } from '@/components/EmptyState'
 import {
   approveSignup,
   rejectSignup,
+  resignEmployee,
   toggleCanDeleteWorks,
   toggleCanManageWorks,
   toggleCanViewStats,
@@ -41,7 +42,13 @@ type EmployeeRow = {
   is_active: boolean
   invited_at: string | null
   accepted_at: string | null
+  resigned_at: string | null
   created_at: string
+}
+
+// Asia/Seoul 기준 오늘 (YYYY-MM-DD) — date input default.
+function todayInSeoul(): string {
+  return new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Seoul' }).format(new Date())
 }
 
 export default async function EmployeesPage() {
@@ -66,8 +73,9 @@ export default async function EmployeesPage() {
   const { data, error: listError } = await supabase
     .from('employees')
     .select(
-      'id, name, email, phone, permission, position, team, work_type, vehicle_plate, workplace_type, can_manage_works, can_delete_works, can_view_stats, can_manage_stock, is_active, invited_at, accepted_at, created_at',
+      'id, name, email, phone, permission, position, team, work_type, vehicle_plate, workplace_type, can_manage_works, can_delete_works, can_view_stats, can_manage_stock, is_active, invited_at, accepted_at, resigned_at, created_at',
     )
+    .is('resigned_at', null) // 퇴사자는 /admin/employees/resigned 별도 페이지
     .order('created_at', { ascending: false })
 
   const all = (data ?? []) as EmployeeRow[]
@@ -75,6 +83,12 @@ export default async function EmployeesPage() {
   //   accepted_at NULL + is_active=false 가 표식
   const pending = all.filter((e) => !e.is_active && !e.accepted_at)
   const rows = all.filter((e) => e.is_active || e.accepted_at)
+
+  // 퇴사자 수 (진입점 배지용)
+  const { count: resignedCount } = await supabase
+    .from('employees')
+    .select('id', { count: 'exact', head: true })
+    .not('resigned_at', 'is', null)
 
   return (
     <main className="min-h-screen p-4 sm:p-6">
@@ -84,10 +98,26 @@ export default async function EmployeesPage() {
             <ChevronLeft className="h-4 w-4" />
             홈
           </Link>
-          <h1 className="mt-1 text-3xl font-bold text-slate-900 tracking-tight">직원 관리</h1>
-          <p className="mt-1 text-sm text-slate-500">
-            회원가입 → 관리자 승인 흐름. 가입 신청자가 권한을 받으면 활성화됩니다.
-          </p>
+          <div className="mt-1 flex items-start justify-between gap-3">
+            <div>
+              <h1 className="text-3xl font-bold text-slate-900 tracking-tight">직원 관리</h1>
+              <p className="mt-1 text-sm text-slate-500">
+                회원가입 → 관리자 승인 흐름. 가입 신청자가 권한을 받으면 활성화됩니다.
+              </p>
+            </div>
+            <Link
+              href="/admin/employees/resigned"
+              className="shrink-0 inline-flex items-center gap-1.5 rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50"
+            >
+              <UserMinus className="h-4 w-4" />
+              퇴사자
+              {resignedCount ? (
+                <span className="rounded-full bg-slate-200 px-1.5 py-0.5 text-[10px] font-bold text-slate-700">
+                  {resignedCount}
+                </span>
+              ) : null}
+            </Link>
+          </div>
         </header>
 
         {listError && (
@@ -416,6 +446,42 @@ export default async function EmployeesPage() {
                     </button>
                   </form>
                 </div>
+
+                {/* 퇴사 처리 — 본인 제외. 데이터는 보존되며 로그인만 차단됨. */}
+                {!isSelf && (
+                  <details className="rounded-lg border border-rose-200 bg-rose-50/40">
+                    <summary className="cursor-pointer list-none px-3 py-2 text-xs font-medium text-rose-700 flex items-center gap-1.5">
+                      <UserMinus className="h-3.5 w-3.5" />
+                      퇴사 처리
+                    </summary>
+                    <form
+                      action={resignEmployee}
+                      className="px-3 pb-3 pt-1 space-y-2 border-t border-rose-200"
+                    >
+                      <input type="hidden" name="id" value={emp.id} />
+                      <p className="text-[11px] text-rose-700/80">
+                        로그인이 차단되고 퇴사자 페이지로 이동합니다. 기존 근태·일보·작업 이력은
+                        보존되며 통계에 그대로 표시됩니다. 사용 중 차량·대기 휴가는 따로 정리해
+                        주세요.
+                      </p>
+                      <label className="block">
+                        <span className="block text-[11px] font-medium text-rose-700">퇴사일</span>
+                        <input
+                          type="date"
+                          name="resigned_at"
+                          defaultValue={todayInSeoul()}
+                          className="mt-1 w-full rounded-md border border-rose-300 bg-white px-2 py-1.5 text-sm"
+                        />
+                      </label>
+                      <button
+                        type="submit"
+                        className="w-full rounded-md bg-rose-600 px-3 py-2 text-sm font-bold text-white hover:bg-rose-700"
+                      >
+                        퇴사 처리
+                      </button>
+                    </form>
+                  </details>
+                )}
               </li>
             )
           })}

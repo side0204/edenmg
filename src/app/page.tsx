@@ -67,7 +67,7 @@ export default async function Home() {
   const { data } = await supabase
     .from('employees')
     .select(
-      'id, name, permission, position, team, work_type, can_manage_stock, workplace_type, hire_date, home_card_prefs, is_active, accepted_at, company_id, companies(name)',
+      'id, name, permission, position, team, work_type, can_manage_stock, workplace_type, hire_date, home_card_prefs, is_active, accepted_at, resigned_at, company_id, companies(name)',
     )
     .eq('auth_user_id', user.id)
     .maybeSingle()
@@ -85,6 +85,8 @@ export default async function Home() {
         hire_date: string | null
         home_card_prefs: unknown
         is_active: boolean
+        accepted_at: string | null
+        resigned_at: string | null
         company_id: string
         companies: { name: string } | null
       }
@@ -111,17 +113,25 @@ export default async function Home() {
 
   if (!employee.is_active) {
     // 가입 직후엔 accepted_at = null. 관리자 승인 시 채워짐.
-    const isFirstApproval = !(employee as { accepted_at?: string | null }).accepted_at
+    // 퇴사 처리됐으면 resigned_at 에 날짜 — 메시지 분기.
+    const isResigned = !!employee.resigned_at
+    const isFirstApproval = !employee.accepted_at && !isResigned
     return (
       <main className="min-h-screen flex items-center justify-center p-4">
         <div className="w-full max-w-md bg-white rounded-2xl shadow-sm border border-slate-200 p-6 sm:p-8 text-center space-y-4">
           <h1 className="text-xl font-bold text-slate-900">
-            {isFirstApproval ? '관리자 승인 대기 중' : '비활성화된 계정입니다'}
+            {isResigned
+              ? '퇴사 처리된 계정입니다'
+              : isFirstApproval
+                ? '관리자 승인 대기 중'
+                : '비활성화된 계정입니다'}
           </h1>
           <p className="text-sm text-slate-600">
-            {isFirstApproval
-              ? '관리자가 가입 신청을 검토하고 권한을 부여하면 사용할 수 있습니다.'
-              : '관리자에게 문의해주세요.'}
+            {isResigned
+              ? `퇴사일: ${employee.resigned_at}. 재입사 처리가 필요하면 관리자에게 문의해주세요.`
+              : isFirstApproval
+                ? '관리자가 가입 신청을 검토하고 권한을 부여하면 사용할 수 있습니다.'
+                : '관리자에게 문의해주세요.'}
           </p>
           <form action={signOut}>
             <button className="w-full rounded-lg border border-slate-300 px-4 py-2.5 text-sm font-medium text-slate-700 hover:bg-slate-50">

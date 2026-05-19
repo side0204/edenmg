@@ -47,3 +47,5 @@ dev.pid
 
 # Claude Code 프로젝트별 설정 (사용자 환경)
 .claude/
+
+.vercel

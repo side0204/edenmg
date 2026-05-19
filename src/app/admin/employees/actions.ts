@@ -330,6 +330,127 @@ export async function rejectSignup(formData: FormData) {
   redirect('/admin/employees?ok=' + encodeURIComponent('가입 신청을 거부했습니다'))
 }
 
+// 퇴사 처리 — is_active=false + resigned_at 설정. 본인 퇴사 처리 차단.
+// 데이터는 보존 (산안법 5년 보존). 로그인은 page.tsx 의 !is_active 분기가 차단.
+// 진행 중 차량·휴가·작업 배정은 자동 정리 안 함 — 관리자가 별도 처리.
+export async function resignEmployee(formData: FormData) {
+  const id = String(formData.get('id') ?? '')
+  const dateRaw = String(formData.get('resigned_at') ?? '').trim()
+  // YYYY-MM-DD 형식 강제. 빈 값이면 오늘 (서울 시각 기준).
+  const resignedAt = dateRaw && /^\d{4}-\d{2}-\d{2}$/.test(dateRaw)
+    ? dateRaw
+    : new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Seoul' }).format(new Date())
+
+  if (!id) redirect('/admin/employees?err=' + encodeURIComponent('직원 id 가 없습니다'))
+
+  const supabase = await createClient()
+  const {
+    data: { user },
+  } = await supabase.auth.getUser()
+  if (!user) redirect('/login')
+
+  const { data: meRow } = await supabase
+    .from('employees')
+    .select('id, permission')
+    .eq('auth_user_id', user.id)
+    .maybeSingle()
+  const me = meRow as { id: string; permission: Permission } | null
+  if (!me || me.permission !== 'admin') {
+    redirect('/admin/employees?err=' + encodeURIComponent('권한이 없습니다'))
+  }
+  if (me.id === id) {
+    redirect('/admin/employees?err=' + encodeURIComponent('본인은 퇴사 처리할 수 없습니다'))
+  }
+
+  const { error } = await supabase
+    .from('employees')
+    .update({ is_active: false, resigned_at: resignedAt })
+    .eq('id', id)
+  if (error) {
+    redirect('/admin/employees?err=' + encodeURIComponent('퇴사 처리 실패: ' + error.message))
+  }
+
+  revalidatePath('/admin/employees')
+  revalidatePath('/admin/employees/resigned')
+  redirect('/admin/employees?ok=' + encodeURIComponent(`퇴사 처리 완료 (${resignedAt})`))
+}
+
+// 재입사 처리 — is_active=true + resigned_at=null. 직원 row 와 보유 데이터 그대로 복귀.
+export async function unresignEmployee(formData: FormData) {
+  const id = String(formData.get('id') ?? '')
+  if (!id) redirect('/admin/employees/resigned?err=' + encodeURIComponent('직원 id 가 없습니다'))
+
+  const supabase = await createClient()
+  const {
+    data: { user },
+  } = await supabase.auth.getUser()
+  if (!user) redirect('/login')
+
+  const { data: meRow } = await supabase
+    .from('employees')
+    .select('id, permission')
+    .eq('auth_user_id', user.id)
+    .maybeSingle()
+  const me = meRow as { id: string; permission: Permission } | null
+  if (!me || me.permission !== 'admin') {
+    redirect('/admin/employees/resigned?err=' + encodeURIComponent('권한이 없습니다'))
+  }
+
+  const { error } = await supabase
+    .from('employees')
+    .update({ is_active: true, resigned_at: null })
+    .eq('id', id)
+  if (error) {
+    redirect(
+      '/admin/employees/resigned?err=' + encodeURIComponent('재입사 처리 실패: ' + error.message),
+    )
+  }
+
+  revalidatePath('/admin/employees')
+  revalidatePath('/admin/employees/resigned')
+  redirect('/admin/employees/resigned?ok=' + encodeURIComponent('재입사 처리 완료'))
+}
+
+// 퇴사일 수정 — 이미 퇴사 처리된 직원의 날짜만 수정.
+export async function updateResignedAt(formData: FormData) {
+  const id = String(formData.get('id') ?? '')
+  const dateRaw = String(formData.get('resigned_at') ?? '').trim()
+  if (!id) redirect('/admin/employees/resigned?err=' + encodeURIComponent('직원 id 가 없습니다'))
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(dateRaw)) {
+    redirect('/admin/employees/resigned?err=' + encodeURIComponent('퇴사일 형식이 올바르지 않습니다 (YYYY-MM-DD)'))
+  }
+
+  const supabase = await createClient()
+  const {
+    data: { user },
+  } = await supabase.auth.getUser()
+  if (!user) redirect('/login')
+
+  const { data: meRow } = await supabase
+    .from('employees')
+    .select('id, permission')
+    .eq('auth_user_id', user.id)
+    .maybeSingle()
+  const me = meRow as { id: string; permission: Permission } | null
+  if (!me || me.permission !== 'admin') {
+    redirect('/admin/employees/resigned?err=' + encodeURIComponent('권한이 없습니다'))
+  }
+
+  const { error } = await supabase
+    .from('employees')
+    .update({ resigned_at: dateRaw })
+    .eq('id', id)
+    .not('resigned_at', 'is', null) // 이미 퇴사 처리된 row 만
+  if (error) {
+    redirect(
+      '/admin/employees/resigned?err=' + encodeURIComponent('변경 실패: ' + error.message),
+    )
+  }
+
+  revalidatePath('/admin/employees/resigned')
+  redirect('/admin/employees/resigned?ok=' + encodeURIComponent(`퇴사일을 ${dateRaw} 로 변경했습니다`))
+}
+
 // 작업 삭제 권한 토글. admin/ceo 만 변경 가능.
 // can_manage_works 와 별개 — 삭제는 cascade 가 크므로 더 좁은 권한자에게만 부여.
 export async function toggleCanDeleteWorks(formData: FormData) {
