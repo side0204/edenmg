@@ -28,6 +28,17 @@ const TIME_FMT = new Intl.DateTimeFormat('ko-KR', {
   hour12: false,
 })
 
+// "2026-05-19 14:30" 형태 — 연-월-일이 같이 보여야 하는 시각용 (최종 반납 등)
+function formatYmdHm(iso: string): string {
+  try {
+    const d = new Date(iso)
+    const kst = new Date(d.getTime() + 9 * 60 * 60 * 1000)
+    return kst.toISOString().slice(0, 16).replace('T', ' ')
+  } catch {
+    return iso
+  }
+}
+
 function formatElapsed(fromIso: string, now: number): string {
   const diffMs = now - new Date(fromIso).getTime()
   if (diffMs < 0) return ''
@@ -103,14 +114,28 @@ export default function VehicleStatusList({
                       {r.driverName} · 출고 {TIME_FMT.format(new Date(r.departedAt))}
                     </p>
                   )}
-                  {r.status === 'idle' && (r.lastDriverName || r.lastReturnLocation) && (
-                    <p className="text-xs text-slate-500 mt-0.5 truncate">
-                      {r.lastDriverName && <>최종 {r.lastDriverName}</>}
-                      {r.lastReturnLocation && (
-                        <> · 반납위치 {r.lastReturnLocation}</>
-                      )}
-                    </p>
-                  )}
+                  {r.status === 'idle' &&
+                    (r.lastDriverName || r.lastReturnLocation || r.lastReturnedAt) && (
+                      <div className="text-xs text-slate-500 mt-0.5 space-y-0.5">
+                        {(r.lastDriverName || r.lastReturnedAt) && (
+                          <p className="truncate">
+                            <span className="text-slate-400">최종 </span>
+                            {r.lastDriverName ?? '?'}
+                            {r.lastReturnedAt && (
+                              <span className="ml-1 text-slate-400">
+                                · {formatYmdHm(r.lastReturnedAt)}
+                              </span>
+                            )}
+                          </p>
+                        )}
+                        {r.lastReturnLocation && (
+                          <p className="truncate">
+                            <span className="text-slate-400">반납위치 </span>
+                            {r.lastReturnLocation}
+                          </p>
+                        )}
+                      </div>
+                    )}
                   {isBlockedIdle && (
                     <p className="text-xs text-amber-700 mt-0.5">
                       먼저 본인 차량을 반납해야 출고 가능
@@ -164,9 +189,7 @@ export default function VehicleStatusList({
                     <div className="rounded-md bg-white border border-slate-200 p-2 text-xs text-slate-600 space-y-0.5">
                       <p className="font-medium text-slate-700">최종 반납 정보</p>
                       {r.lastDriverName && <p>사용자: {r.lastDriverName}</p>}
-                      {r.lastReturnedAt && (
-                        <p>시각: {TIME_FMT.format(new Date(r.lastReturnedAt))}</p>
-                      )}
+                      {r.lastReturnedAt && <p>시각: {formatYmdHm(r.lastReturnedAt)}</p>}
                       {r.lastReturnLocation && <p>위치: {r.lastReturnLocation}</p>}
                     </div>
                   )}
