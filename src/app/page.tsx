@@ -173,6 +173,7 @@ export default async function Home() {
       .from('vehicles')
       .select('id, plate_number, name, is_active')
       .eq('company_id', employee.company_id)
+      .is('retired_at', null)
       .order('is_active', { ascending: false })
       .order('plate_number'),
     supabase

@@ -670,6 +670,7 @@ owner 결정사항:
   - [`0031_annual_leaves.sql`](./supabase/migrations/0031_annual_leaves.sql) — 연차 (hire_date · annual_leave_balances · audit · apply_usage RPC)
   - [`0032_service_role_grants.sql`](./supabase/migrations/0032_service_role_grants.sql) — service_role 일괄 GRANT (회원가입 회사 조회 permission denied 해결)
   - [`0033_employee_resignation.sql`](./supabase/migrations/0033_employee_resignation.sql) — employees.resigned_at 컬럼 (퇴사 처리)
+  - [`0034_vehicle_retirement.sql`](./supabase/migrations/0034_vehicle_retirement.sql) — vehicles.retired_at + retire_reason (사용 종료·영구 삭제)
 - **외선일보 별도 entity (v2)** — 접속일보와 동일 패턴으로 외선팀 전용 모듈. 외선 작업 특성(케이블 포설구간·전주번호 등)에 맞는 구조 별도 설계.
 - **접속일보 후속 (v2)** — segment-level 작업자 태그, 사진 첨부 + EXIF, 국사·함체 마스터 테이블화, 재접속 이력 조회, 지도 시각화
 - **M3 Phase 2 후속** — 사진 첨부 + EXIF·워터마크 (PRD M3-06), 일보 결재함 통합 (현재는 작업 상세에서 진입), 일반 일보 월별 CSV 리포트

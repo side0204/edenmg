@@ -1,7 +1,13 @@
 import Link from 'next/link'
-import { Search, Fuel, Plus, ChevronLeft, Car, Users } from 'lucide-react'
+import { Search, Fuel, Plus, ChevronLeft, Car, Users, Ban } from 'lucide-react'
 import { createClient } from '@/lib/supabase/server'
 import { EmptyState } from '@/components/EmptyState'
+import { retireVehicle } from './actions'
+import DeleteVehicleButton from './DeleteVehicleButton'
+
+function todayInSeoul(): string {
+  return new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Seoul' }).format(new Date())
+}
 
 type Permission = 'worker' | 'team_member' | 'team_leader' | 'admin'
 
@@ -63,14 +69,34 @@ export default async function VehiclesPage() {
 
   const isAdmin = me.permission === 'admin'
 
-  // 차량 목록
+  // 차량 목록 (사용 종료 차량 제외 — 별도 /vehicles/retired 페이지)
   const { data: vData, error: vErr } = await supabase
     .from('vehicles')
     .select('id, plate_number, name, is_active, notes')
+    .is('retired_at', null)
     .order('is_active', { ascending: false })
     .order('plate_number', { ascending: true })
 
   const vehicles = (vData ?? []) as VehicleRow[]
+
+  // 사용 종료 차량 수 (진입점 배지용)
+  const { count: retiredCount } = await supabase
+    .from('vehicles')
+    .select('id', { count: 'exact', head: true })
+    .not('retired_at', 'is', null)
+
+  // 운행 이력 vehicle_id 일괄 (영구 삭제 가능 여부 판단용)
+  // 회사 규모상 운행 기록 50,000건 미만 가정. 그 이상이면 RPC 로 distinct 개선 필요.
+  const tripVehicleIds = new Set<string>()
+  if (isAdmin && vehicles.length > 0) {
+    const { data: allTrips } = await supabase
+      .from('vehicle_trips')
+      .select('vehicle_id')
+      .limit(50000)
+    for (const t of (allTrips ?? []) as { vehicle_id: string }[]) {
+      tripVehicleIds.add(t.vehicle_id)
+    }
+  }
 
   // 현재 사용 중인 운행
   const { data: activeData } = await supabase
@@ -176,13 +202,27 @@ export default async function VehiclesPage() {
               운행 이력
             </Link>
             {isAdmin && (
-              <Link
-                href="/vehicles/new"
-                className="inline-flex items-center gap-1 rounded-lg bg-slate-900 px-4 py-2 text-sm font-medium text-white hover:bg-slate-800"
-              >
-                <Plus className="h-4 w-4" />
-                차량 등록
-              </Link>
+              <>
+                <Link
+                  href="/vehicles/retired"
+                  className="inline-flex items-center gap-1 rounded-lg border border-slate-300 px-3 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50"
+                >
+                  <Ban className="h-4 w-4" />
+                  사용 종료
+                  {retiredCount ? (
+                    <span className="rounded-full bg-slate-200 px-1.5 py-0.5 text-[10px] font-bold text-slate-700">
+                      {retiredCount}
+                    </span>
+                  ) : null}
+                </Link>
+                <Link
+                  href="/vehicles/new"
+                  className="inline-flex items-center gap-1 rounded-lg bg-slate-900 px-4 py-2 text-sm font-medium text-white hover:bg-slate-800"
+                >
+                  <Plus className="h-4 w-4" />
+                  차량 등록
+                </Link>
+              </>
             )}
           </div>
         </header>
@@ -333,6 +373,67 @@ export default async function VehiclesPage() {
                         </Link>
                       )}
                     </div>
+
+                    {/* 관리자 관리 영역 — 사용 종료 / 영구 삭제. 사용 중 차량은 둘 다 차단. */}
+                    {isAdmin && !active && (() => {
+                      const hasTrips = tripVehicleIds.has(v.id)
+                      const vehicleLabel = `${v.plate_number} · ${v.name}`
+                      return (
+                        <div className="flex flex-wrap items-start gap-2 pt-2 border-t border-slate-100">
+                          <details className="flex-1 min-w-[240px] rounded-lg border border-rose-200 bg-rose-50/40">
+                            <summary className="cursor-pointer list-none px-3 py-2 text-xs font-medium text-rose-700 flex items-center gap-1.5">
+                              <Ban className="h-3.5 w-3.5" />
+                              사용 종료 처리
+                            </summary>
+                            <form
+                              action={retireVehicle}
+                              className="px-3 pb-3 pt-1 space-y-2 border-t border-rose-200"
+                            >
+                              <input type="hidden" name="id" value={v.id} />
+                              <p className="text-[11px] text-rose-700/80">
+                                폐차·매각·리스반납·렌트반납 등 회사를 떠난 차량 처리. 운행 이력은 그대로
+                                보존되며 사용 종료 차량 페이지에서 확인·운영 재개할 수 있습니다.
+                              </p>
+                              <label className="block">
+                                <span className="block text-[11px] font-medium text-rose-700">
+                                  사용 종료일
+                                </span>
+                                <input
+                                  type="date"
+                                  name="retired_at"
+                                  defaultValue={todayInSeoul()}
+                                  className="mt-1 w-full rounded-md border border-rose-300 bg-white px-2 py-1.5 text-sm"
+                                />
+                              </label>
+                              <label className="block">
+                                <span className="block text-[11px] font-medium text-rose-700">
+                                  사유 *
+                                </span>
+                                <input
+                                  type="text"
+                                  name="retire_reason"
+                                  required
+                                  maxLength={200}
+                                  placeholder="예: 폐차, 매각, 리스반납, 렌트반납"
+                                  className="mt-1 w-full rounded-md border border-rose-300 bg-white px-2 py-1.5 text-sm"
+                                />
+                              </label>
+                              <button
+                                type="submit"
+                                className="w-full rounded-md bg-rose-600 px-3 py-2 text-sm font-bold text-white hover:bg-rose-700"
+                              >
+                                사용 종료 처리
+                              </button>
+                            </form>
+                          </details>
+
+                          {/* 영구 삭제 — 운행 이력 0건만 노출 */}
+                          {!hasTrips && (
+                            <DeleteVehicleButton vehicleId={v.id} vehicleLabel={vehicleLabel} />
+                          )}
+                        </div>
+                      )
+                    })()}
                   </li>
                 )
               })}

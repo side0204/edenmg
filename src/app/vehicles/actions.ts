@@ -103,6 +103,115 @@ export async function updateVehicle(formData: FormData) {
   redirect('/vehicles?ok=' + encodeURIComponent(`${parsed.name} 정보를 수정했습니다`))
 }
 
+// 영구 삭제 — 운행 이력 0건 차량만 (DB ON DELETE RESTRICT 가 보장).
+// 등록 실수 정정용. 이력 있는 차량은 retireVehicle 로 사용 종료 처리.
+export async function deleteVehicle(formData: FormData) {
+  const id = String(formData.get('id') ?? '').trim()
+  if (!id) redirect('/vehicles?err=' + encodeURIComponent('차량 id 가 없습니다'))
+
+  const { supabase } = await requireAdmin()
+
+  // 운행 이력 존재 여부 사전 확인 (RESTRICT 에 걸리기 전 친절한 메시지)
+  const { count } = await supabase
+    .from('vehicle_trips')
+    .select('id', { count: 'exact', head: true })
+    .eq('vehicle_id', id)
+  if ((count ?? 0) > 0) {
+    redirect(
+      '/vehicles?err=' +
+        encodeURIComponent('운행 이력이 있어 영구 삭제할 수 없습니다. 사용 종료 처리를 이용하세요.'),
+    )
+  }
+
+  // 차량명 미리 조회 (성공 메시지용)
+  const { data: vRow } = await supabase
+    .from('vehicles')
+    .select('name')
+    .eq('id', id)
+    .maybeSingle()
+  const name = (vRow as { name: string } | null)?.name ?? '차량'
+
+  const { error } = await supabase.from('vehicles').delete().eq('id', id)
+  if (error) {
+    redirect('/vehicles?err=' + encodeURIComponent('삭제 실패: ' + error.message))
+  }
+
+  revalidatePath('/vehicles')
+  redirect('/vehicles?ok=' + encodeURIComponent(`${name} 을(를) 영구 삭제했습니다`))
+}
+
+// 사용 종료 처리 — 운행 이력 있는 차량의 소프트 삭제.
+// retired_at + retire_reason 기록 + is_active=false. 운영 재개 시 reactivateVehicle.
+export async function retireVehicle(formData: FormData) {
+  const id = String(formData.get('id') ?? '').trim()
+  const reason = String(formData.get('retire_reason') ?? '').trim()
+  const dateRaw = String(formData.get('retired_at') ?? '').trim()
+  const retiredAt = dateRaw && /^\d{4}-\d{2}-\d{2}$/.test(dateRaw)
+    ? dateRaw
+    : new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Seoul' }).format(new Date())
+
+  if (!id) redirect('/vehicles?err=' + encodeURIComponent('차량 id 가 없습니다'))
+  if (!reason) {
+    redirect('/vehicles?err=' + encodeURIComponent('사용 종료 사유를 입력하세요 (예: 폐차, 매각, 리스반납)'))
+  }
+  if (reason.length > 200) {
+    redirect('/vehicles?err=' + encodeURIComponent('사유는 200자 이하로 입력하세요'))
+  }
+
+  const { supabase } = await requireAdmin()
+
+  // 사용 중인 차량은 사용 종료 불가 (먼저 반납해야 함)
+  const { data: activeRow } = await supabase
+    .from('vehicle_trips')
+    .select('id')
+    .eq('vehicle_id', id)
+    .is('returned_at', null)
+    .maybeSingle()
+  if (activeRow) {
+    redirect(
+      '/vehicles?err=' +
+        encodeURIComponent('사용 중인 차량입니다. 먼저 반납 처리 후 사용 종료해주세요.'),
+    )
+  }
+
+  const { error } = await supabase
+    .from('vehicles')
+    .update({
+      retired_at: retiredAt,
+      retire_reason: reason,
+      is_active: false,
+    })
+    .eq('id', id)
+  if (error) {
+    redirect('/vehicles?err=' + encodeURIComponent('사용 종료 실패: ' + error.message))
+  }
+
+  revalidatePath('/vehicles')
+  revalidatePath('/vehicles/retired')
+  revalidatePath('/')
+  redirect('/vehicles?ok=' + encodeURIComponent(`사용 종료 처리 (${retiredAt})`))
+}
+
+// 사용 종료 차량의 운영 재개. retired_at=null + retire_reason=null + is_active=true.
+export async function reactivateVehicle(formData: FormData) {
+  const id = String(formData.get('id') ?? '').trim()
+  if (!id) redirect('/vehicles/retired?err=' + encodeURIComponent('차량 id 가 없습니다'))
+
+  const { supabase } = await requireAdmin()
+
+  const { error } = await supabase
+    .from('vehicles')
+    .update({ retired_at: null, retire_reason: null, is_active: true })
+    .eq('id', id)
+  if (error) {
+    redirect('/vehicles/retired?err=' + encodeURIComponent('운영 재개 실패: ' + error.message))
+  }
+
+  revalidatePath('/vehicles')
+  revalidatePath('/vehicles/retired')
+  redirect('/vehicles/retired?ok=' + encodeURIComponent('운영 재개 처리됐습니다'))
+}
+
 // ===== 출고·반납 ========================================================
 
 function parseInt0OrNull(raw: FormDataEntryValue | null): number | null {
