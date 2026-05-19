@@ -640,6 +640,72 @@ owner 결정사항:
   - 상태 배지 옆에 「작업 완료로 확정」 인디고 버튼 (canConfirmComplete 일 때만)
   - 진행률 위에 「오늘 진행자 N명」 섹션 (시작시각·마감시각·메모·decision 배지)
 
+### ✅ 완료 (회원가입 흐름 디버깅 — service_role GRANT, 2026-05-19)
+
+회원가입 후 가입가능한 회사가 없음 → 회사 조회 실패 (permission denied) → "This page couldn't load" 의 3단 진단:
+
+| 증상 | 원인 | 해결 |
+|---|---|---|
+| "가입 가능한 회사가 없습니다" | `/signup` 가 anon `createClient()` 로 companies 조회. RLS 가 `current_employee()` 기반이라 비로그인 시 0건 | [`src/app/signup/actions.ts`](./src/app/signup/actions.ts) — admin client (service role) 로 우회 |
+| "This page couldn't load" | Vercel 에 `SUPABASE_SERVICE_ROLE_KEY` 환경변수 누락 → `createAdminClient()` throw → 잡히지 않은 에러 | try/catch 로 잡아 토스트 메시지 노출 + Vercel env 등록 (CLI `--value` 플래그로 비대화형) |
+| "permission denied for table companies" | 자동 RLS ON 으로 만든 Supabase 프로젝트는 `service_role` 에 자동 GRANT 안 들어감. BYPASSRLS 만으론 부족 | 마이그 [`0032_service_role_grants.sql`](./supabase/migrations/0032_service_role_grants.sql) — public 스키마 일괄 GRANT + `alter default privileges` |
+
+**핵심 학습**: `permission denied for table` 메시지는 RLS 가 아니라 **table-level GRANT 부재** 신호. RLS 차단은 빈 결과로 나옴. 향후 admin client 로 새 테이블 접근 시에도 0032 의 default privileges 가 자동 grant 보장.
+
+### ✅ 완료 (직원 퇴사 처리, 2026-05-19)
+
+owner 결정사항:
+
+| 항목 | 결정 | 비고 |
+|---|---|---|
+| **차단 범위** | 로그인 차단만 | 홈 페이지의 `!is_active` 분기가 이미 차단. 진행중 차량·휴가는 수동 정리 |
+| **퇴사일** | 관리자가 직접 입력 | 기본 오늘(KST), 수정 가능. 4대보험·정산용 실제 퇴사일과 맞추는 유연성 |
+| **재입사** | 같은 row 재활용 | `is_active=true` + `resigned_at=null`. 데이터 그대로 복귀 |
+| **화면** | `/admin/employees/resigned` 별도 페이지 | 활성 직원 목록을 깨끗하게 유지 |
+
+- **마이그** [`0033_employee_resignation.sql`](./supabase/migrations/0033_employee_resignation.sql) — `employees.resigned_at date` + index
+- **server actions** ([`src/app/admin/employees/actions.ts`](./src/app/admin/employees/actions.ts)): `resignEmployee` (본인 차단·기본 오늘 KST), `unresignEmployee` (재입사), `updateResignedAt` (퇴사일만 수정)
+- **/admin/employees**: 활성 카드 푸터에 「퇴사 처리」 접기 메뉴 (rose, 본인 제외) + 헤더 우측에 「퇴사자 N」 진입 버튼. 활성 목록 쿼리에 `.is('resigned_at', null)` 필터 추가
+- **/admin/employees/resigned** (신규): 퇴사일 desc 정렬 + 퇴사일 수정 폼 + 「재입사 처리」 emerald 버튼
+- **홈 비활성 메시지**: 3 케이스 분기 (퇴사·승인대기·일반비활성) — 퇴사면 "퇴사 처리된 계정입니다" + 퇴사일 표시
+- **데이터 보존**: 산안법 5년 보존 준수. 모든 일보·근태·작업 이력 유지. 통계·CSV 에 그대로 표시
+
+### ✅ 완료 (업무용 차량 사용 종료·영구 삭제, 2026-05-19)
+
+owner 결정사항: 폐차뿐 아니라 매각·렌트반납·리스반납 등 회사를 떠나는 사유 다양. 하이브리드 방식.
+
+| 시나리오 | 동작 | 보존 |
+|---|---|---|
+| **운행 이력 0건** | 영구 삭제 가능 (등록 실수 정정용) | DB ON DELETE RESTRICT 가 0건 보장 |
+| **운행 이력 있음** | 사용 종료 처리 (`retired_at` + `retire_reason` + `is_active=false`) | 이력 100% 보존 |
+| **사용 중 차량** | 두 동작 모두 차단. 먼저 반납 처리 필요 | server action active trip 사전 체크 |
+
+- **마이그** [`0034_vehicle_retirement.sql`](./supabase/migrations/0034_vehicle_retirement.sql) — `vehicles.retired_at` + `retire_reason` text (enum 화 X, 자유 텍스트)
+- **server actions** ([`src/app/vehicles/actions.ts`](./src/app/vehicles/actions.ts)): `deleteVehicle` (count 0 사전 체크 + RESTRICT 최후 안전망 — 삼중), `retireVehicle` (사유 필수 + active trip 차단), `reactivateVehicle` (운영 재개)
+- **client**: [`DeleteVehicleButton`](./src/app/vehicles/DeleteVehicleButton.tsx) — confirm() 가드 (작업 삭제와 동일 패턴)
+- **/vehicles**:
+  - 활성 카드 푸터 (admin only · 사용 중 차량 제외): 「사용 종료 처리」 details 접기 (사유·날짜 입력) + 「삭제」 버튼 (운행 이력 0건만)
+  - 헤더 우측 (admin only): 「사용 종료 N」 진입 버튼
+  - 차량 목록 쿼리에 `.is('retired_at', null)` 필터
+  - 운행 이력 vehicle_id Set 만들어 영구 삭제 가능 여부 판단 (회사 규모상 50,000건 limit 안전)
+- **/vehicles/retired** (신규): 종료일 desc + 「사용 종료 사유」 표시 + 「운영 재개」 emerald 버튼
+- **홈 차량 카드**: retired 제외 (`vehiclesRes` 쿼리에 `.is('retired_at', null)`)
+- **운행 이력 검색** (`/vehicles/trips`): 사용 종료 차량 그대로 포함 (과거 이력 검색 보장)
+- **아이콘**: lucide-react 에 `CarOff` 없음 → `Ban` 사용
+
+### ✅ 완료 (페이지 헤더 모바일 레이아웃 일괄 보정, 2026-05-19)
+
+owner 모바일 스크린샷 보고: `/vehicles` 헤더에서 "업무용 차량" 이 "업무 / 용 / 차량" 처럼 한 글자씩 세로로 깨짐.
+
+- **원인**: `<header className="flex items-center justify-between gap-3">` 가 모바일에서도 가로 배치를 강제. 우측 버튼 그룹의 `shrink-0` 이 좌측 제목(`text-3xl`)을 압박해 한글이 글자 단위로 줄바꿈됨. 우측 버튼이 늘어날수록 심화.
+- **해결**: 모바일(<640px)에선 세로 stack, `sm` 이상에서만 가로 배치.
+  ```diff
+  - flex items-center justify-between gap-3
+  + space-y-3 sm:space-y-0 sm:flex sm:items-center sm:justify-between sm:gap-3
+  ```
+- **적용 (10개 페이지)**: `/vehicles` · `/admin/employees` · `/admin/sites` · `/admin/facilities` · `/admin/materials` · `/admin/cables` · `/works` · `/works/[id]` · `/requests` · `/vehicles/trips`
+- **신규 페이지 작성 시**: 큰 제목(`text-2xl` 이상) + 우측 버튼 조합이면 처음부터 모바일 stack 패턴으로 시작. mobile_ux_patterns 메모리에 「8. 모바일 헤더 가로 강제」 로 기록.
+
 ### 🟡 미완 / 후속
 
 - **운영 작업 (owner 가 Supabase Dashboard 에서 SQL 실행 필요)** ⚠️
