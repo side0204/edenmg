@@ -46,10 +46,14 @@ const TABS: Tab[] = [
 // 로그인/환영 등 인증 전 페이지에서는 탭 바를 숨긴다.
 const HIDDEN_PREFIXES = ['/login', '/welcome', '/auth', '/signup']
 
+// 지장이설 전체화면 캔버스 라우트(/relocation/[id]/canvas) — 앱 메뉴 없이 캔버스만.
+const CANVAS_ROUTE = /^\/relocation\/[^/]+\/canvas\/?$/
+
 export default function BottomNav({ hideOffice = false }: { hideOffice?: boolean }) {
   const pathname = usePathname() ?? '/'
 
   if (HIDDEN_PREFIXES.some((p) => pathname.startsWith(p))) return null
+  if (CANVAS_ROUTE.test(pathname)) return null
 
   // 현장 직원은 「사무」 탭 숨김. 키는 '사무' label 로 매칭.
   const tabs = hideOffice ? TABS.filter((t) => t.label !== '사무') : TABS

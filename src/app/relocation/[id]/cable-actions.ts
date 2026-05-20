@@ -276,6 +276,8 @@ export async function updateCableFromCanvas(input: {
   waypoints: Array<{
     x: number
     y: number
+    lat?: number | null
+    lng?: number | null
     pole_name: string | null
     dist: number | null
   }>
@@ -299,6 +301,8 @@ export async function updateCableFromCanvas(input: {
   const cleanWaypoints = input.waypoints.map((w) => ({
     x: Math.round(w.x),
     y: Math.round(w.y),
+    lat: typeof w.lat === 'number' && Number.isFinite(w.lat) ? w.lat : null,
+    lng: typeof w.lng === 'number' && Number.isFinite(w.lng) ? w.lng : null,
     pole_name: w.pole_name ? String(w.pole_name).slice(0, 100) : null,
     dist: num(w.dist),
   }))

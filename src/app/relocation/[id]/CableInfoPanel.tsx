@@ -46,6 +46,8 @@ export type CablePanelData = {
 export type CablePanelWaypoint = {
   x: number
   y: number
+  lat?: number | null
+  lng?: number | null
   pole_name?: string | null
   dist?: number | null
 }
@@ -145,6 +147,9 @@ export default function CableInfoPanel({
       waypoints: waypoints.map((w, i) => ({
         x: w.x,
         y: w.y,
+        // 지도 모드 경로점의 GPS 좌표 보존 — 패널에서 전주명·거리만 수정해도 유지
+        lat: w.lat ?? null,
+        lng: w.lng ?? null,
         pole_name: poleNames[i]?.trim() || null,
         dist: parseNum(dists[i] ?? ''),
       })),
@@ -196,7 +201,7 @@ export default function CableInfoPanel({
   }
 
   return (
-    <div className="w-72 shrink-0 h-full overflow-y-auto border-l border-slate-300 bg-white">
+    <div className="w-72 shrink-0 min-h-0 overflow-y-auto border-l border-slate-300 bg-white">
       <div className="sticky top-0 z-10 bg-white border-b border-slate-200 px-3 py-2 flex items-center justify-between">
         <span className="text-sm font-bold text-slate-900">케이블 정보</span>
         <div className="flex items-center gap-1">

@@ -10,14 +10,15 @@ import {
   Download,
   Radio,
   ArrowRightLeft,
+  ExternalLink,
 } from 'lucide-react'
 import { Sparkles } from 'lucide-react'
 import { createClient } from '@/lib/supabase/server'
 import { updateProject, deleteProject } from '../actions'
-import FacilitiesTab, { type FacilityRow } from './FacilitiesTab'
-import CablesTab, { type CableRow } from './CablesTab'
-import CircuitsTab, { type CircuitRow } from './CircuitsTab'
-import CoresTab, { type CoreAssignmentRow } from './CoresTab'
+import FacilitiesTab from './FacilitiesTab'
+import CablesTab from './CablesTab'
+import CircuitsTab from './CircuitsTab'
+import CoresTab from './CoresTab'
 import MigrationsTab, {
   type MigrationRow,
   type MigrationCircuitRow,
@@ -26,13 +27,9 @@ import MigrationsTab, {
 import LeftPanel from './LeftPanel'
 import { HighlightProvider } from './HighlightContext'
 import { seedTestData } from './seed-actions'
-import TopologyCanvas, {
-  type TaskTypeOption,
-  type FacilityTaskRow,
-  type FacilityMaterialRow,
-} from './TopologyCanvas'
+import TopologyCanvas from './TopologyCanvas'
 import CollapsibleLayout from './CollapsibleLayout'
-import RelocationCanvas from './RelocationCanvas'
+import { loadRelocationCanvasData } from './canvas-data'
 
 // 지장이설 프로젝트 상세 — 메인 작업 화면.
 // 사양 § 7: 시설·케이블·회선·코어배정·직선도·차수·검증·내보내기 8 탭.
@@ -131,83 +128,18 @@ export default async function RelocationProjectPage({
     designerName = ((e as EmployeeMini | null)?.name) ?? null
   }
 
-  // 시설 (좌측 패널 + 시설 탭 + 케이블/코어 dropdown + 캔버스에 공통 사용)
-  const { data: fRows } = await supabase
-    .from('relocation_facilities')
-    .select(
-      'id, closure_type, seq_no, name, install_address, closure_spec, parent_facility_id, is_marked, notes, x_hint, y_hint, lat, lng',
-    )
-    .eq('project_id', id)
-    .order('closure_type')
-    .order('seq_no')
-  const facilities = (fRows ?? []) as FacilityRow[]
-
-  // 케이블 (탭 + 코어 dropdown)
-  const { data: cRows } = await supabase
-    .from('relocation_cables')
-    .select(
-      'id, from_facility_id, to_facility_id, spec, status, cable_code, installation_type, waypoints, total_length, end_distance, notes',
-    )
-    .eq('project_id', id)
-    .order('cable_code')
-  const cables = (cRows ?? []) as CableRow[]
-
-  // 회선 (탭 + 코어 dropdown) — cores 탭에서만 사용해도 항상 fetch (작아서 OK)
-  const { data: circRows } = await supabase
-    .from('relocation_circuits')
-    .select('id, circuit_id, subscriber_name, kind, status, notes')
-    .eq('project_id', id)
-    .order('circuit_id')
-  const circuits = (circRows ?? []) as CircuitRow[]
-
-  // 회사 공통 시설 마스터 (캔버스 시설명 자동완성용 — chain 폼과 동일 패턴)
-  const { data: fmRows } = await supabase
-    .from('connection_facilities')
-    .select('id, facility_type, name, code, spec_enum, address')
-    .eq('company_id', me.company_id)
-    .eq('is_active', true)
-    .order('name')
-  const facilityMasters = (fmRows ?? []) as Array<{
-    id: string
-    facility_type: string
-    name: string
-    code: string | null
-    spec_enum: string | null
-    address: string | null
-  }>
-
-  // 공종 마스터 (회사 단위) — 캔버스 접속함체 패널의 공종 드롭다운
-  const { data: ttRows } = await supabase
-    .from('relocation_task_type_master')
-    .select('id, name, unit_label, standard_minutes_per_unit')
-    .eq('company_id', me.company_id)
-    .eq('is_active', true)
-    .order('position')
-  const taskTypes = (ttRows ?? []) as TaskTypeOption[]
-
-  // 시설별 공종량 + 사용 자재 (캔버스 접속함체 패널 — 기별명세서용)
-  const { data: ftRows } = await supabase
-    .from('relocation_facility_tasks')
-    .select('id, facility_id, task_type_id, quantity')
-    .eq('project_id', id)
-  const facilityTasks = (ftRows ?? []) as FacilityTaskRow[]
-
-  const { data: fmtRows } = await supabase
-    .from('relocation_facility_materials')
-    .select('id, facility_id, name, spec, unit, quantity')
-    .eq('project_id', id)
-  const facilityMaterials = (fmtRows ?? []) as FacilityMaterialRow[]
-
-  // 코어 배정 — cores·migrations 탭 + 고장점 검색 패널(회선 경로)에서 필요. 항상 fetch.
-  const { data: aRows } = await supabase
-    .from('relocation_core_assignments')
-    .select(
-      'id, circuit_id, segment_idx, cable_id, core_range_start, core_range_end, lifecycle, status, is_terminal, is_auto_assigned, notes',
-    )
-    .eq('project_id', id)
-    .order('cable_id')
-    .order('core_range_start')
-  const assignments = (aRows ?? []) as CoreAssignmentRow[]
+  // 캔버스·탭 공통 데이터 (시설·케이블·회선·시설마스터·공종·코어배정).
+  // 전체화면 캔버스 라우트와 동일 — canvas-data.ts 로 일원화.
+  const {
+    facilities,
+    cables,
+    circuits,
+    facilityMasters,
+    taskTypes,
+    facilityTasks,
+    facilityMaterials,
+    assignments,
+  } = await loadRelocationCanvasData(id, me.company_id)
 
   // 이전 이력 (migrations 탭 전용)
   let migrations: MigrationRow[] = []
@@ -251,9 +183,19 @@ export default async function RelocationProjectPage({
                 {designerName && ` · 설계자 ${designerName}`}
               </p>
             </div>
-            <span className="shrink-0 inline-flex items-center self-start rounded-full bg-slate-900 px-3 py-1 text-sm font-medium text-white">
-              {project.status}
-            </span>
+            <div className="shrink-0 flex items-center gap-2 self-start">
+              <Link
+                href={`/relocation/${id}/canvas`}
+                target="_blank"
+                className="inline-flex items-center gap-1 rounded-lg border border-slate-300 px-3 py-1.5 text-sm font-medium text-slate-700 hover:bg-slate-50"
+              >
+                <ExternalLink className="h-4 w-4" />
+                넓은 화면으로 열기
+              </Link>
+              <span className="inline-flex items-center rounded-full bg-slate-900 px-3 py-1 text-sm font-medium text-white">
+                {project.status}
+              </span>
+            </div>
           </div>
         </header>
 
@@ -287,13 +229,18 @@ export default async function RelocationProjectPage({
 
   const canvasPanel = (
     <div className="px-4 sm:px-6 my-2">
-      <RelocationCanvas
+      <TopologyCanvas
         projectId={project.id}
         facilities={facilities.map((f) => ({
           id: f.id,
           closure_type: f.closure_type,
           seq_no: f.seq_no,
           name: f.name,
+          closure_spec: f.closure_spec,
+          install_address: f.install_address,
+          notes: f.notes,
+          x_hint: f.x_hint ?? null,
+          y_hint: f.y_hint ?? null,
           lat: f.lat ?? null,
           lng: f.lng ?? null,
         }))}
@@ -303,42 +250,19 @@ export default async function RelocationProjectPage({
           to_facility_id: c.to_facility_id,
           spec: c.spec,
           status: c.status,
+          cable_code: c.cable_code,
+          installation_type: c.installation_type,
+          waypoints: Array.isArray(c.waypoints) ? c.waypoints : [],
+          total_length: c.total_length,
+          end_distance: c.end_distance,
         }))}
-        schematic={
-          <TopologyCanvas
-            projectId={project.id}
-            facilities={facilities.map((f) => ({
-              id: f.id,
-              closure_type: f.closure_type,
-              seq_no: f.seq_no,
-              name: f.name,
-              closure_spec: f.closure_spec,
-              install_address: f.install_address,
-              notes: f.notes,
-              x_hint: f.x_hint ?? null,
-              y_hint: f.y_hint ?? null,
-            }))}
-            cables={cables.map((c) => ({
-              id: c.id,
-              from_facility_id: c.from_facility_id,
-              to_facility_id: c.to_facility_id,
-              spec: c.spec,
-              status: c.status,
-              cable_code: c.cable_code,
-              installation_type: c.installation_type,
-              waypoints: Array.isArray(c.waypoints) ? c.waypoints : [],
-              total_length: c.total_length,
-              end_distance: c.end_distance,
-            }))}
-            editable={true}
-            facilityMasters={facilityMasters}
-            taskTypes={taskTypes}
-            facilityTasks={facilityTasks}
-            facilityMaterials={facilityMaterials}
-            circuits={circuits}
-            coreAssignments={assignments}
-          />
-        }
+        editable={true}
+        facilityMasters={facilityMasters}
+        taskTypes={taskTypes}
+        facilityTasks={facilityTasks}
+        facilityMaterials={facilityMaterials}
+        circuits={circuits}
+        coreAssignments={assignments}
       />
     </div>
   )

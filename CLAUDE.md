@@ -911,12 +911,18 @@ LGU+ 협력사 본업 — 광케이블 지장이설 코어구성도·직선도 �
   - [TopologyCanvas.tsx](src/app/relocation/[id]/TopologyCanvas.tsx) — gap 을 amber 점선 + 방향 화살표 + 「추정경로」 라벨로 렌더 (끊긴 양쪽 시설 중심을 연결)
   - [FaultSearchPanel.tsx](src/app/relocation/[id]/FaultSearchPanel.tsx) — 회선 경로 시설 체인에서 gap 구간은 amber `⇢`, 상단에 끊긴 곳 수 경고 배너, leg 목록에 점선 「추정 중간경로」 행, 고장점 측정값이 gap 에 도달하면 `kind:'gap'` 결과 — 「약 N m 까지 정상 추적, 이후 끊긴 중간경로 부근 추정」 안내
 - ⏳ **Step C-4**: 자동 경로 탐색 server action — `is_terminal=true` 행 그룹핑 + 시설 그래프 BFS + 경유 케이블 자동 코어 할당 (코어 선택 정책: 빈 코어 중 가장 작은 번호)
-- 🚧 **Step C-5 — 카카오맵 연동 (재설계 중)** — 📋 **전체 계획: [docs/KAKAO_MAP_PLAN.md](./docs/KAKAO_MAP_PLAN.md)** (새 작업은 이 문서부터 읽을 것)
-  - **1차 시도 (폐기)**: 별도 단순 컴포넌트 `MapCanvas.tsx` + `RelocationCanvas.tsx` 토글. owner 거부 — 단순 핀 마커뿐, 29종 도형·케이블 그리기·도구·정보 패널 없음.
-  - **재설계 (Option B)**: 카카오맵을 진짜 `TopologyCanvas` SVG 뒤 배경으로 통합. 지도 모드에서 도식의 모든 기능이 GPS 좌표 기반으로 작동. 도식 모드는 코드 무수정.
-  - **완료(미커밋)**: 마이그 0045(`relocation_facilities.lat`/`lng`, owner 실행 완료) · [`kakao-loader.ts`](./src/lib/kakao-loader.ts) · [`kakao-maps.d.ts`](./src/types/kakao-maps.d.ts) · `facility-actions.ts` 의 `createFacilityAtLatLng`·`updateFacilityLatLng`·`bulkPlaceFacilities` · 카카오 셋업(JS키·도메인·env).
-  - **삭제 예정**: `MapCanvas.tsx` · `RelocationCanvas.tsx` (1차 시도).
-  - **단계**: Phase 1(지도 위 29종 도형·케이블 + 주소·건물명 검색) → Phase 1B(별도 전체화면 캔버스 창) → Phase 2(시설 드래그) → Phase 3(시설·케이블 추가 도구) → Phase 4(케이블 waypoint 편집). 상세는 KAKAO_MAP_PLAN.md.
+- ✅ **Step C-5 — 카카오맵 연동 (Phase 1·1B·2·3·4 완료, 2026-05-20)** — 📋 계획: [docs/KAKAO_MAP_PLAN.md](./docs/KAKAO_MAP_PLAN.md)
+  - **방식 (Option B)**: 카카오맵을 `TopologyCanvas` SVG 뒤 배경으로 통합. 상단 툴바 「도식/지도」 토글. 지도 모드는 시설 GPS(lat/lng)를 화면 픽셀로 투영(`containerPointFromCoords`)해 SVG 오버레이로 그림 — 29종 도형·케이블·정보 패널·고장점 검색 전부 지도 위에서 작동. 도식 모드는 무수정.
+  - **신규 파일**: [`useKakaoMap.ts`](./src/app/relocation/[id]/useKakaoMap.ts) (지도 인스턴스 훅 — epoch 카운터로 pan/zoom 시 오버레이 재투영, 콜백 ref 로 컨테이너 전달) · [`MapSearchBox.tsx`](./src/app/relocation/[id]/MapSearchBox.tsx) (주소 Geocoder + 건물명 Places 검색) · [`canvas-data.ts`](./src/app/relocation/[id]/canvas-data.ts) (캔버스 8개 쿼리 공용 로더 — page.tsx·canvas 라우트 공유) · [`canvas/page.tsx`](./src/app/relocation/[id]/canvas/page.tsx) 전용 라우트
+  - **Phase 1**: 지도 위 도형·케이블 표시 + 주소·건물명 검색. SVG 는 지도 모드에서 viewBox 생략(자연 1:1 px 좌표) + `pointer-events:none`(빈 영역 클릭은 지도로 통과), 시설·케이블만 개별로 pointer-events 켬
+  - **Phase 2**: 지도에서 시설 배치 — 「미배치 N」 패널(일괄 펼치기 / 개별 「배치」 후 지도 클릭) + 마커 드래그 이동(드롭 픽셀 → GPS 역변환 `coordsFromContainerPoint` → `updateFacilityLatLng`)
+  - **Phase 3**: 지도에서 시설·케이블 추가 — 도구 패널을 지도 모드에도 노출. 시설 종류 선택 → 지도 클릭으로 배치(`createFacilityAtLatLng` 확장: 마스터·규격·주소 수용), 케이블 규격 선택 → 시설 2개 클릭으로 연결
+  - **Phase 4**: 지도에서 케이블 경로(waypoint) 편집 — `relocation_cables.waypoints` 가 jsonb 라 마이그 없이 경로점에 `lat`/`lng` 추가. 선분 클릭=경로점 추가 · 점 드래그=이동 · 우클릭=삭제. position-actions·cable-actions·CableInfoPanel 모두 lat/lng 보존
+  - **Phase 1B**: 전용 캔버스 라우트 [`/relocation/[id]/canvas`](./src/app/relocation/[id]/canvas/page.tsx) — 프로젝트 페이지 헤더 「넓은 화면으로 열기」(새 탭). 앱 메뉴 없이 캔버스만, `initialCanvasSize='tall'`(90vh)로 크게 열림. BottomNav 는 이 라우트에서 숨김
+  - **마이그**: [`0045_relocation_facility_geo.sql`](./supabase/migrations/0045_relocation_facility_geo.sql) — `relocation_facilities.lat`/`lng` (owner 실행 완료). Phase 2~4 는 추가 마이그 없음 (waypoints 는 jsonb)
+  - **삭제**: 1차 시도의 `MapCanvas.tsx`·`RelocationCanvas.tsx`
+  - **레이아웃 노하우** (정보 패널 잘림 디버깅 — owner 3회 반복 보고로 확인): 다단계 `flex-1`/`height:100%` 높이 체인은 일부 브라우저(크롬)에서 안쪽 자식까지 확정 높이를 전달 못 함 → 패널이 화면 밖으로 늘어남. **해결: 별도 레이아웃을 만들지 말고 검증된 코드 경로 재사용.** 캔버스 행은 명시적 `vh` 높이(`CANVAS_SIZE_HEIGHT`), 전용 라우트도 임베드 모드 그대로 쓰고 `initialCanvasSize` 만 다르게. 정보 패널 루트는 `h-full` 빼고 flex `stretch`+`min-h-0`+`overflow-y-auto`
+  - **운영**: 카카오 JS 키·웹 도메인·`NEXT_PUBLIC_KAKAO_MAP_KEY`(.env.local + Vercel) 등록 완료
 - ⏳ **Step D**: 검증 로직 (룰 12개, § 6-2) + 차수 자동 분할 (§ 6-3)
 - ⏳ **Step E**: SVG 시각화 (코어구성도·직선도) 내보내기 + 기별명세서
 

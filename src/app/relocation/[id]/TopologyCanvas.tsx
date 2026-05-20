@@ -13,6 +13,10 @@ import {
   Expand,
   Shrink,
   Crosshair,
+  Map as MapIcon,
+  Network,
+  TriangleAlert,
+  MapPin,
 } from 'lucide-react'
 import {
   CABLE_SPEC_VALUES,
@@ -36,7 +40,12 @@ import { CABLE_STATUS_LABEL, CABLE_STATUS_VALUES } from '@/lib/relocation'
 import { autoLayoutPositions, NODE_SIZE } from './auto-layout'
 import { saveNodePositions, saveCableWaypoints } from './position-actions'
 import { createCable } from './cable-actions'
-import { createFacilityAtPosition } from './facility-actions'
+import {
+  createFacilityAtPosition,
+  createFacilityAtLatLng,
+  updateFacilityLatLng,
+  bulkPlaceFacilities,
+} from './facility-actions'
 import LegendPanel from './LegendPanel'
 import CableInfoPanel from './CableInfoPanel'
 import FacilityInfoPanel, {
@@ -48,6 +57,8 @@ import { useHighlight } from './HighlightContext'
 import FaultSearchPanel, {
   type FaultSearchCircuit,
 } from './FaultSearchPanel'
+import { useKakaoMap } from './useKakaoMap'
+import MapSearchBox from './MapSearchBox'
 
 export type FacilityMasterMini = {
   id: string
@@ -86,12 +97,17 @@ type FacilityNode = {
   notes: string | null
   x_hint: number | null
   y_hint: number | null
+  lat: number | null
+  lng: number | null
 }
 
-// 경로점 — x/y 는 캔버스 좌표, pole_name/dist 는 정산용 (전주명·구간거리)
+// 경로점 — x/y 는 도식 캔버스 좌표, lat/lng 는 지도 모드 GPS 좌표(Phase 4),
+//   pole_name/dist 는 정산용 (전주명·구간거리)
 type Waypoint = {
   x: number
   y: number
+  lat?: number | null
+  lng?: number | null
   pole_name?: string | null
   dist?: number | null
 }
@@ -108,6 +124,11 @@ type CableEdge = {
   total_length: number | null
   end_distance: number | null
 }
+
+// 시설 신규 배치 대기 — 도식 모드는 캔버스 픽셀(xy), 지도 모드는 GPS 좌표(latlng)
+type PendingPlacement =
+  | { closureType: ClosureType; kind: 'xy'; x: number; y: number }
+  | { closureType: ClosureType; kind: 'latlng'; lat: number; lng: number }
 
 const EXISTING_COLOR = '#111827'
 const NEW_COLOR      = '#dc2626'
@@ -182,6 +203,7 @@ export default function TopologyCanvas({
   facilityMaterials,
   circuits,
   coreAssignments,
+  initialCanvasSize,
 }: {
   projectId: string
   facilities: FacilityNode[]
@@ -193,8 +215,37 @@ export default function TopologyCanvas({
   facilityMaterials?: FacilityMaterialRow[]
   circuits?: FaultSearchCircuit[]
   coreAssignments?: CanvasCoreAssignment[]
+  // 캔버스 표시 영역 시작 크기 — 전용 캔버스 라우트는 'tall' 로 크게 연다.
+  initialCanvasSize?: 'compact' | 'normal' | 'tall' | 'fullscreen'
 }) {
   const router = useRouter()
+
+  // 도식(schematic) / 지도(map) 모드.
+  //   지도 모드 = 카카오맵을 SVG 캔버스 뒤 배경으로 깔고, 시설을 GPS 좌표로 투영해 배치.
+  //   도식 모드는 기존 동작 그대로 — 모든 분기는 `mode === 'map'` 별도 경로.
+  const [mode, setMode] = useState<'schematic' | 'map'>('schematic')
+  const {
+    setContainer: mapSetContainer,
+    map: kakaoMap,
+    status: mapStatus,
+    error: mapError,
+    epoch: mapEpoch,
+  } = useKakaoMap(mode === 'map')
+
+  // 지도 모드 (Phase 2) — 시설 배치·드래그.
+  //   mapDragPos: 지도에서 시설을 드래그하는 동안의 임시 픽셀 override.
+  //     드롭 후 lat/lng 저장 → 다음 지도 이동 때 정리되어 GPS 투영으로 복귀.
+  //   placingId: 「배치」를 누른 미배치 시설 — 다음 지도 클릭으로 위치 지정.
+  const [mapDragPos, setMapDragPos] = useState<Record<string, { x: number; y: number }>>({})
+  const [placingId, setPlacingId] = useState<string | null>(null)
+  const [showUnplaced, setShowUnplaced] = useState(false)
+  const placingIdRef = useRef<string | null>(null)
+  useEffect(() => {
+    placingIdRef.current = placingId
+  }, [placingId])
+
+  // addTool 의 최신값 — 카카오 클릭 리스너(클로저 고정)에서 읽기 위한 ref
+  const addToolRef = useRef<ClosureType | null>(null)
 
   // 고장점 검색 하이라이트 (FaultSearchTab 이 context 로 전달)
   const { highlight } = useHighlight()
@@ -238,11 +289,37 @@ export default function TopologyCanvas({
 
   const effectivePositions = useMemo(() => {
     const result: Record<string, { x: number; y: number }> = {}
+    if (mode === 'map') {
+      // 지도 모드 — 각 시설의 GPS 좌표를 화면 픽셀로 투영.
+      //   containerPointFromCoords 는 시설 「중심」 픽셀을 준다. 노드 transform 은
+      //   좌상단 기준이므로 NODE_SIZE 절반을 빼 도식 모드의 중심 계산과 맞춘다.
+      const m = kakaoMap
+      if (!m) return result
+      const proj = m.getProjection()
+      for (const f of facilities) {
+        // 드래그 중인 시설은 임시 픽셀 override 우선
+        const override = mapDragPos[f.id]
+        if (override) {
+          result[f.id] = override
+          continue
+        }
+        if (f.lat == null || f.lng == null) continue
+        const pt = proj.containerPointFromCoords(new kakao.maps.LatLng(f.lat, f.lng))
+        result[f.id] = {
+          x: pt.x - NODE_SIZE.width / 2,
+          y: pt.y - NODE_SIZE.height / 2 + 10,
+        }
+      }
+      return result
+    }
     for (const f of facilities) {
       result[f.id] = positions[f.id] ?? initialPositions[f.id] ?? { x: 0, y: 0 }
     }
     return result
-  }, [facilities, positions, initialPositions])
+    // mapEpoch = 지도 이동 카운터. getProjection() 이 가변 상태를 읽어 린터가
+    // 의존성 필요성을 못 보므로 명시적으로 포함 (지도 pan/zoom 시 재투영 필수).
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [mode, facilities, positions, initialPositions, kakaoMap, mapEpoch, mapDragPos])
 
   const cableById = useMemo(() => new Map(cables.map((c) => [c.id, c])), [cables])
 
@@ -296,11 +373,12 @@ export default function TopologyCanvas({
     { fromId: string; toId: string } | null
   >(null)
 
-  // 추가 모드 상태 — 도구 패널 chip 클릭으로 ON. 캔버스 빈 영역 클릭 시 그 위치에 시설 임시 배치.
+  // 추가 모드 상태 — 도구 패널 chip 클릭으로 ON. 캔버스/지도 클릭 시 그 위치에 시설 임시 배치.
   const [addTool, setAddTool] = useState<ClosureType | null>(null)
-  const [pendingPlacement, setPendingPlacement] = useState<
-    { closureType: ClosureType; x: number; y: number } | null
-  >(null)
+  const [pendingPlacement, setPendingPlacement] = useState<PendingPlacement | null>(null)
+  useEffect(() => {
+    addToolRef.current = addTool
+  }, [addTool])
 
   // 광케이블 도구 — 시설 도구와 상호 배타. 선택 시 시설 2 개 클릭으로 케이블 연결 모달
   // 띄울 때 규격으로 prefill.
@@ -338,7 +416,7 @@ export default function TopologyCanvas({
     tall: '크게',
     fullscreen: '전체',
   }
-  const [canvasSize, setCanvasSize] = useState<CanvasSize>('normal')
+  const [canvasSize, setCanvasSize] = useState<CanvasSize>(initialCanvasSize ?? 'normal')
 
   const expandCanvas = () => {
     const idx = CANVAS_SIZE_ORDER.indexOf(canvasSize)
@@ -446,13 +524,30 @@ export default function TopologyCanvas({
   const highlightFacKey = highlight?.facilityIds.join(',') ?? ''
   useEffect(() => {
     if (!highlightFacKey) return
+    const ids = highlightFacKey.split(',')
+    if (mode === 'map') {
+      // 지도 모드 — 하이라이트된 시설들의 GPS 범위로 지도 fit
+      const m = kakaoMap
+      if (!m) return
+      const bounds = new kakao.maps.LatLngBounds()
+      let count = 0
+      for (const id of ids) {
+        const f = facilities.find((x) => x.id === id)
+        if (f && f.lat != null && f.lng != null) {
+          bounds.extend(new kakao.maps.LatLng(f.lat, f.lng))
+          count += 1
+        }
+      }
+      if (count > 0) m.setBounds(bounds)
+      return
+    }
     const pos: Record<string, { x: number; y: number }> = {}
-    for (const id of highlightFacKey.split(',')) {
+    for (const id of ids) {
       const p = effPosRef.current[id]
       if (p) pos[id] = p
     }
     if (Object.keys(pos).length > 0) setViewport(computeFitViewport(pos))
-  }, [highlightFacKey, computeFitViewport])
+  }, [highlightFacKey, computeFitViewport, mode, kakaoMap, facilities])
 
   // 빈 영역 드래그 (pan) ref. SVG 좌표 변환 비율을 시작 시점에 캡처.
   const panRef = useRef<{
@@ -486,6 +581,10 @@ export default function TopologyCanvas({
     return result
   }, [facilities, cables])
 
+  // viewBox — 도식 모드만 사용 (사용자 제어 viewport).
+  //   지도 모드는 viewBox 를 생략한다 → SVG 자연 좌표계(1 user unit = 1 CSS px).
+  //   containerPointFromCoords 가 주는 컨테이너 픽셀이 그대로 SVG 좌표가 되어
+  //   별도 크기 측정 없이 정확히 정렬된다.
   const viewBoxStr = `${viewport.x} ${viewport.y} ${viewport.width} ${viewport.height}`
 
   const toSvgCoord = useCallback((clientX: number, clientY: number) => {
@@ -502,7 +601,9 @@ export default function TopologyCanvas({
 
   // wheel — 마우스 위치 anchor 로 줌. React 의 onWheel 은 passive:true 이라
   // preventDefault 가 안 되니 native addEventListener 로 attach.
+  // 지도 모드는 카카오맵이 휠 줌을 직접 처리하므로 리스너를 달지 않는다.
   useEffect(() => {
+    if (mode === 'map') return
     const svg = svgRef.current
     if (!svg) return
     function onWheel(e: WheelEvent) {
@@ -525,13 +626,145 @@ export default function TopologyCanvas({
     }
     svg.addEventListener('wheel', onWheel, { passive: false })
     return () => svg.removeEventListener('wheel', onWheel)
-  }, [toSvgCoord])
+  }, [toSvgCoord, mode])
 
-  // 「전체보기」 — 모든 시설이 보이도록 viewport 리셋
-  const onFitToContent = () => setViewport(computeFitViewport(effectivePositions))
+  // 지도 모드 — GPS 가 있는 시설들이 모두 보이도록 지도 fit
+  const fitMapToFacilities = useCallback(() => {
+    const m = kakaoMap
+    if (!m) return
+    const withGps = facilities.filter(
+      (f): f is FacilityNode & { lat: number; lng: number } =>
+        f.lat != null && f.lng != null,
+    )
+    if (withGps.length === 0) return
+    if (withGps.length === 1) {
+      m.setCenter(new kakao.maps.LatLng(withGps[0].lat, withGps[0].lng))
+      m.setLevel(3)
+      return
+    }
+    const bounds = new kakao.maps.LatLngBounds()
+    for (const f of withGps) bounds.extend(new kakao.maps.LatLng(f.lat, f.lng))
+    m.setBounds(bounds)
+  }, [kakaoMap, facilities])
+
+  // 지도 첫 준비 시 1회 — 시설 GPS 범위로 자동 fit
+  const initialFitDoneRef = useRef(false)
+  useEffect(() => {
+    if (mapStatus !== 'ready' || initialFitDoneRef.current) return
+    initialFitDoneRef.current = true
+    fitMapToFacilities()
+  }, [mapStatus, fitMapToFacilities])
+
+  // GPS 가 없는(지도 미배치) 시설 목록 — 배치 패널에서 사용
+  const unplacedFacilities = useMemo(
+    () => facilities.filter((f) => f.lat == null || f.lng == null),
+    [facilities],
+  )
+  const placingFacility = placingId
+    ? facilities.find((f) => f.id === placingId) ?? null
+    : null
+
+  // 카카오맵 이벤트 — 클릭(시설 배치) + 지도 이동(드래그 override 정리).
+  //   핸들러는 1회 등록하고 최신 placingId 는 ref 로 읽는다 (리스너 클로저는 고정).
+  //   setState 는 effect 본문이 아닌 카카오 콜백 안에서 호출 — 캐스케이드 렌더 룰 회피.
+  useEffect(() => {
+    const m = kakaoMap
+    if (!m) return
+    const onClick = (e?: kakao.maps.MouseEvent) => {
+      if (!e) return
+      const lat = e.latLng.getLat()
+      const lng = e.latLng.getLng()
+      // 1) 「배치」 대기 중인 미배치 시설이 있으면 그 위치로 지정
+      const pid = placingIdRef.current
+      if (pid) {
+        void (async () => {
+          const r = await updateFacilityLatLng({
+            project_id: projectId,
+            facility_id: pid,
+            lat,
+            lng,
+          })
+          if (!r.ok) {
+            toast.error(r.error)
+            return
+          }
+          toast.success('시설 위치를 지정했습니다')
+          setPlacingId(null)
+          router.refresh()
+        })()
+        return
+      }
+      // 2) 시설 추가 도구가 선택돼 있으면 그 위치에 새 시설 배치 폼 열기
+      const tool = addToolRef.current
+      if (tool) {
+        setPendingPlacement({ closureType: tool, kind: 'latlng', lat, lng })
+        setAddTool(null) // 1회 배치 후 도구 해제
+      }
+    }
+    // 지도가 움직이기 시작하면 드래그 픽셀 override 를 비워 GPS 투영으로 복귀
+    const onMapMove = () => {
+      setMapDragPos((prev) => (Object.keys(prev).length > 0 ? {} : prev))
+    }
+    kakao.maps.event.addListener(m, 'click', onClick)
+    kakao.maps.event.addListener(m, 'dragstart', onMapMove)
+    kakao.maps.event.addListener(m, 'zoom_start', onMapMove)
+    return () => {
+      kakao.maps.event.removeListener(m, 'click', onClick)
+      kakao.maps.event.removeListener(m, 'dragstart', onMapMove)
+      kakao.maps.event.removeListener(m, 'zoom_start', onMapMove)
+    }
+  }, [kakaoMap, projectId, router])
+
+  // 미배치 시설들을 지도 중앙 격자에 한 번에 펼치기 — 이후 드래그로 실제 위치 보정
+  const onBulkPlace = async () => {
+    const m = kakaoMap
+    if (!m || unplacedFacilities.length === 0) return
+    const c = m.getCenter()
+    const cLat = c.getLat()
+    const cLng = c.getLng()
+    const n = unplacedFacilities.length
+    const cols = Math.ceil(Math.sqrt(n))
+    const rows = Math.ceil(n / cols)
+    const gap = 0.0008 // 약 90m 간격
+    const items = unplacedFacilities.map((f, i) => {
+      const r = Math.floor(i / cols)
+      const col = i % cols
+      return {
+        id: f.id,
+        lat: cLat - (r - (rows - 1) / 2) * gap,
+        lng: cLng + (col - (cols - 1) / 2) * gap,
+      }
+    })
+    const res = await bulkPlaceFacilities(projectId, items)
+    if (!res.ok) {
+      toast.error(res.error)
+      return
+    }
+    toast.success(`시설 ${res.count}개를 지도에 펼쳤습니다. 드래그해 실제 위치로 옮기세요.`)
+    setShowUnplaced(false)
+    router.refresh()
+  }
+
+  // 「전체보기」 — 도식: viewport 리셋 / 지도: 시설 GPS 범위로 fit
+  const onFitToContent = () => {
+    if (mode === 'map') {
+      fitMapToFacilities()
+      return
+    }
+    setViewport(computeFitViewport(effectivePositions))
+  }
 
   // 특정 시설을 화면 중앙으로 — 좌측 사이드바에서 시설 클릭 시. 줌 레벨은 유지.
   const focusFacility = (id: string) => {
+    if (mode === 'map') {
+      const f = facilities.find((x) => x.id === id)
+      if (f && f.lat != null && f.lng != null && kakaoMap) {
+        kakaoMap.setCenter(new kakao.maps.LatLng(f.lat, f.lng))
+      }
+      setSelectedId(id)
+      setSelectedCableId(null)
+      return
+    }
     const pos = effectivePositions[id]
     if (!pos) return
     const cx = pos.x + NODE_SIZE.width / 2
@@ -604,6 +837,26 @@ export default function TopologyCanvas({
       pickFaultFacility(id)
       return
     }
+    // 지도 모드 — 케이블 도구가 켜져 있으면 시설 2개 클릭으로 케이블 연결,
+    //   아니면 클릭 = 선택(정보 패널).
+    if (mode === 'map') {
+      setSelectedCableId(null)
+      if (cableTool) {
+        if (selectedId === id) {
+          setSelectedId(null)
+          return
+        }
+        if (selectedId === null) {
+          setSelectedId(id)
+          return
+        }
+        setPendingConnection({ fromId: selectedId, toId: id })
+        setSelectedId(null)
+        return
+      }
+      setSelectedId((cur) => (cur === id ? null : id))
+      return
+    }
     setSelectedCableId(null)  // 시설 선택 시 케이블 경로 편집 종료
     if (selectedId === id) {
       setSelectedId(null)
@@ -618,9 +871,10 @@ export default function TopologyCanvas({
     setSelectedId(null)
   }
 
-  // 케이블의 경로 점 배열 — [출발 시설 중심, ...waypoints, 도착 시설 중심]
-  //   - waypoint 있으면 그대로 (사용자가 경로를 수정한 케이블)
-  //   - waypoint 없으면 같은 경로 다른 케이블과 겹치지 않도록 수직 offset 적용
+  // 케이블의 경로 점 배열 — [출발 시설 중심, ...중간 경로점, 도착 시설 중심]
+  //   - 도식 모드: 경로점 x/y 그대로
+  //   - 지도 모드: 경로점 lat/lng 를 화면 픽셀로 투영 (Phase 4)
+  //   - 경로점 없으면 같은 경로 다른 케이블과 겹치지 않게 수직 offset 적용
   const cablePathPoints = useCallback(
     (c: CableEdge): Waypoint[] => {
       const from = effectivePositions[c.from_facility_id]
@@ -635,8 +889,29 @@ export default function TopologyCanvas({
         y: to.y + NODE_SIZE.height / 2 - 10,
       }
       const wps = effectiveWaypoints(c.id)
-      if (wps.length > 0) {
-        return [fromCenter, ...wps, toCenter]
+
+      // 중간 경로점을 화면 좌표로 변환
+      let midPoints: { x: number; y: number }[]
+      if (mode === 'map') {
+        midPoints = []
+        const m = kakaoMap
+        if (m) {
+          const proj = m.getProjection()
+          for (const w of wps) {
+            if (w.lat != null && w.lng != null) {
+              const pt = proj.containerPointFromCoords(
+                new kakao.maps.LatLng(w.lat, w.lng),
+              )
+              midPoints.push({ x: pt.x, y: pt.y })
+            }
+          }
+        }
+      } else {
+        midPoints = wps.map((w) => ({ x: w.x, y: w.y }))
+      }
+
+      if (midPoints.length > 0) {
+        return [fromCenter, ...midPoints, toCenter]
       }
       // 직선 케이블 — 같은 경로 여러 조면 수직 offset
       const offset = cableOffsets.get(c.id) ?? 0
@@ -651,15 +926,44 @@ export default function TopologyCanvas({
         { x: toCenter.x + nx * offset, y: toCenter.y + ny * offset },
       ]
     },
-    [effectivePositions, effectiveWaypoints, cableOffsets],
+    [effectivePositions, effectiveWaypoints, cableOffsets, mode, kakaoMap],
+  )
+
+  // 경로점의 화면 좌표 — 도식: x/y · 지도: lat/lng 투영 (없으면 null)
+  const waypointScreenPos = useCallback(
+    (w: Waypoint): { x: number; y: number } | null => {
+      if (mode === 'map') {
+        const m = kakaoMap
+        if (!m || w.lat == null || w.lng == null) return null
+        const pt = m
+          .getProjection()
+          .containerPointFromCoords(new kakao.maps.LatLng(w.lat, w.lng))
+        return { x: pt.x, y: pt.y }
+      }
+      return { x: w.x, y: w.y }
+    },
+    [mode, kakaoMap],
   )
 
   // waypoint 추가 — 선분 i (점 i ~ 점 i+1 사이) 클릭 시 waypoints 의 index i 에 삽입
   const addWaypoint = async (cableId: string, segmentIndex: number, x: number, y: number) => {
     const current = effectiveWaypoints(cableId)
+    let wp: Waypoint = { x: Math.round(x), y: Math.round(y) }
+    // 지도 모드 — 클릭 픽셀을 GPS 좌표로 역변환해 함께 저장
+    if (mode === 'map' && kakaoMap) {
+      const ll = kakaoMap
+        .getProjection()
+        .coordsFromContainerPoint(new kakao.maps.Point(x, y))
+      wp = {
+        x: Math.round(x),
+        y: Math.round(y),
+        lat: ll.getLat(),
+        lng: ll.getLng(),
+      }
+    }
     const next = [
       ...current.slice(0, segmentIndex),
-      { x: Math.round(x), y: Math.round(y) },
+      wp,
       ...current.slice(segmentIndex),
     ]
     setCableWaypoints((prev) => ({ ...prev, [cableId]: next }))
@@ -687,20 +991,25 @@ export default function TopologyCanvas({
     const { x, y } = toSvgCoord(e.clientX, e.clientY)
     const wp = effectiveWaypoints(cableId)[index]
     if (!wp) return
+    // 경로점의 현재 화면 좌표 기준으로 offset 계산 (지도 모드는 lat/lng 투영값)
+    const sp = waypointScreenPos(wp)
+    if (!sp) return
     waypointDragRef.current = {
       cableId,
       index,
       startX: x,
       startY: y,
-      offsetX: x - wp.x,
-      offsetY: y - wp.y,
+      offsetX: x - sp.x,
+      offsetY: y - sp.y,
       hasMoved: false,
     }
-    svgRef.current?.setPointerCapture(e.pointerId)
+    // 원 요소에 캡처 — 지도 모드(SVG 루트 pointer-events:none)에서도 안정적
+    e.currentTarget.setPointerCapture(e.pointerId)
   }
 
   const onPointerDown = (e: React.PointerEvent<SVGGElement>, id: string) => {
     if (!editable) return
+    // 도식·지도 모드 공통 — pointer 캡처로 드래그. 지도 모드도 동일 (Phase 2).
     e.stopPropagation()
     const { x, y } = toSvgCoord(e.clientX, e.clientY)
     const pos = effectivePositions[id]
@@ -719,6 +1028,8 @@ export default function TopologyCanvas({
   // SVG 빈 영역 pointerdown — pan 시작. 노드 위는 노드 onPointerDown 에서 stopPropagation
   // 하므로 여기까지 안 옴.
   const onSvgPointerDown = (e: React.PointerEvent<SVGSVGElement>) => {
+    // 지도 모드 — pan 은 카카오맵이 직접 처리 (SVG 루트 pointer-events:none)
+    if (mode === 'map') return
     if (interactionRef.current) return  // 노드 드래그 중이면 무시 (이론상 도달 안 함)
     // SVG 배경을 직접 누른 경우만 pan. 케이블 선·라벨 위에서 누르면 pan 시작 안 함
     // — setPointerCapture 가 케이블 click 이벤트를 SVG 로 가로채는 것을 방지.
@@ -753,13 +1064,13 @@ export default function TopologyCanvas({
         setDragging(ir.id)
         setSelectedId(null)
       }
-      setPositions((prev) => ({
-        ...prev,
-        [ir.id]: {
-          x: x - ir.offsetX,
-          y: y - ir.offsetY,
-        },
-      }))
+      const np = { x: x - ir.offsetX, y: y - ir.offsetY }
+      // 지도 모드는 mapDragPos(임시 픽셀)에, 도식 모드는 positions(영구 레이아웃)에 기록
+      if (mode === 'map') {
+        setMapDragPos((prev) => ({ ...prev, [ir.id]: np }))
+      } else {
+        setPositions((prev) => ({ ...prev, [ir.id]: np }))
+      }
       return
     }
     // 2) 케이블 waypoint 드래그 진행 중
@@ -772,9 +1083,26 @@ export default function TopologyCanvas({
       wd.hasMoved = true
       const nx = x - wd.offsetX
       const ny = y - wd.offsetY
+      // 지도 모드 — 픽셀을 GPS 좌표로 역변환
+      let llPart: { lat: number; lng: number } | null = null
+      if (mode === 'map' && kakaoMap) {
+        const ll = kakaoMap
+          .getProjection()
+          .coordsFromContainerPoint(new kakao.maps.Point(nx, ny))
+        llPart = { lat: ll.getLat(), lng: ll.getLng() }
+      }
       setCableWaypoints((prev) => {
         const base = prev[wd.cableId] ?? effectiveWaypoints(wd.cableId)
-        const next = base.map((w, i) => (i === wd.index ? { x: nx, y: ny } : w))
+        const next = base.map((w, i) => {
+          if (i !== wd.index) return w
+          // 위치만 갱신하고 전주명·구간거리는 보존
+          const moved: Waypoint = { ...w, x: Math.round(nx), y: Math.round(ny) }
+          if (llPart) {
+            moved.lat = llPart.lat
+            moved.lng = llPart.lng
+          }
+          return moved
+        })
         return { ...prev, [wd.cableId]: next }
       })
       return
@@ -803,7 +1131,35 @@ export default function TopologyCanvas({
       if (ir.hasMoved) {
         setDragging(null)
         const pos = effectivePositions[ir.id]
-        if (pos) {
+        if (mode === 'map') {
+          // 지도 모드 — 드롭한 픽셀을 GPS 좌표로 역변환해 저장
+          const m = kakaoMap
+          if (pos && m) {
+            const cx = pos.x + NODE_SIZE.width / 2
+            const cy = pos.y + NODE_SIZE.height / 2 - 10
+            const ll = m
+              .getProjection()
+              .coordsFromContainerPoint(new kakao.maps.Point(cx, cy))
+            const result = await updateFacilityLatLng({
+              project_id: projectId,
+              facility_id: ir.id,
+              lat: ll.getLat(),
+              lng: ll.getLng(),
+            })
+            if (!result.ok) {
+              toast.error(result.error)
+              // 실패 시 override 제거 → 원래 위치로 복귀
+              setMapDragPos((prev) => {
+                const next = { ...prev }
+                delete next[ir.id]
+                return next
+              })
+            } else {
+              toast.success('시설 위치를 저장했습니다')
+              router.refresh()
+            }
+          }
+        } else if (pos) {
           const result = await saveNodePositions(projectId, [
             { id: ir.id, x: pos.x, y: pos.y },
           ])
@@ -837,6 +1193,8 @@ export default function TopologyCanvas({
   }
 
   const onCanvasClick = (e: React.MouseEvent<SVGSVGElement>) => {
+    // 지도 모드 — 빈 영역 클릭은 카카오맵으로 통과 (SVG 루트 pointer-events:none)
+    if (mode === 'map') return
     // pan 드래그 직후의 click 은 무시 (화면 이동만 한 것임)
     if (recentlyPannedRef.current) {
       recentlyPannedRef.current = false
@@ -856,7 +1214,7 @@ export default function TopologyCanvas({
       // 클릭 지점이 노드 중심에 오도록 NODE_SIZE 의 절반만큼 빼기
       const placedX = Math.max(0, Math.round(x - NODE_SIZE.width / 2))
       const placedY = Math.max(0, Math.round(y - NODE_SIZE.height / 2))
-      setPendingPlacement({ closureType: addTool, x: placedX, y: placedY })
+      setPendingPlacement({ closureType: addTool, kind: 'xy', x: placedX, y: placedY })
       setAddTool(null)  // 1회 배치 후 도구 해제 (연속 추가는 다시 클릭)
       setSelectedId(null)
       return
@@ -884,28 +1242,77 @@ export default function TopologyCanvas({
       <div className="px-4 py-2 border-b border-slate-100 flex items-center justify-between gap-2 flex-wrap">
         <p className="text-xs text-slate-600">
           시설 {facilities.length}개 · 케이블 {cables.length}개
-          {editable && (
-            faultSearchOpen
-              ? ' · 고장점 검색 — 케이블을 클릭해 회선을 선택하세요 (우측 패널)'
+          {mode === 'map'
+            ? placingFacility
+              ? ' · 지도를 클릭해 시설 위치를 지정하세요'
               : addTool
-                ? ` · 캔버스를 클릭해 ${CLOSURE_TYPE_LABEL[addTool]} 을(를) 배치하세요`
-                : selectedCableId
-                  ? ' · 케이블 경로 편집 — 선 클릭 = 경로점 추가 · 점 드래그 = 이동 · 점 우클릭 = 삭제'
-                  : selectedId
-                    ? ' · 다른 시설을 클릭하면 케이블이 연결됩니다 (취소: 빈 영역 클릭)'
-                    : ' · 시설 클릭 = 연결 · 케이블 클릭 = 경로 편집 · 빈 영역 드래그 = 이동 · 휠 = 확대/축소'
-          )}
+                ? ` · 지도를 클릭해 ${CLOSURE_TYPE_LABEL[addTool]} 을(를) 배치하세요`
+                : cableTool
+                  ? ' · 시설 2개를 차례로 클릭해 케이블을 연결하세요'
+                  : selectedCableId
+                    ? ' · 케이블 경로 편집 — 선 클릭 = 경로점 추가 · 점 드래그 = 이동 · 점 우클릭 = 삭제'
+                    : unplacedFacilities.length > 0
+                      ? ` · 미배치 시설 ${unplacedFacilities.length}개 — 우측 「미배치」 버튼으로 배치`
+                      : ' · 시설 드래그 = 위치 이동 · 클릭 = 선택 · 검색창으로 위치 이동'
+            : editable && (
+                faultSearchOpen
+                  ? ' · 고장점 검색 — 케이블을 클릭해 회선을 선택하세요 (우측 패널)'
+                  : addTool
+                    ? ` · 캔버스를 클릭해 ${CLOSURE_TYPE_LABEL[addTool]} 을(를) 배치하세요`
+                    : selectedCableId
+                      ? ' · 케이블 경로 편집 — 선 클릭 = 경로점 추가 · 점 드래그 = 이동 · 점 우클릭 = 삭제'
+                      : selectedId
+                        ? ' · 다른 시설을 클릭하면 케이블이 연결됩니다 (취소: 빈 영역 클릭)'
+                        : ' · 시설 클릭 = 연결 · 케이블 클릭 = 경로 편집 · 빈 영역 드래그 = 이동 · 휠 = 확대/축소'
+              )}
         </p>
         <div className="flex items-center gap-1">
-          {/* 줌 컨트롤 */}
-          <button
-            type="button"
-            onClick={() => onZoom('out')}
-            className="inline-flex items-center justify-center w-7 h-7 rounded-md border border-slate-300 text-slate-700 hover:bg-slate-50"
-            title="축소"
-          >
-            <ZoomOut className="h-3.5 w-3.5" />
-          </button>
+          {/* 도식 / 지도 모드 토글 */}
+          <div className="mr-1 inline-flex items-center rounded-md border border-slate-300 overflow-hidden">
+            <button
+              type="button"
+              onClick={() => setMode('schematic')}
+              className={
+                'inline-flex items-center gap-1 px-2 h-7 text-[11px] font-medium ' +
+                (mode === 'schematic'
+                  ? 'bg-slate-900 text-white'
+                  : 'text-slate-700 hover:bg-slate-50')
+              }
+            >
+              <Network className="h-3 w-3" />
+              도식
+            </button>
+            <button
+              type="button"
+              onClick={() => {
+                setMode('map')
+                // 지도 모드에 없는 도식 전용 도구는 정리
+                setAddTool(null)
+                setCableTool(null)
+              }}
+              className={
+                'inline-flex items-center gap-1 px-2 h-7 text-[11px] font-medium border-l border-slate-300 ' +
+                (mode === 'map'
+                  ? 'bg-slate-900 text-white'
+                  : 'text-slate-700 hover:bg-slate-50')
+              }
+            >
+              <MapIcon className="h-3 w-3" />
+              지도
+            </button>
+          </div>
+
+          {/* 줌 컨트롤 — 도식 모드만 (지도 모드는 카카오맵 자체 줌) */}
+          {mode === 'schematic' && (
+            <button
+              type="button"
+              onClick={() => onZoom('out')}
+              className="inline-flex items-center justify-center w-7 h-7 rounded-md border border-slate-300 text-slate-700 hover:bg-slate-50"
+              title="축소"
+            >
+              <ZoomOut className="h-3.5 w-3.5" />
+            </button>
+          )}
           <button
             type="button"
             onClick={onFitToContent}
@@ -915,17 +1322,21 @@ export default function TopologyCanvas({
             <Maximize2 className="h-3 w-3" />
             전체보기
           </button>
-          <button
-            type="button"
-            onClick={() => onZoom('in')}
-            className="inline-flex items-center justify-center w-7 h-7 rounded-md border border-slate-300 text-slate-700 hover:bg-slate-50"
-            title="확대"
-          >
-            <ZoomIn className="h-3.5 w-3.5" />
-          </button>
-          <span className="px-2 text-[11px] font-medium text-slate-500 font-mono min-w-[3rem] text-right">
-            {Math.round((computeFitViewport(effectivePositions).width / viewport.width) * 100)}%
-          </span>
+          {mode === 'schematic' && (
+            <>
+              <button
+                type="button"
+                onClick={() => onZoom('in')}
+                className="inline-flex items-center justify-center w-7 h-7 rounded-md border border-slate-300 text-slate-700 hover:bg-slate-50"
+                title="확대"
+              >
+                <ZoomIn className="h-3.5 w-3.5" />
+              </button>
+              <span className="px-2 text-[11px] font-medium text-slate-500 font-mono min-w-[3rem] text-right">
+                {Math.round((computeFitViewport(effectivePositions).width / viewport.width) * 100)}%
+              </span>
+            </>
+          )}
 
           {/* 캔버스 표시 영역 크기 단계 — compact/normal/tall/fullscreen */}
           <div className="ml-2 inline-flex items-center rounded-md border border-slate-300 overflow-hidden">
@@ -990,7 +1401,8 @@ export default function TopologyCanvas({
       </div>
 
       {/* 추가 도구 패널 — 접기/펼치기 가능. 헤더 항상 표시, 카테고리 그룹은 펼친 상태일 때만.
-          시설 chip 클릭 시 자동 접힘 (owner 요청 — 그리기 작업 시 화면 최대화) */}
+          시설 chip 클릭 시 자동 접힘 (owner 요청 — 그리기 작업 시 화면 최대화).
+          도식·지도 모드 모두 표시 — 지도 모드는 지도 클릭으로 시설 배치, 시설 2개 클릭으로 케이블 연결. */}
       {editable && (
         <div className="px-4 py-2 border-b border-slate-100 bg-slate-50">
           <div className="flex items-center gap-2">
@@ -1142,6 +1554,98 @@ export default function TopologyCanvas({
         </div>
       )}
 
+      {/* 지도 모드 검색창 + 미배치 시설 배치. SDK 준비 완료 후에만 노출. */}
+      {mode === 'map' && mapStatus === 'ready' && (
+        <div className="px-4 py-2 border-b border-slate-100 bg-slate-50 space-y-2">
+          <div className="flex items-start gap-2">
+            <div className="flex-1 min-w-0">
+              <MapSearchBox
+                onPick={(lat, lng) => {
+                  const m = kakaoMap
+                  if (!m) return
+                  m.setCenter(new kakao.maps.LatLng(lat, lng))
+                  m.setLevel(3)
+                }}
+              />
+            </div>
+            {unplacedFacilities.length > 0 && (
+              <button
+                type="button"
+                onClick={() => setShowUnplaced((v) => !v)}
+                className={
+                  'shrink-0 inline-flex items-center gap-1 rounded-md px-2.5 h-8 text-xs font-medium border ' +
+                  (showUnplaced
+                    ? 'bg-amber-500 text-white border-amber-500'
+                    : 'bg-white text-amber-700 border-amber-300 hover:bg-amber-50')
+                }
+              >
+                <MapPin className="h-3.5 w-3.5" />
+                미배치 {unplacedFacilities.length}
+              </button>
+            )}
+          </div>
+
+          {/* 배치 대기 배너 — 「배치」 누른 시설을 지도 클릭으로 위치 지정 */}
+          {placingFacility && (
+            <div className="flex items-center justify-between gap-2 rounded-md bg-slate-900 px-3 py-1.5 text-xs font-medium text-white">
+              <span className="min-w-0 truncate">
+                지도를 클릭해 「{placingFacility.name}」 위치를 지정하세요
+              </span>
+              <button
+                type="button"
+                onClick={() => setPlacingId(null)}
+                className="shrink-0 inline-flex items-center gap-1 text-slate-300 hover:text-white"
+              >
+                <X className="h-3.5 w-3.5" />
+                취소
+              </button>
+            </div>
+          )}
+
+          {/* 미배치 시설 패널 — 일괄 펼치기 + 개별 배치 */}
+          {showUnplaced && unplacedFacilities.length > 0 && (
+            <div className="rounded-lg border border-slate-200 bg-white p-2 space-y-2">
+              <button
+                type="button"
+                onClick={onBulkPlace}
+                className="w-full rounded-md bg-emerald-600 px-2 py-1.5 text-xs font-semibold text-white hover:bg-emerald-700"
+              >
+                미배치 시설 {unplacedFacilities.length}개를 지도 중앙에 펼치기
+              </button>
+              <p className="px-0.5 text-[10px] text-slate-500 leading-snug">
+                펼친 뒤 시설을 드래그해 실제 위치로 옮기세요. 또는 아래에서 「배치」를
+                누른 뒤 지도를 클릭하세요.
+              </p>
+              <ul className="max-h-44 space-y-1 overflow-y-auto">
+                {unplacedFacilities.map((f) => (
+                  <li
+                    key={f.id}
+                    className="flex items-center justify-between gap-2 rounded-md border border-slate-200 px-2 py-1"
+                  >
+                    <span className="min-w-0 truncate text-[11px] text-slate-700">
+                      <span className="font-mono text-slate-500">
+                        {formatFacilityCode(f.closure_type, f.seq_no)}
+                      </span>{' '}
+                      {f.name}
+                    </span>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setPlacingId(f.id)
+                        setShowUnplaced(false)
+                      }}
+                      className="shrink-0 rounded-md bg-slate-900 px-2 py-0.5 text-[10px] font-medium text-white hover:bg-slate-800"
+                    >
+                      배치
+                    </button>
+                  </li>
+                ))}
+              </ul>
+            </div>
+          )}
+        </div>
+      )}
+
       {/* 좌측 시설 목록 사이드바 + SVG 캔버스 — 가로 flex */}
       <div
         className={isFullscreen ? 'flex flex-1 min-h-0' : 'flex'}
@@ -1223,19 +1727,52 @@ export default function TopologyCanvas({
               ▶ 시설 목록
             </button>
           )}
+          {/* 카카오맵 배경 — 항상 mount, 지도 모드에서만 표시. SVG 가 위에 투명 오버레이. */}
+          <div
+            ref={mapSetContainer}
+            className="absolute inset-0"
+            style={{ display: mode === 'map' ? 'block' : 'none', zIndex: 0 }}
+          />
+          {/* 지도 로딩 / 에러 오버레이 */}
+          {mode === 'map' && mapStatus === 'loading' && (
+            <div className="absolute inset-0 z-20 flex items-center justify-center bg-slate-50/80">
+              <p className="text-sm text-slate-500">지도를 불러오는 중…</p>
+            </div>
+          )}
+          {mode === 'map' && mapStatus === 'error' && (
+            <div className="absolute inset-0 z-20 flex items-center justify-center bg-slate-50 p-6">
+              <div className="max-w-md rounded-xl border border-rose-200 bg-rose-50 p-4 text-center">
+                <TriangleAlert className="mx-auto h-6 w-6 text-rose-500" />
+                <p className="mt-2 text-sm font-semibold text-rose-800">
+                  카카오맵을 불러오지 못했습니다
+                </p>
+                <p className="mt-1 text-xs text-rose-700">{mapError}</p>
+                <p className="mt-2 text-[11px] text-rose-600 leading-relaxed">
+                  환경변수(NEXT_PUBLIC_KAKAO_MAP_KEY)·도메인 등록·dev 서버 재시작을 확인하세요.
+                </p>
+              </div>
+            </div>
+          )}
           <svg
             ref={svgRef}
-            viewBox={viewBoxStr}
-            className="bg-white select-none w-full h-full"
+            viewBox={mode === 'map' ? undefined : viewBoxStr}
+            className="select-none absolute inset-0 w-full h-full"
             style={{
               display: 'block',
+              background: mode === 'map' ? 'transparent' : 'white',
+              zIndex: 1, // 카카오맵 배경(zIndex:0) 위에 오버레이
               cursor:
-                addTool || faultSearchOpen
-                  ? 'crosshair'
-                  : dragging
-                    ? 'grabbing'
-                    : 'grab',
+                mode === 'map'
+                  ? 'default'
+                  : addTool || faultSearchOpen
+                    ? 'crosshair'
+                    : dragging
+                      ? 'grabbing'
+                      : 'grab',
               touchAction: 'none',
+              // 지도 모드 — SVG 루트는 이벤트 통과(지도 pan/zoom). 시설·케이블 등
+              // 클릭 대상 요소만 pointer-events 를 개별로 켠다.
+              pointerEvents: mode === 'map' ? 'none' : 'auto',
             }}
             onPointerDown={onSvgPointerDown}
             onPointerMove={onPointerMove}
@@ -1400,7 +1937,10 @@ export default function TopologyCanvas({
                   strokeWidth={style.width}
                   strokeDasharray={style.dash}
                   strokeLinejoin="round"
-                  style={{ cursor: 'pointer' }}
+                  style={{
+                    cursor: 'pointer',
+                    pointerEvents: mode === 'map' ? 'auto' : undefined,
+                  }}
                   onClick={(e) => {
                     e.stopPropagation()
                     if (faultSearchOpen) {
@@ -1492,25 +2032,33 @@ export default function TopologyCanvas({
                     </g>
                   )
                 })()}
-                {/* 선택 시 waypoint 핸들 — 드래그 이동 / 우클릭 삭제 */}
+                {/* 선택 시 waypoint 핸들 — 드래그 이동 / 우클릭 삭제.
+                    지도 모드는 경로점 lat/lng 를 화면으로 투영한 위치에 표시. */}
                 {selected &&
-                  wps.map((w, i) => (
-                    <circle
-                      key={`wp-${i}`}
-                      cx={w.x}
-                      cy={w.y}
-                      r={6}
-                      fill="white"
-                      stroke={SELECTED_COLOR}
-                      strokeWidth={2}
-                      style={{ cursor: 'grab' }}
-                      onPointerDown={(e) => onWaypointPointerDown(e, c.id, i)}
-                      onContextMenu={(e) => {
-                        e.preventDefault()
-                        removeWaypoint(c.id, i)
-                      }}
-                    />
-                  ))}
+                  wps.map((w, i) => {
+                    const sp = waypointScreenPos(w)
+                    if (!sp) return null
+                    return (
+                      <circle
+                        key={`wp-${i}`}
+                        cx={sp.x}
+                        cy={sp.y}
+                        r={6}
+                        fill="white"
+                        stroke={SELECTED_COLOR}
+                        strokeWidth={2}
+                        style={{
+                          cursor: 'grab',
+                          pointerEvents: mode === 'map' ? 'auto' : undefined,
+                        }}
+                        onPointerDown={(e) => onWaypointPointerDown(e, c.id, i)}
+                        onContextMenu={(e) => {
+                          e.preventDefault()
+                          removeWaypoint(c.id, i)
+                        }}
+                      />
+                    )
+                  })}
               </g>
             )
           })}
@@ -1527,7 +2075,12 @@ export default function TopologyCanvas({
               <g
                 key={f.id}
                 transform={`translate(${pos.x}, ${pos.y})`}
-                style={{ cursor: editable ? (dragging === f.id ? 'grabbing' : 'pointer') : 'default' }}
+                style={{
+                  cursor: editable ? (dragging === f.id ? 'grabbing' : 'pointer') : 'default',
+                  // 지도 모드 — SVG 루트가 pointer-events:none 이라 시설은 개별로 켠다.
+                  //   클릭(선택)·드래그(이동) 모두 pointer 핸들러가 처리.
+                  pointerEvents: mode === 'map' ? 'auto' : undefined,
+                }}
                 onPointerDown={(e) => onPointerDown(e, f.id)}
               >
                 {/* 선택 강조 — 도형 뒤 동그란 후광 */}
@@ -1747,9 +2300,7 @@ export default function TopologyCanvas({
       {pendingPlacement && (
         <NewFacilityModal
           projectId={projectId}
-          closureType={pendingPlacement.closureType}
-          x={pendingPlacement.x}
-          y={pendingPlacement.y}
+          placement={pendingPlacement}
           masters={facilityMasters ?? []}
           onClose={() => setPendingPlacement(null)}
           onSaved={() => {
@@ -1765,21 +2316,18 @@ export default function TopologyCanvas({
 
 function NewFacilityModal({
   projectId,
-  closureType,
-  x,
-  y,
+  placement,
   masters,
   onClose,
   onSaved,
 }: {
   projectId: string
-  closureType: ClosureType
-  x: number
-  y: number
+  placement: PendingPlacement
   masters: FacilityMasterMini[]
   onClose: () => void
   onSaved: () => void
 }) {
+  const closureType = placement.closureType
   const [name, setName] = useState('')
   const [masterId, setMasterId] = useState<string | null>(null)
   const [closureSpec, setClosureSpec] = useState<string>('')
@@ -1826,16 +2374,31 @@ function NewFacilityModal({
       return
     }
     setSubmitting(true)
-    const result = await createFacilityAtPosition({
-      project_id: projectId,
-      closure_type: closureType,
-      name: name.trim(),
-      x,
-      y,
-      master_facility_id: masterId,
-      closure_spec: closureSpec ? (closureSpec as (typeof CABLE_SPEC_VALUES)[number]) : null,
-      install_address: installAddress.trim() || null,
-    })
+    const spec = closureSpec
+      ? (closureSpec as (typeof CABLE_SPEC_VALUES)[number])
+      : null
+    const result =
+      placement.kind === 'xy'
+        ? await createFacilityAtPosition({
+            project_id: projectId,
+            closure_type: closureType,
+            name: name.trim(),
+            x: placement.x,
+            y: placement.y,
+            master_facility_id: masterId,
+            closure_spec: spec,
+            install_address: installAddress.trim() || null,
+          })
+        : await createFacilityAtLatLng({
+            project_id: projectId,
+            closure_type: closureType,
+            name: name.trim(),
+            lat: placement.lat,
+            lng: placement.lng,
+            master_facility_id: masterId,
+            closure_spec: spec,
+            install_address: installAddress.trim() || null,
+          })
     setSubmitting(false)
     if (!result.ok) {
       toast.error(result.error)
@@ -1860,7 +2423,9 @@ function NewFacilityModal({
             {CLOSURE_TYPE_LABEL[closureType]} 추가
           </h3>
           <p className="text-xs text-slate-500 mt-1">
-            좌표 ({x}, {y}) — 캔버스 위치 그대로 저장됩니다.
+            {placement.kind === 'xy'
+              ? `좌표 (${placement.x}, ${placement.y}) — 캔버스 위치 그대로 저장됩니다.`
+              : `지도 위치 (${placement.lat.toFixed(6)}, ${placement.lng.toFixed(6)}) 에 저장됩니다.`}
           </p>
         </div>
 

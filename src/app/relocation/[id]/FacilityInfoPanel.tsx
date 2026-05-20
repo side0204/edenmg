@@ -275,7 +275,7 @@ export default function FacilityInfoPanel({
   }
 
   return (
-    <div className="w-80 shrink-0 h-full overflow-y-auto border-l border-slate-300 bg-white">
+    <div className="w-80 shrink-0 min-h-0 overflow-y-auto border-l border-slate-300 bg-white">
       <div className="sticky top-0 z-10 bg-white border-b border-slate-200 px-3 py-2 flex items-center justify-between">
         <span className="text-sm font-bold text-slate-900">시설 정보</span>
         <div className="flex items-center gap-1">

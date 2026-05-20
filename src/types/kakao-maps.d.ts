@@ -1,5 +1,5 @@
 // 카카오맵 JavaScript SDK v2 — 지장이설 지도 캔버스에서 쓰는 최소 타입 선언.
-// 전체 SDK 타입이 아니라 MapCanvas 가 실제로 사용하는 부분만 정의한다.
+// 전체 SDK 타입이 아니라 지도 모드(TopologyCanvas)가 실제로 사용하는 부분만 정의한다.
 
 declare namespace kakao.maps {
   function load(callback: () => void): void
@@ -16,6 +16,19 @@ declare namespace kakao.maps {
     isEmpty(): boolean
   }
 
+  // 화면(컨테이너) 픽셀 좌표 — 좌표 ↔ 화면 변환 결과
+  class Point {
+    constructor(x: number, y: number)
+    x: number
+    y: number
+  }
+
+  // 좌표 ↔ 화면 픽셀 투영 — 지도 모드에서 SVG 오버레이를 지도에 맞춰 배치
+  interface MapProjection {
+    containerPointFromCoords(latlng: LatLng): Point
+    coordsFromContainerPoint(point: Point): LatLng
+  }
+
   interface MapOptions {
     center: LatLng
     level?: number
@@ -28,7 +41,9 @@ declare namespace kakao.maps {
     setLevel(level: number): void
     getLevel(): number
     setBounds(bounds: LatLngBounds): void
+    panTo(latlng: LatLng): void
     relayout(): void
+    getProjection(): MapProjection
   }
 
   interface MarkerOptions {
@@ -95,8 +110,9 @@ declare namespace kakao.maps {
     ): void
   }
 
-  // libraries=services — 주소 → 좌표 변환
+  // libraries=services — 주소·장소 검색
   namespace services {
+    // 주소 검색 (지번·도로명)
     interface AddressResult {
       x: string // 경도(lng)
       y: string // 위도(lat)
@@ -106,6 +122,23 @@ declare namespace kakao.maps {
       addressSearch(
         address: string,
         callback: (result: AddressResult[], status: string) => void,
+      ): void
+    }
+
+    // 장소·키워드 검색 (건물·아파트·상호)
+    interface PlacesSearchResultItem {
+      id: string
+      place_name: string
+      address_name: string
+      road_address_name: string
+      category_group_name: string
+      x: string // 경도(lng)
+      y: string // 위도(lat)
+    }
+    class Places {
+      keywordSearch(
+        keyword: string,
+        callback: (result: PlacesSearchResultItem[], status: string) => void,
       ): void
     }
   }

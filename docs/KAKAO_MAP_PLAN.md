@@ -1,7 +1,9 @@
 # 카카오맵 ↔ 지장이설 캔버스 통합 계획
 
-> 작성 2026-05-20. 컨텍스트 정리용 핸드오프 문서 — 다음 작업의 출발점.
-> 새 대화는 이 문서 + CLAUDE.md 의 「Step C-5」 항목을 읽고 이어서 진행한다.
+> 작성 2026-05-20. 컨텍스트 정리용 핸드오프 문서.
+>
+> ✅ **완료 (2026-05-20)** — Phase 1·1B·2·3·4 모두 구현 완료. 실제 구현 내역은
+> CLAUDE.md 의 「Step C-5」 항목이 정본. 이 문서는 설계 의도 기록용으로 보존.
 
 ## 목표
 
@@ -57,15 +59,18 @@
 9. **토글·정리** — 도식/지도 토글을 TopologyCanvas 상단 툴바로. `MapCanvas.tsx` 삭제. `RelocationCanvas.tsx` 삭제 → `page.tsx` 가 `<TopologyCanvas>` 직접 렌더. `TopologyCanvas` 의 `FacilityNode` 타입에 `lat`/`lng` 추가.
 10. **d.ts 보강** — `getProjection()` 반환 타입에 `containerPointFromCoords`/`coordsFromContainerPoint` 추가. `services.Places` 추가.
 
-## 단계 (phased)
+## 단계 (phased) — 전부 완료 ✅
 
-| 단계 | 내용 |
-|---|---|
-| **Phase 1** | 지도 위 실제 29종 도형·케이블 표시 (보기·정보 패널·고장점) + **주소·건물명 검색** |
-| **Phase 1B** | **별도 전체화면 캔버스 창** |
-| **Phase 2** | 지도에서 시설 마커 드래그 이동 |
-| **Phase 3** | 지도에서 시설 추가·케이블 그리기 도구 |
-| **Phase 4** | 지도에서 케이블 경로(waypoint·전주 꺾임점) 편집 — waypoint 를 lat/lng 로 저장하는 스키마 작업 필요 |
+| 단계 | 내용 | 상태 |
+|---|---|---|
+| **Phase 1** | 지도 위 실제 29종 도형·케이블 표시 (보기·정보 패널·고장점) + 주소·건물명 검색 | ✅ |
+| **Phase 1B** | 별도 캔버스 라우트 `/relocation/[id]/canvas` (「넓은 화면으로 열기」) | ✅ |
+| **Phase 2** | 지도에서 시설 배치(미배치 패널) + 마커 드래그 이동 | ✅ |
+| **Phase 3** | 지도에서 시설 추가·케이블 그리기 도구 | ✅ |
+| **Phase 4** | 지도에서 케이블 경로(waypoint) 편집 — `waypoints` 가 jsonb 라 스키마 작업 불필요, 경로점에 lat/lng 추가 | ✅ |
+
+> 구현 중 확인: waypoint 스키마 작업은 불필요했음 (`relocation_cables.waypoints` 가 jsonb).
+> 전용 라우트는 별도 레이아웃을 만들지 않고 임베드 모드(`initialCanvasSize='tall'`) 재사용.
 
 ## 추가 요구사항 (owner, 2026-05-20)
 

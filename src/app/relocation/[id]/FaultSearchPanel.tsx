@@ -558,7 +558,7 @@ export default function FaultSearchPanel({
   return (
     <div
       style={{ width: `${width}px` }}
-      className="shrink-0 h-full relative bg-white border-l border-slate-300 flex flex-col"
+      className="shrink-0 min-h-0 relative bg-white border-l border-slate-300 flex flex-col"
     >
       {/* 너비 조절 핸들 */}
       <div
@@ -569,7 +569,7 @@ export default function FaultSearchPanel({
         className="absolute left-0 top-0 h-full w-1.5 cursor-col-resize hover:bg-violet-400/50 z-20"
       />
 
-      <div className="bg-white border-b border-slate-200 px-3 py-2 flex items-center justify-between">
+      <div className="shrink-0 bg-white border-b border-slate-200 px-3 py-2 flex items-center justify-between">
         <span className="flex items-center gap-1.5 text-sm font-bold text-slate-900">
           <Crosshair className="h-4 w-4 text-violet-600" />
           고장점 검색
@@ -594,7 +594,7 @@ export default function FaultSearchPanel({
         </div>
       </div>
 
-      <div className="flex-1 overflow-y-auto p-3 space-y-3">
+      <div className="flex-1 min-h-0 overflow-y-auto p-3 space-y-3">
         <p className="text-[11px] text-slate-500 leading-relaxed">
           시설물 → 케이블 → 코어선번(회선) 순으로 선택하면 그 회선의 코어 경로를 따라
           고장점을 찾습니다. 캔버스에서 시설물·케이블을 직접 클릭해도 됩니다.

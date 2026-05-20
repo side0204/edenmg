@@ -60,6 +60,9 @@ export async function saveNodePositions(
 type Waypoint = {
   x: number
   y: number
+  // 지도 모드에서 편집한 경로점의 GPS 좌표 (도식 모드는 x/y 만 사용)
+  lat?: number | null
+  lng?: number | null
   pole_name?: string | null
   dist?: number | null
 }
@@ -103,6 +106,8 @@ export async function saveCableWaypoints(
   const clean = waypoints.map((w) => ({
     x: Math.round(w.x),
     y: Math.round(w.y),
+    lat: typeof w.lat === 'number' && Number.isFinite(w.lat) ? w.lat : null,
+    lng: typeof w.lng === 'number' && Number.isFinite(w.lng) ? w.lng : null,
     pole_name: w.pole_name ? String(w.pole_name).slice(0, 100) : null,
     dist: typeof w.dist === 'number' && Number.isFinite(w.dist) ? w.dist : null,
   }))

@@ -450,6 +450,10 @@ export async function createFacilityAtLatLng(input: {
   name: string
   lat: number
   lng: number
+  master_facility_id?: string | null
+  closure_spec?: CableSpec | null
+  install_address?: string | null
+  parent_facility_id?: string | null
 }): Promise<
   | { ok: true; id: string; seq_no: number }
   | { ok: false; error: string }
@@ -463,6 +467,12 @@ export async function createFacilityAtLatLng(input: {
   if (name.length > 200) return { ok: false, error: '이름은 200자 이하로 입력하세요' }
   if (!isValidLat(input.lat) || !isValidLng(input.lng)) {
     return { ok: false, error: 'GPS 좌표가 올바르지 않습니다' }
+  }
+  if (input.closure_spec && !isCableSpec(input.closure_spec)) {
+    return { ok: false, error: '함체 규격이 올바르지 않습니다' }
+  }
+  if (input.parent_facility_id && !isInternalNode(input.closure_type)) {
+    return { ok: false, error: '부모 시설은 MOFD·OJC·국사내장비만 가질 수 있습니다' }
   }
 
   const { supabase } = await requireMember()
@@ -487,6 +497,10 @@ export async function createFacilityAtLatLng(input: {
           name,
           lat: input.lat,
           lng: input.lng,
+          install_address: input.install_address ?? null,
+          closure_spec: input.closure_spec ?? null,
+          parent_facility_id: input.parent_facility_id ?? null,
+          master_facility_id: input.master_facility_id ?? null,
           is_marked: false,
         })
         .select('id')
