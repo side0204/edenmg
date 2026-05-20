@@ -428,3 +428,157 @@ export async function deleteFacility(formData: FormData) {
       encodeURIComponent('시설을 삭제했습니다'),
   )
 }
+
+
+// ===== 카카오맵 지도 모드 — GPS 좌표 기반 시설 배치 =====================
+
+function isValidLat(v: number): boolean {
+  return Number.isFinite(v) && v >= -90 && v <= 90
+}
+function isValidLng(v: number): boolean {
+  return Number.isFinite(v) && v >= -180 && v <= 180
+}
+
+/**
+ * 지도 모드에서 시설 신규 배치 — 지도 클릭 좌표(lat/lng)로 생성.
+ * createFacilityAtPosition 의 GPS 판. x_hint/y_hint 는 비워둠 (도식 모드는 자동 배치).
+ * redirect 안 함 — JSON 결과 반환.
+ */
+export async function createFacilityAtLatLng(input: {
+  project_id: string
+  closure_type: ClosureType
+  name: string
+  lat: number
+  lng: number
+}): Promise<
+  | { ok: true; id: string; seq_no: number }
+  | { ok: false; error: string }
+> {
+  if (!input.project_id) return { ok: false, error: '프로젝트 id 가 없습니다' }
+  if (!isClosureType(input.closure_type)) {
+    return { ok: false, error: '시설 종류가 올바르지 않습니다' }
+  }
+  const name = (input.name ?? '').trim()
+  if (!name) return { ok: false, error: '시설 이름을 입력하세요' }
+  if (name.length > 200) return { ok: false, error: '이름은 200자 이하로 입력하세요' }
+  if (!isValidLat(input.lat) || !isValidLng(input.lng)) {
+    return { ok: false, error: 'GPS 좌표가 올바르지 않습니다' }
+  }
+
+  const { supabase } = await requireMember()
+
+  let attempt = 0
+  let lastErr: string | null = null
+  while (attempt < 3) {
+    attempt += 1
+    try {
+      const seqNo = await allocateNextFacilitySeq(
+        supabase,
+        input.project_id,
+        input.closure_type,
+      )
+
+      const { data: row, error } = await supabase
+        .from('relocation_facilities')
+        .insert({
+          project_id: input.project_id,
+          closure_type: input.closure_type,
+          seq_no: seqNo,
+          name,
+          lat: input.lat,
+          lng: input.lng,
+          is_marked: false,
+        })
+        .select('id')
+        .maybeSingle()
+
+      if (!error && row) {
+        revalidatePath(`/relocation/${input.project_id}`)
+        return { ok: true, id: (row as { id: string }).id, seq_no: seqNo }
+      }
+
+      lastErr = error?.message ?? '알 수 없음'
+      if (
+        error?.message.includes('unique') ||
+        error?.message.includes('duplicate') ||
+        error?.code === '23505'
+      ) {
+        continue
+      }
+      break
+    } catch (e: unknown) {
+      lastErr = e instanceof Error ? e.message : String(e)
+      break
+    }
+  }
+
+  return { ok: false, error: '등록 실패: ' + (lastErr ?? '알 수 없는 오류') }
+}
+
+
+/**
+ * 지도 모드에서 시설 위치 이동/지정 — 마커 드래그 또는 미배치 시설 배치.
+ * redirect 안 함 — JSON 결과 반환.
+ */
+export async function updateFacilityLatLng(input: {
+  project_id: string
+  facility_id: string
+  lat: number
+  lng: number
+}): Promise<{ ok: true } | { ok: false; error: string }> {
+  if (!input.project_id || !input.facility_id) {
+    return { ok: false, error: '대상이 올바르지 않습니다' }
+  }
+  if (!isValidLat(input.lat) || !isValidLng(input.lng)) {
+    return { ok: false, error: 'GPS 좌표가 올바르지 않습니다' }
+  }
+
+  const { supabase } = await requireMember()
+
+  const { error } = await supabase
+    .from('relocation_facilities')
+    .update({ lat: input.lat, lng: input.lng })
+    .eq('id', input.facility_id)
+    .eq('project_id', input.project_id) // RLS 보강
+
+  if (error) return { ok: false, error: '위치 저장 실패: ' + error.message }
+
+  revalidatePath(`/relocation/${input.project_id}`)
+  return { ok: true }
+}
+
+
+/**
+ * 도식 모드에서 만든 GPS 없는 시설들을 한 번에 지도에 배치.
+ * 클라이언트가 지도 중심 기준 격자 좌표를 계산해 넘기면 일괄 update.
+ * (시설마다 좌표가 달라 upsert 대신 행별 update — 회사 규모상 수십 건이라 OK)
+ */
+export async function bulkPlaceFacilities(
+  projectId: string,
+  items: { id: string; lat: number; lng: number }[],
+): Promise<{ ok: true; count: number } | { ok: false; error: string }> {
+  if (!projectId) return { ok: false, error: '프로젝트 id 가 없습니다' }
+  if (!Array.isArray(items) || items.length === 0) {
+    return { ok: false, error: '배치할 시설이 없습니다' }
+  }
+  if (items.length > 500) {
+    return { ok: false, error: '한 번에 최대 500개까지 배치할 수 있습니다' }
+  }
+
+  const { supabase } = await requireMember()
+
+  let count = 0
+  for (const it of items) {
+    if (!it.id || !isValidLat(it.lat) || !isValidLng(it.lng)) continue
+    const { error } = await supabase
+      .from('relocation_facilities')
+      .update({ lat: it.lat, lng: it.lng })
+      .eq('id', it.id)
+      .eq('project_id', projectId) // RLS 보강
+    if (error) return { ok: false, error: '배치 실패: ' + error.message }
+    count += 1
+  }
+
+  revalidatePath(`/relocation/${projectId}`)
+  return { ok: true, count }
+}

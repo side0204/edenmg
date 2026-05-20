@@ -2,16 +2,27 @@
 
 import { useState } from 'react'
 import { toast } from 'sonner'
-import { X, Trash2, Save, TriangleAlert, ChevronLeft, ChevronRight } from 'lucide-react'
+import { X, Trash2, Save, TriangleAlert, ChevronLeft, ChevronRight, Flag, Plus } from 'lucide-react'
 import {
   CABLE_STATUS_VALUES,
   CABLE_STATUS_LABEL,
   CABLE_INSTALLATION_TYPE_VALUES,
+  CORE_LIFECYCLE_VALUES,
+  CORE_LIFECYCLE_LABEL,
+  CIRCUIT_KIND_VALUES,
+  CIRCUIT_KIND_LABEL,
+  isCircuitDiverse,
   type CableStatus,
   type CableInstallationType,
+  type CoreLifecycle,
+  type CircuitKind,
 } from '@/lib/relocation'
 import { CABLE_SPEC_VALUES, type CableSpec } from '@/lib/connection'
 import { updateCableFromCanvas, deleteCableFromCanvas } from './cable-actions'
+import {
+  addCoreAssignmentFromCanvas,
+  removeCoreAssignmentFromCanvas,
+} from './core-actions'
 
 // 케이블 정보 패널 — 캔버스에서 케이블 클릭 시 우측에 표시.
 // 규격·상태·설치구분·전체거리 수정 + 경로점(전주명·구간거리) 입력 + 거리 검증 + 삭제.
@@ -39,14 +50,35 @@ export type CablePanelWaypoint = {
   dist?: number | null
 }
 
+// 회선·코어 인라인 입력용 (워크플로우 3단계)
+export type CablePanelCircuit = {
+  id: string
+  circuit_id: string
+  subscriber_name: string | null
+  kind: string
+}
+
+export type CablePanelAssignment = {
+  id: string
+  circuit_id: string | null
+  segment_idx: number
+  core_range_start: number
+  core_range_end: number
+  lifecycle: CoreLifecycle
+  is_terminal: boolean
+}
+
 export default function CableInfoPanel({
   projectId,
   cable,
   fromName,
   toName,
   waypoints,
+  circuits,
+  assignments,
   onClose,
   onSaved,
+  onCoreChanged,
   collapsed,
   onToggleCollapse,
 }: {
@@ -55,8 +87,11 @@ export default function CableInfoPanel({
   fromName: string
   toName: string
   waypoints: CablePanelWaypoint[]
+  circuits: CablePanelCircuit[]
+  assignments: CablePanelAssignment[]
   onClose: () => void
   onSaved: () => void
+  onCoreChanged: () => void
   collapsed: boolean
   onToggleCollapse: () => void
 }) {
@@ -365,6 +400,15 @@ export default function CableInfoPanel({
           </div>
         </div>
 
+        {/* 회선·코어 배정 — 워크플로우 3단계 (종단 케이블에 회선·사용코어 입력) */}
+        <CoreAssignSection
+          projectId={projectId}
+          cableId={cable.id}
+          circuits={circuits}
+          assignments={assignments}
+          onChanged={onCoreChanged}
+        />
+
         {/* 액션 */}
         <div className="border-t border-slate-200 pt-2 flex items-center justify-between gap-2">
           <button
@@ -415,6 +459,325 @@ function DistanceRow({
         className="w-16 rounded-md border border-slate-300 px-1.5 py-0.5 text-[11px]"
       />
       <span className="text-slate-400">m</span>
+    </div>
+  )
+}
+
+
+// 회선·코어 배정 — 케이블 정보 패널 안의 인라인 입력 폼 (워크플로우 3단계).
+// 종단으로 표시한 케이블에 회선·사용코어를 입력한다.
+function CoreAssignSection({
+  projectId,
+  cableId,
+  circuits,
+  assignments,
+  onChanged,
+}: {
+  projectId: string
+  cableId: string
+  circuits: CablePanelCircuit[]
+  assignments: CablePanelAssignment[]
+  onChanged: () => void
+}) {
+  const [adding, setAdding] = useState(false)
+  const [circuitMode, setCircuitMode] = useState('') // '' 미지정 | 'NEW' 새 회선 | circuit id
+  const [newCircuitNo, setNewCircuitNo] = useState('')
+  const [newCircuitKind, setNewCircuitKind] = useState<CircuitKind>('1코어')
+  const [coreStart, setCoreStart] = useState('')
+  const [coreEnd, setCoreEnd] = useState('')
+  const [lifecycle, setLifecycle] = useState<CoreLifecycle>('new')
+  const [segmentIdx, setSegmentIdx] = useState('0')
+  const [isTerminal, setIsTerminal] = useState(true)
+  const [busy, setBusy] = useState(false)
+
+  const circuitMap = new Map(circuits.map((c) => [c.id, c]))
+
+  function circuitLabel(id: string | null): string {
+    if (!id) return '미지정 회선'
+    const c = circuitMap.get(id)
+    if (!c) return '(삭제된 회선)'
+    return c.subscriber_name ? `${c.circuit_id} · ${c.subscriber_name}` : c.circuit_id
+  }
+
+  function resetForm() {
+    setCircuitMode('')
+    setNewCircuitNo('')
+    setNewCircuitKind('1코어')
+    setCoreStart('')
+    setCoreEnd('')
+    setLifecycle('new')
+    setSegmentIdx('0')
+    setIsTerminal(true)
+  }
+
+  async function onAdd() {
+    if (busy) return
+    const s = Number.parseInt(coreStart, 10)
+    const e = Number.parseInt(coreEnd, 10)
+    if (!Number.isFinite(s) || s < 1) {
+      toast.error('시작 코어를 입력하세요')
+      return
+    }
+    if (!Number.isFinite(e) || e < 1) {
+      toast.error('끝 코어를 입력하세요')
+      return
+    }
+    if (e < s) {
+      toast.error('끝 코어는 시작 코어 이상이어야 합니다')
+      return
+    }
+    if (circuitMode === 'NEW' && !newCircuitNo.trim()) {
+      toast.error('새 회선번호를 입력하세요')
+      return
+    }
+    setBusy(true)
+    const result = await addCoreAssignmentFromCanvas({
+      project_id: projectId,
+      cable_id: cableId,
+      circuit_id: circuitMode && circuitMode !== 'NEW' ? circuitMode : null,
+      new_circuit:
+        circuitMode === 'NEW'
+          ? { circuit_id: newCircuitNo.trim(), kind: newCircuitKind }
+          : null,
+      segment_idx: Number.parseInt(segmentIdx, 10) || 0,
+      core_range_start: s,
+      core_range_end: e,
+      lifecycle,
+      is_terminal: isTerminal,
+    })
+    setBusy(false)
+    if (!result.ok) {
+      toast.error(result.error)
+      return
+    }
+    toast.success('회선·코어를 배정했습니다')
+    resetForm()
+    onChanged()
+  }
+
+  async function onRemove(id: string) {
+    if (busy) return
+    setBusy(true)
+    const result = await removeCoreAssignmentFromCanvas(projectId, id)
+    setBusy(false)
+    if (!result.ok) {
+      toast.error(result.error)
+      return
+    }
+    toast.success('코어 배정을 삭제했습니다')
+    onChanged()
+  }
+
+  return (
+    <div className="border-t border-slate-200 pt-2">
+      <div className="flex items-center justify-between">
+        <p className="text-[11px] font-bold text-slate-700">
+          회선·코어 배정 ({assignments.length})
+        </p>
+        {!adding && (
+          <button
+            type="button"
+            onClick={() => setAdding(true)}
+            className="inline-flex items-center gap-0.5 rounded-md bg-slate-900 px-1.5 py-0.5 text-[10px] font-medium text-white hover:bg-slate-800"
+          >
+            <Plus className="h-3 w-3" />
+            추가
+          </button>
+        )}
+      </div>
+
+      {/* 기존 배정 목록 */}
+      {assignments.length > 0 ? (
+        <ul className="mt-1.5 space-y-1">
+          {assignments.map((a) => (
+            <li
+              key={a.id}
+              className="flex items-start justify-between gap-1.5 rounded-md border border-slate-200 px-2 py-1"
+            >
+              <div className="min-w-0">
+                <p className="text-[11px] font-mono text-slate-800 flex items-center gap-1 flex-wrap">
+                  코어 {a.core_range_start}
+                  {a.core_range_end !== a.core_range_start ? `~${a.core_range_end}` : ''}
+                  {a.is_terminal && (
+                    <span className="inline-flex items-center gap-0.5 rounded border border-blue-300 bg-blue-50 px-1 text-[9px] font-medium text-blue-700">
+                      <Flag className="h-2 w-2" />
+                      종단
+                    </span>
+                  )}
+                </p>
+                <p className="text-[10px] text-slate-500 truncate">
+                  {circuitLabel(a.circuit_id)} · {CORE_LIFECYCLE_LABEL[a.lifecycle]}
+                  {a.segment_idx > 0 ? ` · 세그 ${a.segment_idx}` : ''}
+                </p>
+              </div>
+              <button
+                type="button"
+                onClick={() => onRemove(a.id)}
+                disabled={busy}
+                title="배정 삭제"
+                className="shrink-0 text-slate-400 hover:text-rose-600 disabled:opacity-50"
+              >
+                <X className="h-3.5 w-3.5" />
+              </button>
+            </li>
+          ))}
+        </ul>
+      ) : (
+        !adding && (
+          <p className="mt-1.5 text-[10px] text-slate-400 italic">
+            이 케이블에 배정된 회선·코어가 없습니다.
+          </p>
+        )
+      )}
+
+      {/* 추가 폼 */}
+      {adding && (
+        <div className="mt-2 rounded-lg border border-slate-200 bg-slate-50 p-2 space-y-2">
+          <div>
+            <label className="block text-[10px] font-medium text-slate-600">회선</label>
+            <select
+              value={circuitMode}
+              onChange={(e) => setCircuitMode(e.target.value)}
+              className="mt-0.5 w-full rounded-md border border-slate-300 px-2 py-1 text-[11px] bg-white"
+            >
+              <option value="">(미지정)</option>
+              {circuits.map((c) => (
+                <option key={c.id} value={c.id}>
+                  {c.circuit_id}
+                  {c.subscriber_name ? ` · ${c.subscriber_name}` : ''}
+                  {isCircuitDiverse(c.kind as CircuitKind) ? ' [이원화]' : ''}
+                </option>
+              ))}
+              <option value="NEW">+ 새 회선 입력</option>
+            </select>
+          </div>
+
+          {circuitMode === 'NEW' && (
+            <div className="grid grid-cols-2 gap-1.5">
+              <div>
+                <label className="block text-[10px] font-medium text-slate-600">
+                  회선번호
+                </label>
+                <input
+                  type="text"
+                  value={newCircuitNo}
+                  onChange={(e) => setNewCircuitNo(e.target.value)}
+                  placeholder="예: 5572607"
+                  maxLength={100}
+                  className="mt-0.5 w-full rounded-md border border-slate-300 px-2 py-1 text-[11px]"
+                />
+              </div>
+              <div>
+                <label className="block text-[10px] font-medium text-slate-600">종류</label>
+                <select
+                  value={newCircuitKind}
+                  onChange={(e) => setNewCircuitKind(e.target.value as CircuitKind)}
+                  className="mt-0.5 w-full rounded-md border border-slate-300 px-2 py-1 text-[11px] bg-white"
+                >
+                  {CIRCUIT_KIND_VALUES.map((k) => (
+                    <option key={k} value={k}>
+                      {CIRCUIT_KIND_LABEL[k]}
+                    </option>
+                  ))}
+                </select>
+              </div>
+            </div>
+          )}
+
+          <div className="grid grid-cols-2 gap-1.5">
+            <div>
+              <label className="block text-[10px] font-medium text-slate-600">
+                시작 코어
+              </label>
+              <input
+                type="number"
+                min={1}
+                max={576}
+                value={coreStart}
+                onChange={(e) => setCoreStart(e.target.value)}
+                className="mt-0.5 w-full rounded-md border border-slate-300 px-2 py-1 text-[11px]"
+              />
+            </div>
+            <div>
+              <label className="block text-[10px] font-medium text-slate-600">끝 코어</label>
+              <input
+                type="number"
+                min={1}
+                max={576}
+                value={coreEnd}
+                onChange={(e) => setCoreEnd(e.target.value)}
+                className="mt-0.5 w-full rounded-md border border-slate-300 px-2 py-1 text-[11px]"
+              />
+            </div>
+          </div>
+
+          <div className="grid grid-cols-2 gap-1.5">
+            <div>
+              <label className="block text-[10px] font-medium text-slate-600">구분</label>
+              <select
+                value={lifecycle}
+                onChange={(e) => setLifecycle(e.target.value as CoreLifecycle)}
+                className="mt-0.5 w-full rounded-md border border-slate-300 px-2 py-1 text-[11px] bg-white"
+              >
+                {CORE_LIFECYCLE_VALUES.map((l) => (
+                  <option key={l} value={l}>
+                    {CORE_LIFECYCLE_LABEL[l]}
+                  </option>
+                ))}
+              </select>
+            </div>
+            <div>
+              <label className="block text-[10px] font-medium text-slate-600">세그먼트</label>
+              <input
+                type="number"
+                min={0}
+                max={9}
+                value={segmentIdx}
+                onChange={(e) => setSegmentIdx(e.target.value)}
+                className="mt-0.5 w-full rounded-md border border-slate-300 px-2 py-1 text-[11px]"
+              />
+            </div>
+          </div>
+
+          <label className="flex items-center gap-1.5 cursor-pointer">
+            <input
+              type="checkbox"
+              checked={isTerminal}
+              onChange={(e) => setIsTerminal(e.target.checked)}
+              className="h-3.5 w-3.5 rounded border-slate-300 text-blue-600"
+            />
+            <span className="text-[11px] font-medium text-slate-700 inline-flex items-center gap-0.5">
+              <Flag className="h-3 w-3 text-blue-600" />
+              종단 (회선의 끝)
+            </span>
+          </label>
+          <p className="text-[9px] text-slate-400 leading-tight">
+            회선의 출발/도착점이면 체크. 자동 경로 탐색의 입력이 됩니다.
+          </p>
+
+          <div className="flex items-center justify-end gap-1.5 pt-0.5">
+            <button
+              type="button"
+              onClick={() => {
+                setAdding(false)
+                resetForm()
+              }}
+              className="rounded-md border border-slate-300 px-2 py-1 text-[10px] font-medium text-slate-600 hover:bg-white"
+            >
+              취소
+            </button>
+            <button
+              type="button"
+              onClick={onAdd}
+              disabled={busy}
+              className="inline-flex items-center gap-0.5 rounded-md bg-slate-900 px-2.5 py-1 text-[10px] font-medium text-white hover:bg-slate-800 disabled:bg-slate-300"
+            >
+              <Plus className="h-3 w-3" />
+              {busy ? '배정 중...' : '배정'}
+            </button>
+          </div>
+        </div>
+      )}
     </div>
   )
 }

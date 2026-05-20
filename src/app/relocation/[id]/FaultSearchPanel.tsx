@@ -120,19 +120,31 @@ function orientedSegments(
   return segs
 }
 
-type RawLeg = {
+// 케이블 leg — 실제 케이블 구간
+type CableLeg = {
+  kind: 'cable'
   cable: FaultSearchCable
   fromId: string
   toId: string
   coreStart: number
   coreEnd: number
 }
+// gap leg — 끊긴 중간경로. 케이블·코어 배정이 삭제돼 직접 연결이 없는 구간.
+//   양쪽 시설은 알지만 사이 케이블을 모름 → 추정 경로(점선·방향)로 잇는다.
+type GapLeg = {
+  kind: 'gap'
+  fromId: string
+  toId: string
+}
+type RawLeg = CableLeg | GapLeg
 
 // 회선의 코어 배정 → 케이블 체인 + 시설 경로 (segment_idx 순서).
+// 중간 케이블이 삭제돼 체인이 끊기면 에러 대신 gap leg 를 끼워넣어
+// 양쪽 연결 구간은 그대로 추적하고 끊긴 부분만 추정 표시한다.
 function buildCircuitPath(
   assignments: FaultSearchAssignment[],
   cableById: Map<string, FaultSearchCable>,
-): { legs: RawLeg[]; facilityIds: string[] } | { error: string } {
+): { legs: RawLeg[]; facilityIds: string[]; gapCount: number } | { error: string } {
   const sorted = [...assignments].sort((a, b) => a.segment_idx - b.segment_idx)
   const steps = sorted
     .map((a) => {
@@ -152,6 +164,7 @@ function buildCircuitPath(
     return {
       legs: [
         {
+          kind: 'cable',
           cable: s.cable,
           fromId: s.cable.from_facility_id,
           toId: s.cable.to_facility_id,
@@ -160,35 +173,72 @@ function buildCircuitPath(
         },
       ],
       facilityIds: [s.cable.from_facility_id, s.cable.to_facility_id],
+      gapCount: 0,
     }
   }
 
+  // 시작 시설 — step0·step1 이 공유하는 시설 기준. 공유 없으면(시작부터 끊김)
+  // step0 은 from→to 방향으로 가정.
   const ends0 = [steps[0].cable.from_facility_id, steps[0].cable.to_facility_id]
   const ends1 = [steps[1].cable.from_facility_id, steps[1].cable.to_facility_id]
   const shared01 = ends0.find((f) => ends1.includes(f))
-  if (!shared01) {
-    return { error: '회선의 케이블들이 서로 이어지지 않습니다 (코어 배정 확인)' }
-  }
-  let prev = ends0[0] === shared01 ? ends0[1] : ends0[0]
+  let prev = shared01 ? (ends0[0] === shared01 ? ends0[1] : ends0[0]) : ends0[0]
 
   const facilityIds: string[] = [prev]
   const legs: RawLeg[] = []
-  for (const s of steps) {
-    let next: string
-    if (s.cable.from_facility_id === prev) next = s.cable.to_facility_id
-    else if (s.cable.to_facility_id === prev) next = s.cable.from_facility_id
-    else return { error: '회선 경로가 끊겨 있습니다 (세그먼트 순서·코어 배정 확인)' }
+  let gapCount = 0
+
+  for (let i = 0; i < steps.length; i++) {
+    const s = steps[i]
+    const cFrom = s.cable.from_facility_id
+    const cTo = s.cable.to_facility_id
+    let entry: string
+    let exit: string
+    if (cFrom === prev) {
+      entry = cFrom
+      exit = cTo
+    } else if (cTo === prev) {
+      entry = cTo
+      exit = cFrom
+    } else {
+      // 끊긴 중간경로 — prev 와 이 케이블이 직접 연결되지 않음.
+      gapCount += 1
+      // 케이블 방향 추정 — 다음 케이블과 공유하는 시설을 exit 으로 둔다.
+      let oEntry = cFrom
+      let oExit = cTo
+      const nextStep = steps[i + 1]
+      if (nextStep) {
+        const nEnds = [
+          nextStep.cable.from_facility_id,
+          nextStep.cable.to_facility_id,
+        ]
+        if (nEnds.includes(cFrom)) {
+          oEntry = cTo
+          oExit = cFrom
+        } else if (nEnds.includes(cTo)) {
+          oEntry = cFrom
+          oExit = cTo
+        }
+      }
+      entry = oEntry
+      exit = oExit
+      // 추정 중간경로(gap) leg — prev → entry
+      legs.push({ kind: 'gap', fromId: prev, toId: entry })
+      facilityIds.push(entry)
+    }
     legs.push({
+      kind: 'cable',
       cable: s.cable,
-      fromId: prev,
-      toId: next,
+      fromId: entry,
+      toId: exit,
       coreStart: s.coreStart,
       coreEnd: s.coreEnd,
     })
-    facilityIds.push(next)
-    prev = next
+    facilityIds.push(exit)
+    prev = exit
   }
-  return { legs, facilityIds }
+
+  return { legs, facilityIds, gapCount }
 }
 
 type FaultResult =
@@ -211,6 +261,7 @@ type FaultResult =
   | { kind: 'atEnd'; label: string; cum: number }
   | { kind: 'tooLong'; total: number; over: number }
   | { kind: 'incomplete'; cableCode: string; atLabel: string; cum: number }
+  | { kind: 'gap'; fromLabel: string; toLabel: string; cum: number }
 
 export default function FaultSearchPanel({
   facilities,
@@ -317,12 +368,16 @@ export default function FaultSearchPanel({
     const built = buildCircuitPath(circAssignments, cableById)
     if ('error' in built) return { error: built.error }
 
-    const rawLegs = fromEnd
+    const rawLegs: RawLeg[] = fromEnd
       ? [...built.legs].reverse().map((l) => ({ ...l, fromId: l.toId, toId: l.fromId }))
       : built.legs
     const facilityIds = fromEnd ? [...built.facilityIds].reverse() : built.facilityIds
 
     const legs = rawLegs.map((l) => {
+      if (l.kind === 'gap') {
+        // 끊긴 중간경로 — 거리 미상
+        return { ...l, segs: [] as Seg[], dist: null as number | null }
+      }
       const segs = orientedSegments(l.cable, l.fromId, facLabel)
       const known = segs.every((s) => s.dist != null)
       const dist = known ? segs.reduce((a, s) => a + (s.dist ?? 0), 0) : null
@@ -344,10 +399,18 @@ export default function FaultSearchPanel({
       }
     }
 
+    const gaps = legs
+      .filter((l): l is Extract<typeof l, { kind: 'gap' }> => l.kind === 'gap')
+      .map((l) => ({ fromId: l.fromId, toId: l.toId }))
+
     return {
       legs,
       facilityIds,
-      cableIds: legs.map((l) => l.cable.id),
+      cableIds: legs
+        .filter((l): l is Extract<typeof l, { kind: 'cable' }> => l.kind === 'cable')
+        .map((l) => l.cable.id),
+      gaps,
+      gapCount: gaps.length,
       allKnown,
       total,
       cumByFacility,
@@ -366,6 +429,15 @@ export default function FaultSearchPanel({
 
     let cum = 0
     for (const leg of route.legs) {
+      // 끊긴 중간경로에 도달 — 여기부터는 거리를 알 수 없어 정밀 산출 불가.
+      if (leg.kind === 'gap') {
+        return {
+          kind: 'gap',
+          fromLabel: facLabel(leg.fromId),
+          toLabel: facLabel(leg.toId),
+          cum,
+        }
+      }
       const legStartCum = cum
       let fromLabel = facLabel(leg.fromId)
       let fromIsFacility = true
@@ -420,6 +492,7 @@ export default function FaultSearchPanel({
       setHighlight({
         facilityIds: route.facilityIds,
         cableIds: route.cableIds,
+        gaps: route.gaps,
         fault:
           fault && fault.kind === 'found'
             ? { cableId: fault.cableId, fraction: fault.canonicalFraction }
@@ -432,12 +505,13 @@ export default function FaultSearchPanel({
           ? {
               facilityIds: [c.from_facility_id, c.to_facility_id],
               cableIds: [cableId],
+              gaps: [],
               fault: null,
             }
           : null,
       )
     } else if (facilityId) {
-      setHighlight({ facilityIds: [facilityId], cableIds: [], fault: null })
+      setHighlight({ facilityIds: [facilityId], cableIds: [], gaps: [], fault: null })
     } else {
       setHighlight(null)
     }
@@ -663,22 +737,47 @@ export default function FaultSearchPanel({
               <Route className="h-3.5 w-3.5" />
               회선 경로
             </p>
+
+            {route.gapCount > 0 && (
+              <div className="flex items-start gap-1 rounded border border-amber-300 bg-amber-50 px-2 py-1.5 text-[10px] text-amber-800">
+                <TriangleAlert className="h-3.5 w-3.5 shrink-0 mt-px" />
+                <span>
+                  중간경로 {route.gapCount}곳이 끊겨 있습니다 (케이블·코어 배정 삭제).
+                  점선(⇢)은 추정 경로이며 거리·고장점 정밀 산출은 끊긴 지점까지만
+                  가능합니다.
+                </span>
+              </div>
+            )}
+
             <div className="flex flex-wrap items-center gap-1">
-              {route.facilityIds.map((fid, i) => (
-                <span key={`${fid}-${i}`} className="flex items-center gap-1">
-                  {i > 0 && <span className="text-slate-300 text-[10px]">→</span>}
-                  <span className="inline-flex flex-col items-center">
-                    <span className="rounded bg-slate-900 px-1.5 py-0.5 text-[10px] font-medium text-white">
-                      {facCode(fid)}
-                    </span>
-                    <span className="mt-0.5 text-[9px] font-mono text-slate-400">
-                      {route.cumByFacility[i] == null
-                        ? '· · ·'
-                        : `${fmtM(route.cumByFacility[i] as number)}m`}
+              {route.facilityIds.map((fid, i) => {
+                const isGapBefore = i > 0 && route.legs[i - 1]?.kind === 'gap'
+                return (
+                  <span key={`${fid}-${i}`} className="flex items-center gap-1">
+                    {i > 0 &&
+                      (isGapBefore ? (
+                        <span
+                          title="끊긴 중간경로 (추정)"
+                          className="text-[11px] font-bold text-amber-500"
+                        >
+                          ⇢
+                        </span>
+                      ) : (
+                        <span className="text-slate-300 text-[10px]">→</span>
+                      ))}
+                    <span className="inline-flex flex-col items-center">
+                      <span className="rounded bg-slate-900 px-1.5 py-0.5 text-[10px] font-medium text-white">
+                        {facCode(fid)}
+                      </span>
+                      <span className="mt-0.5 text-[9px] font-mono text-slate-400">
+                        {route.cumByFacility[i] == null
+                          ? '· · ·'
+                          : `${fmtM(route.cumByFacility[i] as number)}m`}
+                      </span>
                     </span>
                   </span>
-                </span>
-              ))}
+                )
+              })}
             </div>
             <div className="rounded bg-slate-50 px-2 py-1.5">
               {route.total != null ? (
@@ -697,22 +796,39 @@ export default function FaultSearchPanel({
               )}
             </div>
             <ul className="space-y-1">
-              {route.legs.map((leg, i) => (
-                <li
-                  key={i}
-                  className="flex items-center gap-1.5 rounded border border-slate-100 px-2 py-1 text-[10px]"
-                >
-                  <span className="font-mono text-slate-500 shrink-0">
-                    {facCode(leg.fromId)}→{facCode(leg.toId)}
-                  </span>
-                  <span className="flex-1 min-w-0 truncate text-slate-500">
-                    {leg.cable.spec} · 코어 {coreLabel(leg.coreStart, leg.coreEnd)}
-                  </span>
-                  <span className="shrink-0 font-semibold text-slate-900">
-                    {leg.dist != null ? `${fmtM(leg.dist)}m` : '미입력'}
-                  </span>
-                </li>
-              ))}
+              {route.legs.map((leg, i) =>
+                leg.kind === 'gap' ? (
+                  <li
+                    key={i}
+                    className="flex items-center gap-1.5 rounded border border-dashed border-amber-300 bg-amber-50 px-2 py-1 text-[10px] text-amber-700"
+                  >
+                    <span className="font-mono shrink-0">
+                      {facCode(leg.fromId)}
+                      <span className="mx-0.5 font-bold">⇢</span>
+                      {facCode(leg.toId)}
+                    </span>
+                    <span className="flex-1 min-w-0 truncate">
+                      추정 중간경로 — 케이블 끊김
+                    </span>
+                    <span className="shrink-0 font-semibold">미상</span>
+                  </li>
+                ) : (
+                  <li
+                    key={i}
+                    className="flex items-center gap-1.5 rounded border border-slate-100 px-2 py-1 text-[10px]"
+                  >
+                    <span className="font-mono text-slate-500 shrink-0">
+                      {facCode(leg.fromId)}→{facCode(leg.toId)}
+                    </span>
+                    <span className="flex-1 min-w-0 truncate text-slate-500">
+                      {leg.cable.spec} · 코어 {coreLabel(leg.coreStart, leg.coreEnd)}
+                    </span>
+                    <span className="shrink-0 font-semibold text-slate-900">
+                      {leg.dist != null ? `${fmtM(leg.dist)}m` : '미입력'}
+                    </span>
+                  </li>
+                ),
+              )}
             </ul>
           </div>
         )}
@@ -814,6 +930,26 @@ export default function FaultSearchPanel({
                 거리가 입력되지 않아 정밀 위치를 산출할 수 없습니다. 고장점은{' '}
                 <span className="font-semibold">{fault.atLabel}</span> (약{' '}
                 {fmtM(fault.cum)} m) 이후 구간입니다.
+              </div>
+            )}
+
+            {fault?.kind === 'gap' && (
+              <div className="rounded border border-amber-300 bg-amber-50 p-2 text-xs text-amber-800 space-y-1">
+                <p className="flex items-center gap-1 font-bold">
+                  <TriangleAlert className="h-3.5 w-3.5 shrink-0" />
+                  끊긴 중간경로 구간
+                </p>
+                <p>
+                  측정 시작점에서 약{' '}
+                  <span className="font-semibold">{fmtM(fault.cum)} m</span> 지점(
+                  <span className="font-semibold">{fault.fromLabel}</span>)까지는 정상
+                  추적되었습니다. 고장점은 여기서부터 끊긴 중간경로(
+                  <span className="font-semibold">{fault.toLabel}</span> 방향) 부근으로
+                  추정됩니다.
+                </p>
+                <p className="text-[11px] text-amber-700">
+                  중간경로의 케이블·코어 배정을 복원하면 정밀 위치를 산출할 수 있습니다.
+                </p>
               </div>
             )}
           </div>

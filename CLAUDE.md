@@ -900,10 +900,23 @@ LGU+ 협력사 본업 — 광케이블 지장이설 코어구성도·직선도 �
     - 함체 규격 필드는 접속함체 종류에만 표시 (`isClosure`)
     - 설치 주소·위치 필드 신규 (모든 종류). `updateFacilityFromCanvas` 에 `install_address` 추가
     - 헤더·라벨 「접속함체 정보」 → 「시설 정보」. 공종량 안내문 일반화
-- 🚧 **Step C-2 (다음)**: 범례에 케이블 규격 chip 추가 → 케이블 도구 선택 → 시설 2 개 차례 클릭으로 케이블 배치. 기존 ConnectionModal 의 spec/status 분기 통합
-- ⏳ **Step C-3**: 종단 케이블에 회선·코어 인라인 입력 폼 (캔버스 우측 패널 또는 케이블 클릭 모달)
+- ✅ **Step C-3 코드** (2026-05-20): 케이블 정보 패널에 회선·코어 인라인 입력 폼 — 워크플로우 3단계 (종단 케이블에 회선·사용코어 입력)
+  - server actions [core-actions.ts](src/app/relocation/[id]/core-actions.ts) — `addCoreAssignmentFromCanvas` (JSON 반환. 새 회선번호 입력 시 회선 즉시 생성, 같은 번호 있으면 재사용. 코어 범위 중복 = exclusion constraint 친절 메시지) · `removeCoreAssignmentFromCanvas`
+  - [CableInfoPanel.tsx](src/app/relocation/[id]/CableInfoPanel.tsx) — 케이블 클릭 시 우측 패널에 「회선·코어 배정」 섹션. 기존 배정 목록(코어범위·회선·구분·종단 배지·삭제) + 「추가」 폼 토글 (회선 select 또는 「+ 새 회선 입력」·시작/끝 코어·구분(lifecycle)·세그먼트·종단 체크박스). 종단 체크 기본 ON
+  - [TopologyCanvas.tsx](src/app/relocation/[id]/TopologyCanvas.tsx) — `circuits`·`coreAssignments` 를 CableInfoPanel 에 전달. `coreAssignments` 프롭 타입을 `CanvasCoreAssignment` (id·lifecycle·is_terminal 포함)로 확장. 케이블 라벨에 회선·코어 배정 수 teal 배지 (`회선 N`). 코어 add/remove 후 `router.refresh()` (패널 유지)
+  - CoresTab 의 전체 편집 흐름은 그대로 — 패널은 add/list/remove 만 (작업자 흐름 단순화)
+- ✅ **고장점 검색 — 끊긴 중간경로 추정 표시** (2026-05-20, owner 요청): 중간 케이블이 삭제돼 회선 코어 체인이 끊겨도 에러로 중단하지 않고 추정 경로로 이어 표시
+  - `buildCircuitPath` 재작성 — 인접 세그먼트가 시설을 공유하지 않으면 에러 대신 `gap leg` 삽입. 끊긴 케이블 방향은 다음 세그먼트와 공유하는 시설을 exit 으로 추정. 양쪽 연결 구간은 정상 추적 유지
+  - [HighlightContext.tsx](src/app/relocation/[id]/HighlightContext.tsx) — `CanvasHighlight` 에 `gaps: {fromId,toId}[]` 추가
+  - [TopologyCanvas.tsx](src/app/relocation/[id]/TopologyCanvas.tsx) — gap 을 amber 점선 + 방향 화살표 + 「추정경로」 라벨로 렌더 (끊긴 양쪽 시설 중심을 연결)
+  - [FaultSearchPanel.tsx](src/app/relocation/[id]/FaultSearchPanel.tsx) — 회선 경로 시설 체인에서 gap 구간은 amber `⇢`, 상단에 끊긴 곳 수 경고 배너, leg 목록에 점선 「추정 중간경로」 행, 고장점 측정값이 gap 에 도달하면 `kind:'gap'` 결과 — 「약 N m 까지 정상 추적, 이후 끊긴 중간경로 부근 추정」 안내
 - ⏳ **Step C-4**: 자동 경로 탐색 server action — `is_terminal=true` 행 그룹핑 + 시설 그래프 BFS + 경유 케이블 자동 코어 할당 (코어 선택 정책: 빈 코어 중 가장 작은 번호)
-- ⏳ **Step C-5**: 카카오 지도 배경 (owner JS API key 발급 후)
+- 🚧 **Step C-5 — 카카오맵 연동 (재설계 중)** — 📋 **전체 계획: [docs/KAKAO_MAP_PLAN.md](./docs/KAKAO_MAP_PLAN.md)** (새 작업은 이 문서부터 읽을 것)
+  - **1차 시도 (폐기)**: 별도 단순 컴포넌트 `MapCanvas.tsx` + `RelocationCanvas.tsx` 토글. owner 거부 — 단순 핀 마커뿐, 29종 도형·케이블 그리기·도구·정보 패널 없음.
+  - **재설계 (Option B)**: 카카오맵을 진짜 `TopologyCanvas` SVG 뒤 배경으로 통합. 지도 모드에서 도식의 모든 기능이 GPS 좌표 기반으로 작동. 도식 모드는 코드 무수정.
+  - **완료(미커밋)**: 마이그 0045(`relocation_facilities.lat`/`lng`, owner 실행 완료) · [`kakao-loader.ts`](./src/lib/kakao-loader.ts) · [`kakao-maps.d.ts`](./src/types/kakao-maps.d.ts) · `facility-actions.ts` 의 `createFacilityAtLatLng`·`updateFacilityLatLng`·`bulkPlaceFacilities` · 카카오 셋업(JS키·도메인·env).
+  - **삭제 예정**: `MapCanvas.tsx` · `RelocationCanvas.tsx` (1차 시도).
+  - **단계**: Phase 1(지도 위 29종 도형·케이블 + 주소·건물명 검색) → Phase 1B(별도 전체화면 캔버스 창) → Phase 2(시설 드래그) → Phase 3(시설·케이블 추가 도구) → Phase 4(케이블 waypoint 편집). 상세는 KAKAO_MAP_PLAN.md.
 - ⏳ **Step D**: 검증 로직 (룰 12개, § 6-2) + 차수 자동 분할 (§ 6-3)
 - ⏳ **Step E**: SVG 시각화 (코어구성도·직선도) 내보내기 + 기별명세서
 
@@ -965,6 +978,7 @@ LGU+ 협력사 본업 — 광케이블 지장이설 코어구성도·직선도 �
   - [`0042_cable_waypoints.sql`](./supabase/migrations/0042_cable_waypoints.sql) — 지장이설 케이블 경로 waypoint: `relocation_cables.waypoints jsonb` (중간 꺾임점 — 도로 경로 대응)
   - [`0043_cable_distances.sql`](./supabase/migrations/0043_cable_distances.sql) — 지장이설 케이블 정산 거리: `relocation_cables.total_length` + `end_distance` numeric (기별명세서용 구간 거리)
   - [`0044_relocation_facility_materials.sql`](./supabase/migrations/0044_relocation_facility_materials.sql) — 지장이설 접속함체 사용 자재: `relocation_facility_materials` 테이블 (시설별 자재, 기별명세서용). 공종량은 0037 의 `relocation_facility_tasks` 재사용
+  - [`0045_relocation_facility_geo.sql`](./supabase/migrations/0045_relocation_facility_geo.sql) — 지장이설 시설 GPS 좌표: `relocation_facilities.lat`/`lng` (카카오맵 지도 모드 배치용)
 - **외선일보 별도 entity (v2)** — 접속일보와 동일 패턴으로 외선팀 전용 모듈. 외선 작업 특성(케이블 포설구간·전주번호 등)에 맞는 구조 별도 설계.
 - **접속일보 후속 (v2)** — segment-level 작업자 태그, 사진 첨부 + EXIF, 국사·함체 마스터 테이블화, 재접속 이력 조회, 지도 시각화
 - **M3 Phase 2 후속** — 사진 첨부 + EXIF·워터마크 (PRD M3-06), 일보 결재함 통합 (현재는 작업 상세에서 진입), 일반 일보 월별 CSV 리포트

@@ -6,8 +6,10 @@ import { createClient } from '@/lib/supabase/server'
 import {
   CORE_LIFECYCLE_VALUES,
   CIRCUIT_STATUS_VALUES,
+  CIRCUIT_KIND_VALUES,
   type CoreLifecycle,
   type CircuitStatus,
+  type CircuitKind,
 } from '@/lib/relocation'
 
 // 코어 배정(core assignment) CRUD — 회사 스코프 + 권한 제한 없음.
@@ -44,6 +46,10 @@ function isCoreLifecycle(v: string): v is CoreLifecycle {
 
 function isCircuitStatus(v: string): v is CircuitStatus {
   return (CIRCUIT_STATUS_VALUES as readonly string[]).includes(v)
+}
+
+function isCircuitKind(v: string): v is CircuitKind {
+  return (CIRCUIT_KIND_VALUES as readonly string[]).includes(v)
 }
 
 type CoreFormParsed = {
@@ -220,4 +226,134 @@ export async function deleteCoreAssignment(formData: FormData) {
   redirect(
     `/relocation/${projectId}?tab=cores&ok=` + encodeURIComponent('코어 배정을 삭제했습니다'),
   )
+}
+
+
+/**
+ * 캔버스 케이블 정보 패널에서 회선·코어 인라인 추가 (워크플로우 3단계).
+ * 종단으로 표시한 케이블에 회선·사용코어를 입력한다.
+ * 새 회선번호를 입력하면 회선을 즉시 생성 (같은 번호가 이미 있으면 재사용).
+ * redirect 안 함 — JSON 결과 반환 (캔버스 컨텍스트 유지). 클라이언트가 router.refresh.
+ */
+export async function addCoreAssignmentFromCanvas(input: {
+  project_id: string
+  cable_id: string
+  circuit_id: string | null
+  new_circuit: { circuit_id: string; kind: string } | null
+  segment_idx: number
+  core_range_start: number
+  core_range_end: number
+  lifecycle: string
+  is_terminal: boolean
+}): Promise<{ ok: true } | { ok: false; error: string }> {
+  if (!input.project_id || !input.cable_id) {
+    return { ok: false, error: '케이블 정보가 없습니다' }
+  }
+
+  const start = Math.trunc(input.core_range_start)
+  const end = Math.trunc(input.core_range_end)
+  if (!Number.isFinite(start) || start < 1) {
+    return { ok: false, error: '시작 코어는 1 이상의 정수여야 합니다' }
+  }
+  if (!Number.isFinite(end) || end < 1) {
+    return { ok: false, error: '끝 코어는 1 이상의 정수여야 합니다' }
+  }
+  if (end < start) {
+    return { ok: false, error: '끝 코어는 시작 코어보다 크거나 같아야 합니다' }
+  }
+
+  const segment_idx = Math.trunc(input.segment_idx)
+  if (!Number.isFinite(segment_idx) || segment_idx < 0 || segment_idx > 9) {
+    return { ok: false, error: '세그먼트 번호는 0~9 여야 합니다' }
+  }
+
+  if (!isCoreLifecycle(input.lifecycle)) {
+    return { ok: false, error: '코어 lifecycle 이 올바르지 않습니다' }
+  }
+
+  const { supabase } = await requireMember()
+
+  // 회선 결정 — 기존 선택 또는 새 회선 즉시 생성 (같은 번호 있으면 재사용)
+  let circuitId: string | null = input.circuit_id || null
+  if (input.new_circuit) {
+    const newNo = input.new_circuit.circuit_id.trim()
+    if (!newNo) return { ok: false, error: '새 회선번호를 입력하세요' }
+    if (newNo.length > 100) return { ok: false, error: '회선번호는 100자 이하여야 합니다' }
+    const kind = isCircuitKind(input.new_circuit.kind) ? input.new_circuit.kind : '1코어'
+
+    const { data: existing } = await supabase
+      .from('relocation_circuits')
+      .select('id')
+      .eq('project_id', input.project_id)
+      .eq('circuit_id', newNo)
+      .maybeSingle()
+
+    if (existing) {
+      circuitId = (existing as { id: string }).id
+    } else {
+      const { data: created, error: cErr } = await supabase
+        .from('relocation_circuits')
+        .insert({
+          project_id: input.project_id,
+          circuit_id: newNo,
+          kind,
+          status: 'OK',
+        })
+        .select('id')
+        .single()
+      if (cErr || !created) {
+        return { ok: false, error: '회선 생성 실패: ' + (cErr?.message ?? '알 수 없는 오류') }
+      }
+      circuitId = (created as { id: string }).id
+    }
+  }
+
+  const { error } = await supabase.from('relocation_core_assignments').insert({
+    project_id: input.project_id,
+    circuit_id: circuitId,
+    segment_idx,
+    cable_id: input.cable_id,
+    core_range_start: start,
+    core_range_end: end,
+    lifecycle: input.lifecycle,
+    status: null,
+    is_terminal: input.is_terminal,
+    is_auto_assigned: false, // 사람 입력
+    notes: null,
+  })
+
+  if (error) {
+    const friendly =
+      error.message.includes('exclude') || error.code === '23P01'
+        ? overlapErrorMessage(start, end)
+        : '코어 배정 실패: ' + error.message
+    return { ok: false, error: friendly }
+  }
+
+  revalidatePath(`/relocation/${input.project_id}`)
+  return { ok: true }
+}
+
+
+/**
+ * 캔버스 케이블 정보 패널에서 코어 배정 삭제 — JSON 결과 반환 (redirect 안 함).
+ */
+export async function removeCoreAssignmentFromCanvas(
+  projectId: string,
+  id: string,
+): Promise<{ ok: true } | { ok: false; error: string }> {
+  if (!projectId || !id) return { ok: false, error: '코어 배정 정보가 없습니다' }
+
+  const { supabase } = await requireMember()
+
+  const { error } = await supabase
+    .from('relocation_core_assignments')
+    .delete()
+    .eq('id', id)
+    .eq('project_id', projectId) // RLS 보강
+
+  if (error) return { ok: false, error: '삭제 실패: ' + error.message }
+
+  revalidatePath(`/relocation/${projectId}`)
+  return { ok: true }
 }

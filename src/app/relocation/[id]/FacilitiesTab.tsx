@@ -22,6 +22,8 @@ export type FacilityRow = {
   notes: string | null
   x_hint: number | null
   y_hint: number | null
+  lat: number | null
+  lng: number | null
 }
 
 // 함체일 때 보여줄 기본 권장 함체 규격 (참고용 — 폼에는 직접 추천 표시)

@@ -9,6 +9,9 @@ import { createContext, useContext, useState, type ReactNode } from 'react'
 export type CanvasHighlight = {
   facilityIds: string[]
   cableIds: string[]
+  // gaps: 끊긴 중간경로 — 케이블·코어 배정이 삭제돼 직접 연결이 없는 구간.
+  //   캔버스에 점선 + 방향 화살표(추정 경로)로 표시.
+  gaps: { fromId: string; toId: string }[]
   // fault: 고장점이 떨어진 케이블 + from_facility 기준 위치 비율(0~1)
   fault: { cableId: string; fraction: number } | null
 } | null

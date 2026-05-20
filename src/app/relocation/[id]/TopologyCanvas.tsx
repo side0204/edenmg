@@ -30,6 +30,7 @@ import {
   type CableStatus,
   type CableSpec,
   type CableInstallationType,
+  type CoreLifecycle,
 } from '@/lib/relocation'
 import { CABLE_STATUS_LABEL, CABLE_STATUS_VALUES } from '@/lib/relocation'
 import { autoLayoutPositions, NODE_SIZE } from './auto-layout'
@@ -46,7 +47,6 @@ import FacilityInfoPanel, {
 import { useHighlight } from './HighlightContext'
 import FaultSearchPanel, {
   type FaultSearchCircuit,
-  type FaultSearchAssignment,
 } from './FaultSearchPanel'
 
 export type FacilityMasterMini = {
@@ -62,6 +62,19 @@ export type FacilityMasterMini = {
 export type FacilityTaskRow = FacilityTaskItem & { facility_id: string }
 export type FacilityMaterialRow = FacilityMaterialItem & { facility_id: string }
 export type { TaskTypeOption }
+
+// 코어 배정 — 케이블 정보 패널의 회선·코어 인라인 입력 + 고장점 검색에 공통 사용.
+//   FaultSearchAssignment 의 상위 타입 (id·lifecycle·is_terminal 추가).
+export type CanvasCoreAssignment = {
+  id: string
+  circuit_id: string | null
+  segment_idx: number
+  cable_id: string
+  core_range_start: number
+  core_range_end: number
+  lifecycle: CoreLifecycle
+  is_terminal: boolean
+}
 
 type FacilityNode = {
   id: string
@@ -101,6 +114,7 @@ const NEW_COLOR      = '#dc2626'
 const SELECTED_COLOR = '#2563eb'  // blue-600 (선택 강조)
 const LINKED_COLOR   = '#f59e0b'  // amber-500 (선택 시설에 연결된 케이블 강조)
 const ROUTE_COLOR    = '#7c3aed'  // violet-600 (고장점 검색 경로 강조)
+const ROUTE_GAP_COLOR = '#d97706' // amber-600 (끊긴 중간경로 — 추정 연결)
 const FAULT_COLOR    = '#dc2626'  // red-600 (고장점 위치 마커)
 const DRAG_THRESHOLD = 4          // px — 클릭/드래그 구분
 const CABLE_OFFSET_GAP = 7        // px — 같은 경로 여러 케이블 평행 간격
@@ -178,7 +192,7 @@ export default function TopologyCanvas({
   facilityTasks?: FacilityTaskRow[]
   facilityMaterials?: FacilityMaterialRow[]
   circuits?: FaultSearchCircuit[]
-  coreAssignments?: FaultSearchAssignment[]
+  coreAssignments?: CanvasCoreAssignment[]
 }) {
   const router = useRouter()
 
@@ -267,6 +281,15 @@ export default function TopologyCanvas({
     }
     return m
   }, [cables])
+
+  // 케이블별 회선·코어 배정 수 (케이블 라벨 배지)
+  const coreCountByCable = useMemo(() => {
+    const m = new Map<string, number>()
+    for (const a of coreAssignments ?? []) {
+      m.set(a.cable_id, (m.get(a.cable_id) ?? 0) + 1)
+    }
+    return m
+  }, [coreAssignments])
 
   const [selectedId, setSelectedId] = useState<string | null>(null)
   const [pendingConnection, setPendingConnection] = useState<
@@ -1241,6 +1264,70 @@ export default function TopologyCanvas({
                   />
                 )
               })}
+              {/* 끊긴 중간경로 — 추정 연결 (점선 + 방향 화살표) */}
+              {highlight.gaps.map((g, i) => {
+                const a = effectivePositions[g.fromId]
+                const b = effectivePositions[g.toId]
+                if (!a || !b) return null
+                const ax = a.x + NODE_SIZE.width / 2
+                const ay = a.y + NODE_SIZE.height / 2 - 10
+                const bx = b.x + NODE_SIZE.width / 2
+                const by = b.y + NODE_SIZE.height / 2 - 10
+                const dx = bx - ax
+                const dy = by - ay
+                const len = Math.hypot(dx, dy) || 1
+                const ux = dx / len
+                const uy = dy / len
+                const px = -uy
+                const py = ux
+                // 화살촉 — 도착 노드 앞쪽 (노드에 안 가리게 34px 뒤로)
+                const tipX = bx - ux * 34
+                const tipY = by - uy * 34
+                const baseX = tipX - ux * 12
+                const baseY = tipY - uy * 12
+                const midX = (ax + bx) / 2
+                const midY = (ay + by) / 2
+                return (
+                  <g key={`gap-${i}`}>
+                    <line
+                      x1={ax}
+                      y1={ay}
+                      x2={bx}
+                      y2={by}
+                      stroke={ROUTE_GAP_COLOR}
+                      strokeWidth={2.5}
+                      strokeDasharray="7 5"
+                      strokeOpacity={0.9}
+                      strokeLinecap="round"
+                    />
+                    <polygon
+                      points={`${tipX},${tipY} ${baseX + px * 6},${baseY + py * 6} ${baseX - px * 6},${baseY - py * 6}`}
+                      fill={ROUTE_GAP_COLOR}
+                    />
+                    <g transform={`translate(${midX}, ${midY})`}>
+                      <rect
+                        x={-27}
+                        y={-8}
+                        width={54}
+                        height={15}
+                        rx={7.5}
+                        fill="white"
+                        stroke={ROUTE_GAP_COLOR}
+                        strokeWidth={1}
+                      />
+                      <text
+                        x={0}
+                        y={3}
+                        textAnchor="middle"
+                        fill={ROUTE_GAP_COLOR}
+                        style={{ fontSize: 8.5, fontWeight: 700, fontFamily: 'system-ui' }}
+                      >
+                        추정경로
+                      </text>
+                    </g>
+                  </g>
+                )
+              })}
               {highlight.facilityIds.map((fid) => {
                 const pos = effectivePositions[fid]
                 if (!pos) return null
@@ -1379,6 +1466,32 @@ export default function TopologyCanvas({
                 >
                   {c.cable_code}
                 </text>
+                {/* 회선·코어 배정 수 배지 (teal) */}
+                {(() => {
+                  const cnt = coreCountByCable.get(c.id) ?? 0
+                  if (cnt === 0) return null
+                  return (
+                    <g pointerEvents="none">
+                      <rect
+                        x={labelPt.x - 15}
+                        y={labelPt.y + 12}
+                        width={30}
+                        height={11}
+                        rx={5.5}
+                        fill="#0d9488"
+                      />
+                      <text
+                        x={labelPt.x}
+                        y={labelPt.y + 20}
+                        textAnchor="middle"
+                        fill="white"
+                        style={{ fontSize: 7.5, fontWeight: 700, fontFamily: 'system-ui' }}
+                      >
+                        회선 {cnt}
+                      </text>
+                    </g>
+                  )
+                })()}
                 {/* 선택 시 waypoint 핸들 — 드래그 이동 / 우클릭 삭제 */}
                 {selected &&
                   wps.map((w, i) => (
@@ -1547,11 +1660,16 @@ export default function TopologyCanvas({
                 fromName={fromName}
                 toName={toName}
                 waypoints={wps}
+                circuits={circuits ?? []}
+                assignments={(coreAssignments ?? []).filter(
+                  (a) => a.cable_id === c.id,
+                )}
                 onClose={() => setSelectedCableId(null)}
                 onSaved={() => {
                   setSelectedCableId(null)
                   router.refresh()
                 }}
+                onCoreChanged={() => router.refresh()}
                 collapsed={infoPanelCollapsed}
                 onToggleCollapse={() => setInfoPanelCollapsed((v) => !v)}
               />

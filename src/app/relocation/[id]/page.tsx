@@ -32,6 +32,7 @@ import TopologyCanvas, {
   type FacilityMaterialRow,
 } from './TopologyCanvas'
 import CollapsibleLayout from './CollapsibleLayout'
+import RelocationCanvas from './RelocationCanvas'
 
 // 지장이설 프로젝트 상세 — 메인 작업 화면.
 // 사양 § 7: 시설·케이블·회선·코어배정·직선도·차수·검증·내보내기 8 탭.
@@ -134,7 +135,7 @@ export default async function RelocationProjectPage({
   const { data: fRows } = await supabase
     .from('relocation_facilities')
     .select(
-      'id, closure_type, seq_no, name, install_address, closure_spec, parent_facility_id, is_marked, notes, x_hint, y_hint',
+      'id, closure_type, seq_no, name, install_address, closure_spec, parent_facility_id, is_marked, notes, x_hint, y_hint, lat, lng',
     )
     .eq('project_id', id)
     .order('closure_type')
@@ -286,18 +287,15 @@ export default async function RelocationProjectPage({
 
   const canvasPanel = (
     <div className="px-4 sm:px-6 my-2">
-      <TopologyCanvas
+      <RelocationCanvas
         projectId={project.id}
         facilities={facilities.map((f) => ({
           id: f.id,
           closure_type: f.closure_type,
           seq_no: f.seq_no,
           name: f.name,
-          closure_spec: f.closure_spec,
-          install_address: f.install_address,
-          notes: f.notes,
-          x_hint: f.x_hint ?? null,
-          y_hint: f.y_hint ?? null,
+          lat: f.lat ?? null,
+          lng: f.lng ?? null,
         }))}
         cables={cables.map((c) => ({
           id: c.id,
@@ -305,19 +303,42 @@ export default async function RelocationProjectPage({
           to_facility_id: c.to_facility_id,
           spec: c.spec,
           status: c.status,
-          cable_code: c.cable_code,
-          installation_type: c.installation_type,
-          waypoints: Array.isArray(c.waypoints) ? c.waypoints : [],
-          total_length: c.total_length,
-          end_distance: c.end_distance,
         }))}
-        editable={true}
-        facilityMasters={facilityMasters}
-        taskTypes={taskTypes}
-        facilityTasks={facilityTasks}
-        facilityMaterials={facilityMaterials}
-        circuits={circuits}
-        coreAssignments={assignments}
+        schematic={
+          <TopologyCanvas
+            projectId={project.id}
+            facilities={facilities.map((f) => ({
+              id: f.id,
+              closure_type: f.closure_type,
+              seq_no: f.seq_no,
+              name: f.name,
+              closure_spec: f.closure_spec,
+              install_address: f.install_address,
+              notes: f.notes,
+              x_hint: f.x_hint ?? null,
+              y_hint: f.y_hint ?? null,
+            }))}
+            cables={cables.map((c) => ({
+              id: c.id,
+              from_facility_id: c.from_facility_id,
+              to_facility_id: c.to_facility_id,
+              spec: c.spec,
+              status: c.status,
+              cable_code: c.cable_code,
+              installation_type: c.installation_type,
+              waypoints: Array.isArray(c.waypoints) ? c.waypoints : [],
+              total_length: c.total_length,
+              end_distance: c.end_distance,
+            }))}
+            editable={true}
+            facilityMasters={facilityMasters}
+            taskTypes={taskTypes}
+            facilityTasks={facilityTasks}
+            facilityMaterials={facilityMaterials}
+            circuits={circuits}
+            coreAssignments={assignments}
+          />
+        }
       />
     </div>
   )
