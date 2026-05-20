@@ -865,12 +865,52 @@ LGU+ 협력사 본업 — 광케이블 지장이설 코어구성도·직선도 �
   - `saveCableWaypoints` 도 pole_name·dist 보존하도록 형식 확장 (캔버스 드래그 시 거리정보 안 날아감)
   - 케이블 선택(`selectedCableId`) 시 패널 마운트 — key=`{id}-{waypoint수}` 로 경로점 추가/삭제 시 재초기화
   - **케이블 클릭 디버깅** (owner 피드백 2회): (1) `onSvgPointerDown` 이 `setPointerCapture` 로 click 을 가로채던 문제 → SVG 배경 직접 클릭일 때만 pan 시작 (2) hit area `pointer-events="all"` + 보이는 polyline 에도 onClick (3) 패널이 `absolute` + `max-h-[calc(100%-1rem)]` 의 % 가 0 으로 접히던 문제 → flex 우측 컬럼 레이아웃으로 전환 (h-full)
+- ✅ **Step C-2.5 접속함체 정보 패널 — 공종량·자재 (기별명세서)** (2026-05-20, owner 요청):
+  - owner: "접속함체 선택했을 때 우상단에 정보 패널 추가. 접속함체도 접속작업 여부에 따라 기별명세서에 자재·공종량이 작성돼야 하니 감안해서."
+  - 마이그 [`0044_relocation_facility_materials.sql`](./supabase/migrations/0044_relocation_facility_materials.sql) — `relocation_facility_materials` 신규 테이블 (시설별 사용 자재, 자유 텍스트 — 회사 자재 마스터와 FK 연결 안 함). 공종량은 0037 의 `relocation_facility_tasks` 재사용
+  - server actions:
+    - [facility-actions.ts](src/app/relocation/[id]/facility-actions.ts) — `updateFacilityFromCanvas` (이름·함체규격·비고, JSON 반환) · `deleteFacilityFromCanvas` (JSON 반환, FK 위반 친절 메시지). 기존 `updateFacility`/`deleteFacility`(redirect) 은 FacilitiesTab 용으로 유지
+    - 신규 [facility-task-actions.ts](src/app/relocation/[id]/facility-task-actions.ts) — `addFacilityTask`(upsert, facility_id+task_type_id unique) · `removeFacilityTask` · `addFacilityMaterial` · `removeFacilityMaterial`
+  - 신규 [FacilityInfoPanel.tsx](src/app/relocation/[id]/FacilityInfoPanel.tsx) — `CLOSURE_TYPE_CATEGORY === '접속함체'` 인 시설 선택 시 캔버스 **우측 컬럼** 패널 (CableInfoPanel 과 동일 패턴):
+    - 기본 정보 수정 (이름·함체 규격·비고)
+    - 공종량 섹션 — 공종 마스터(회사 단위) 드롭다운 + 수량. 예상 작업시간 합계(분) 표시 (차수 계획 참고)
+    - 사용 자재 섹션 — 자재명·규격·수량·단위 자유 입력
+    - 시설 삭제 (confirm 가드)
+  - [page.tsx](src/app/relocation/[id]/page.tsx) — `relocation_task_type_master`(회사) + `relocation_facility_tasks` + `relocation_facility_materials` fetch → TopologyCanvas 전달. facilities 매핑에 closure_spec·notes 추가
+  - selectedId(시설) 와 selectedCableId(케이블) 는 상호 배타 — 패널 1개만 표시
+  - **패널 접기/펼치기** (후속) — CableInfoPanel·FacilityInfoPanel 헤더에 `>` 접기 버튼. 접으면 폭 36px 세로 스트립(세로 라벨). `infoPanelCollapsed` 공유 state — 선택 바꿔도 유지
+- ✅ **Step C-2.6 고장점 검색 — 회선(코어연결) 기준** (2026-05-20, owner 요청):
+  - owner: "고장점 확인용 검색 기능 필요" — OTDR 측정 거리로 고장점의 물리적 위치 추정. 앞서 정한 「기설 케이블 거리 = 함체 간 거리 파악·검색용」 규칙의 실제 활용처
+  - **핵심 결정 (owner)**: 고장점은 **케이블 물리 연결이 아니라 회선(코어)연결 기준**. OTDR 빛은 회선이 실제 지나는 코어 경로를 따라가므로, 경로는 회선의 코어 배정(`relocation_core_assignments`)이 `segment_idx` 순으로 이루는 케이블 체인이어야 함
+  - [FaultSearchPanel.tsx](src/app/relocation/[id]/FaultSearchPanel.tsx) — **캔버스 우측 컬럼 패널** (헤더 「고장점 검색」 버튼으로 토글). **읽기 전용 클라이언트 계산**
+    - **선택 드릴다운 = ① 시설물 → ② 그 시설물에 연결된 케이블 → ③ 케이블의 코어선번별 회선**. 캔버스에서 시설물·케이블 직접 클릭도 같은 드릴다운에 반영 (시설 클릭=step1, 케이블 클릭=step1+2)
+    - 회선 선택 → `buildCircuitPath` 가 그 회선의 코어 배정(segment_idx 순) → 케이블 체인 → 시설 경로 구성. 인접 케이블의 공유 시설로 방향 자동 판정. 경로가 끊기면 안내
+    - 측정 기준 끝 토글(`fromEnd`) — 회선 경로의 어느 끝에서 OTDR 쟀는지
+    - 고장점 — 측정 거리 입력 → 경로 구간 누적해 D 가 떨어지는 케이블·구간 산출. waypoints 의 전주명·구간거리(`dist`)로 전주 단위까지 좁힘. `orientedSegments` 가 traverse 방향(정/역) 정렬
+    - **패널 너비 조절** — 좌측 가장자리 드래그 핸들 (`width` state, 260~680px). 드릴다운 진행 중에도 캔버스에 선택한 시설·케이블 하이라이트
+  - 케이블 거리는 `total_length` 우선, 없으면 waypoints `dist` 합 (CableInfoPanel 입력값)
+  - [page.tsx](src/app/relocation/[id]/page.tsx) — `relocation_core_assignments` 를 항상 fetch (기존엔 cores·migrations 탭만) → TopologyCanvas → FaultSearchPanel 전달
+  - **변천**: 처음 별도 「고장점」 탭(케이블 BFS·시설 start/end 클릭) → owner 요청으로 ① 캔버스 우측 패널로 이전 ② 회선(코어연결) 기준으로 재설계 ③ 시설물→케이블→회선 드릴다운 + 패널 너비 조절. 탭 제거, FaultSearchTab→FaultSearchPanel
+- ✅ **Step C-2.7 캔버스 하이라이트 + 전 시설 정보 패널** (2026-05-20, owner 요청):
+  - **고장점 검색 결과 캔버스 하이라이트**:
+    - 신규 [HighlightContext.tsx](src/app/relocation/[id]/HighlightContext.tsx) — `HighlightProvider` + `useHighlight`. FaultSearchTab(탭)·TopologyCanvas(캔버스)가 다른 패널이라 page 의 CollapsibleLayout 을 감싸는 context 로 연결
+    - FaultSearchTab — 경로/고장점 계산 결과를 `useEffect` 로 context 에 push. 탭 떠나면(언마운트) 해제
+    - TopologyCanvas — 경로 케이블 violet 글로우 + 경로 시설 violet 링 + 고장점 빨강 십자선 마커. 마커는 `pointAlongPolyline` 으로 케이블 polyline arc-length 비율 위치에 표시 (캔버스는 schematic 이라 근사). 새 검색 시 해당 경로로 viewport 자동 fit
+  - **전 시설 정보 패널** — FacilityInfoPanel 을 접속함체뿐 아니라 **모든 시설 종류**에서 노출 (owner: "함체뿐 아니라 모든 시설물"). TopologyCanvas 의 `CLOSURE_TYPE_CATEGORY === '접속함체'` 게이트 제거
+    - 함체 규격 필드는 접속함체 종류에만 표시 (`isClosure`)
+    - 설치 주소·위치 필드 신규 (모든 종류). `updateFacilityFromCanvas` 에 `install_address` 추가
+    - 헤더·라벨 「접속함체 정보」 → 「시설 정보」. 공종량 안내문 일반화
 - 🚧 **Step C-2 (다음)**: 범례에 케이블 규격 chip 추가 → 케이블 도구 선택 → 시설 2 개 차례 클릭으로 케이블 배치. 기존 ConnectionModal 의 spec/status 분기 통합
 - ⏳ **Step C-3**: 종단 케이블에 회선·코어 인라인 입력 폼 (캔버스 우측 패널 또는 케이블 클릭 모달)
 - ⏳ **Step C-4**: 자동 경로 탐색 server action — `is_terminal=true` 행 그룹핑 + 시설 그래프 BFS + 경유 케이블 자동 코어 할당 (코어 선택 정책: 빈 코어 중 가장 작은 번호)
 - ⏳ **Step C-5**: 카카오 지도 배경 (owner JS API key 발급 후)
 - ⏳ **Step D**: 검증 로직 (룰 12개, § 6-2) + 차수 자동 분할 (§ 6-3)
-- ⏳ **Step E**: SVG 시각화 (코어구성도·직선도) 내보내기
+- ⏳ **Step E**: SVG 시각화 (코어구성도·직선도) 내보내기 + 기별명세서
+
+**기별명세서 정산 규칙** (owner 결정 2026-05-20):
+- **광케이블 포설 공종** — 케이블 거리(`relocation_cables.total_length`)로 산출. **단 `status='existing'`(기설) 케이블 거리는 기별명세서 정산에 반영 금지.** 포설 정산 = Σ(total_length where status != existing).
+- **기설 케이블 거리의 용도** — 정산이 아니라 「특정 함체 ~ 특정 함체 거리 파악」용. 향후 검색 기능(함체 간 거리 검색)에 활용 예정.
+- CableInfoPanel 은 `status='existing'` 이면 거리 입력란을 「함체 간 거리 (검색용)」 로 라벨링 + 「정산 미반영」 안내. 그 외 상태는 「정산 기준 (포설)」.
 
 **미해결 항목** (§ 9 of plan doc):
 - 9-1: `1:2:8:4`·`1:3:8:4` 정확한 의미
@@ -924,6 +964,7 @@ LGU+ 협력사 본업 — 광케이블 지장이설 코어구성도·직선도 �
   - [`0041_relocation_lgu_legend.sql`](./supabase/migrations/0041_relocation_lgu_legend.sql) — 지장이설 LGU+ 표준 범례 적용: `relocation_closure_type` enum 21 ADD VALUE (국사 4·설치장소 2·모바일국소 8·접속함체 3·RN/IJP/광MUX 5) + `relocation_cables.installation_type text` (가공·구내·해저·입상·지중)
   - [`0042_cable_waypoints.sql`](./supabase/migrations/0042_cable_waypoints.sql) — 지장이설 케이블 경로 waypoint: `relocation_cables.waypoints jsonb` (중간 꺾임점 — 도로 경로 대응)
   - [`0043_cable_distances.sql`](./supabase/migrations/0043_cable_distances.sql) — 지장이설 케이블 정산 거리: `relocation_cables.total_length` + `end_distance` numeric (기별명세서용 구간 거리)
+  - [`0044_relocation_facility_materials.sql`](./supabase/migrations/0044_relocation_facility_materials.sql) — 지장이설 접속함체 사용 자재: `relocation_facility_materials` 테이블 (시설별 자재, 기별명세서용). 공종량은 0037 의 `relocation_facility_tasks` 재사용
 - **외선일보 별도 entity (v2)** — 접속일보와 동일 패턴으로 외선팀 전용 모듈. 외선 작업 특성(케이블 포설구간·전주번호 등)에 맞는 구조 별도 설계.
 - **접속일보 후속 (v2)** — segment-level 작업자 태그, 사진 첨부 + EXIF, 국사·함체 마스터 테이블화, 재접속 이력 조회, 지도 시각화
 - **M3 Phase 2 후속** — 사진 첨부 + EXIF·워터마크 (PRD M3-06), 일보 결재함 통합 (현재는 작업 상세에서 진입), 일반 일보 월별 CSV 리포트

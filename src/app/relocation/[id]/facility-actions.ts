@@ -331,6 +331,77 @@ export async function createFacilityAtPosition(input: {
 }
 
 
+/**
+ * 캔버스 정보 패널에서 시설 기본 정보 수정 — 이름·함체 규격·비고.
+ * redirect 안 함 — JSON 결과 반환 (패널 안에서 router.refresh 처리).
+ */
+export async function updateFacilityFromCanvas(input: {
+  project_id: string
+  id: string
+  name: string
+  closure_spec: CableSpec | null
+  install_address: string | null
+  notes: string | null
+}): Promise<{ ok: true } | { ok: false; error: string }> {
+  if (!input.project_id || !input.id) return { ok: false, error: '대상이 올바르지 않습니다' }
+  const name = (input.name ?? '').trim()
+  if (!name) return { ok: false, error: '시설 이름을 입력하세요' }
+  if (name.length > 200) return { ok: false, error: '이름은 200자 이하로 입력하세요' }
+  if (input.closure_spec && !isCableSpec(input.closure_spec)) {
+    return { ok: false, error: '함체 규격이 올바르지 않습니다' }
+  }
+  const installAddress = (input.install_address ?? '').trim() || null
+  if (installAddress && installAddress.length > 500) {
+    return { ok: false, error: '설치 주소는 500자 이하로 입력하세요' }
+  }
+  const notes = (input.notes ?? '').trim() || null
+  if (notes && notes.length > 1000) return { ok: false, error: '비고는 1000자 이하로 입력하세요' }
+
+  const { supabase } = await requireMember()
+
+  const { error } = await supabase
+    .from('relocation_facilities')
+    .update({
+      name,
+      closure_spec: input.closure_spec ?? null,
+      install_address: installAddress,
+      notes,
+    })
+    .eq('id', input.id)
+
+  if (error) return { ok: false, error: '수정 실패: ' + error.message }
+
+  revalidatePath(`/relocation/${input.project_id}`)
+  return { ok: true }
+}
+
+
+/**
+ * 캔버스 정보 패널에서 시설 삭제 — JSON 결과 반환.
+ * 공종·자재(facility_tasks·facility_materials)는 cascade 로 함께 삭제되지만
+ * 연결된 케이블이 있으면 FK 위반 → 친절한 메시지.
+ */
+export async function deleteFacilityFromCanvas(
+  projectId: string,
+  id: string,
+): Promise<{ ok: true } | { ok: false; error: string }> {
+  if (!projectId || !id) return { ok: false, error: '대상이 올바르지 않습니다' }
+
+  const { supabase } = await requireMember()
+
+  const { error } = await supabase.from('relocation_facilities').delete().eq('id', id)
+  if (error) {
+    const friendly = error.message.includes('foreign key')
+      ? '이 시설을 사용하는 케이블이 있어 삭제할 수 없습니다. 케이블을 먼저 제거해주세요.'
+      : '삭제 실패: ' + error.message
+    return { ok: false, error: friendly }
+  }
+
+  revalidatePath(`/relocation/${projectId}`)
+  return { ok: true }
+}
+
+
 export async function deleteFacility(formData: FormData) {
   const id = String(formData.get('id') ?? '').trim()
   const projectId = String(formData.get('project_id') ?? '').trim()

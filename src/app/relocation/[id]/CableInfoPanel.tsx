@@ -2,7 +2,7 @@
 
 import { useState } from 'react'
 import { toast } from 'sonner'
-import { X, Trash2, Save, TriangleAlert } from 'lucide-react'
+import { X, Trash2, Save, TriangleAlert, ChevronLeft, ChevronRight } from 'lucide-react'
 import {
   CABLE_STATUS_VALUES,
   CABLE_STATUS_LABEL,
@@ -47,6 +47,8 @@ export default function CableInfoPanel({
   waypoints,
   onClose,
   onSaved,
+  collapsed,
+  onToggleCollapse,
 }: {
   projectId: string
   cable: CablePanelData
@@ -55,6 +57,8 @@ export default function CableInfoPanel({
   waypoints: CablePanelWaypoint[]
   onClose: () => void
   onSaved: () => void
+  collapsed: boolean
+  onToggleCollapse: () => void
 }) {
   const [spec, setSpec] = useState<CableSpec>(cable.spec)
   const [status, setStatus] = useState<CableStatus>(cable.status)
@@ -88,6 +92,9 @@ export default function CableInfoPanel({
     dists.reduce((acc, d) => acc + (parseNum(d) ?? 0), 0) + (parseNum(endDistance) ?? 0)
   const totalNum = parseNum(totalLength)
   const mismatch = totalNum != null && Math.abs(segmentSum - totalNum) > 0.001
+
+  // 기설 케이블 거리는 기별명세서 정산(포설)에 반영 금지 — 함체 간 거리 파악·검색용.
+  const isExisting = status === 'existing'
 
   async function onSave() {
     if (submitting) return
@@ -136,17 +143,45 @@ export default function CableInfoPanel({
     onSaved()
   }
 
+  // 접힘 — 얇은 세로 스트립. 캔버스 작업 공간 확보용.
+  if (collapsed) {
+    return (
+      <button
+        type="button"
+        onClick={onToggleCollapse}
+        title="케이블 정보 펼치기"
+        className="w-9 shrink-0 h-full border-l border-slate-300 bg-white flex flex-col items-center gap-2 py-2 text-slate-500 hover:bg-slate-50 hover:text-slate-900"
+      >
+        <ChevronLeft className="h-4 w-4" />
+        <span className="text-[11px] font-bold [writing-mode:vertical-rl]">
+          케이블 정보
+        </span>
+      </button>
+    )
+  }
+
   return (
     <div className="w-72 shrink-0 h-full overflow-y-auto border-l border-slate-300 bg-white">
-      <div className="sticky top-0 bg-white border-b border-slate-200 px-3 py-2 flex items-center justify-between">
+      <div className="sticky top-0 z-10 bg-white border-b border-slate-200 px-3 py-2 flex items-center justify-between">
         <span className="text-sm font-bold text-slate-900">케이블 정보</span>
-        <button
-          type="button"
-          onClick={onClose}
-          className="text-slate-400 hover:text-slate-900"
-        >
-          <X className="h-4 w-4" />
-        </button>
+        <div className="flex items-center gap-1">
+          <button
+            type="button"
+            onClick={onToggleCollapse}
+            title="패널 접기"
+            className="text-slate-400 hover:text-slate-900"
+          >
+            <ChevronRight className="h-4 w-4" />
+          </button>
+          <button
+            type="button"
+            onClick={onClose}
+            title="닫기"
+            className="text-slate-400 hover:text-slate-900"
+          >
+            <X className="h-4 w-4" />
+          </button>
+        </div>
       </div>
 
       <div className="p-3 space-y-3">
@@ -208,7 +243,12 @@ export default function CableInfoPanel({
 
         <div>
           <label className="block text-[11px] font-medium text-slate-600">
-            케이블 전체거리 (m) — 정산 기준
+            케이블 전체거리 (m){' '}
+            {isExisting ? (
+              <span className="text-blue-600">— 함체 간 거리 (검색용)</span>
+            ) : (
+              <span className="text-slate-500">— 정산 기준 (포설)</span>
+            )}
           </label>
           <input
             type="number"
@@ -216,15 +256,21 @@ export default function CableInfoPanel({
             step="0.1"
             value={totalLength}
             onChange={(e) => setTotalLength(e.target.value)}
-            placeholder="실제 포설 케이블 길이"
+            placeholder={isExisting ? '함체 간 케이블 거리' : '실제 포설 케이블 길이'}
             className="mt-0.5 w-full rounded-md border border-slate-300 px-2 py-1 text-xs"
           />
+          {isExisting && (
+            <p className="mt-0.5 text-[10px] text-blue-600">
+              기설 케이블 거리는 기별명세서 정산에 반영되지 않습니다. 함체 간 거리
+              파악·검색용입니다.
+            </p>
+          )}
         </div>
 
         {/* 경로점 거리 — 정산용 */}
         <div className="border-t border-slate-200 pt-2">
           <p className="text-[11px] font-bold text-slate-700 mb-1">
-            경로점 거리 (기별명세서)
+            경로점 거리 {isExisting ? '(함체 간 거리)' : '(기별명세서)'}
           </p>
           <div className="space-y-1 text-[11px]">
             {/* 시작 시설 */}

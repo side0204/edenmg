@@ -24,8 +24,13 @@ import MigrationsTab, {
   type CoreAssignmentForMigration,
 } from './MigrationsTab'
 import LeftPanel from './LeftPanel'
+import { HighlightProvider } from './HighlightContext'
 import { seedTestData } from './seed-actions'
-import TopologyCanvas from './TopologyCanvas'
+import TopologyCanvas, {
+  type TaskTypeOption,
+  type FacilityTaskRow,
+  type FacilityMaterialRow,
+} from './TopologyCanvas'
 import CollapsibleLayout from './CollapsibleLayout'
 
 // 지장이설 프로젝트 상세 — 메인 작업 화면.
@@ -170,19 +175,38 @@ export default async function RelocationProjectPage({
     address: string | null
   }>
 
-  // 코어 배정 (cores 탭 + migrations 탭에서 필요 — 영향 회선 추출)
-  let assignments: CoreAssignmentRow[] = []
-  if (tab === 'cores' || tab === 'migrations') {
-    const { data: aRows } = await supabase
-      .from('relocation_core_assignments')
-      .select(
-        'id, circuit_id, segment_idx, cable_id, core_range_start, core_range_end, lifecycle, status, is_terminal, is_auto_assigned, notes',
-      )
-      .eq('project_id', id)
-      .order('cable_id')
-      .order('core_range_start')
-    assignments = (aRows ?? []) as CoreAssignmentRow[]
-  }
+  // 공종 마스터 (회사 단위) — 캔버스 접속함체 패널의 공종 드롭다운
+  const { data: ttRows } = await supabase
+    .from('relocation_task_type_master')
+    .select('id, name, unit_label, standard_minutes_per_unit')
+    .eq('company_id', me.company_id)
+    .eq('is_active', true)
+    .order('position')
+  const taskTypes = (ttRows ?? []) as TaskTypeOption[]
+
+  // 시설별 공종량 + 사용 자재 (캔버스 접속함체 패널 — 기별명세서용)
+  const { data: ftRows } = await supabase
+    .from('relocation_facility_tasks')
+    .select('id, facility_id, task_type_id, quantity')
+    .eq('project_id', id)
+  const facilityTasks = (ftRows ?? []) as FacilityTaskRow[]
+
+  const { data: fmtRows } = await supabase
+    .from('relocation_facility_materials')
+    .select('id, facility_id, name, spec, unit, quantity')
+    .eq('project_id', id)
+  const facilityMaterials = (fmtRows ?? []) as FacilityMaterialRow[]
+
+  // 코어 배정 — cores·migrations 탭 + 고장점 검색 패널(회선 경로)에서 필요. 항상 fetch.
+  const { data: aRows } = await supabase
+    .from('relocation_core_assignments')
+    .select(
+      'id, circuit_id, segment_idx, cable_id, core_range_start, core_range_end, lifecycle, status, is_terminal, is_auto_assigned, notes',
+    )
+    .eq('project_id', id)
+    .order('cable_id')
+    .order('core_range_start')
+  const assignments = (aRows ?? []) as CoreAssignmentRow[]
 
   // 이전 이력 (migrations 탭 전용)
   let migrations: MigrationRow[] = []
@@ -269,6 +293,9 @@ export default async function RelocationProjectPage({
           closure_type: f.closure_type,
           seq_no: f.seq_no,
           name: f.name,
+          closure_spec: f.closure_spec,
+          install_address: f.install_address,
+          notes: f.notes,
           x_hint: f.x_hint ?? null,
           y_hint: f.y_hint ?? null,
         }))}
@@ -286,6 +313,11 @@ export default async function RelocationProjectPage({
         }))}
         editable={true}
         facilityMasters={facilityMasters}
+        taskTypes={taskTypes}
+        facilityTasks={facilityTasks}
+        facilityMaterials={facilityMaterials}
+        circuits={circuits}
+        coreAssignments={assignments}
       />
     </div>
   )
@@ -497,11 +529,13 @@ export default async function RelocationProjectPage({
 
   return (
     <main className="min-h-screen pb-6">
-      <CollapsibleLayout
-        topPanel={topPanel}
-        canvas={canvasPanel}
-        bottomPanel={bottomPanel}
-      />
+      <HighlightProvider>
+        <CollapsibleLayout
+          topPanel={topPanel}
+          canvas={canvasPanel}
+          bottomPanel={bottomPanel}
+        />
+      </HighlightProvider>
     </main>
   )
 }

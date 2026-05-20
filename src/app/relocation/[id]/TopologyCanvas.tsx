@@ -12,6 +12,7 @@ import {
   ZoomOut,
   Expand,
   Shrink,
+  Crosshair,
 } from 'lucide-react'
 import {
   CABLE_SPEC_VALUES,
@@ -37,6 +38,16 @@ import { createCable } from './cable-actions'
 import { createFacilityAtPosition } from './facility-actions'
 import LegendPanel from './LegendPanel'
 import CableInfoPanel from './CableInfoPanel'
+import FacilityInfoPanel, {
+  type TaskTypeOption,
+  type FacilityTaskItem,
+  type FacilityMaterialItem,
+} from './FacilityInfoPanel'
+import { useHighlight } from './HighlightContext'
+import FaultSearchPanel, {
+  type FaultSearchCircuit,
+  type FaultSearchAssignment,
+} from './FaultSearchPanel'
 
 export type FacilityMasterMini = {
   id: string
@@ -47,11 +58,19 @@ export type FacilityMasterMini = {
   address: string | null
 }
 
+// 시설별 공종량·자재 — facility_id 로 캔버스에서 필터링해 패널에 전달
+export type FacilityTaskRow = FacilityTaskItem & { facility_id: string }
+export type FacilityMaterialRow = FacilityMaterialItem & { facility_id: string }
+export type { TaskTypeOption }
+
 type FacilityNode = {
   id: string
   closure_type: ClosureType
   seq_no: number
   name: string
+  closure_spec: CableSpec | null
+  install_address: string | null
+  notes: string | null
   x_hint: number | null
   y_hint: number | null
 }
@@ -81,8 +100,39 @@ const EXISTING_COLOR = '#111827'
 const NEW_COLOR      = '#dc2626'
 const SELECTED_COLOR = '#2563eb'  // blue-600 (선택 강조)
 const LINKED_COLOR   = '#f59e0b'  // amber-500 (선택 시설에 연결된 케이블 강조)
+const ROUTE_COLOR    = '#7c3aed'  // violet-600 (고장점 검색 경로 강조)
+const FAULT_COLOR    = '#dc2626'  // red-600 (고장점 위치 마커)
 const DRAG_THRESHOLD = 4          // px — 클릭/드래그 구분
 const CABLE_OFFSET_GAP = 7        // px — 같은 경로 여러 케이블 평행 간격
+
+// polyline 의 arc-length 비율(0~1) 위치 점 — 고장점 마커용
+function pointAlongPolyline(
+  pts: { x: number; y: number }[],
+  fraction: number,
+): { x: number; y: number } {
+  if (pts.length === 0) return { x: 0, y: 0 }
+  if (pts.length === 1) return pts[0]
+  const segLens: number[] = []
+  let total = 0
+  for (let i = 0; i < pts.length - 1; i++) {
+    const d = Math.hypot(pts[i + 1].x - pts[i].x, pts[i + 1].y - pts[i].y)
+    segLens.push(d)
+    total += d
+  }
+  if (total === 0) return pts[0]
+  let target = Math.min(1, Math.max(0, fraction)) * total
+  for (let i = 0; i < segLens.length; i++) {
+    if (target <= segLens[i]) {
+      const t = segLens[i] === 0 ? 0 : target / segLens[i]
+      return {
+        x: pts[i].x + (pts[i + 1].x - pts[i].x) * t,
+        y: pts[i].y + (pts[i + 1].y - pts[i].y) * t,
+      }
+    }
+    target -= segLens[i]
+  }
+  return pts[pts.length - 1]
+}
 
 // 케이블 라인 스타일 산출 — LGU+ 표준 범례 적용 (2026-05-20)
 //   - 색(stroke): 케이블 규격 (cableSpecColor — 1C~12C 빨강 / 13C~36C 청록 / ...)
@@ -113,14 +163,36 @@ export default function TopologyCanvas({
   cables,
   editable,
   facilityMasters,
+  taskTypes,
+  facilityTasks,
+  facilityMaterials,
+  circuits,
+  coreAssignments,
 }: {
   projectId: string
   facilities: FacilityNode[]
   cables: CableEdge[]
   editable: boolean
   facilityMasters?: FacilityMasterMini[]
+  taskTypes?: TaskTypeOption[]
+  facilityTasks?: FacilityTaskRow[]
+  facilityMaterials?: FacilityMaterialRow[]
+  circuits?: FaultSearchCircuit[]
+  coreAssignments?: FaultSearchAssignment[]
 }) {
   const router = useRouter()
+
+  // 고장점 검색 하이라이트 (FaultSearchTab 이 context 로 전달)
+  const { highlight } = useHighlight()
+  const highlightFacilitySet = useMemo(
+    () => new Set(highlight?.facilityIds ?? []),
+    [highlight],
+  )
+  const highlightCableSet = useMemo(
+    () => new Set(highlight?.cableIds ?? []),
+    [highlight],
+  )
+
   const initialPositions = useMemo(() => {
     const map = autoLayoutPositions(facilities)
     const obj: Record<string, { x: number; y: number }> = {}
@@ -213,6 +285,19 @@ export default function TopologyCanvas({
 
   // LGU+ 표준 범례 모달
   const [legendOpen, setLegendOpen] = useState(false)
+
+  // 정보 패널(케이블·접속함체) 접기 상태 — 캔버스 작업 공간 확보용.
+  // 케이블·시설 패널은 동시에 1개만 뜨므로 공유 상태 1개. 선택 바꿔도 유지.
+  const [infoPanelCollapsed, setInfoPanelCollapsed] = useState(false)
+
+  // 고장점 검색 패널 — 캔버스 우측. 회선(코어연결) 기준.
+  //   선택 드릴다운: 시설물 → 케이블 → 코어선번(회선).
+  const [faultSearchOpen, setFaultSearchOpen] = useState(false)
+  const [faultFacilityId, setFaultFacilityId] = useState('')
+  const [faultCableId, setFaultCableId] = useState('')
+  const [faultCircuitId, setFaultCircuitId] = useState('')
+  const [faultPanelCollapsed, setFaultPanelCollapsed] = useState(false)
+  const [faultPanelWidth, setFaultPanelWidth] = useState(340)
 
   // 캔버스 표시 영역 크기 — owner 요청 (광범위 작업 시 확장/축소).
   //   compact: 40vh · normal: 75vh (기본) · tall: 90vh · fullscreen: 화면 전체 (fixed inset-0)
@@ -331,6 +416,21 @@ export default function TopologyCanvas({
     computeFitViewport(initialPositions),
   )
 
+  // 고장점 검색 하이라이트가 바뀌면(새 검색) 그 경로가 보이도록 viewport fit.
+  // effectivePositions 는 ref 로 읽어 시설 드래그 때마다 재-fit 되는 것을 방지.
+  const effPosRef = useRef<Record<string, { x: number; y: number }>>({})
+  effPosRef.current = effectivePositions
+  const highlightFacKey = highlight?.facilityIds.join(',') ?? ''
+  useEffect(() => {
+    if (!highlightFacKey) return
+    const pos: Record<string, { x: number; y: number }> = {}
+    for (const id of highlightFacKey.split(',')) {
+      const p = effPosRef.current[id]
+      if (p) pos[id] = p
+    }
+    if (Object.keys(pos).length > 0) setViewport(computeFitViewport(pos))
+  }, [highlightFacKey, computeFitViewport])
+
   // 빈 영역 드래그 (pan) ref. SVG 좌표 변환 비율을 시작 시점에 캡처.
   const panRef = useRef<{
     startClientX: number
@@ -442,7 +542,45 @@ export default function TopologyCanvas({
     })
   }
 
+  // 고장점 검색 드릴다운 — 시설물 → 케이블 → 회선. 상위 변경 시 하위 초기화.
+  const pickFaultFacility = (id: string) => {
+    setFaultFacilityId(id)
+    setFaultCableId('')
+    setFaultCircuitId('')
+  }
+  const pickFaultCable = (id: string) => {
+    setFaultCableId(id)
+    setFaultCircuitId('')
+  }
+  const pickFaultCircuit = (id: string) => setFaultCircuitId(id)
+
+  // 캔버스에서 케이블 클릭 → 그 케이블 + 한쪽 시설물 선택 (드릴다운 step 2 채움)
+  const handleFaultCableClick = (cableId: string) => {
+    const c = cables.find((x) => x.id === cableId)
+    if (!c) return
+    setFaultFacilityId(c.from_facility_id)
+    setFaultCableId(cableId)
+    setFaultCircuitId('')
+  }
+
+  const toggleFaultSearch = () => {
+    if (faultSearchOpen) {
+      setFaultSearchOpen(false)
+    } else {
+      setFaultSearchOpen(true)
+      setSelectedId(null)
+      setSelectedCableId(null)
+      setAddTool(null)
+      setCableTool(null)
+    }
+  }
+
   const handleNodeClick = (id: string) => {
+    // 고장점 검색 모드 — 시설 클릭은 드릴다운 step 1 (시설물) 선택
+    if (faultSearchOpen) {
+      pickFaultFacility(id)
+      return
+    }
     setSelectedCableId(null)  // 시설 선택 시 케이블 경로 편집 종료
     if (selectedId === id) {
       setSelectedId(null)
@@ -724,13 +862,15 @@ export default function TopologyCanvas({
         <p className="text-xs text-slate-600">
           시설 {facilities.length}개 · 케이블 {cables.length}개
           {editable && (
-            addTool
-              ? ` · 캔버스를 클릭해 ${CLOSURE_TYPE_LABEL[addTool]} 을(를) 배치하세요`
-              : selectedCableId
-                ? ' · 케이블 경로 편집 — 선 클릭 = 경로점 추가 · 점 드래그 = 이동 · 점 우클릭 = 삭제'
-                : selectedId
-                  ? ' · 다른 시설을 클릭하면 케이블이 연결됩니다 (취소: 빈 영역 클릭)'
-                  : ' · 시설 클릭 = 연결 · 케이블 클릭 = 경로 편집 · 빈 영역 드래그 = 이동 · 휠 = 확대/축소'
+            faultSearchOpen
+              ? ' · 고장점 검색 — 케이블을 클릭해 회선을 선택하세요 (우측 패널)'
+              : addTool
+                ? ` · 캔버스를 클릭해 ${CLOSURE_TYPE_LABEL[addTool]} 을(를) 배치하세요`
+                : selectedCableId
+                  ? ' · 케이블 경로 편집 — 선 클릭 = 경로점 추가 · 점 드래그 = 이동 · 점 우클릭 = 삭제'
+                  : selectedId
+                    ? ' · 다른 시설을 클릭하면 케이블이 연결됩니다 (취소: 빈 영역 클릭)'
+                    : ' · 시설 클릭 = 연결 · 케이블 클릭 = 경로 편집 · 빈 영역 드래그 = 이동 · 휠 = 확대/축소'
           )}
         </p>
         <div className="flex items-center gap-1">
@@ -796,6 +936,20 @@ export default function TopologyCanvas({
           >
             <BookOpen className="h-3 w-3" />
             표준 범례
+          </button>
+
+          <button
+            type="button"
+            onClick={toggleFaultSearch}
+            className={
+              'ml-1 inline-flex items-center gap-1 rounded-md px-2 h-7 text-[11px] font-medium border ' +
+              (faultSearchOpen
+                ? 'bg-violet-600 text-white border-violet-600'
+                : 'border-slate-300 text-slate-700 hover:bg-slate-50')
+            }
+          >
+            <Crosshair className="h-3 w-3" />
+            고장점 검색
           </button>
 
           {isFullscreen && (
@@ -1052,7 +1206,12 @@ export default function TopologyCanvas({
             className="bg-white select-none w-full h-full"
             style={{
               display: 'block',
-              cursor: addTool ? 'crosshair' : dragging ? 'grabbing' : 'grab',
+              cursor:
+                addTool || faultSearchOpen
+                  ? 'crosshair'
+                  : dragging
+                    ? 'grabbing'
+                    : 'grab',
               touchAction: 'none',
             }}
             onPointerDown={onSvgPointerDown}
@@ -1060,6 +1219,47 @@ export default function TopologyCanvas({
             onPointerUp={onPointerUp}
             onClick={onCanvasClick}
         >
+          {/* 고장점 검색 하이라이트 — 경로 케이블 글로우 + 시설 링 (케이블·노드 아래) */}
+          {highlight && (
+            <g style={{ pointerEvents: 'none' }}>
+              {highlight.cableIds.map((cid) => {
+                const c = cableById.get(cid)
+                if (!c) return null
+                const pts = cablePathPoints(c)
+                if (pts.length < 2) return null
+                const isFaultCable = highlight.fault?.cableId === cid
+                return (
+                  <polyline
+                    key={`hl-${cid}`}
+                    points={pts.map((p) => `${p.x},${p.y}`).join(' ')}
+                    fill="none"
+                    stroke={isFaultCable ? FAULT_COLOR : ROUTE_COLOR}
+                    strokeWidth={11}
+                    strokeOpacity={0.3}
+                    strokeLinejoin="round"
+                    strokeLinecap="round"
+                  />
+                )
+              })}
+              {highlight.facilityIds.map((fid) => {
+                const pos = effectivePositions[fid]
+                if (!pos) return null
+                return (
+                  <circle
+                    key={`hlf-${fid}`}
+                    cx={pos.x + NODE_SIZE.width / 2}
+                    cy={pos.y + NODE_SIZE.height / 2 - 10}
+                    r={30}
+                    fill="none"
+                    stroke={ROUTE_COLOR}
+                    strokeWidth={3}
+                    strokeOpacity={0.6}
+                  />
+                )
+              })}
+            </g>
+          )}
+
           {/* 케이블 (엣지) — 노드보다 먼저. polyline 경로 (시작·끝 시설 자동 + 중간 waypoint) */}
           {cables.map((c) => {
             const pts = cablePathPoints(c)
@@ -1116,6 +1316,10 @@ export default function TopologyCanvas({
                   style={{ cursor: 'pointer' }}
                   onClick={(e) => {
                     e.stopPropagation()
+                    if (faultSearchOpen) {
+                      handleFaultCableClick(c.id)
+                      return
+                    }
                     if (!selected) {
                       setSelectedCableId(c.id)
                       setSelectedId(null)
@@ -1141,6 +1345,10 @@ export default function TopologyCanvas({
                       style={{ cursor: selected ? 'copy' : 'pointer' }}
                       onClick={(e) => {
                         e.stopPropagation()
+                        if (faultSearchOpen) {
+                          handleFaultCableClick(c.id)
+                          return
+                        }
                         if (selected) {
                           const { x, y } = toSvgCoord(e.clientX, e.clientY)
                           addWaypoint(c.id, i, x, y)
@@ -1257,11 +1465,60 @@ export default function TopologyCanvas({
               </g>
             )
           })}
+
+          {/* 고장점 마커 — 측정 거리로 추정한 위치 (노드 위에 표시) */}
+          {highlight?.fault &&
+            (() => {
+              const c = cableById.get(highlight.fault.cableId)
+              if (!c) return null
+              const pts = cablePathPoints(c)
+              if (pts.length < 2) return null
+              const pt = pointAlongPolyline(pts, highlight.fault.fraction)
+              return (
+                <g style={{ pointerEvents: 'none' }}>
+                  <circle cx={pt.x} cy={pt.y} r={13} fill={FAULT_COLOR} fillOpacity={0.25} />
+                  <line
+                    x1={pt.x - 16}
+                    y1={pt.y}
+                    x2={pt.x + 16}
+                    y2={pt.y}
+                    stroke={FAULT_COLOR}
+                    strokeWidth={1.5}
+                  />
+                  <line
+                    x1={pt.x}
+                    y1={pt.y - 16}
+                    x2={pt.x}
+                    y2={pt.y + 16}
+                    stroke={FAULT_COLOR}
+                    strokeWidth={1.5}
+                  />
+                  <circle
+                    cx={pt.x}
+                    cy={pt.y}
+                    r={6}
+                    fill={FAULT_COLOR}
+                    stroke="white"
+                    strokeWidth={2}
+                  />
+                  <text
+                    x={pt.x}
+                    y={pt.y - 21}
+                    textAnchor="middle"
+                    fill={FAULT_COLOR}
+                    style={{ fontSize: 10, fontWeight: 700, fontFamily: 'system-ui' }}
+                  >
+                    고장점
+                  </text>
+                </g>
+              )
+            })()}
           </svg>
         </div>
 
         {/* 케이블 정보 패널 — 케이블 선택 시 우측 컬럼. 정보 수정·경로점 거리·삭제 */}
-        {selectedCableId &&
+        {!faultSearchOpen &&
+          selectedCableId &&
           (() => {
             const c = cableById.get(selectedCableId)
             if (!c) return null
@@ -1295,9 +1552,66 @@ export default function TopologyCanvas({
                   setSelectedCableId(null)
                   router.refresh()
                 }}
+                collapsed={infoPanelCollapsed}
+                onToggleCollapse={() => setInfoPanelCollapsed((v) => !v)}
               />
             )
           })()}
+
+        {/* 시설 정보 패널 — 시설(모든 종류) 선택 시 우측 컬럼.
+            기본 정보 수정 + 공종량·자재 입력 (기별명세서용) */}
+        {!faultSearchOpen &&
+          selectedId &&
+          (() => {
+            const f = facilities.find((x) => x.id === selectedId)
+            if (!f) return null
+            return (
+              <FacilityInfoPanel
+                key={f.id}
+                projectId={projectId}
+                facility={{
+                  id: f.id,
+                  closure_type: f.closure_type,
+                  seq_no: f.seq_no,
+                  name: f.name,
+                  closure_spec: f.closure_spec,
+                  install_address: f.install_address,
+                  notes: f.notes,
+                }}
+                cableCount={facilityCableCount.get(f.id) ?? 0}
+                taskTypes={taskTypes ?? []}
+                tasks={(facilityTasks ?? []).filter((t) => t.facility_id === f.id)}
+                materials={(facilityMaterials ?? []).filter(
+                  (m) => m.facility_id === f.id,
+                )}
+                onClose={() => setSelectedId(null)}
+                onChanged={() => router.refresh()}
+                collapsed={infoPanelCollapsed}
+                onToggleCollapse={() => setInfoPanelCollapsed((v) => !v)}
+              />
+            )
+          })()}
+
+        {/* 고장점 검색 패널 — 우측 컬럼. 시설물→케이블→회선 드릴다운 */}
+        {faultSearchOpen && (
+          <FaultSearchPanel
+            facilities={facilities}
+            cables={cables}
+            circuits={circuits ?? []}
+            assignments={coreAssignments ?? []}
+            facilityId={faultFacilityId}
+            cableId={faultCableId}
+            circuitId={faultCircuitId}
+            onPickFacility={pickFaultFacility}
+            onPickCable={pickFaultCable}
+            onPickCircuit={pickFaultCircuit}
+            width={faultPanelWidth}
+            onResize={setFaultPanelWidth}
+            onClose={() => setFaultSearchOpen(false)}
+            collapsed={faultPanelCollapsed}
+            onToggleCollapse={() => setFaultPanelCollapsed((v) => !v)}
+          />
+        )}
       </div>
 
       {pendingConnection && fromFacility && toFacility && (
