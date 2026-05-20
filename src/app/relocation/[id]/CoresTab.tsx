@@ -1,4 +1,4 @@
-import { Plus, Pencil, Trash2, Zap, User } from 'lucide-react'
+import { Plus, Pencil, Trash2, Zap, User, Flag } from 'lucide-react'
 import {
   CORE_LIFECYCLE_LABEL,
   CORE_LIFECYCLE_VALUES,
@@ -24,6 +24,7 @@ export type CoreAssignmentRow = {
   core_range_end: number
   lifecycle: CoreLifecycle
   status: CircuitStatus | null
+  is_terminal: boolean
   is_auto_assigned: boolean
   notes: string | null
 }
@@ -214,6 +215,23 @@ export default function CoresTab({
               />
             </div>
 
+            <div className="sm:col-span-2">
+              <label className="inline-flex items-center gap-2 cursor-pointer">
+                <input
+                  type="checkbox"
+                  name="is_terminal"
+                  className="h-4 w-4 rounded border-slate-300 text-blue-600"
+                />
+                <span className="text-sm font-medium text-slate-700 inline-flex items-center gap-1">
+                  <Flag className="h-3.5 w-3.5 text-blue-600" />
+                  종단 (회선의 끝)
+                </span>
+              </label>
+              <p className="mt-0.5 text-[11px] text-slate-500 ml-6">
+                회선의 출발/도착점이면 체크. 자동 경로 탐색의 입력이 됩니다 (가입자시설·국사·함체 등 모든 시설 가능)
+              </p>
+            </div>
+
             <div className="sm:col-span-2 flex justify-end">
               <button
                 type="submit"
@@ -297,6 +315,12 @@ function CoreRowItem({
             <span className="text-[10px] text-slate-400 border border-slate-300 px-1.5 py-0.5 rounded">
               {CORE_LIFECYCLE_LABEL[assignment.lifecycle]}
             </span>
+            {assignment.is_terminal && (
+              <span className="inline-flex items-center gap-0.5 text-[10px] font-medium px-1.5 py-0.5 rounded border bg-blue-50 text-blue-700 border-blue-300">
+                <Flag className="h-2.5 w-2.5" />
+                종단
+              </span>
+            )}
             {assignment.status && (
               <span
                 className={
@@ -437,6 +461,21 @@ function CoreRowItem({
               maxLength={1000}
               className="mt-0.5 w-full rounded-lg border border-slate-300 px-2 py-1.5 text-sm"
             />
+          </div>
+
+          <div className="sm:col-span-2">
+            <label className="inline-flex items-center gap-2 cursor-pointer">
+              <input
+                type="checkbox"
+                name="is_terminal"
+                defaultChecked={assignment.is_terminal}
+                className="h-4 w-4 rounded border-slate-300 text-blue-600"
+              />
+              <span className="text-xs font-medium text-slate-700 inline-flex items-center gap-1">
+                <Flag className="h-3 w-3 text-blue-600" />
+                종단 (회선의 끝)
+              </span>
+            </label>
           </div>
 
           <div className="sm:col-span-2 flex justify-end gap-2">

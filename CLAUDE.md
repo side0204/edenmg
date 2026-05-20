@@ -747,9 +747,130 @@ LGU+ 협력사 본업 — 광케이블 지장이설 코어구성도·직선도 �
   - [`LeftPanel.tsx`](./src/app/relocation/[id]/LeftPanel.tsx) — 시설 번호 목록 (S/B/H/C/M/O/E prefix 그룹)
   - [`seed-actions.ts`](./src/app/relocation/[id]/seed-actions.ts) — 빈 프로젝트에 미니 시나리오 시드 (시설 7·케이블 6·회선 4). 실제 LGU+ 임포트 구현 전 임시 도구
   - 케이블 라벨 = 구간명 (`출발시설명 ~ 도착시설명 · 규격`) 으로 통일
-- 🚧 **Step C (진행 중)**: 이전(migration) 워크플로우 — 영향 회선 자동 추출·옛→새 매핑·자동 코어 배정 알고리즘. 사양 § 2-7 (v0.9). 마이그 0039 작성 완료, owner 실행 대기
-- ⏳ **Step D**: 검증 로직 (룰 12개)·차수 자동 분할
-- ⏳ **Step E**: SVG 시각화 (코어구성도·직선도)
+- ✅ **Step C-prev 코드** (2026-05-20): 이전(migration) 워크플로우 — 영향 회선 자동 추출 + 옛→새 매핑 audit
+  - [`migration-actions.ts`](./src/app/relocation/[id]/migration-actions.ts) · [`MigrationsTab.tsx`](./src/app/relocation/[id]/MigrationsTab.tsx) · `?from=` searchParam — 이전 탭 (철거/이설 chip → 영향 회선 자동 추출 → 매핑) 동작 중. audit 가치 보존
+  - 시드 보강 — 기설 코어 배정 5건 (lifecycle='preexisting'). C1종로중구23-3 을 removing 으로 마킹하면 회선 5572607 자동 추출
+
+- ✅ **Step C 워크플로우 재정의** (2026-05-20, owner 제안):
+  | 단계 | 동작 | 데이터 |
+  |---|---|---|
+  | 1. 범례 → 캔버스 배치 | 좌측 범례에서 시설/케이블 종류 선택 → 캔버스 클릭으로 순서대로 배치 | `relocation_facilities.x_hint/y_hint` |
+  | 2. 시설물명 매칭 | 배치 후 인라인 input + `connection_facilities` 마스터 자동완성 | `master_facility_id` FK |
+  | 3. 종단 케이블 + 회선 입력 | 종단으로 표시한 케이블에 회선·사용코어 입력 | `relocation_core_assignments` (lifecycle·circuit_id·core_range) |
+  | **종단 판단** | **설계자 명시 (자동 추론 X)** — 가입자시설도 통과되는 경우 있음. 함체·국사·맨홀 모두 종단 가능 | `is_terminal boolean` (마이그 0040) |
+  | 4. 자동 경로 탐색 | 종단만 검색 → 동일 회선 2 개 이상 종단 = 양쪽 끝. 시설 그래프 BFS 로 경유 케이블에 자동 코어 배정 | server action (C-4 예정) |
+  | 5. 카카오 지도 배경 | 캔버스 SVG 뒤에 지도 타일 합성 (owner 가 카카오 개발자 등록 후 JS API key 발급 → `NEXT_PUBLIC_KAKAO_MAP_KEY`) | C-5 |
+
+- ✅ **Step C-1 코드** (2026-05-20): 워크플로우 1-2 — 범례 도구 + 캔버스 배치 + 시설명 마스터 매칭
+  - [`TopologyCanvas.tsx`](./src/app/relocation/[id]/TopologyCanvas.tsx) 에 「시설 추가」 도구 패널 (7 종 chip) + `addTool` 상태 + 캔버스 빈 영역 클릭 시 그 좌표에 임시 placement
+  - `NewFacilityModal` (client) — 시설명 input + 회사 `connection_facilities` 마스터 datalist 자동완성 (국사→station, 함체→box 자동 필터). 마스터명 일치 시 `master_id` + 규격·주소 자동 prefill (✓ 매칭 배지)
+  - 함체 추가 시 규격 select, 가입자시설 추가 시 주소 input 노출
+  - 신규 server action [`createFacilityAtPosition`](./src/app/relocation/[id]/facility-actions.ts) — 좌표 + 마스터 FK 한 번에 저장 (JSON 결과 반환, redirect 안 함)
+  - [`page.tsx`](src/app/relocation/[id]/page.tsx) — 회사 facility 마스터 fetch + 빈 프로젝트에도 캔버스 노출
+- ✅ **Step C-1.5 종단 컬럼** (2026-05-20): 마이그 0040 + `CoresTab` 폼에 「종단 (회선의 끝)」 체크박스 + 행 배지 (Flag 아이콘, blue). owner 결정: 자동 추론 X, 설계자 명시
+- ✅ **Step C-1.6 LGU+ 표준 범례** (2026-05-20, owner 첨부 이미지 2장):
+  - 마이그 0041 — `relocation_closure_type` 8 → 29 종 (국사 5 + 국사내부 3 + 설치장소 4 + 접속함체 5 + 모바일국소 8 + RN/IJP/광MUX 5). `relocation_cables.installation_type` 컬럼 (가공·구내·해저·입상·지중)
+  - [`lib/relocation.ts`](src/lib/relocation.ts) — `ClosureType` 29 종 + `ClosureCategory` 5 그룹 + `CLOSURE_TYPE_CATEGORY` 매핑 + `CLOSURE_TYPE_COLOR` LGU+ 표준 색 (마름모 4색·R/i/M 글자색 등) + `cableSpecColor` (1C~12C 빨강·13C~36C 청록·...·기타 검정) + `installationTypeDash` (가공/구내/해저 solid·입상 dotted·지중 dashed)
+  - 신규 [`LegendPanel.tsx`](src/app/relocation/[id]/LegendPanel.tsx) — 「표준 범례」 버튼 클릭 시 모달. 좌측 「건물/설치장소 범례」 + 우측 「광망 범례」 두 컬럼. 카테고리 헤더(rose dot) + 시설 SVG 아이콘 (DiamondIcon·TriangleIcon·FlagIcon·TowerIcon·CircledTextIcon·BoxedTextIcon·CircleXIcon·CircleTIcon·BowtieIcon·LineIcon) + 라벨
+  - [`TopologyCanvas.tsx`](src/app/relocation/[id]/TopologyCanvas.tsx) — 기존 인라인 `Legend()` 제거 → 「표준 범례」 트리거 버튼 (BookOpen 아이콘). 「시설 추가」 도구 패널을 카테고리 5 그룹 접기/펼치기 (기본: 국사·접속함체 펼침)로 재구성. 케이블 line 색은 `edgeStyle(spec, status)` — 색은 규격 기반 + dash 는 status 기반. ConnectionModal 의 status 선택은 그대로
+  - **캔버스 시설 SVG 도형 자체** (FacilityShape) 의 표준 모양 적용은 별도 단계 (신규 21 종은 현재 fallback 박스+라벨)
+
+- ✅ **Step C-1.7 캔버스 폭 확장 + FacilityShape 표준 도형** (2026-05-20, owner 피드백):
+  - **캔버스 가로 폭 full-bleed** — [page.tsx](src/app/relocation/[id]/page.tsx): 캔버스를 `max-w-6xl` 컨테이너 밖으로 분리 (`px-4 sm:px-6 my-5`). 헤더·탭·정보 폼은 6xl 유지. 결과: 모니터 해상도에 따라 캔버스가 거의 화면 전체 폭 사용
+  - **FacilityShape 29 종 표준 도형** — [TopologyCanvas.tsx](src/app/relocation/[id]/TopologyCanvas.tsx) 의 FacilityShape 재작성:
+    - 국사 5종: 깃발 (국사) + 마름모 4 색 (종합·집중·가입자·간이)
+    - 설치장소 4종: 사각형(맨홀)·빨강 원(가입자시설)·초록 마름모(창고)·파란 삼각형(일반설치장소)
+    - 접속함체 5종: 원+X 검정(함체_가공형/관로형) + 원+X 빨강(중간접속형) + 원+T 주황(중간분기형) + 보타이 빨강(SP내장형)
+    - 모바일국소 8종: 탑(기지국)·검정 깃발(중계기)·H원(안테나)·eNB박스·충원·기원·광원·RF원
+    - RN/IJP/광MUX 5종: R빨강·R보라·R초록(RN_TPS/LTE/외)·i노랑(IJP)·M파랑(광Mux)
+    - 색깔은 모두 `CLOSURE_TYPE_COLOR` 사용 → LegendPanel 의 작은 아이콘과 동일 모양·색을 NODE_SIZE 90×90 에 맞춰 확대 재현
+    - 헬퍼 `CircledText`·`BoxedText` 추가로 13개 동일 패턴 정리
+
+- ✅ **Step C-1.8 캔버스 zoom · pan** (2026-05-20, owner 요청 — 광범위 작업 영역 대응):
+  - **마우스 휠**: 마우스 위치를 anchor 로 줌 in/out (factor 1.15 per tick, min width 200·max 12000). `useEffect` + native `wheel` 리스너 (`passive: false`) — React onWheel 은 passive 라 preventDefault 안 됨
+  - **빈 영역 마우스 다운 + 드래그**: pan. SVG `setPointerCapture` 로 마우스가 SVG 밖으로 나가도 계속 추적. drag 거리 < 4px 이면 클릭으로 간주 (선택 해제 / 추가 도구 시 시설 배치)
+  - **viewBox 를 state 로 분리** — 기존 `useMemo` 자동 계산 → `useState<Viewport>` (사용자 제어). 초기값은 `computeFitToContent(initialPositions)` 로 전체 시설 보이는 viewport
+  - **「전체보기」 버튼** — 우상단. 모든 시설이 보이도록 viewport 리셋
+  - **줌 컨트롤** — ZoomOut·전체보기·ZoomIn 버튼 + 현재 줌% 표시 (100% = 초기 fit)
+  - **click 충돌 해결** — pan 직후 click 은 `recentlyPannedRef` 로 무시 (선택 해제·추가 도구 배치 모두 차단)
+  - **캔버스 컨테이너** — 기존 `maxHeight: 70vh + overflow-auto` → `height: 75vh + svg w-full h-full + touchAction: none`. 외부 스크롤바 제거 — 모든 이동은 pan 으로
+  - **cursor**: 추가 도구 시 `crosshair` · 노드 드래그 중 `grabbing` · 그 외 `grab`
+
+- ✅ **Step C-1.9 캔버스 DOM 크기 단계 조절** (2026-05-20, owner 요청 — 광범위 작업):
+  - owner 정정: **내부 작업 공간은 무한** (이미 zoom/pan 으로 어디든 가능). 조절 대상은 **화면 표시 영역 (DOM)**. 4K 모니터에서 화면 전체 활용 가능하도록
+  - 4 단계 `canvasSize`: **compact** (40vh) · **normal** (75vh, 기본) · **tall** (90vh) · **fullscreen** (`fixed inset-0 z-40`, 100vw×100vh — 4K 모니터에서 3840×2160)
+  - 우상단 컨트롤 그룹: `Shrink ◁` 축소 / 현재 단계 라벨 (작게/보통/크게/전체) / `Expand ▷` 확장
+  - fullscreen 진입 시 페이지 padding 무시하고 캔버스만 화면 전체. 헤더 컨트롤은 그대로 유지 (`flex flex-col` wrapper + SVG `flex-1 min-h-0`)
+  - **ESC 키** 로 fullscreen → normal 복귀 + 헤더 우측 「✕ 닫기」 버튼도 노출
+  - 작은 화면(compact)도 의외로 유용 — 작업 내용 빠르게 훑기·다른 폼 입력 시 캔버스 줄이기
+
+- ✅ **Step C-1.10 상·하단 패널 접기 + 집중 모드** (2026-05-20, owner 요청 — 캔버스 작업 시 화면 최대 활용):
+  - 신규 [`CollapsibleLayout.tsx`](src/app/relocation/[id]/CollapsibleLayout.tsx) (client) — `topPanel`·`canvas`·`bottomPanel` 세 ReactNode props
+  - 상태: `topCollapsed`·`bottomCollapsed` 각각 독립. 둘 다 collapsed = 집중 모드
+  - **개별 토글 stripe** — 상단↔캔버스 사이 / 캔버스↔하단 사이에 얇은 hover 영역. ChevronUp/Down 아이콘 + "상단 접기/펼치기" / "하단 접기/펼치기" 라벨
+  - **집중 모드 floating 토글** — 화면 `fixed bottom-right z-30`. 「집중 모드」(Minimize2) ↔ 「펼치기」(Maximize2). 페이지 어디서든 한 번 클릭으로 상하 동시 접기·펼치기
+  - z-index 의도: fullscreen 캔버스 (`z-40`) 보다 낮음 → fullscreen 진입 시 floating 가려짐 (이미 다 접힌 상태와 동일하므로 불필요)
+  - [page.tsx](src/app/relocation/[id]/page.tsx) 의 상단(헤더+시드카드)·캔버스·하단(탭+폼) 세 영역을 `topPanel`·`canvas`·`bottomPanel` 로 분리해서 전달
+
+- ✅ **Step C-1.11 시설 추가 도구 패널 접기 + 자동 접힘** (2026-05-20, owner 요청):
+  - owner: "시설을 선택할 때는 펼쳐서 선택, 그리기 할 때는 접어서 그리기"
+  - [TopologyCanvas.tsx](src/app/relocation/[id]/TopologyCanvas.tsx) 에 `toolsCollapsed` state 추가
+  - 도구 패널 헤더 항상 표시 (`▼ 시설 추가` / `▶ 시설 추가`) — 클릭으로 토글
+  - 헤더에 현재 선택된 시설 종류 chip 표시 (예: `시설 추가 [● 종합국사]`) — 접힌 상태에서도 무엇을 선택했는지 즉시 확인
+  - **chip 클릭 시 자동 접힘** — 시설 종류 선택 → 도구 패널 자동 접힘 → 캔버스에 집중. 같은 chip 다시 누르면 해제(펼친 상태 유지)
+  - 「취소」 버튼 — addTool 만 null (펼침 상태는 그대로)
+
+- ✅ **Step C-2 케이블 도구 + 설치 구분** (2026-05-20):
+  - [TopologyCanvas.tsx](src/app/relocation/[id]/TopologyCanvas.tsx) 도구 패널에 **「광케이블」 카테고리** 추가 — `CABLE_SPEC_VALUES` chip (규격별 색 막대). `cableTool` state, 시설 도구(`addTool`)와 상호 배타
+  - 케이블 도구 선택 → 시설 2 개 차례 클릭 → `ConnectionModal` 의 규격이 `cableTool` 로 prefill (`defaultSpec` prop)
+  - **`route_type` → `installation_type` 일원화** — LGU+ 광망 범례의 「설치구분별 형태」 (가공·구내·해저·입상·지중). `route_type` DB 컬럼은 legacy 로 방치, UI·신규 입력은 `installation_type`
+  - [cable-actions.ts](src/app/relocation/[id]/cable-actions.ts) — `parseCableForm` 에 `installation_type` enum 검증, create/update insert 에 반영
+  - 캔버스 케이블 line `edgeStyle(spec, status, installationType)` — **색=규격 · dash=설치구분**(`installationTypeDash`: 가공/구내/해저 solid·입상 dotted·지중 dashed) **· width·opacity=상태**(신설 두껍게·철거 흐리게 opacity 0.45)
+  - [CablesTab.tsx](src/app/relocation/[id]/CablesTab.tsx) create/edit 폼도 `route_type` select → `installation_type` select 로 교체
+  - seed-actions 의 케이블 시드는 legacy `route_type` 그대로 (DB 컬럼 존재 → 동작엔 영향 없음. 캔버스 dash 만 미표시)
+
+- ✅ **Step C-2.1 케이블 경로 (polyline) + waypoint 편집** (2026-05-20, owner 요청 — 도로 경로 대응):
+  - owner: 케이블 양끝은 시설 위치 자동, 연결 후 중간 경로를 길에 맞춰 수정 (지도 연동 대비)
+  - 마이그 0042 — `relocation_cables.waypoints jsonb` (중간 꺾임점 `[{x,y}]`. 시작·끝점은 시설 위치 derive — 시설 이동 시 자동 추종)
+  - [position-actions.ts](src/app/relocation/[id]/position-actions.ts) `saveCableWaypoints` server action
+  - [TopologyCanvas.tsx](src/app/relocation/[id]/TopologyCanvas.tsx):
+    - 케이블 렌더 `<line>` → `<polyline>` (점 배열 = `[출발시설중심, ...waypoints, 도착시설중심]` — `cablePathPoints`)
+    - **케이블 클릭 = 경로 편집 선택** (`selectedCableId`, 시설 선택 `selectedId` 와 상호 배타). 선택 시 파란 굵은 후광
+    - **선분 클릭 = waypoint 추가** (클릭한 선분 위치에 삽입), **점 드래그 = 이동**, **점 우클릭 = 삭제**
+    - 선분별 투명 굵은 hit area (strokeWidth 14) 로 가는 케이블도 클릭 쉽게
+    - `cableWaypoints` 로컬 override state — positions 와 동일 패턴 (드래그 부드럽게 + router.refresh 후 새 데이터 반영). `waypointDragRef` 로 onPointerMove/Up 분기 (노드드래그 / waypoint드래그 / pan 3-way)
+  - [page.tsx](src/app/relocation/[id]/page.tsx) cables fetch 에 waypoints, CableEdge 매핑
+
+- ✅ **Step C-2.2 좌측 시설 목록 사이드바** (2026-05-20, owner 요청):
+  - [TopologyCanvas.tsx](src/app/relocation/[id]/TopologyCanvas.tsx) SVG 영역을 가로 flex 로 — 좌측 `aside` 시설 목록 + 우측 SVG
+  - 카테고리 5 그룹별 시설 리스트 (색 dot + 번호 S-001 + 이름). `facilitiesByCategory` useMemo
+  - 시설 클릭 → `focusFacility` — viewport 를 그 시설이 화면 중앙에 오도록 이동 (줌 레벨 유지) + 선택 표시
+  - `sidebarCollapsed` 토글 — 접으면 SVG 위 absolute 「▶ 시설 목록」 버튼으로 다시 펼침
+  - fullscreen 모드에서도 사이드바 유지
+
+- ✅ **Step C-2.3 케이블 클릭 수정 + 겹침 분리 + 연결 직관화** (2026-05-20, owner 피드백):
+  - **케이블 클릭 안 되던 버그** — 케이블 위 pointerdown 이 SVG 까지 bubble → `onSvgPointerDown` 이 `setPointerCapture` 호출 → 후속 click 이 SVG 로 가로채짐. `onSvgPointerDown` 에 `if (e.target !== svgRef.current) return` 추가 — SVG 배경 직접 클릭일 때만 pan 시작
+  - **같은 경로 여러 케이블 겹침** — `cableOffsets` useMemo: 같은 (from,to) 쌍 그룹의 케이블들을 수직 offset (`CABLE_OFFSET_GAP` 7px) 으로 평행 분리. waypoint 있는 케이블은 offset 안 함 (사용자 경로 존중)
+  - **동일 시설 연결 직관 확인**: (a) 시설 노드 우상단에 **연결 케이블 수 배지** (teal 원, `facilityCableCount`) (b) 시설 선택 시 그 시설에 연결된 케이블 **amber 후광 강조** (`linkedToSelectedFacility`, `LINKED_COLOR`)
+
+- ✅ **Step C-2.4 케이블 정보 패널 — 정산 거리 + 수정 + 삭제** (2026-05-20, owner 요청):
+  - owner: 정산 시 기별명세서 — 케이블 구간별 거리 필요. 경로점이 전주면 전주명 + 시설~전주 / 전주~전주 구간 거리. 구간 합 = 케이블 전체거리, 불일치 시 설계자 결정
+  - 마이그 0043 — `relocation_cables.total_length` (케이블 전체 실제 거리) + `end_distance` (마지막 경로점→도착시설 구간). 중간 구간거리·전주명은 waypoints jsonb 확장 (`{x,y,pole_name,dist}` — `dist`=직전 점→이 점 구간거리)
+  - [cable-actions.ts](src/app/relocation/[id]/cable-actions.ts) — `updateCableFromCanvas` (규격·상태·설치구분·전체거리·waypoints 한 번에, JSON 반환) · `deleteCableFromCanvas` (JSON 반환). 기존 `deleteCable`(redirect) 은 CablesTab 용으로 유지
+  - 신규 [CableInfoPanel.tsx](src/app/relocation/[id]/CableInfoPanel.tsx) — 케이블 클릭 시 캔버스 **우측 컬럼** 패널 (사이드바·캔버스·패널 가로 flex 3컬럼):
+    - 규격·상태·설치구분·전체거리 수정
+    - 경로점별 전주명 + 구간거리 입력 (시작→wp1→...→wpN→도착, 구간 N+1개)
+    - 구간 합계 vs 전체거리 비교 — 불일치 시 amber 경고 + 「전체거리를 합계로 맞추기」 버튼
+    - 케이블 삭제 (confirm 가드)
+  - `saveCableWaypoints` 도 pole_name·dist 보존하도록 형식 확장 (캔버스 드래그 시 거리정보 안 날아감)
+  - 케이블 선택(`selectedCableId`) 시 패널 마운트 — key=`{id}-{waypoint수}` 로 경로점 추가/삭제 시 재초기화
+  - **케이블 클릭 디버깅** (owner 피드백 2회): (1) `onSvgPointerDown` 이 `setPointerCapture` 로 click 을 가로채던 문제 → SVG 배경 직접 클릭일 때만 pan 시작 (2) hit area `pointer-events="all"` + 보이는 polyline 에도 onClick (3) 패널이 `absolute` + `max-h-[calc(100%-1rem)]` 의 % 가 0 으로 접히던 문제 → flex 우측 컬럼 레이아웃으로 전환 (h-full)
+- 🚧 **Step C-2 (다음)**: 범례에 케이블 규격 chip 추가 → 케이블 도구 선택 → 시설 2 개 차례 클릭으로 케이블 배치. 기존 ConnectionModal 의 spec/status 분기 통합
+- ⏳ **Step C-3**: 종단 케이블에 회선·코어 인라인 입력 폼 (캔버스 우측 패널 또는 케이블 클릭 모달)
+- ⏳ **Step C-4**: 자동 경로 탐색 server action — `is_terminal=true` 행 그룹핑 + 시설 그래프 BFS + 경유 케이블 자동 코어 할당 (코어 선택 정책: 빈 코어 중 가장 작은 번호)
+- ⏳ **Step C-5**: 카카오 지도 배경 (owner JS API key 발급 후)
+- ⏳ **Step D**: 검증 로직 (룰 12개, § 6-2) + 차수 자동 분할 (§ 6-3)
+- ⏳ **Step E**: SVG 시각화 (코어구성도·직선도) 내보내기
 
 **미해결 항목** (§ 9 of plan doc):
 - 9-1: `1:2:8:4`·`1:3:8:4` 정확한 의미
@@ -799,6 +920,10 @@ LGU+ 협력사 본업 — 광케이블 지장이설 코어구성도·직선도 �
   - [`0037_relocation_splitters_tasks.sql`](./supabase/migrations/0037_relocation_splitters_tasks.sql) — 지장이설 splices + 1차 RN 스플리터 + 출력 포트 + 공종 마스터(시드 14종) + 시설별 공종 수량
   - [`0038_relocation_phases.sql`](./supabase/migrations/0038_relocation_phases.sql) — 지장이설 차수 + 차수별 작업 + 양쪽 작업자 페어링 (작업 지시서용)
   - [`0039_relocation_migrations.sql`](./supabase/migrations/0039_relocation_migrations.sql) — 지장이설 이전(migration) 워크플로우 audit: relocation_migrations + relocation_migration_circuits
+  - [`0040_core_is_terminal.sql`](./supabase/migrations/0040_core_is_terminal.sql) — 지장이설 코어배정 종단 플래그: `relocation_core_assignments.is_terminal boolean` + partial index. **종단은 설계자가 명시** (자동 추론 안 함 — 가입자시설도 통과되는 경우 있음)
+  - [`0041_relocation_lgu_legend.sql`](./supabase/migrations/0041_relocation_lgu_legend.sql) — 지장이설 LGU+ 표준 범례 적용: `relocation_closure_type` enum 21 ADD VALUE (국사 4·설치장소 2·모바일국소 8·접속함체 3·RN/IJP/광MUX 5) + `relocation_cables.installation_type text` (가공·구내·해저·입상·지중)
+  - [`0042_cable_waypoints.sql`](./supabase/migrations/0042_cable_waypoints.sql) — 지장이설 케이블 경로 waypoint: `relocation_cables.waypoints jsonb` (중간 꺾임점 — 도로 경로 대응)
+  - [`0043_cable_distances.sql`](./supabase/migrations/0043_cable_distances.sql) — 지장이설 케이블 정산 거리: `relocation_cables.total_length` + `end_distance` numeric (기별명세서용 구간 거리)
 - **외선일보 별도 entity (v2)** — 접속일보와 동일 패턴으로 외선팀 전용 모듈. 외선 작업 특성(케이블 포설구간·전주번호 등)에 맞는 구조 별도 설계.
 - **접속일보 후속 (v2)** — segment-level 작업자 태그, 사진 첨부 + EXIF, 국사·함체 마스터 테이블화, 재접속 이력 조회, 지도 시각화
 - **M3 Phase 2 후속** — 사진 첨부 + EXIF·워터마크 (PRD M3-06), 일보 결재함 통합 (현재는 작업 상세에서 진입), 일반 일보 월별 CSV 리포트

@@ -2,15 +2,17 @@
 // 외부 라이브러리 없이. C1 단계 — 정밀 레이아웃은 추후 dagre 등 도입 검토.
 //
 // 배치 룰 (위 → 아래):
-//   1행: 국사 (S-)
-//   2행: 함체 (B-)
-//   3행: 맨홀 (H-)
-//   4행: MOFD / OJC / 국사내장비 (M-/O-/E-)
-//   5행: 가입자시설 (C-)
+//   0행: 국사 (5종 + 국사내부 없음)
+//   1행: 접속함체 (5종)
+//   2행: 설치장소 (맨홀·창고·일반설치장소 등)
+//   3행: 국사 내부 (MOFD·OJC·국사내장비)
+//   4행: 가입자시설
+//   5행: 모바일국소
+//   6행: RN/IJP/광MUX
 //
 // 같은 행 안에서는 seq_no 순서대로 좌→우.
 
-import type { ClosureType } from '@/lib/relocation'
+import { CLOSURE_TYPE_CATEGORY, type ClosureType } from '@/lib/relocation'
 
 type Node = {
   id: string
@@ -22,15 +24,20 @@ type Node = {
 
 type Position = { id: string; x: number; y: number }
 
-const ROW_BY_TYPE: Record<ClosureType, number> = {
-  국사: 0,
-  함체_가공형: 1,
-  함체_관로형: 1,
-  맨홀: 2,
-  MOFD: 3,
-  OJC: 3,
-  국사내장비: 3,
-  가입자시설: 4,
+// 카테고리 기반 행 분류 — 신규 21 종 시설도 자동 분류됨.
+function rowForType(t: ClosureType): number {
+  // 국사 내부 (MOFD/OJC/국사내장비) 는 별도 행
+  if (t === 'MOFD' || t === 'OJC' || t === '국사내장비') return 3
+  // 가입자시설은 별도 행
+  if (t === '가입자시설') return 4
+  const cat = CLOSURE_TYPE_CATEGORY[t]
+  switch (cat) {
+    case '국사': return 0
+    case '접속함체': return 1
+    case '설치장소': return 2
+    case '모바일국소': return 5
+    case 'RN_IJP_광MUX': return 6
+  }
 }
 
 // 노드 슬롯 = 정사각형 80x80. 도형(원·사각)은 슬롯 중앙에 그리고, 라벨은 아래.
@@ -55,7 +62,7 @@ export function autoLayoutPositions(nodes: Node[]): Map<string, Position> {
       result.set(n.id, { id: n.id, x: n.x_hint, y: n.y_hint })
       continue
     }
-    const row = ROW_BY_TYPE[n.closure_type]
+    const row = rowForType(n.closure_type)
     if (!rows.has(row)) rows.set(row, [])
     rows.get(row)!.push(n)
   }

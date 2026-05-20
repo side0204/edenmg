@@ -55,3 +55,67 @@ export async function saveNodePositions(
   revalidatePath(`/relocation/${projectId}`)
   return { ok: true }
 }
+
+
+type Waypoint = {
+  x: number
+  y: number
+  pole_name?: string | null
+  dist?: number | null
+}
+
+/**
+ * 한 케이블의 중간 경로 waypoint 일괄 저장 — 드래그·추가·삭제 후 호출.
+ * 시작·종료점은 시설 위치에서 derive 하므로 저장 안 함 — 중간점만.
+ * pole_name(전주명)·dist(구간거리)도 함께 보존.
+ */
+export async function saveCableWaypoints(
+  projectId: string,
+  cableId: string,
+  waypoints: Waypoint[],
+): Promise<{ ok: true } | { ok: false; error: string }> {
+  const supabase = await createClient()
+  const {
+    data: { user },
+  } = await supabase.auth.getUser()
+  if (!user) return { ok: false, error: '로그인이 필요합니다' }
+
+  const { data: meRow } = await supabase
+    .from('employees')
+    .select('id, is_active')
+    .eq('auth_user_id', user.id)
+    .maybeSingle()
+  const me = meRow as { id: string; is_active: boolean } | null
+  if (!me || !me.is_active) return { ok: false, error: '계정이 활성 상태가 아닙니다' }
+
+  if (!projectId || !cableId) {
+    return { ok: false, error: '케이블 정보가 없습니다' }
+  }
+  if (waypoints.length > 200) {
+    return { ok: false, error: '경로점이 너무 많습니다 (최대 200개)' }
+  }
+  for (const w of waypoints) {
+    if (!Number.isFinite(w.x) || !Number.isFinite(w.y)) {
+      return { ok: false, error: '경로점 좌표가 올바르지 않습니다' }
+    }
+  }
+
+  const clean = waypoints.map((w) => ({
+    x: Math.round(w.x),
+    y: Math.round(w.y),
+    pole_name: w.pole_name ? String(w.pole_name).slice(0, 100) : null,
+    dist: typeof w.dist === 'number' && Number.isFinite(w.dist) ? w.dist : null,
+  }))
+
+  const { error } = await supabase
+    .from('relocation_cables')
+    .update({ waypoints: clean })
+    .eq('id', cableId)
+    .eq('project_id', projectId) // RLS 보강
+  if (error) {
+    return { ok: false, error: `경로 저장 실패: ${error.message}` }
+  }
+
+  revalidatePath(`/relocation/${projectId}`)
+  return { ok: true }
+}

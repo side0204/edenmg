@@ -8,53 +8,228 @@ import { CABLE_SPEC_VALUES, type CableSpec } from './connection'
 
 // ===== enum 미러링 (DB 의 relocation_* enum 들) =======================
 
+// LGU+ 표준 범례 (2026-05-20) 적용. 마이그 0041 로 enum 21 종 추가, 누적 29 종.
+//   카테고리 5 그룹: 국사 / 설치장소 / 모바일국소 / 접속함체 / RN-IJP-광MUX
+//   + 국사 내부 (MOFD·OJC·국사내장비) 는 「국사」 카테고리 안 sub 그룹
+
 export type ClosureType =
+  // 국사 (5 + 국사내부 3)
   | '국사'
-  | '맨홀'
-  | '함체_가공형'
-  | '함체_관로형'
-  | '가입자시설'
+  | '종합국사'
+  | '집중국사'
+  | '가입자국사'
+  | '간이국사'
   | 'MOFD'
   | 'OJC'
   | '국사내장비'
+  // 설치장소 (4)
+  | '맨홀'
+  | '가입자시설'
+  | '창고'
+  | '일반설치장소'
+  // 접속함체 (5) — 설치방식 2 + 용도 3
+  | '함체_가공형'
+  | '함체_관로형'
+  | '중간접속형'
+  | '중간분기형'
+  | 'SP내장형'
+  // 모바일국소 (8)
+  | '기지국'
+  | '중계기'
+  | '안테나'
+  | 'ESS_LTE_DU'
+  | 'ESS_LTE_RRH'
+  | 'ESS_CDMA_기지국'
+  | 'ESS_CDMA_광중계기'
+  | 'ESS_RF중계기'
+  // RN/IJP/광MUX (5)
+  | 'RN_TPS'
+  | 'RN_LTE'
+  | 'TPS_LTE_외'
+  | 'IJP'
+  | '광Mux'
 
 export const CLOSURE_TYPE_VALUES: readonly ClosureType[] = [
-  '국사',
-  '맨홀',
-  '함체_가공형',
-  '함체_관로형',
-  '가입자시설',
-  'MOFD',
-  'OJC',
-  '국사내장비',
+  '국사', '종합국사', '집중국사', '가입자국사', '간이국사',
+  'MOFD', 'OJC', '국사내장비',
+  '맨홀', '가입자시설', '창고', '일반설치장소',
+  '함체_가공형', '함체_관로형', '중간접속형', '중간분기형', 'SP내장형',
+  '기지국', '중계기', '안테나',
+  'ESS_LTE_DU', 'ESS_LTE_RRH',
+  'ESS_CDMA_기지국', 'ESS_CDMA_광중계기', 'ESS_RF중계기',
+  'RN_TPS', 'RN_LTE', 'TPS_LTE_외', 'IJP', '광Mux',
 ]
 
 export const CLOSURE_TYPE_LABEL: Record<ClosureType, string> = {
   국사: '국사',
-  맨홀: '맨홀',
-  함체_가공형: '함체(가공형)',
-  함체_관로형: '함체(관로형)',
-  가입자시설: '가입자시설',
+  종합국사: '종합국사',
+  집중국사: '집중국사',
+  가입자국사: '가입자국사',
+  간이국사: '간이국사',
   MOFD: 'MOFD',
   OJC: 'OJC',
   국사내장비: '국사내장비',
+  맨홀: '맨홀',
+  가입자시설: '가입자시설',
+  창고: '창고',
+  일반설치장소: '일반설치장소',
+  함체_가공형: '함체(가공형)',
+  함체_관로형: '함체(관로형)',
+  중간접속형: '중간접속형',
+  중간분기형: '중간분기형',
+  SP내장형: 'SP내장형',
+  기지국: '기지국',
+  중계기: '중계기 / 초소형 중계기',
+  안테나: '안테나',
+  ESS_LTE_DU: 'ESS_LTE_DU',
+  ESS_LTE_RRH: 'ESS_LTE_RRH',
+  ESS_CDMA_기지국: 'ESS_CDMA_기지국',
+  ESS_CDMA_광중계기: 'ESS_CDMA_광중계기',
+  ESS_RF중계기: 'ESS_RF중계기',
+  RN_TPS: 'RN_TPS',
+  RN_LTE: 'RN_LTE',
+  TPS_LTE_외: 'TPS,LTE 외',
+  IJP: 'IJP',
+  광Mux: '광Mux',
 }
 
-// 시설 번호 prefix (S/B/H/C/M/O/E)
+// 시설 번호 prefix — 카테고리·종류별로 1자.
+//   기존(S/B/H/C/M/O/E) 호환 + 신규(W/P/T/N/J/X) 추가
 export const CLOSURE_TYPE_PREFIX: Record<ClosureType, string> = {
   국사: 'S',
-  함체_가공형: 'B',
-  함체_관로형: 'B',
-  맨홀: 'H',
-  가입자시설: 'C',
+  종합국사: 'S',
+  집중국사: 'S',
+  가입자국사: 'S',
+  간이국사: 'S',
   MOFD: 'M',
   OJC: 'O',
   국사내장비: 'E',
+  맨홀: 'H',
+  가입자시설: 'C',
+  창고: 'W',
+  일반설치장소: 'P',
+  함체_가공형: 'B',
+  함체_관로형: 'B',
+  중간접속형: 'B',
+  중간분기형: 'B',
+  SP내장형: 'B',
+  기지국: 'T',
+  중계기: 'T',
+  안테나: 'T',
+  ESS_LTE_DU: 'T',
+  ESS_LTE_RRH: 'T',
+  ESS_CDMA_기지국: 'T',
+  ESS_CDMA_광중계기: 'T',
+  ESS_RF중계기: 'T',
+  RN_TPS: 'N',
+  RN_LTE: 'N',
+  TPS_LTE_외: 'N',
+  IJP: 'J',
+  광Mux: 'X',
+}
+
+// 카테고리 — 범례 + 추가 도구 패널 그룹화에 사용
+export type ClosureCategory =
+  | '국사'
+  | '설치장소'
+  | '모바일국소'
+  | '접속함체'
+  | 'RN_IJP_광MUX'
+
+export const CLOSURE_CATEGORY_LABEL: Record<ClosureCategory, string> = {
+  국사: '국사',
+  설치장소: '설치장소',
+  모바일국소: '모바일국소',
+  접속함체: '접속함체',
+  RN_IJP_광MUX: 'RN / IJP / 광MUX',
+}
+
+export const CLOSURE_TYPE_CATEGORY: Record<ClosureType, ClosureCategory> = {
+  국사: '국사',
+  종합국사: '국사',
+  집중국사: '국사',
+  가입자국사: '국사',
+  간이국사: '국사',
+  MOFD: '국사',
+  OJC: '국사',
+  국사내장비: '국사',
+  맨홀: '설치장소',
+  가입자시설: '설치장소',
+  창고: '설치장소',
+  일반설치장소: '설치장소',
+  함체_가공형: '접속함체',
+  함체_관로형: '접속함체',
+  중간접속형: '접속함체',
+  중간분기형: '접속함체',
+  SP내장형: '접속함체',
+  기지국: '모바일국소',
+  중계기: '모바일국소',
+  안테나: '모바일국소',
+  ESS_LTE_DU: '모바일국소',
+  ESS_LTE_RRH: '모바일국소',
+  ESS_CDMA_기지국: '모바일국소',
+  ESS_CDMA_광중계기: '모바일국소',
+  ESS_RF중계기: '모바일국소',
+  RN_TPS: 'RN_IJP_광MUX',
+  RN_LTE: 'RN_IJP_광MUX',
+  TPS_LTE_외: 'RN_IJP_광MUX',
+  IJP: 'RN_IJP_광MUX',
+  광Mux: 'RN_IJP_광MUX',
+}
+
+// LGU+ 표준 색깔 (범례 이미지 기준 추정)
+// SVG fill/stroke 직접 사용.
+export const CLOSURE_TYPE_COLOR: Record<ClosureType, string> = {
+  국사: '#111827',           // slate-900
+  종합국사: '#2563eb',       // blue-600 (파랑 마름모)
+  집중국사: '#f59e0b',       // amber-500 (주황 마름모)
+  가입자국사: '#ea580c',     // orange-600 (진오렌지 마름모)
+  간이국사: '#38bdf8',       // sky-400 (하늘 마름모)
+  MOFD: '#111827',
+  OJC: '#111827',
+  국사내장비: '#111827',
+  맨홀: '#111827',
+  가입자시설: '#dc2626',     // red-600
+  창고: '#16a34a',           // green-600 (초록 마름모)
+  일반설치장소: '#2563eb',   // blue-600 (파란 삼각형)
+  함체_가공형: '#111827',
+  함체_관로형: '#111827',
+  중간접속형: '#dc2626',     // 빨강 원+X
+  중간분기형: '#ea580c',     // 주황 원+T
+  SP내장형: '#dc2626',       // 빨강 보타이
+  기지국: '#111827',
+  중계기: '#111827',
+  안테나: '#dc2626',         // H 빨강 원
+  ESS_LTE_DU: '#0ea5e9',     // sky-500 (파랑)
+  ESS_LTE_RRH: '#f59e0b',    // amber (주황 충)
+  ESS_CDMA_기지국: '#0d9488',// teal (청록)
+  ESS_CDMA_광중계기: '#94a3b8', // slate-400 (회색)
+  ESS_RF중계기: '#16a34a',   // green-600 (초록 RF)
+  RN_TPS: '#dc2626',         // 빨강 R
+  RN_LTE: '#7c3aed',         // violet 보라 R
+  TPS_LTE_외: '#16a34a',     // 초록 R
+  IJP: '#eab308',            // yellow i
+  광Mux: '#2563eb',          // 파랑 M
 }
 
 // 국사 내부 토폴로지 노드만 parent 를 가질 수 있음 (DB CHECK 와 일치)
 export function isInternalNode(t: ClosureType): boolean {
   return t === 'MOFD' || t === 'OJC' || t === '국사내장비'
+}
+
+// 카테고리별 시설 그룹핑 헬퍼
+export function groupClosureTypesByCategory(): Record<ClosureCategory, ClosureType[]> {
+  const grouped: Record<ClosureCategory, ClosureType[]> = {
+    국사: [],
+    설치장소: [],
+    모바일국소: [],
+    접속함체: [],
+    RN_IJP_광MUX: [],
+  }
+  for (const t of CLOSURE_TYPE_VALUES) {
+    grouped[CLOSURE_TYPE_CATEGORY[t]].push(t)
+  }
+  return grouped
 }
 
 // 표시 번호 조립 (예: S-001)
@@ -196,6 +371,42 @@ export const PHASE_STATUS_COLOR: Record<PhaseStatus, string> = {
   진행중: 'bg-amber-50 text-amber-700 border-amber-300',
   완료: 'bg-emerald-50 text-emerald-700 border-emerald-300',
   취소: 'bg-rose-50 text-rose-700 border-rose-300',
+}
+
+
+// ===== LGU+ 광망 범례 — 케이블 표준 색깔·설치종류 ======================
+// 사양서 § ?-? (owner 첨부 표준 범례, 2026-05-20)
+
+// 규격별 색깔 — 광망 범례의 「규격별 COLOR」 5 구간 + 기타
+//   1C~12C / 13C~36C / 37C~72C / 73C~144C / 145C~288C / 기타(576C 등)
+export function cableSpecColor(spec: CableSpec): string {
+  // 1C ~ 12C: 빨강
+  if (spec === '1C' || spec === '1C(드랍)' || spec === '2C' || spec === '2C(드랍)' || spec === '12C') {
+    return '#dc2626'
+  }
+  // 13C ~ 36C: 청록
+  if (spec === '36C') return '#0d9488'
+  // 37C ~ 72C: 초록
+  if (spec === '72C') return '#16a34a'
+  // 73C ~ 144C: 보라
+  if (spec === '144C') return '#7c3aed'
+  // 145C ~ 288C: 갈색
+  if (spec === '288C') return '#92400e'
+  // 기타 (576C 등)
+  return '#111827'
+}
+
+// 설치종류 — 가공·구내·해저 = solid, 입상 = dotted, 지중 = dashed
+export type CableInstallationType = '가공' | '구내' | '해저' | '입상' | '지중'
+
+export const CABLE_INSTALLATION_TYPE_VALUES: readonly CableInstallationType[] = [
+  '가공', '구내', '해저', '입상', '지중',
+]
+
+export function installationTypeDash(t: CableInstallationType | null | undefined): string {
+  if (t === '입상') return '2 3'      // dotted
+  if (t === '지중') return '8 4'      // dashed
+  return 'none'                        // 가공·구내·해저·기본 = solid
 }
 
 

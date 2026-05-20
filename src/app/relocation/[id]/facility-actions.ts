@@ -239,6 +239,98 @@ export async function updateFacility(formData: FormData) {
 }
 
 
+/**
+ * 캔버스에서 시설 직접 배치 — 좌표 + 마스터 FK 포함.
+ *
+ * 일반 폼 액션과 달리 redirect 안 함 — 결과를 JSON 으로 돌려서
+ * 클라이언트가 모달 안에서 처리 (router.refresh 또는 revalidatePath 후 닫기).
+ *
+ * @param input - closure_type, name, x, y, master_facility_id?, closure_spec?, install_address?
+ * @returns { ok: true, id, seq_no } | { ok: false, error: string }
+ */
+export async function createFacilityAtPosition(input: {
+  project_id: string
+  closure_type: ClosureType
+  name: string
+  x: number
+  y: number
+  master_facility_id?: string | null
+  closure_spec?: CableSpec | null
+  install_address?: string | null
+  parent_facility_id?: string | null
+}): Promise<
+  | { ok: true; id: string; seq_no: number }
+  | { ok: false; error: string }
+> {
+  if (!input.project_id) return { ok: false, error: '프로젝트 id 가 없습니다' }
+  if (!isClosureType(input.closure_type)) return { ok: false, error: '시설 종류가 올바르지 않습니다' }
+  const name = (input.name ?? '').trim()
+  if (!name) return { ok: false, error: '시설 이름을 입력하세요' }
+  if (name.length > 200) return { ok: false, error: '이름은 200자 이하로 입력하세요' }
+
+  if (!Number.isFinite(input.x) || !Number.isFinite(input.y)) {
+    return { ok: false, error: '좌표가 올바르지 않습니다' }
+  }
+  if (input.closure_spec && !isCableSpec(input.closure_spec)) {
+    return { ok: false, error: '함체 규격이 올바르지 않습니다' }
+  }
+  if (input.parent_facility_id && !isInternalNode(input.closure_type)) {
+    return { ok: false, error: '부모 시설은 MOFD·OJC·국사내장비만 가질 수 있습니다' }
+  }
+
+  const { supabase } = await requireMember()
+
+  // 동시성 안전망: race 시 unique 충돌 → 1회 재시도
+  let attempt = 0
+  let lastErr: string | null = null
+  while (attempt < 3) {
+    attempt += 1
+    try {
+      const seqNo = await allocateNextFacilitySeq(supabase, input.project_id, input.closure_type)
+
+      const { data: row, error } = await supabase
+        .from('relocation_facilities')
+        .insert({
+          project_id: input.project_id,
+          closure_type: input.closure_type,
+          seq_no: seqNo,
+          name,
+          install_address: input.install_address ?? null,
+          closure_spec: input.closure_spec ?? null,
+          parent_facility_id: input.parent_facility_id ?? null,
+          master_facility_id: input.master_facility_id ?? null,
+          x_hint: Math.round(input.x),
+          y_hint: Math.round(input.y),
+          is_marked: false,
+        })
+        .select('id')
+        .maybeSingle()
+
+      if (!error && row) {
+        revalidatePath(`/relocation/${input.project_id}`)
+        return { ok: true, id: (row as { id: string }).id, seq_no: seqNo }
+      }
+
+      lastErr = error?.message ?? '알 수 없음'
+      if (
+        error?.message.includes('unique') ||
+        error?.message.includes('duplicate') ||
+        error?.code === '23505'
+      ) {
+        continue
+      }
+      break
+    } catch (e: unknown) {
+      const msg = e instanceof Error ? e.message : String(e)
+      lastErr = msg
+      break
+    }
+  }
+
+  return { ok: false, error: '등록 실패: ' + (lastErr ?? '알 수 없는 오류') }
+}
+
+
 export async function deleteFacility(formData: FormData) {
   const id = String(formData.get('id') ?? '').trim()
   const projectId = String(formData.get('project_id') ?? '').trim()

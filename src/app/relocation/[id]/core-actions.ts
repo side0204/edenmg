@@ -54,6 +54,7 @@ type CoreFormParsed = {
   core_range_end: number
   lifecycle: CoreLifecycle
   status: CircuitStatus | null
+  is_terminal: boolean
   notes: string | null
 }
 
@@ -89,6 +90,9 @@ function parseCoreForm(formData: FormData): CoreFormParsed | string {
   const statusRaw = String(formData.get('status') ?? '').trim()
   const status = statusRaw && isCircuitStatus(statusRaw) ? statusRaw : null
 
+  // 종단 여부 — 설계자가 명시적으로 체크. 자동 추론 X (가입자시설이라도 통과되는 경우 있음)
+  const is_terminal = formData.get('is_terminal') === 'on'
+
   const notes = String(formData.get('notes') ?? '').trim() || null
 
   return {
@@ -99,6 +103,7 @@ function parseCoreForm(formData: FormData): CoreFormParsed | string {
     core_range_end: end,
     lifecycle: lifecycleRaw,
     status,
+    is_terminal,
     notes,
   }
 }
@@ -128,6 +133,7 @@ export async function createCoreAssignment(formData: FormData) {
     core_range_end: parsed.core_range_end,
     lifecycle: parsed.lifecycle,
     status: parsed.status,
+    is_terminal: parsed.is_terminal,
     is_auto_assigned: false, // 사람 입력
     notes: parsed.notes,
   })
@@ -173,6 +179,7 @@ export async function updateCoreAssignment(formData: FormData) {
       core_range_end: parsed.core_range_end,
       lifecycle: parsed.lifecycle,
       status: parsed.status,
+      is_terminal: parsed.is_terminal,
       is_auto_assigned: false,
       notes: parsed.notes,
     })

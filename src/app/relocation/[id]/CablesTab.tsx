@@ -3,8 +3,10 @@ import {
   CABLE_STATUS_LABEL,
   CABLE_STATUS_VALUES,
   CABLE_STATUS_COLOR,
+  CABLE_INSTALLATION_TYPE_VALUES,
   formatFacilityCode,
   type CableStatus,
+  type CableInstallationType,
   type ClosureType,
 } from '@/lib/relocation'
 import type { CableSpec } from '@/lib/connection'
@@ -18,7 +20,10 @@ export type CableRow = {
   spec: CableSpec
   status: CableStatus
   cable_code: string
-  route_type: string | null
+  installation_type: CableInstallationType | null
+  waypoints: { x: number; y: number; pole_name?: string | null; dist?: number | null }[]
+  total_length: number | null
+  end_distance: number | null
   notes: string | null
 }
 
@@ -155,16 +160,18 @@ export default function CablesTab({
             </div>
 
             <div>
-              <label className="block text-xs font-medium text-slate-600">경로 종류</label>
+              <label className="block text-xs font-medium text-slate-600">설치 구분</label>
               <select
-                name="route_type"
+                name="installation_type"
                 defaultValue=""
                 className="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2 text-sm"
               >
                 <option value="">(미지정)</option>
-                <option value="가공">가공</option>
-                <option value="지중">지중</option>
-                <option value="관로">관로</option>
+                {CABLE_INSTALLATION_TYPE_VALUES.map((t) => (
+                  <option key={t} value={t}>
+                    {t}
+                  </option>
+                ))}
               </select>
             </div>
 
@@ -246,7 +253,7 @@ function CableRowItem({
           </p>
           <p className="text-xs text-slate-500 mt-0.5">
             {facilityLabel(cable.from_facility_id)} → {facilityLabel(cable.to_facility_id)}
-            {cable.route_type && ` · ${cable.route_type}`}
+            {cable.installation_type && ` · ${cable.installation_type}`}
           </p>
         </div>
         <span className="text-xs text-slate-400 group-open:rotate-90 transition-transform">
@@ -332,16 +339,18 @@ function CableRowItem({
           </div>
 
           <div>
-            <label className="block text-[11px] text-slate-500">경로 종류</label>
+            <label className="block text-[11px] text-slate-500">설치 구분</label>
             <select
-              name="route_type"
-              defaultValue={cable.route_type ?? ''}
+              name="installation_type"
+              defaultValue={cable.installation_type ?? ''}
               className="mt-0.5 w-full rounded-lg border border-slate-300 px-2 py-1.5 text-sm"
             >
               <option value="">(미지정)</option>
-              <option value="가공">가공</option>
-              <option value="지중">지중</option>
-              <option value="관로">관로</option>
+              {CABLE_INSTALLATION_TYPE_VALUES.map((t) => (
+                <option key={t} value={t}>
+                  {t}
+                </option>
+              ))}
             </select>
           </div>
 

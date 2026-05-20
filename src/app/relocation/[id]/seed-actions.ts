@@ -200,19 +200,93 @@ export async function seedTestData(formData: FormData) {
     status: c.status,
   }))
 
-  const { error: cirErr } = await supabase.from('relocation_circuits').insert(circuitRows)
-  if (cirErr) {
+  const { data: insertedCircuits, error: cirErr } = await supabase
+    .from('relocation_circuits')
+    .insert(circuitRows)
+    .select('id, circuit_id')
+  if (cirErr || !insertedCircuits) {
     redirect(
       `/relocation/${projectId}?err=` +
-        encodeURIComponent('회선 시드 실패: ' + cirErr.message),
+        encodeURIComponent('회선 시드 실패: ' + (cirErr?.message ?? '알 수 없음')),
     )
+  }
+
+  // ===== 4. 기설 코어 배정 (preexisting) =================================
+  // 영향 회선 자동 추출이 의미 있도록 기설 케이블에 회선을 미리 매핑.
+  // 사용자 시연 시나리오:
+  //   - C1종로중구23-3 (72C box1→manhole1) 을 status='removing' 으로 마킹하면
+  //     영향 회선 = 5572607 segment 0 자동 추출됨 → 이전 탭에서 새 케이블에 매핑.
+  type CircuitKey = '5632751' | '5680650' | '5572607' | '149653'
+  const circuitIdByKey = new Map<CircuitKey, string>()
+  for (const row of insertedCircuits as Array<{ id: string; circuit_id: string }>) {
+    circuitIdByKey.set(row.circuit_id as CircuitKey, row.id)
+  }
+
+  // 이미 insert 된 케이블에서 코드 → id 조회
+  const { data: insertedCables } = await supabase
+    .from('relocation_cables')
+    .select('id, cable_code')
+    .eq('project_id', projectId)
+  const cableIdByCode = new Map<string, string>()
+  for (const row of (insertedCables ?? []) as Array<{ id: string; cable_code: string }>) {
+    cableIdByCode.set(row.cable_code, row.id)
+  }
+
+  type CoreSeed = {
+    cableCode: string
+    circuitKey: CircuitKey
+    segmentIdx: number
+    coreStart: number
+    coreEnd: number
+  }
+
+  const coreSeeds: CoreSeed[] = [
+    // C1종로중구23 (288C station→box1) — 회선 5632751, 5680650
+    { cableCode: 'C1종로중구23', circuitKey: '5632751', segmentIdx: 0, coreStart: 1, coreEnd: 1 },
+    { cableCode: 'C1종로중구23', circuitKey: '5680650', segmentIdx: 0, coreStart: 2, coreEnd: 3 },
+    // C1종로중구23-3 (72C box1→manhole1) — 이원화 회선 5572607 segment 0
+    { cableCode: 'C1종로중구23-3', circuitKey: '5572607', segmentIdx: 0, coreStart: 5, coreEnd: 5 },
+    // C1필동B-001-B-002 (144C box1→box2) — 이원화 회선 5572607 segment 1 + 회선 149653
+    { cableCode: 'C1필동B-001-B-002', circuitKey: '5572607', segmentIdx: 1, coreStart: 5, coreEnd: 5 },
+    { cableCode: 'C1필동B-001-B-002', circuitKey: '149653', segmentIdx: 0, coreStart: 10, coreEnd: 10 },
+  ]
+
+  const coreRows = coreSeeds
+    .map((s) => {
+      const cableId = cableIdByCode.get(s.cableCode)
+      const circuitId = circuitIdByKey.get(s.circuitKey)
+      if (!cableId || !circuitId) return null
+      return {
+        project_id: projectId,
+        circuit_id: circuitId,
+        segment_idx: s.segmentIdx,
+        cable_id: cableId,
+        core_range_start: s.coreStart,
+        core_range_end: s.coreEnd,
+        lifecycle: 'preexisting' as const,
+        status: 'OK' as const,
+        is_auto_assigned: false,
+      }
+    })
+    .filter((r): r is NonNullable<typeof r> => r !== null)
+
+  if (coreRows.length > 0) {
+    const { error: coreErr } = await supabase
+      .from('relocation_core_assignments')
+      .insert(coreRows)
+    if (coreErr) {
+      redirect(
+        `/relocation/${projectId}?err=` +
+          encodeURIComponent('코어 시드 실패: ' + coreErr.message),
+      )
+    }
   }
 
   revalidatePath(`/relocation/${projectId}`)
   redirect(
     `/relocation/${projectId}?tab=facilities&ok=` +
       encodeURIComponent(
-        `테스트 데이터 채움: 시설 ${facilitySeeds.length}개 · 케이블 ${cableSeeds.length}개 · 회선 ${circuitSeeds.length}개`,
+        `테스트 데이터 채움: 시설 ${facilitySeeds.length}개 · 케이블 ${cableSeeds.length}개 · 회선 ${circuitSeeds.length}개 · 기설 코어 ${coreRows.length}건`,
       ),
   )
 }

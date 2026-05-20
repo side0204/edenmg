@@ -5,8 +5,10 @@ import { revalidatePath } from 'next/cache'
 import { createClient } from '@/lib/supabase/server'
 import {
   CABLE_STATUS_VALUES,
+  CABLE_INSTALLATION_TYPE_VALUES,
   formatNewCableCode,
   type CableStatus,
+  type CableInstallationType,
 } from '@/lib/relocation'
 import type { CableSpec } from '@/lib/connection'
 import { CABLE_SPEC_VALUES } from '@/lib/connection'
@@ -46,13 +48,17 @@ function isCableStatus(v: string): v is CableStatus {
   return (CABLE_STATUS_VALUES as readonly string[]).includes(v)
 }
 
+function isInstallationType(v: string): v is CableInstallationType {
+  return (CABLE_INSTALLATION_TYPE_VALUES as readonly string[]).includes(v)
+}
+
 type CableFormParsed = {
   from_facility_id: string
   to_facility_id: string
   spec: CableSpec
   status: CableStatus
   cable_code: string                // create 시 비어있으면 신설 자동 생성
-  route_type: string | null
+  installation_type: CableInstallationType | null  // LGU+ 광망 범례 — 가공·구내·해저·입상·지중
   notes: string | null
 }
 
@@ -75,7 +81,9 @@ function parseCableForm(formData: FormData): CableFormParsed | string {
 
   const cable_code = String(formData.get('cable_code') ?? '').trim()
 
-  const route_type = String(formData.get('route_type') ?? '').trim() || null
+  const installRaw = String(formData.get('installation_type') ?? '').trim()
+  const installation_type = installRaw && isInstallationType(installRaw) ? installRaw : null
+
   const notes = String(formData.get('notes') ?? '').trim() || null
 
   return {
@@ -84,7 +92,7 @@ function parseCableForm(formData: FormData): CableFormParsed | string {
     spec: specRaw,
     status: statusRaw,
     cable_code,
-    route_type,
+    installation_type,
     notes,
   }
 }
@@ -158,7 +166,7 @@ export async function createCable(formData: FormData) {
       spec: parsed.spec,
       status: parsed.status,
       cable_code: cableCode,
-      route_type: parsed.route_type,
+      installation_type: parsed.installation_type,
       notes: parsed.notes,
     })
 
@@ -233,7 +241,7 @@ export async function updateCable(formData: FormData) {
       spec: parsed.spec,
       status: parsed.status,
       cable_code: parsed.cable_code,
-      route_type: parsed.route_type,
+      installation_type: parsed.installation_type,
       notes: parsed.notes,
     })
     .eq('id', id)
@@ -250,6 +258,101 @@ export async function updateCable(formData: FormData) {
     `/relocation/${projectId}?tab=cables&ok=` +
       encodeURIComponent('케이블 정보를 수정했습니다'),
   )
+}
+
+
+/**
+ * 캔버스에서 케이블 정보 수정 — 규격·상태·설치구분·전체거리 + 경로점(전주명·구간거리).
+ * redirect 안 함 — JSON 결과 반환 (캔버스 컨텍스트 유지). 클라이언트가 router.refresh.
+ */
+export async function updateCableFromCanvas(input: {
+  project_id: string
+  cable_id: string
+  spec: string
+  status: string
+  installation_type: string | null
+  total_length: number | null
+  end_distance: number | null
+  waypoints: Array<{
+    x: number
+    y: number
+    pole_name: string | null
+    dist: number | null
+  }>
+}): Promise<{ ok: true } | { ok: false; error: string }> {
+  if (!input.project_id || !input.cable_id) {
+    return { ok: false, error: '케이블 정보가 없습니다' }
+  }
+  if (!isCableSpec(input.spec)) return { ok: false, error: '케이블 규격이 올바르지 않습니다' }
+  if (!isCableStatus(input.status)) return { ok: false, error: '케이블 상태가 올바르지 않습니다' }
+  const installation_type =
+    input.installation_type && isInstallationType(input.installation_type)
+      ? input.installation_type
+      : null
+
+  const num = (v: number | null): number | null =>
+    typeof v === 'number' && Number.isFinite(v) && v >= 0 ? v : null
+
+  if (input.waypoints.length > 200) {
+    return { ok: false, error: '경로점이 너무 많습니다 (최대 200개)' }
+  }
+  const cleanWaypoints = input.waypoints.map((w) => ({
+    x: Math.round(w.x),
+    y: Math.round(w.y),
+    pole_name: w.pole_name ? String(w.pole_name).slice(0, 100) : null,
+    dist: num(w.dist),
+  }))
+
+  const { supabase } = await requireMember()
+
+  const { error } = await supabase
+    .from('relocation_cables')
+    .update({
+      spec: input.spec,
+      status: input.status,
+      installation_type,
+      total_length: num(input.total_length),
+      end_distance: num(input.end_distance),
+      waypoints: cleanWaypoints,
+    })
+    .eq('id', input.cable_id)
+    .eq('project_id', input.project_id) // RLS 보강
+
+  if (error) {
+    return { ok: false, error: '케이블 수정 실패: ' + error.message }
+  }
+
+  revalidatePath(`/relocation/${input.project_id}`)
+  return { ok: true }
+}
+
+
+/**
+ * 캔버스에서 케이블 삭제 — JSON 결과 반환 (redirect 안 함).
+ */
+export async function deleteCableFromCanvas(
+  projectId: string,
+  cableId: string,
+): Promise<{ ok: true } | { ok: false; error: string }> {
+  if (!projectId || !cableId) return { ok: false, error: '케이블 정보가 없습니다' }
+
+  const { supabase } = await requireMember()
+
+  const { error } = await supabase
+    .from('relocation_cables')
+    .delete()
+    .eq('id', cableId)
+    .eq('project_id', projectId)
+
+  if (error) {
+    const friendly = error.message.includes('foreign key')
+      ? '이 케이블을 사용하는 코어 배정·접속이 있어 삭제할 수 없습니다. 먼저 제거해주세요.'
+      : '삭제 실패: ' + error.message
+    return { ok: false, error: friendly }
+  }
+
+  revalidatePath(`/relocation/${projectId}`)
+  return { ok: true }
 }
 
 
