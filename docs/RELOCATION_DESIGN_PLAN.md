@@ -1,8 +1,8 @@
-# 지장이설 자동화 설계서 (M-Relocation, v0.1)
+# 지장이설 자동화 설계서 (M-Relocation, v0.10)
 
-> 작성: 2026-05-19 · 상태: **owner 검토 대기**
-> 본 문서는 owner 와의 누적 합의 사항을 정리한 사양서 v0.1.
-> 코드 진입 전 검토·수정 → v1.0 확정 → 마이그·구현.
+> 작성: 2026-05-19 · 최종 갱신: 2026-05-20 · 상태: **구현 진행 중 (Step C)**
+> 본 문서는 owner 와의 누적 합의 사항을 정리한 사양서.
+> 구현 진행 상황은 [`CLAUDE.md`](../CLAUDE.md) 의 「지장이설」 섹션 참조.
 
 ## 1. 한 줄 요약
 
@@ -31,6 +31,9 @@ LGU+ 협력사로서 지장이설(기설 광케이블의 새 경로 재시공) �
 | **다이버시티 식별** | (a) 1차 RN 입력 2 코어 = 자동 다이버시티 (b) 회선 분류 라벨로도 식별 | Q6 |
 | **분리 수준** | 케이블 + 함체 둘 다 분리 (다이버시티 회선) | round-add |
 | **분리 단위** | 1 코어씩 또는 2 코어씩 (회선마다 다름) | round-add |
+| **시설별 사용 자재** | 모든 작업 발생 시설(접속함체 등)에 자재명·규격·단위·수량 입력 — 기별명세서용. `relocation_facility_materials` 테이블 (자유 텍스트, 회사 자재 마스터와 FK 연결 안 함) | v0.10 |
+| **기별명세서 — 광케이블 포설** | 케이블 거리 합산. **단 `status='existing'`(기설) 케이블 거리는 정산 제외**. 포설 정산 = Σ(total_length where status≠기설) | v0.10 |
+| **기설 케이블 거리 용도** | 정산이 아니라 「특정 함체~함체 거리 파악」용 — 고장점 검색에 활용 | v0.10 |
 
 ### 2-2. 케이블·함체 물리 제약
 | 항목 | 값 | 비고 |
@@ -649,6 +652,25 @@ create policy relocation_projects_all on public.relocation_projects
 - 여장판 단위로 그룹화 (다른 색 배경)
 - 유니트 경계 점선
 
+### 6-6. 고장점 검색 (회선 코어경로 추적) — v0.10
+
+운영 단계에서 고장(케이블 절단·신호 손실) 발생 시, OTDR 등으로 측정한 거리로
+고장점의 물리적 위치를 추정한다. **케이블 물리 연결이 아니라 회선(코어)연결
+기준** — OTDR 빛은 회선이 실제 지나는 코어 경로를 따라가므로.
+
+- **경로 산출**: 회선의 코어 배정(`relocation_core_assignments`)을 `segment_idx`
+  순으로 정렬 → 케이블 체인 → 인접 케이블의 공유 시설로 진행 방향 자동 판정 →
+  시설 경로 구성. 케이블이 서로 이어지지 않으면 안내
+- **선택 흐름**: 시설물 → 그 시설물에 연결된 케이블 → 케이블의 코어선번별 회선.
+  캔버스에서 시설물·케이블 직접 클릭도 같은 드릴다운에 반영
+- **고장점 추정**: 회선 경로의 한쪽 끝 기준 측정 거리(D) 입력 → 경로 구간을
+  누적하며 D 가 떨어지는 케이블·구간 산출. 케이블 waypoint 의 전주명·구간거리로
+  전주 단위까지 좁힘. 측정 기준 끝은 토글로 전환
+- **거리 출처**: 케이블 `total_length` 우선, 없으면 waypoint 구간거리 합
+- 캔버스에 회선 경로(보라)·고장점(빨강 십자선) 하이라이트
+- 캔버스 우측 패널 (`FaultSearchPanel`) — 너비 조절·접기 가능. 읽기 전용
+  클라이언트 계산 (서버 액션·DB 변경 없음)
+
 ## 7. UI 흐름
 
 ### 7-1. 진입점
@@ -1052,7 +1074,12 @@ owner 답변 받지 못함. 추측 후보:
 | 0036 | facilities (+ parent_facility_id + seq_no + facility_seq) · cables · circuits · core_assignments (+ btree_gist + exclusion constraint + cable_seq) | ✅ 실행 |
 | 0037 | splices · splitters (+ work_mode) · splitter_ports · task_type_master + 시드 14종 · facility_tasks | ✅ 실행 |
 | 0038 | phases · phase_tasks · task_pairs (양쪽 작업자 페어링) | ✅ 실행 |
-| 0039 | **migrations · migration_circuits (이전 워크플로우 audit)** | 미작성 |
+| 0039 | migrations · migration_circuits (이전 워크플로우 audit) | ✅ 실행 |
+| 0040 | core_assignments.is_terminal (종단 플래그 — 설계자 명시) | ✅ 실행 |
+| 0041 | LGU+ 표준 범례 — closure_type 21종 추가 · cables.installation_type | ✅ 실행 |
+| 0042 | cables.waypoints (케이블 경로 꺾임점 — 도로 경로 대응) | ✅ 실행 |
+| 0043 | cables.total_length · end_distance (정산 거리) | ✅ 실행 |
+| 0044 | relocation_facility_materials (시설별 사용 자재 — 기별명세서용) | ✅ 실행 |
 
 추가로 시드 데이터 SQL:
 - `cable_spec_meta` (유니트·길이 표)
@@ -1139,3 +1166,4 @@ DB 사이드 영향:
 | 2026-05-19 | v0.7 | (1) 공종 마스터 확장 — relocation_task_type_master 회사 단위 마스터. 시드 14종 + 설계자 자유 추가. facility_tasks.task_type 을 enum → FK 변경. /admin/relocation-task-types 페이지 (2) 국사 내부 토폴로지 — closure_type 에 MOFD/OJC/국사내장비 추가 + facilities.parent_facility_id (3) RN 내부 접속만 — relocation_splitter_work_mode enum + splitter.work_mode 컬럼. UI 토글로 분기/내부접속만 전환. 모드별 검증·차수·시각화 차이 명시 | Claude |
 | 2026-05-19 | v0.8 | (1) 객체 번호 자동 부여 — facilities.seq_no + facility_seq 카운터 + 종류별 prefix(S/B/H/C/M/O/E) (2) 좌측 패널 — 시설 번호 목록·검색·그룹·캔버스 점프 (§ 7-2-1 신규) (3) 모바일 보기 정책 갱신 — 설계 화면은 데스크톱이지만 완료된 설계의 읽기 전용은 모바일 허용 (§ 7-3 통합 재작성, § 7-4 삭제) (4) Supabase 운영 검토 신규 (§ 11) — 무료 플랜 한도·예상 사용량·Pro 전환 시점·즉시 액션 | Claude |
 | 2026-05-20 | v0.9 | **이전(Migration) 워크플로우 추가 (§ 2-7)** — 기설 임포트 후 영향 회선 자동 추출 → 옛→새 케이블 N:M 분할 이전 → 자동 코어 배정. relocation_migrations + relocation_migration_circuits 테이블 (마이그 0039). 1코어 1행 임포트 가정. 결재 없이 설계자 직접 확정 | Claude |
+| 2026-05-20 | v0.10 | (1) 시설 정보 패널 — 모든 시설 종류에서 공종량·자재 입력 (relocation_facility_materials, 마이그 0044) (2) 고장점 검색 (§ 6-6) — 회선 코어경로 추적·시설물→케이블→회선 드릴다운·캔버스 하이라이트·패널 너비 조절 (3) 기별명세서 정산 규칙 — 기설 케이블 거리 제외 (§ 2-1) (4) 운영작업 표에 마이그 0040~0044 반영 | Claude |
