@@ -243,6 +243,15 @@ export default function CableInfoPanel({
           </p>
         </div>
 
+        {/* 회선·코어 배정 — 케이블 선택 시 스크롤 없이 바로 입력 (패널 상단 배치) */}
+        <CoreAssignSection
+          projectId={projectId}
+          cableId={cable.id}
+          circuits={circuits}
+          assignments={assignments}
+          onChanged={onCoreChanged}
+        />
+
         {/* 기본 정보 */}
         <div className="grid grid-cols-2 gap-2">
           <div>
@@ -415,15 +424,6 @@ export default function CableInfoPanel({
           </div>
         </div>
 
-        {/* 회선·코어 배정 — 워크플로우 3단계 (종단 케이블에 회선·사용코어 입력) */}
-        <CoreAssignSection
-          projectId={projectId}
-          cableId={cable.id}
-          circuits={circuits}
-          assignments={assignments}
-          onChanged={onCoreChanged}
-        />
-
         {/* 액션 */}
         <div className="border-t border-slate-200 pt-2 flex items-center justify-end gap-2">
           <button
@@ -489,6 +489,7 @@ function CoreAssignSection({
   const [circuitMode, setCircuitMode] = useState('') // '' 미지정 | 'NEW' 새 회선 | circuit id
   const [newCircuitNo, setNewCircuitNo] = useState('')
   const [newCircuitKind, setNewCircuitKind] = useState<CircuitKind>('1코어')
+  const [newCircuitLocation, setNewCircuitLocation] = useState('')
   const [coreNo, setCoreNo] = useState('')
   const [lifecycle, setLifecycle] = useState<CoreLifecycle>('new')
   const [segmentIdx, setSegmentIdx] = useState('0')
@@ -508,6 +509,7 @@ function CoreAssignSection({
     setCircuitMode('')
     setNewCircuitNo('')
     setNewCircuitKind('1코어')
+    setNewCircuitLocation('')
     setCoreNo('')
     setLifecycle('new')
     setSegmentIdx('0')
@@ -532,7 +534,11 @@ function CoreAssignSection({
       circuit_id: circuitMode && circuitMode !== 'NEW' ? circuitMode : null,
       new_circuit:
         circuitMode === 'NEW'
-          ? { circuit_id: newCircuitNo.trim(), kind: newCircuitKind }
+          ? {
+              circuit_id: newCircuitNo.trim(),
+              kind: newCircuitKind,
+              subscriber_name: newCircuitLocation.trim() || null,
+            }
           : null,
       segment_idx: Number.parseInt(segmentIdx, 10) || 0,
       core_no: core,
@@ -563,9 +569,9 @@ function CoreAssignSection({
   }
 
   return (
-    <div className="border-t border-slate-200 pt-2">
+    <div className="rounded-lg border border-teal-300 bg-teal-50/60 p-2.5">
       <div className="flex items-center justify-between">
-        <p className="text-[11px] font-bold text-slate-700">
+        <p className="text-xs font-bold text-teal-800">
           회선·코어 배정 ({assignments.length})
         </p>
         {!adding && (
@@ -674,6 +680,19 @@ function CoreAssignSection({
                     </option>
                   ))}
                 </select>
+              </div>
+              <div className="col-span-2">
+                <label className="block text-[10px] font-medium text-slate-600">
+                  설치장소
+                </label>
+                <input
+                  type="text"
+                  value={newCircuitLocation}
+                  onChange={(e) => setNewCircuitLocation(e.target.value)}
+                  placeholder="가입자 설치장소명 (선택)"
+                  maxLength={200}
+                  className="mt-0.5 w-full rounded-md border border-slate-300 px-2 py-1 text-[11px]"
+                />
               </div>
             </div>
           )}

@@ -232,7 +232,11 @@ export async function addCoreAssignmentFromCanvas(input: {
   project_id: string
   cable_id: string
   circuit_id: string | null
-  new_circuit: { circuit_id: string; kind: string } | null
+  new_circuit: {
+    circuit_id: string
+    kind: string
+    subscriber_name: string | null
+  } | null
   segment_idx: number
   core_no: number
   lifecycle: string
@@ -282,6 +286,8 @@ export async function addCoreAssignmentFromCanvas(input: {
         .insert({
           project_id: input.project_id,
           circuit_id: newNo,
+          subscriber_name:
+            input.new_circuit.subscriber_name?.trim().slice(0, 200) || null,
           kind,
           status: 'OK',
         })
