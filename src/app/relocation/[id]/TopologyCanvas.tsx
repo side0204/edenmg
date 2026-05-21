@@ -154,6 +154,7 @@ const ROUTE_GAP_COLOR = '#d97706' // amber-600 (끊긴 중간경로 — 추정 �
 const FAULT_COLOR    = '#dc2626'  // red-600 (고장점 위치 마커)
 const DRAG_THRESHOLD = 4          // px — 클릭/드래그 구분
 const SNAP_THRESHOLD = 14         // px — 좌클릭 드래그 시 다른 시설과 수직·수평 정렬 스냅 거리
+const LABEL_LEADER_THRESHOLD = 26 // px — 라벨이 이만큼 멀어지면 시설과 연결선 표시
 const CABLE_OFFSET_GAP = 7        // px — 같은 경로 여러 케이블 평행 간격
 // 시설 라벨 흰색 외곽선 — 지도 모드에서 배경 지도 글자와 구분 (지도 제작사 표준 기법).
 //   두껍다고 느껴지면 줄이고, 잘 안 보이면 올린다.
@@ -2484,6 +2485,25 @@ export default function TopologyCanvas({
               dx: f.label_dx,
               dy: f.label_dy,
             }
+            // 라벨이 시설에서 멀어지면 연결선(leader) — 어느 시설 라벨인지 표시.
+            //   선은 라벨 박스 가장자리에서 멈춰 글자 위를 지나지 않게 한다.
+            const leaderShow =
+              Math.hypot(labelOff.dx, labelOff.dy) > LABEL_LEADER_THRESHOLD
+            let leaderEndX = nodeCx
+            let leaderEndY = nodeCy
+            if (leaderShow) {
+              const lcX = nodeCx + labelOff.dx
+              const lcY = (labelCodeY + labelNameY) / 2 + labelOff.dy
+              const ddx = nodeCx - lcX
+              const ddy = nodeCy - lcY
+              const hw = labelW / 2 + 3
+              const hh = (labelNameY - labelCodeY) / 2 + facNameFont * 0.7 + 3
+              const tx = ddx !== 0 ? hw / Math.abs(ddx) : Infinity
+              const ty = ddy !== 0 ? hh / Math.abs(ddy) : Infinity
+              const t = Math.min(tx, ty, 1)
+              leaderEndX = lcX + ddx * t
+              leaderEndY = lcY + ddy * t
+            }
             return (
               <g
                 key={f.id}
@@ -2496,6 +2516,21 @@ export default function TopologyCanvas({
                 }}
                 onPointerDown={(e) => onPointerDown(e, f.id)}
               >
+                {/* 라벨 연결선(leader) — 라벨이 멀어졌을 때 어느 시설인지 표시.
+                    도형·라벨보다 먼저 그려 그 아래로 깔린다. */}
+                {leaderShow && (
+                  <line
+                    x1={nodeCx}
+                    y1={nodeCy}
+                    x2={leaderEndX}
+                    y2={leaderEndY}
+                    stroke="#94a3b8"
+                    strokeWidth={1}
+                    strokeDasharray="3 2"
+                    vectorEffect="non-scaling-stroke"
+                    style={{ pointerEvents: 'none' }}
+                  />
+                )}
                 {/* 도형 — 지도 모드 줌 축소 시 노드 중심 기준으로 함께 축소.
                     중심(GPS 투영점)은 불변 → 케이블 연결점 유지. 라벨은 이 그룹 밖이라 원래 크기. */}
                 <g
