@@ -2317,7 +2317,7 @@ export default function TopologyCanvas({
             // 라벨 — 글자 크기는 원래대로 고정. 도형이 축소된 만큼 위치만 중심 쪽으로 당겨
             //   축소된 도형 바로 아래에 붙도록 한다 (scale=1 이면 원래 좌표 그대로).
             const labelCodeY = nodeCy + mapNodeScale * (NODE_SIZE.height - 20 - nodeCy)
-            const labelNameY = labelCodeY + 15
+            const labelNameY = labelCodeY + 19
             return (
               <g
                 key={f.id}
@@ -2390,7 +2390,7 @@ export default function TopologyCanvas({
                   strokeWidth={LABEL_HALO_WIDTH}
                   strokeLinejoin="round"
                   paintOrder="stroke"
-                  style={{ fontSize: 12, fontFamily: 'monospace', fontWeight: 700 }}
+                  style={{ fontSize: 15, fontFamily: 'monospace', fontWeight: 700 }}
                 >
                   {code}
                 </text>
@@ -2403,7 +2403,7 @@ export default function TopologyCanvas({
                   strokeWidth={LABEL_HALO_WIDTH}
                   strokeLinejoin="round"
                   paintOrder="stroke"
-                  style={{ fontSize: 13, fontFamily: 'system-ui', fontWeight: 600 }}
+                  style={{ fontSize: 17, fontFamily: 'system-ui', fontWeight: 600 }}
                 >
                   {f.name.length > 12 ? f.name.slice(0, 11) + '…' : f.name}
                 </text>
