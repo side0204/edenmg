@@ -2146,6 +2146,15 @@ export default function TopologyCanvas({
                     x: (pts[midIdx - 1].x + pts[midIdx].x) / 2,
                     y: (pts[midIdx - 1].y + pts[midIdx].y) / 2,
                   }
+            // 라벨 크기 — 도식은 크게·볼드, 지도는 원래 작은 크기 (지도 가독성 우선)
+            const labelBig = mode !== 'map'
+            const lblSpecFont = labelBig ? 20 : 9
+            const lblCodeFont = labelBig ? 20 : 8
+            const lblWeight = labelBig ? 700 : 400
+            const lblSpecDy = labelBig ? -13 : -4
+            const lblCodeDy = labelBig ? 13 : 8
+            const lblBadgeRectDy = labelBig ? 24 : 12
+            const lblBadgeTextDy = labelBig ? 32 : 20
             return (
               <g key={c.id} opacity={style.opacity}>
                 {/* 선택 강조 (파랑) / 선택 시설에 연결된 케이블 강조 (주황) */}
@@ -2231,12 +2240,12 @@ export default function TopologyCanvas({
                 {/* 라벨 */}
                 <text
                   x={labelPt.x}
-                  y={labelPt.y - 13}
+                  y={labelPt.y + lblSpecDy}
                   textAnchor="middle"
                   className="fill-slate-700"
                   style={{
-                    fontSize: 20,
-                    fontWeight: 700,
+                    fontSize: lblSpecFont,
+                    fontWeight: lblWeight,
                     fontFamily: 'system-ui',
                     pointerEvents: 'none',
                   }}
@@ -2245,12 +2254,12 @@ export default function TopologyCanvas({
                 </text>
                 <text
                   x={labelPt.x}
-                  y={labelPt.y + 13}
+                  y={labelPt.y + lblCodeDy}
                   textAnchor="middle"
                   className="fill-slate-400"
                   style={{
-                    fontSize: 20,
-                    fontWeight: 700,
+                    fontSize: lblCodeFont,
+                    fontWeight: lblWeight,
                     fontFamily: 'monospace',
                     pointerEvents: 'none',
                   }}
@@ -2265,7 +2274,7 @@ export default function TopologyCanvas({
                     <g pointerEvents="none">
                       <rect
                         x={labelPt.x - 15}
-                        y={labelPt.y + 24}
+                        y={labelPt.y + lblBadgeRectDy}
                         width={30}
                         height={11}
                         rx={5.5}
@@ -2273,7 +2282,7 @@ export default function TopologyCanvas({
                       />
                       <text
                         x={labelPt.x}
-                        y={labelPt.y + 32}
+                        y={labelPt.y + lblBadgeTextDy}
                         textAnchor="middle"
                         fill="white"
                         style={{ fontSize: 7.5, fontWeight: 700, fontFamily: 'system-ui' }}
@@ -2327,7 +2336,10 @@ export default function TopologyCanvas({
             // 라벨 — 글자 크기는 원래대로 고정. 도형이 축소된 만큼 위치만 중심 쪽으로 당겨
             //   축소된 도형 바로 아래에 붙도록 한다 (scale=1 이면 원래 좌표 그대로).
             const labelCodeY = nodeCy + mapNodeScale * (NODE_SIZE.height - 20 - nodeCy)
-            const labelNameY = labelCodeY + 19
+            // 라벨 크기 — 도식은 크게, 지도는 원래 작은 크기 (지도 가독성 우선)
+            const facCodeFont = mode === 'map' ? 9 : 15
+            const facNameFont = mode === 'map' ? 10 : 17
+            const labelNameY = labelCodeY + (mode === 'map' ? 12 : 19)
             return (
               <g
                 key={f.id}
@@ -2400,7 +2412,7 @@ export default function TopologyCanvas({
                   strokeWidth={LABEL_HALO_WIDTH}
                   strokeLinejoin="round"
                   paintOrder="stroke"
-                  style={{ fontSize: 15, fontFamily: 'monospace', fontWeight: 700 }}
+                  style={{ fontSize: facCodeFont, fontFamily: 'monospace', fontWeight: 700 }}
                 >
                   {code}
                 </text>
@@ -2413,7 +2425,7 @@ export default function TopologyCanvas({
                   strokeWidth={LABEL_HALO_WIDTH}
                   strokeLinejoin="round"
                   paintOrder="stroke"
-                  style={{ fontSize: 17, fontFamily: 'system-ui', fontWeight: 600 }}
+                  style={{ fontSize: facNameFont, fontFamily: 'system-ui', fontWeight: 600 }}
                 >
                   {f.name.length > 12 ? f.name.slice(0, 11) + '…' : f.name}
                 </text>
