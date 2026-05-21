@@ -50,7 +50,35 @@ function metaLine(r: OnlineRow): string {
   return [r.position, r.team, r.work_type].filter(Boolean).join(' · ')
 }
 
-export default async function ActivityPage() {
+// 경로 → 메뉴(섹션) 이름. "어느 메뉴를 많이 쓰는지" 집계용.
+function pathSection(path: string): string {
+  if (path === '/') return '홈'
+  if (path.startsWith('/works')) return '작업관리'
+  if (path.startsWith('/relocation')) return '지장이설'
+  if (path.startsWith('/attendance')) return '근태'
+  if (path.startsWith('/vehicles')) return '차량관리'
+  if (path.startsWith('/requests') || path.startsWith('/approvals')) return '결재'
+  if (path.startsWith('/leaves') || path.startsWith('/my-leaves')) return '휴가'
+  if (path.startsWith('/stock')) return '자재관리'
+  if (path.startsWith('/admin')) return '관리'
+  if (path.startsWith('/settings')) return '설정'
+  return '기타'
+}
+
+// 동적 경로의 UUID 를 :id 로 치환 — 세부 페이지 집계 시 같은 페이지로 묶기 위함.
+const UUID_RE = /[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/gi
+function normalizePath(path: string): string {
+  return path.replace(UUID_RE, ':id')
+}
+
+export default async function ActivityPage({
+  searchParams,
+}: {
+  searchParams: Promise<{ days?: string }>
+}) {
+  const { days: daysRaw } = await searchParams
+  const days = daysRaw === '7' ? 7 : 30
+
   const supabase = await createClient()
   const {
     data: { user },
@@ -108,6 +136,33 @@ export default async function ActivityPage() {
       nameById.set(e.id, e.name ?? '이름 미상')
     }
   }
+
+  // 메뉴별 사용량 — page_view_summary RPC (경로별 방문수, RLS 가 회사로 제한)
+  const usageSince = new Date(Date.now() - days * 86400000).toISOString()
+  const { data: summaryData } = await supabase.rpc('page_view_summary', {
+    _since: usageSince,
+  })
+  const summaryRows = (summaryData ?? []) as { path: string; cnt: number }[]
+
+  const sectionCount = new Map<string, number>()
+  const pageCount = new Map<string, number>()
+  let totalViews = 0
+  for (const r of summaryRows) {
+    const c = Number(r.cnt) || 0
+    totalViews += c
+    const sec = pathSection(r.path)
+    sectionCount.set(sec, (sectionCount.get(sec) ?? 0) + c)
+    const np = normalizePath(r.path)
+    pageCount.set(np, (pageCount.get(np) ?? 0) + c)
+  }
+  const sections = [...sectionCount.entries()]
+    .map(([name, count]) => ({ name, count }))
+    .sort((a, b) => b.count - a.count)
+  const topPages = [...pageCount.entries()]
+    .map(([path, count]) => ({ path, count }))
+    .sort((a, b) => b.count - a.count)
+    .slice(0, 12)
+  const maxSection = sections[0]?.count ?? 0
 
   return (
     <main className="min-h-screen p-4 sm:p-6">
@@ -168,6 +223,88 @@ export default async function ActivityPage() {
                 )
               })}
             </ul>
+          )}
+        </section>
+
+        {/* 메뉴별 사용량 */}
+        <section className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
+          <div className="space-y-2 sm:flex sm:items-center sm:justify-between sm:gap-3 sm:space-y-0">
+            <div>
+              <h2 className="text-base font-semibold tracking-tight text-slate-900">
+                메뉴별 사용량
+              </h2>
+              <p className="mt-0.5 text-xs text-slate-400">
+                최근 {days}일 · 총 {totalViews.toLocaleString()}회 방문
+              </p>
+            </div>
+            <div className="inline-flex shrink-0 overflow-hidden rounded-lg border border-slate-300 text-sm">
+              {[7, 30].map((d) => (
+                <Link
+                  key={d}
+                  href={`/admin/activity?days=${d}`}
+                  className={
+                    'px-3 py-1.5 font-medium ' +
+                    (days === d
+                      ? 'bg-slate-900 text-white'
+                      : 'text-slate-600 hover:bg-slate-50')
+                  }
+                >
+                  {d}일
+                </Link>
+              ))}
+            </div>
+          </div>
+
+          {sections.length === 0 ? (
+            <p className="mt-3 py-4 text-center text-sm text-slate-400">
+              아직 페이지 방문 기록이 없습니다.
+            </p>
+          ) : (
+            <>
+              <ul className="mt-3 space-y-2">
+                {sections.map((s) => (
+                  <li key={s.name} className="flex items-center gap-3">
+                    <span className="w-24 shrink-0 text-sm font-medium text-slate-700">
+                      {s.name}
+                    </span>
+                    <div className="h-5 flex-1 overflow-hidden rounded bg-slate-100">
+                      <div
+                        className="h-full rounded bg-indigo-500"
+                        style={{
+                          width: `${maxSection ? (s.count / maxSection) * 100 : 0}%`,
+                        }}
+                      />
+                    </div>
+                    <span className="w-14 shrink-0 text-right text-sm font-semibold text-slate-900">
+                      {s.count.toLocaleString()}
+                    </span>
+                  </li>
+                ))}
+              </ul>
+
+              {topPages.length > 0 && (
+                <details className="mt-4">
+                  <summary className="cursor-pointer text-xs font-medium text-slate-500 hover:text-slate-900">
+                    세부 페이지 TOP {topPages.length}
+                  </summary>
+                  <ul className="mt-2 divide-y divide-slate-100">
+                    {topPages.map((p) => (
+                      <li
+                        key={p.path}
+                        className="flex items-center gap-2 py-1.5 text-xs"
+                      >
+                        <span className="min-w-0 flex-1 truncate font-mono text-slate-600">
+                          {p.path}
+                        </span>
+                        <span className="shrink-0 font-semibold text-slate-900">
+                          {p.count.toLocaleString()}
+                        </span>
+                      </li>
+                    ))}
+                  </ul>
+                </details>
+              )}
+            </>
           )}
         </section>
 

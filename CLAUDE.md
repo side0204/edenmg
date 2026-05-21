@@ -1013,7 +1013,15 @@ owner 요구: 베타 운영 중 사용자 경험 반영을 위해 현재 접속�
 - **last_seen_at 갱신** [`proxy.ts`](./src/proxy.ts) — 인증된 요청마다 갱신하되 `em_seen` 쿠키(maxAge 300초)로 쿨다운 → 사용자당 최대 5분에 1회 DB 쓰기. 모든 요청마다 쓰지 않음.
 - **로그인·로그아웃 기록** [`login/actions.ts`](./src/app/login/actions.ts) — `logActivity` 헬퍼. signIn 성공 후 'login', signOut 전(세션 유효 시)에 'logout' 1행 insert. 실패해도 로그인/로그아웃 흐름은 안 막음.
 - **관리자 페이지** [`/admin/activity`](./src/app/admin/activity/page.tsx) — admin 전용. 「현재 접속 중」(last_seen 최근 10분) + 「로그인 기록」(activity_logs 최근 100건). 홈 관리 카드에 「접속 현황 · 로그」 진입점.
-- **후속 후보**: 페이지·기능 단위 사용 분석(어느 메뉴를 많이 쓰는지)은 owner 가 더 깊은 데이터를 원할 때. 현재는 접속 여부·로그인 빈도까지.
+
+### ✅ 완료 (메뉴별 사용량 분석, 2026-05-21)
+
+owner 요구: "어느 메뉴를 많이 쓰는지" 페이지 단위 분석. 접속 현황·로그의 후속.
+
+- **마이그** [`0048_page_views.sql`](./supabase/migrations/0048_page_views.sql) — `page_views` 테이블(방문 1건=1행, append-only) + RLS 2개(select=같은 회사 admin, insert=본인 행) + `page_view_summary(_since)` RPC(경로별 방문수 집계, security definer 아님 → 호출자 RLS 적용).
+- **페이지 방문 기록** [`proxy.ts`](./src/proxy.ts) — `isPageNavigation()` 으로 실제 네비게이션만 판별(프리페치·API·자산 제외. 소프트=`rsc` 헤더, 하드=`Accept: text/html`). `after()`(Next.js 16 — 응답 후 비동기)로 page_views insert → **네비게이션 지연 0**. `em_seen` 쿠키 값에 `employeeId.companyId` 를 담아 직원 조회를 캐시(5분).
+- **관리자 페이지** [`/admin/activity`](./src/app/admin/activity/page.tsx) — 「메뉴별 사용량」 섹션 추가. 경로를 메뉴(작업관리·차량관리·지장이설 등)로 묶어 막대 랭킹 + 세부 페이지 TOP 12(UUID→`:id` 정규화). 7일/30일 토글.
+- **후속 후보**: 사용자별·시간대별 분석은 owner 가 더 깊은 데이터를 원할 때. page_views 누적 시 보존 정책(오래된 행 정리) 검토.
 
 ### 🟡 미완 / 후속
 
@@ -1059,6 +1067,7 @@ owner 요구: 베타 운영 중 사용자 경험 반영을 위해 현재 접속�
   - [`0045_relocation_facility_geo.sql`](./supabase/migrations/0045_relocation_facility_geo.sql) — 지장이설 시설 GPS 좌표: `relocation_facilities.lat`/`lng` (카카오맵 지도 모드 배치용)
   - [`0046_facility_work_window.sql`](./supabase/migrations/0046_facility_work_window.sql) — 지장이설 시설 작업 가능 시간대: `relocation_facilities.work_window_start`/`end` (owner 실행 완료)
   - [`0047_activity_log.sql`](./supabase/migrations/0047_activity_log.sql) — 베타 모니터링: `employees.last_seen_at` + `activity_logs`(로그인·로그아웃, append-only) + RLS
+  - [`0048_page_views.sql`](./supabase/migrations/0048_page_views.sql) — 베타 모니터링: `page_views`(페이지 방문, append-only) + `page_view_summary` 집계 RPC + RLS
 - **외선일보 별도 entity (v2)** — 접속일보와 동일 패턴으로 외선팀 전용 모듈. 외선 작업 특성(케이블 포설구간·전주번호 등)에 맞는 구조 별도 설계.
 - **접속일보 후속 (v2)** — segment-level 작업자 태그, 사진 첨부 + EXIF, 국사·함체 마스터 테이블화, 재접속 이력 조회, 지도 시각화
 - **M3 Phase 2 후속** — 사진 첨부 + EXIF·워터마크 (PRD M3-06), 일보 결재함 통합 (현재는 작업 상세에서 진입), 일반 일보 월별 CSV 리포트
