@@ -214,6 +214,101 @@ export async function createCable(formData: FormData) {
 }
 
 
+/**
+ * 캔버스에서 케이블 생성 — redirect 안 함, JSON 결과 반환.
+ * 케이블 추가 후 캔버스(도식/지도 모드)에 그대로 머물기 위함.
+ */
+export async function createCableFromCanvas(input: {
+  project_id: string
+  from_facility_id: string
+  to_facility_id: string
+  spec: string
+  status: string
+  cable_code: string
+  installation_type: string | null
+  notes: string | null
+}): Promise<{ ok: true; cable_code: string } | { ok: false; error: string }> {
+  if (!input.project_id) return { ok: false, error: '프로젝트 id 가 없습니다' }
+
+  const from_facility_id = (input.from_facility_id ?? '').trim()
+  const to_facility_id = (input.to_facility_id ?? '').trim()
+  if (!from_facility_id || !to_facility_id) {
+    return { ok: false, error: '출발·도착 시설을 선택하세요' }
+  }
+  if (from_facility_id === to_facility_id) {
+    return { ok: false, error: '출발과 도착 시설이 같을 수 없습니다' }
+  }
+  if (!isCableSpec(input.spec)) return { ok: false, error: '케이블 규격을 선택하세요' }
+  const status = (input.status ?? '').trim() || 'new'
+  if (!isCableStatus(status)) return { ok: false, error: '케이블 상태가 올바르지 않습니다' }
+  const installation_type =
+    input.installation_type && isInstallationType(input.installation_type)
+      ? input.installation_type
+      : null
+  const notes = (input.notes ?? '').trim() || null
+  const userCableCode = (input.cable_code ?? '').trim()
+
+  const { supabase } = await requireMember()
+
+  let cableCode = userCableCode
+  if (!cableCode) {
+    if (status !== 'new') {
+      return {
+        ok: false,
+        error: '기설·이설·철거 케이블은 LGU+ 제공 케이블 ID 입력이 필요합니다',
+      }
+    }
+    try {
+      cableCode = await allocateNextCableCode(supabase, input.project_id)
+    } catch (e: unknown) {
+      return { ok: false, error: e instanceof Error ? e.message : String(e) }
+    }
+  }
+
+  let attempt = 0
+  let lastErr: string | null = null
+  while (attempt < 3) {
+    attempt += 1
+    const { error } = await supabase.from('relocation_cables').insert({
+      project_id: input.project_id,
+      from_facility_id,
+      to_facility_id,
+      spec: input.spec,
+      status,
+      cable_code: cableCode,
+      installation_type,
+      notes,
+    })
+
+    if (!error) {
+      revalidatePath(`/relocation/${input.project_id}`)
+      return { ok: true, cable_code: cableCode }
+    }
+
+    lastErr = error.message
+    const isUnique =
+      error.message.includes('unique') ||
+      error.message.includes('duplicate') ||
+      error.code === '23505'
+    // 자동 생성 모드에서 unique 충돌 → 다음 시퀀스로 재시도
+    if (!userCableCode && isUnique) {
+      try {
+        cableCode = await allocateNextCableCode(supabase, input.project_id)
+        continue
+      } catch (e: unknown) {
+        return { ok: false, error: e instanceof Error ? e.message : String(e) }
+      }
+    }
+    if (isUnique) {
+      lastErr = `같은 케이블 ID 가 이미 등록되어 있습니다: ${cableCode}`
+    }
+    break
+  }
+
+  return { ok: false, error: '등록 실패: ' + (lastErr ?? '알 수 없는 오류') }
+}
+
+
 export async function updateCable(formData: FormData) {
   const id = String(formData.get('id') ?? '').trim()
   const projectId = String(formData.get('project_id') ?? '').trim()

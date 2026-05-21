@@ -43,7 +43,7 @@ import {
 import { CABLE_STATUS_LABEL, CABLE_STATUS_VALUES } from '@/lib/relocation'
 import { autoLayoutPositions, NODE_SIZE } from './auto-layout'
 import { saveNodePositions, saveCableWaypoints } from './position-actions'
-import { createCable } from './cable-actions'
+import { createCableFromCanvas } from './cable-actions'
 import {
   createFacilityAtPosition,
   createFacilityAtLatLng,
@@ -2902,6 +2902,10 @@ export default function TopologyCanvas({
           to={toFacility}
           defaultSpec={cableTool}
           onClose={() => setPendingConnection(null)}
+          onSaved={() => {
+            setPendingConnection(null)
+            router.refresh()
+          }}
         />
       )}
 
@@ -3439,15 +3443,48 @@ function ConnectionModal({
   to,
   defaultSpec,
   onClose,
+  onSaved,
 }: {
   projectId: string
   from: FacilityNode
   to: FacilityNode
   defaultSpec: CableSpec | null
   onClose: () => void
+  onSaved: () => void
 }) {
   const fromLabel = `${formatFacilityCode(from.closure_type, from.seq_no)} ${from.name}`
   const toLabel = `${formatFacilityCode(to.closure_type, to.seq_no)} ${to.name}`
+
+  const [spec, setSpec] = useState<string>(defaultSpec ?? '144C')
+  const [status, setStatus] = useState<string>('new')
+  const [cableCode, setCableCode] = useState('')
+  const [installationType, setInstallationType] = useState('')
+  const [notes, setNotes] = useState('')
+  const [submitting, setSubmitting] = useState(false)
+
+  async function onSubmit(e: React.FormEvent) {
+    e.preventDefault()
+    if (submitting) return
+    setSubmitting(true)
+    // redirect 안 하는 캔버스용 액션 — 현재 모드(도식/지도)를 유지한 채 케이블만 추가
+    const result = await createCableFromCanvas({
+      project_id: projectId,
+      from_facility_id: from.id,
+      to_facility_id: to.id,
+      spec,
+      status,
+      cable_code: cableCode.trim(),
+      installation_type: installationType || null,
+      notes: notes.trim() || null,
+    })
+    setSubmitting(false)
+    if (!result.ok) {
+      toast.error(result.error)
+      return
+    }
+    toast.success(`${result.cable_code} 케이블을 등록했습니다`)
+    onSaved()
+  }
 
   return (
     <div
@@ -3471,20 +3508,16 @@ function ConnectionModal({
           </p>
         </div>
 
-        <form action={createCable} className="space-y-3">
-          <input type="hidden" name="project_id" value={projectId} />
-          <input type="hidden" name="from_facility_id" value={from.id} />
-          <input type="hidden" name="to_facility_id" value={to.id} />
-
+        <form onSubmit={onSubmit} className="space-y-3">
           <div className="grid grid-cols-2 gap-3">
             <div>
               <label className="block text-xs font-medium text-slate-700">
                 규격 <span className="text-rose-600">*</span>
               </label>
               <select
-                name="spec"
+                value={spec}
+                onChange={(e) => setSpec(e.target.value)}
                 required
-                defaultValue={defaultSpec ?? '144C'}
                 className="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2 text-sm"
               >
                 {CABLE_SPEC_VALUES.map((s) => (
@@ -3497,8 +3530,8 @@ function ConnectionModal({
             <div>
               <label className="block text-xs font-medium text-slate-700">상태</label>
               <select
-                name="status"
-                defaultValue="new"
+                value={status}
+                onChange={(e) => setStatus(e.target.value)}
                 className="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2 text-sm"
               >
                 {CABLE_STATUS_VALUES.map((s) => (
@@ -3516,7 +3549,8 @@ function ConnectionModal({
             </label>
             <input
               type="text"
-              name="cable_code"
+              value={cableCode}
+              onChange={(e) => setCableCode(e.target.value)}
               maxLength={100}
               placeholder="기설은 LGU+ 제공 ID. 신설은 비워두면 NEW-XXXX-NNNNNN"
               className="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2 text-sm font-mono"
@@ -3528,8 +3562,8 @@ function ConnectionModal({
               설치 구분 (LGU+ 광망 범례)
             </label>
             <select
-              name="installation_type"
-              defaultValue=""
+              value={installationType}
+              onChange={(e) => setInstallationType(e.target.value)}
               className="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2 text-sm"
             >
               <option value="">(미지정)</option>
@@ -3545,7 +3579,8 @@ function ConnectionModal({
             <label className="block text-xs font-medium text-slate-700">비고</label>
             <input
               type="text"
-              name="notes"
+              value={notes}
+              onChange={(e) => setNotes(e.target.value)}
               maxLength={1000}
               className="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2 text-sm"
             />
@@ -3561,9 +3596,10 @@ function ConnectionModal({
             </button>
             <button
               type="submit"
-              className="rounded-lg bg-slate-900 px-4 py-2 text-sm font-medium text-white hover:bg-slate-800"
+              disabled={submitting}
+              className="rounded-lg bg-slate-900 px-4 py-2 text-sm font-medium text-white hover:bg-slate-800 disabled:bg-slate-300"
             >
-              케이블 생성
+              {submitting ? '저장 중...' : '케이블 생성'}
             </button>
           </div>
         </form>
