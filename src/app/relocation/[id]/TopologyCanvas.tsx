@@ -2611,6 +2611,21 @@ export default function TopologyCanvas({
                     흰색 외곽선(paintOrder=stroke → 외곽선이 글자 뒤)으로 배경 지도 글자와 구분.
                     g transform — 마우스 드래그 offset 적용. */}
                 <g transform={`translate(${labelOff.dx}, ${labelOff.dy})`}>
+                {/* 지도 모드 — 글자 뒤 흰 배경 박스로 지도 배경 글자와 시인성 확보 */}
+                {mode === 'map' && (
+                  <rect
+                    x={nodeCx - labelW / 2 - 5}
+                    y={labelCodeY - facCodeFont}
+                    width={labelW + 10}
+                    height={labelNameY - labelCodeY + facNameFont + 8}
+                    rx={4}
+                    fill="#ffffff"
+                    fillOpacity={0.9}
+                    stroke="#cbd5e1"
+                    strokeWidth={0.75}
+                    style={{ pointerEvents: 'none' }}
+                  />
+                )}
                 <text
                   x={nodeCx}
                   y={labelCodeY}
