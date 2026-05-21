@@ -33,6 +33,7 @@ export type FacilityRow = {
   work_window_end: string | null
   created_at: string | null
   install_status: string
+  label_position: string
 }
 
 // 함체일 때 보여줄 기본 권장 함체 규격 (참고용 — 폼에는 직접 추천 표시)

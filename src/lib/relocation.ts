@@ -277,6 +277,40 @@ export const FACILITY_INSTALL_STATUS_LABEL: Record<FacilityInstallStatus, string
 }
 
 
+// 시설 라벨 위치 — 캔버스에서 시설명 라벨을 도형 기준 8방향 중 어디에 둘지 (마이그 0053)
+export type FacilityLabelPosition =
+  | 'bottom'
+  | 'top'
+  | 'left'
+  | 'right'
+  | 'top_left'
+  | 'top_right'
+  | 'bottom_left'
+  | 'bottom_right'
+
+export const FACILITY_LABEL_POSITION_VALUES: readonly FacilityLabelPosition[] = [
+  'bottom',
+  'top',
+  'left',
+  'right',
+  'top_left',
+  'top_right',
+  'bottom_left',
+  'bottom_right',
+]
+
+export const FACILITY_LABEL_POSITION_LABEL: Record<FacilityLabelPosition, string> = {
+  bottom: '아래',
+  top: '위',
+  left: '왼쪽',
+  right: '오른쪽',
+  top_left: '왼쪽 위',
+  top_right: '오른쪽 위',
+  bottom_left: '왼쪽 아래',
+  bottom_right: '오른쪽 아래',
+}
+
+
 export type CoreLifecycle = 'preexisting' | 'relocating' | 'new'
 
 export const CORE_LIFECYCLE_VALUES: readonly CoreLifecycle[] = [

@@ -6,9 +6,11 @@ import { createClient } from '@/lib/supabase/server'
 import {
   CLOSURE_TYPE_VALUES,
   FACILITY_INSTALL_STATUS_VALUES,
+  FACILITY_LABEL_POSITION_VALUES,
   isInternalNode,
   type ClosureType,
   type FacilityInstallStatus,
+  type FacilityLabelPosition,
 } from '@/lib/relocation'
 import type { CableSpec } from '@/lib/connection'
 import { CABLE_SPEC_VALUES } from '@/lib/connection'
@@ -51,6 +53,10 @@ function isCableSpec(v: string): v is CableSpec {
 
 function isInstallStatus(v: string): v is FacilityInstallStatus {
   return (FACILITY_INSTALL_STATUS_VALUES as readonly string[]).includes(v)
+}
+
+function isLabelPosition(v: string): v is FacilityLabelPosition {
+  return (FACILITY_LABEL_POSITION_VALUES as readonly string[]).includes(v)
 }
 
 type FacilityFormParsed = {
@@ -411,6 +417,7 @@ export async function updateFacilityFromCanvas(input: {
   work_window_start: string | null
   work_window_end: string | null
   install_status: FacilityInstallStatus
+  label_position: string
 }): Promise<{ ok: true } | { ok: false; error: string }> {
   if (!input.project_id || !input.id) return { ok: false, error: '대상이 올바르지 않습니다' }
   const name = (input.name ?? '').trim()
@@ -455,6 +462,10 @@ export async function updateFacilityFromCanvas(input: {
     ? input.install_status
     : 'new'
 
+  const labelPosition: FacilityLabelPosition = isLabelPosition(input.label_position)
+    ? input.label_position
+    : 'bottom'
+
   // 노란색 마크 내용 — 체크 해제 시 내용도 비움
   const markNote =
     input.is_marked && input.mark_note
@@ -475,6 +486,7 @@ export async function updateFacilityFromCanvas(input: {
       work_window_start: workWindowStart,
       work_window_end: workWindowEnd,
       install_status: installStatus,
+      label_position: labelPosition,
     })
     .eq('id', input.id)
 

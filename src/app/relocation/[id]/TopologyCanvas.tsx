@@ -111,6 +111,7 @@ type FacilityNode = {
   lng: number | null
   created_at: string | null
   install_status: string
+  label_position: string
 }
 
 // 경로점 — x/y 는 도식 캔버스 좌표, lat/lng 는 지도 모드 GPS 좌표(Phase 4),
@@ -211,6 +212,35 @@ function estimateTextWidth(text: string, fontSize: number): number {
     w += fontSize * (ch.charCodeAt(0) > 0x1100 ? 1.0 : 0.58)
   }
   return w
+}
+
+// 라벨 위치(8방향) → 라벨 블록 translate offset.
+//   sideShift: 좌/우 가로 이동량 · topDy: 위로 올릴 때 세로 이동량
+//   centerDy: 도형 옆(좌/우)에 둘 때 도형 중앙 높이로 맞추는 세로 이동량
+function labelOffsetFor(
+  pos: string,
+  sideShift: number,
+  topDy: number,
+  centerDy: number,
+): { dx: number; dy: number } {
+  switch (pos) {
+    case 'top':
+      return { dx: 0, dy: topDy }
+    case 'left':
+      return { dx: -sideShift, dy: centerDy }
+    case 'right':
+      return { dx: sideShift, dy: centerDy }
+    case 'top_left':
+      return { dx: -sideShift, dy: topDy }
+    case 'top_right':
+      return { dx: sideShift, dy: topDy }
+    case 'bottom_left':
+      return { dx: -sideShift, dy: 0 }
+    case 'bottom_right':
+      return { dx: sideShift, dy: 0 }
+    default:
+      return { dx: 0, dy: 0 } // bottom (기본)
+  }
 }
 
 // 케이블 라인 스타일 산출 — LGU+ 표준 범례 적용 (2026-05-20)
@@ -2397,6 +2427,20 @@ export default function TopologyCanvas({
             const facCodeFont = mode === 'map' ? 9 : 15
             const facNameFont = mode === 'map' ? 10 : 17
             const labelNameY = labelCodeY + (mode === 'map' ? 12 : 19)
+            // 라벨 위치 offset — 시설명 겹침 방지 (8방향)
+            const labelDispName =
+              f.name.length > 12 ? f.name.slice(0, 11) + '…' : f.name
+            const labelW = Math.max(
+              estimateTextWidth(code, facCodeFont),
+              estimateTextWidth(labelDispName, facNameFont) +
+                (installNoByFacility.get(f.id) ? facNameFont * 1.9 : 0),
+            )
+            const labelOffset = labelOffsetFor(
+              f.label_position,
+              labelW / 2 + 22,
+              nodeCy - 32 - labelNameY,
+              nodeCy - (labelCodeY + labelNameY) / 2,
+            )
             return (
               <g
                 key={f.id}
@@ -2486,7 +2530,9 @@ export default function TopologyCanvas({
                 </g>
 
                 {/* 라벨 — 도형이 축소돼도 글자 크기는 처음 크기로 고정.
-                    흰색 외곽선(paintOrder=stroke → 외곽선이 글자 뒤)으로 배경 지도 글자와 구분. */}
+                    흰색 외곽선(paintOrder=stroke → 외곽선이 글자 뒤)으로 배경 지도 글자와 구분.
+                    g transform — 라벨 위치(8방향) offset 적용. */}
+                <g transform={`translate(${labelOffset.dx}, ${labelOffset.dy})`}>
                 <text
                   x={nodeCx}
                   y={labelCodeY}
@@ -2569,6 +2615,7 @@ export default function TopologyCanvas({
                     </>
                   )
                 })()}
+                </g>
               </g>
             )
           })}
@@ -2696,6 +2743,7 @@ export default function TopologyCanvas({
                   work_window_start: f.work_window_start,
                   work_window_end: f.work_window_end,
                   install_status: f.install_status,
+                  label_position: f.label_position,
                 }}
                 stations={facilities
                   .filter((x) => x.closure_type === '국사')
