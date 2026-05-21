@@ -269,6 +269,13 @@ export default function FacilityInfoPanel({
 
   async function onDelete() {
     if (busy) return
+    // 연결된 케이블이 있으면 FK 제약으로 삭제 불가 — 미리 안내
+    if (cableCount > 0) {
+      toast.error(
+        `연결된 케이블 ${cableCount}개를 먼저 삭제해야 이 시설을 삭제할 수 있습니다.`,
+      )
+      return
+    }
     if (
       !confirm(
         `${facility.name} 시설을 삭제하시겠습니까?\n등록된 공종·자재도 함께 삭제됩니다.`,
@@ -310,6 +317,16 @@ export default function FacilityInfoPanel({
       <div className="sticky top-0 z-10 bg-white border-b border-slate-200 px-3 py-2 flex items-center justify-between">
         <span className="text-sm font-bold text-slate-900">시설 정보</span>
         <div className="flex items-center gap-1">
+          <button
+            type="button"
+            onClick={onDelete}
+            disabled={busy}
+            title="시설 삭제"
+            className="inline-flex items-center gap-0.5 rounded-md border border-rose-300 px-1.5 py-0.5 text-[11px] font-medium text-rose-700 hover:bg-rose-50 disabled:opacity-40"
+          >
+            <Trash2 className="h-3.5 w-3.5" />
+            삭제
+          </button>
           <button
             type="button"
             onClick={onToggleCollapse}
@@ -643,18 +660,6 @@ export default function FacilityInfoPanel({
           </div>
         </div>
 
-        {/* 시설 삭제 */}
-        <div className="border-t border-slate-200 pt-2">
-          <button
-            type="button"
-            onClick={onDelete}
-            disabled={busy}
-            className="inline-flex items-center gap-1 rounded-md border border-rose-300 px-2 py-1 text-[11px] font-medium text-rose-700 hover:bg-rose-50 disabled:opacity-50"
-          >
-            <Trash2 className="h-3.5 w-3.5" />
-            시설 삭제
-          </button>
-        </div>
       </div>
     </div>
   )

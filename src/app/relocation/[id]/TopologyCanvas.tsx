@@ -192,7 +192,7 @@ function pointAlongPolyline(
 // 케이블 라인 스타일 산출 — LGU+ 표준 범례 적용 (2026-05-20)
 //   - 색(stroke): 기설 = 검정 / 그 외 = 케이블 규격 (cableSpecColor — 1C~12C 빨강 / 13C~36C 청록 / ...)
 //   - dash: 설치 구분 (installationTypeDash — 가공/구내/해저 solid · 입상 dotted · 지중 dashed)
-//   - width·opacity: 상태 (신설 두껍게 · 철거 흐리게)
+//   - width·opacity: 상태 (기설 가장 두껍게 · 신설 두껍게 · 철거 흐리게)
 function edgeStyle(
   spec: string,
   status: CableStatus,
@@ -206,7 +206,8 @@ function edgeStyle(
   const dash = installationTypeDash(installationType)
   let width = 1.8
   let opacity = 1
-  if (status === 'new') width = 2.6
+  if (status === 'existing') width = 3.4
+  else if (status === 'new') width = 2.6
   else if (status === 'relocating') width = 2.2
   else if (status === 'removing') {
     width = 1.4
@@ -755,7 +756,12 @@ export default function TopologyCanvas({
       if (tool) {
         setPendingPlacement({ closureType: tool, kind: 'latlng', lat, lng })
         setAddTool(null) // 1회 배치 후 도구 해제
+        return
       }
+      // 3) 빈 지도 클릭 — 선택 해제 (도식 모드의 빈 영역 클릭과 동일).
+      //   시설·케이블 위 클릭은 그 요소가 이벤트를 잡아 이 콜백이 호출되지 않음.
+      setSelectedId(null)
+      setSelectedCableId(null)
     }
     // 지도가 움직이기 시작하면 드래그 픽셀 override 를 비워 GPS 투영으로 복귀
     const onMapMove = () => {
@@ -2311,7 +2317,7 @@ export default function TopologyCanvas({
             // 라벨 — 글자 크기는 원래대로 고정. 도형이 축소된 만큼 위치만 중심 쪽으로 당겨
             //   축소된 도형 바로 아래에 붙도록 한다 (scale=1 이면 원래 좌표 그대로).
             const labelCodeY = nodeCy + mapNodeScale * (NODE_SIZE.height - 20 - nodeCy)
-            const labelNameY = labelCodeY + 12
+            const labelNameY = labelCodeY + 15
             return (
               <g
                 key={f.id}
@@ -2384,7 +2390,7 @@ export default function TopologyCanvas({
                   strokeWidth={LABEL_HALO_WIDTH}
                   strokeLinejoin="round"
                   paintOrder="stroke"
-                  style={{ fontSize: 9, fontFamily: 'monospace', fontWeight: 700 }}
+                  style={{ fontSize: 12, fontFamily: 'monospace', fontWeight: 700 }}
                 >
                   {code}
                 </text>
@@ -2397,7 +2403,7 @@ export default function TopologyCanvas({
                   strokeWidth={LABEL_HALO_WIDTH}
                   strokeLinejoin="round"
                   paintOrder="stroke"
-                  style={{ fontSize: 10, fontFamily: 'system-ui', fontWeight: 600 }}
+                  style={{ fontSize: 13, fontFamily: 'system-ui', fontWeight: 600 }}
                 >
                   {f.name.length > 12 ? f.name.slice(0, 11) + '…' : f.name}
                 </text>
