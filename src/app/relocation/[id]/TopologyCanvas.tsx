@@ -3128,13 +3128,13 @@ function FacilityShape({
 
   // ===== 접속함체 ==========================================================
   if (closureType === '함체_가공형' || closureType === '함체_관로형') {
-    // 기존 — 원 + X (검정)
+    // 원 + X — 규격색(stdColor). 접속함체 기설이면 stdColor 가 검정으로 산출됨.
     const r = 14
     return (
       <g>
-        <circle cx={cx} cy={cy} r={r} fill="white" stroke={isFallback} strokeWidth={1.8} />
-        <line x1={cx - r * 0.7} y1={cy - r * 0.7} x2={cx + r * 0.7} y2={cy + r * 0.7} stroke={isFallback} strokeWidth={1.5} />
-        <line x1={cx - r * 0.7} y1={cy + r * 0.7} x2={cx + r * 0.7} y2={cy - r * 0.7} stroke={isFallback} strokeWidth={1.5} />
+        <circle cx={cx} cy={cy} r={r} fill="white" stroke={stdColor} strokeWidth={1.8} />
+        <line x1={cx - r * 0.7} y1={cy - r * 0.7} x2={cx + r * 0.7} y2={cy + r * 0.7} stroke={stdColor} strokeWidth={1.5} />
+        <line x1={cx - r * 0.7} y1={cy + r * 0.7} x2={cx + r * 0.7} y2={cy - r * 0.7} stroke={stdColor} strokeWidth={1.5} />
       </g>
     )
   }
