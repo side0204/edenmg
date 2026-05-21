@@ -15,15 +15,19 @@ export default function CollapsibleLayout({
   topPanel,
   canvas,
   bottomPanel,
+  bottomDefaultCollapsed = true,
 }: {
   topPanel: React.ReactNode
   canvas: React.ReactNode
   bottomPanel: React.ReactNode
+  // 하단 패널(탭 콘텐츠) 기본 접힘 여부.
+  //   URL 에 ?tab= 이 있으면(탭·진행단계 클릭) 펼친 채로 시작 — 매번 다시 펼치는 수고 제거.
+  bottomDefaultCollapsed?: boolean
 }) {
   // 기본값 접힘 — 설계 화면 진입 시 캔버스에 바로 집중 (owner 요청).
   //   도식·지도 모드 공통 (CollapsibleLayout 이 두 모드를 모두 감쌈).
   const [topCollapsed, setTopCollapsed] = useState(true)
-  const [bottomCollapsed, setBottomCollapsed] = useState(true)
+  const [bottomCollapsed, setBottomCollapsed] = useState(bottomDefaultCollapsed)
 
   const focused = topCollapsed && bottomCollapsed
   const toggleFocus = () => {

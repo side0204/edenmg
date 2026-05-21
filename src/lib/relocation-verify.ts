@@ -4,14 +4,15 @@
 //   설계 데이터(시설·케이블·회선·코어배정·접속·스플리터·공종)를 받아
 //   위반 항목을 빨강(red)·노랑(yellow)으로 산출한다.
 //
-// 구현 룰: C1·C2·C3·S1·R1·D1·D2·T1
+// 구현 룰: C1·C2·C3·S1·R1·D1·D2·T1·U1·U2 + T2(회선 종단 완전성)
 //   O1(코어 중복)·E1(기설 보존)은 DB exclusion constraint 가 강제 → 검증 탭 안내문으로 표시.
-//   U1·U2(유니트·여장판 최적화)는 스플라이스 입력 흐름이 갖춰진 뒤 후속.
 
 import {
   CLOSURE_SPEC_META,
   CLOSURE_RECOMMENDED_FROM_CABLE,
   CLOSURE_TYPE_CATEGORY,
+  CABLE_SPEC_META,
+  coreUnitIndex,
   formatFacilityCode,
   isCircuitDiverse,
   type ClosureType,
@@ -47,10 +48,15 @@ export type VAssignment = {
   circuit_id: string | null
   segment_idx: number
   cable_id: string
+  is_terminal: boolean
 }
 
 export type VSplice = {
   facility_id: string
+  in_cable_id: string
+  in_core: number
+  out_cable_id: string
+  out_core: number
 }
 
 export type VSplitter = {
@@ -297,6 +303,106 @@ export function runVerification(input: VerifyInput): VerifyResult {
           '작업이 발생하는 함체인데 공종 수량이 없습니다 — 차수 시간 산출이 부정확해집니다.',
         target: facilityLabel(f),
       })
+    }
+  }
+
+  // ── U1 — 한 함체 접속 코어가 같은 유니트에 모이는지 (노랑) ────────────
+  for (const f of closures) {
+    const coresByCable = new Map<string, Set<number>>()
+    for (const s of splices) {
+      if (s.facility_id !== f.id) continue
+      for (const [cid, core] of [
+        [s.in_cable_id, s.in_core],
+        [s.out_cable_id, s.out_core],
+      ] as [string, number][]) {
+        const set = coresByCable.get(cid)
+        if (set) set.add(core)
+        else coresByCable.set(cid, new Set([core]))
+      }
+    }
+    for (const [cableId, cores] of coresByCable) {
+      const cable = cableById.get(cableId)
+      if (!cable) continue
+      const meta = CABLE_SPEC_META[cable.spec]
+      if (!meta || !meta.hasUnits) continue
+      const units = new Set<number>()
+      for (const core of cores) {
+        const u = coreUnitIndex(cable.spec, core)
+        if (u !== null) units.add(u)
+      }
+      const minimal = Math.max(1, Math.ceil(cores.size / meta.unitSize))
+      if (units.size > minimal) {
+        findings.push({
+          rule: 'U1',
+          severity: 'yellow',
+          title: '접속 코어가 여러 유니트에 분산',
+          detail: `${cable.spec} 케이블 접속 코어가 유니트 ${units.size}개에 흩어짐 (최소 ${minimal}개). 코어 재배정 시 접속 효율이 올라갑니다.`,
+          target: `${facilityLabel(f)} · ${cable.cable_code}`,
+        })
+      }
+    }
+  }
+
+  // ── U2 — 한 함체 접속이 여장판 1매에 들어가는지 (노랑) ────────────────
+  for (const f of closures) {
+    if (!f.closure_spec) continue
+    const meta = CLOSURE_SPEC_META[f.closure_spec]
+    if (!meta) continue
+    const cnt = spliceCountByFacility.get(f.id) ?? 0
+    if (cnt > meta.trayCapacity) {
+      const trays = Math.ceil(cnt / meta.trayCapacity)
+      findings.push({
+        rule: 'U2',
+        severity: 'yellow',
+        title: '접속이 여장판 1매를 초과',
+        detail: `접속 ${cnt}코어 — 여장판 ${trays}매 필요 (1매 ${meta.trayCapacity}코어). 코어 재배정으로 여장판 수를 줄일 수 있는지 검토하세요.`,
+        target: facilityLabel(f),
+      })
+    }
+  }
+
+  // ── T2 — 회선 종단 표시 완전성 (노랑) ────────────────────────────────
+  // 코어 배정이 있는 회선은 세그먼트마다 양 끝 케이블 2개가 종단으로 표시돼야 함.
+  const segHasAssign = new Map<string, Set<number>>()
+  const segTerminalCables = new Map<string, Map<number, Set<string>>>()
+  for (const a of assignments) {
+    if (!a.circuit_id) continue
+    let segs = segHasAssign.get(a.circuit_id)
+    if (!segs) {
+      segs = new Set()
+      segHasAssign.set(a.circuit_id, segs)
+    }
+    segs.add(a.segment_idx)
+    if (a.is_terminal) {
+      let m = segTerminalCables.get(a.circuit_id)
+      if (!m) {
+        m = new Map()
+        segTerminalCables.set(a.circuit_id, m)
+      }
+      const set = m.get(a.segment_idx)
+      if (set) set.add(a.cable_id)
+      else m.set(a.segment_idx, new Set([a.cable_id]))
+    }
+  }
+  for (const circuit of circuits) {
+    const segs = segHasAssign.get(circuit.id)
+    if (!segs) continue
+    for (const seg of [...segs].sort((x, y) => x - y)) {
+      const termCount = segTerminalCables.get(circuit.id)?.get(seg)?.size ?? 0
+      if (termCount !== 2) {
+        findings.push({
+          rule: 'T2',
+          severity: 'yellow',
+          title: '회선 종단 표시 불완전',
+          detail:
+            termCount === 0
+              ? '종단으로 표시된 케이블이 없습니다 — 자동 코어 배정을 할 수 없습니다.'
+              : termCount === 1
+                ? '종단이 한쪽 케이블만 표시됨 — 회선 양 끝 2개 케이블을 표시하세요.'
+                : `종단 케이블이 ${termCount}개 — 양 끝 2개여야 합니다.`,
+          target: `회선 ${circuit.circuit_id}${seg > 0 ? ` · 세그먼트 ${seg}` : ''}`,
+        })
+      }
     }
   }
 

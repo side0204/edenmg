@@ -946,7 +946,10 @@ LGU+ 협력사 본업 — 광케이블 지장이설 코어구성도·직선도 �
   - server action [`phase-actions.ts`](./src/app/relocation/[id]/phase-actions.ts) `runPhasePlanning` — 시설별 공종량(`relocation_facility_tasks` × `task_type_master.standard_minutes`) 합계를 작업시간으로 산출 → `planPhases` → 기존 차수 삭제 후 `relocation_phases` + `relocation_phase_tasks` 생성 (재실행 idempotent). task_kind 는 신설 케이블 연결 시 '함체신설_절단' 그 외 '기설접속'
   - [`PhasesTab.tsx`](./src/app/relocation/[id]/PhasesTab.tsx) + [`PhasePlanButton.tsx`](./src/app/relocation/[id]/PhasePlanButton.tsx) — 차수 탭. 「차수 자동 분할」 버튼 + 요약
   - **차수 재조정 (2026-05-21)**: 실 시공 시 차수별 투입 가능 팀 수가 달라지는 것 대응. [`PhaseBoard.tsx`](./src/app/relocation/[id]/PhaseBoard.tsx) (client) — 차수별 「투입 팀」 1~4 조정 + 「차수 재조정」(설정 팀 수 용량대로 FFD 재패킹, 초과분은 새 차수) + 시설 수동 이동(차수 select) + 빈 차수 삭제. 알고리즘 `rebalanceIntoPhases`, server action `updatePhaseTeams`·`rebalancePhases`·`movePhaseTask`·`deletePhase`. 수동 이동으로 용량 초과 시 빨강 경고만 표시
-  - ⚠️ v1 범위: 시설 단위 빈패킹만. 동시작업 페어링(simultaneity)·의존성 DAG·`relocation_task_pairs`·작업 지시서(§ 6-4)는 splice 입력 흐름 후 후속
+- ✅ **P0-1 — 동시작업 페어링 + 작업 지시서 (2026-05-21)**: 전문가 검토 P0 반영. 마이그 없음 (0038 컬럼 사용)
+  - **동시작업 그룹** — `buildSimultaneityGroups` ([phase-planner](./src/lib/relocation-phase-planner.ts)): 절체 대상 케이블(status≠기설)로 연결된 시설을 union-find 연결요소로 묶음. 한 케이블 양끝 함체가 다른 차수로 갈리면 회선 단절 → 차수 분할이 **그룹을 한 단위로** 패킹 (시설 단위 X). `runPhasePlanning`·`rebalancePhases` 둘 다 `buildGroupUnits`로 그룹 패킹, `phase_tasks.simultaneity_group` 기록
+  - **작업 지시서** — [`/relocation/[id]/phases/[phaseNo]/instructions`](./src/app/relocation/[id]/phases/[phaseNo]/instructions/page.tsx): 차수별 현장 문서. 동시작업 그룹별로 시설·공종·시간 묶어 출력 + 인쇄([`PrintButton`](./src/app/relocation/[id]/PrintButton.tsx)). 차수 카드(PhaseBoard)에 「작업 지시서」 링크 + 「묶음 N」 배지
+  - ⚠️ 후속: 의존성 DAG(신설→절체 선후), `relocation_task_pairs`(회선별 양끝 코어 명시), per-팀·짝 작업자 연락처는 팀-작업자 배정 기능 후
 - ✅ **Step E-1 — 기별명세서 내보내기 (2026-05-21)**: 내보내기 탭 = 정산 문서. 마이그 없음
   - [`ExportTab.tsx`](./src/app/relocation/[id]/ExportTab.tsx) — 설계 요약(시설·케이블·회선·코어배정 수) + 케이블 포설 명세(status≠기설 — 구간·규격·상태·설치구분·거리 + 총 포설거리) + 함체별 공종 명세 + 함체별 자재 명세. 각 섹션 화면 표 + CSV 다운로드. 데이터는 canvas-data 재사용 (추가 쿼리 없음)
   - CSV Route Handler [`/api/reports/relocation-statement`](./src/app/api/reports/relocation-statement/route.ts) — `?project=&type=cable|task|material`. UTF-8+BOM+CRLF (csv.ts), 회사 스코프는 relocation_* RLS 강제
@@ -956,7 +959,34 @@ LGU+ 협력사 본업 — 광케이블 지장이설 코어구성도·직선도 �
   - [`SpliceTab.tsx`](./src/app/relocation/[id]/SpliceTab.tsx) (client) — 함체·시설 선택 → 그 시설 접속 목록 + 추가 폼 (입력 케이블·코어 → 출력 케이블·코어, 연속 코어 체크). 연결 케이블만 in/out select 에 표시
   - [page.tsx](./src/app/relocation/[id]/page.tsx) — 직선도(splice) 탭일 때 splices 조회. `TabPlaceholder` 제거 (전 탭 구현 완료)
   - 검증 룰 C2·U1·U2, 차수 동시작업 페어링, 직선도 SVG 의 입력 데이터원
-- ⏳ **Step E-2**: 코어구성도·직선도 SVG·도면 PDF 내보내기 — 코어구성도 토폴로지는 도식/지도 캔버스가 이미 시각화 제공. 직선도 SVG(함체 in/out 매트릭스)는 이제 splice 데이터로 생성 가능
+- ✅ **Step E-2 직선도 시각화 (2026-05-21)**: [`SpliceDiagram.tsx`](./src/app/relocation/[id]/SpliceDiagram.tsx) — 함체 접속(splice)을 입력 코어 ↔ 출력 코어 단선결선도(bipartite SVG)로 렌더. 좌=입력 케이블·코어, 우=출력 케이블·코어 (케이블별 정렬), 접속선 색은 연속(초록)/비연속(주황), 케이블은 C1·C2 태그+색. SpliceTab(직선도 탭)에 함체 선택 시 표시
+- ⏳ **Step E-2 후속**: 직선도·코어구성도 SVG 파일·도면 PDF 다운로드 (현재는 화면 시각화까지). 코어구성도 토폴로지는 도식/지도 캔버스가 시각화 제공 중
+- ✅ **P0-2 — LGU+ 표준 템플릿 임포터 (2026-05-21)**: 전문가 검토 P0 반영. 시설·케이블·회선 CSV 일괄 등록. 마이그 없음
+  - owner 결정: **표준 템플릿 방식** — edenMG 양식 제공, LGU+ 데이터를 맞춰 채워 업로드 (자재·재고 임포트와 동일 패턴)
+  - server action [`import-actions.ts`](./src/app/relocation/[id]/import-actions.ts) — `importRelocationFacilitiesCsv`·`importRelocationCablesCsv`·`importRelocationCircuitsCsv`. 행 단위 검증 (오류 행 건너뛰고 사유 보고, 정상 행만 등록). 종류·상태·종류 enum 은 값·한국어 라벨 둘 다 허용. 시설 번호는 카운터에서 일괄 발급. 케이블은 시설 이름으로 매칭 (이름 중복 시 오류)
+  - 템플릿 CSV [`/api/templates/relocation-import.csv`](./src/app/api/templates/relocation-import.csv/route.ts) — `?type=facilities|cables|circuits`
+  - [`/relocation/[id]/import`](./src/app/relocation/[id]/import/page.tsx) + [`RelocationImportClient.tsx`](./src/app/relocation/[id]/RelocationImportClient.tsx) — 시설→케이블→회선 3섹션 (템플릿 다운로드·업로드·결과). 프로젝트 헤더에 「데이터 가져오기」 진입점
+- ✅ **P1 — 검증 강화 (2026-05-21)**: 전문가 검토 P1. 마이그 없음
+  - 검증 룰 추가 ([relocation-verify.ts](./src/lib/relocation-verify.ts)) — **U1**(접속 코어가 여러 유니트에 분산, 노랑) · **U2**(접속이 여장판 1매 초과, 노랑) · **T2**(회선 종단 표시 불완전 — 코어 배정 있는데 종단 케이블 ≠ 2개, 노랑). splice 데이터 기반. 누적 룰 11종
+  - **검증 게이트** ([relocation/actions.ts](./src/app/relocation/actions.ts) `updateProject`) — 프로젝트를 「확정」·「시공중」 으로 바꿀 때 `runVerification` 실행, 빨강 오류가 1건이라도 있으면 차단하고 검증 탭으로 이동. 시공 사고 방지
+- ✅ **차수 시간대 (2026-05-21)**: 야간 작업이 02~05시 고정이 아니라 가변임을 반영. 마이그 [`0046_facility_work_window.sql`](./supabase/migrations/0046_facility_work_window.sql)
+  - **차수별 시간대 편집** — `relocation_phases.window_start/end`(컬럼 기존) 를 PhaseBoard 에서 차수마다 `<input type=time>` 으로 편집. 차수 용량 = 팀 수 × 시간대 길이(`windowMinutes`, 자정 넘김 처리). `updatePhaseWindow` server action. 차수 재조정(`rebalanceIntoPhases`)이 차수별 시간대를 보존·반영
+  - **시설 작업가능 시간대** — 마이그 0046 `relocation_facilities.work_window_start/end` (특정 시간대만 작업 가능한 시설). 시설 탭 편집 폼에서 입력
+  - **시간대 충돌 경고** — 차수 탭(PhaseBoard) 에서 시설의 작업가능 시간대가 배정된 차수 시간대와 안 겹치면(`windowsOverlap`) 작업 행에 「시간대 불가」 빨강 배지. 00시 작업·특정 시간대 작업은 그 시간대로 차수를 만들고 작업 배정
+
+### ✅ 완료 (지장이설 설계 UI/UX 개선 — 7항목 일괄, 2026-05-21)
+
+UI/UX 검토 결과 owner 가 우선순위 순으로 진행하기로 한 7항목. "순서를 보여주고·할 일을 드러내고·중복을 정리" — 비개발자 owner 가 "어디서 뭘 하지" 를 겪지 않도록 정보구조(IA) 정돈. 마이그 없음.
+
+1. **작업 순서 안내** — [`ProgressStepBar.tsx`](./src/app/relocation/[id]/ProgressStepBar.tsx) 신규. 프로젝트 페이지 최상단 항상 표시되는 진행 단계 표시줄 (시설→케이블→회선·코어→검증→차수→내보내기). 데이터 유무로 단계 완료 자동 판정, 각 단계 = 해당 탭 링크. 첫 미완료(또는 검증 빨강 오류) 단계를 「현재」 강조 + 하단에 「다음 할 일: …」 안내문. [page.tsx](./src/app/relocation/[id]/page.tsx) `CollapsibleLayout` 밖에 배치(접기 영향 없음).
+2. **탭 바 상태 배지** — `page.tsx` 탭 바에 배지: 「검증」 빨강 오류 수(rose)/주의 수(amber) · 「코어배정」 미배정 회선 수(amber). `runVerification` 을 모든 탭에서 실행(splices·splitters·phases 항상 조회) → 검증/차수/접속 탭 전용 조건부 쿼리 제거·일원화.
+3. **시설 목록 중복 제거** — `LeftPanel.tsx` 삭제. 「시설」 탭 목록·캔버스 좌측 사이드바와 3중 중복이었음. bottomPanel grid → 단일 컬럼.
+4. **시설 편집기 단일화** — [`FacilityInfoPanel`](./src/app/relocation/[id]/FacilityInfoPanel.tsx) 을 시설의 유일 정식 편집기로 수렴. 「시설」 탭 폼에만 있던 부모 국사·작업 가능 시간대·노란 마크 필드 추가. `updateFacilityFromCanvas` ([facility-actions.ts](./src/app/relocation/[id]/facility-actions.ts)) 에 4필드(closure_type 포함) 추가 + 검증. TopologyCanvas `FacilityNode` 타입·매핑(page.tsx·canvas/page.tsx) 보강, `stations` prop 전달.
+5. **프로젝트 정보 폼 접기** — `page.tsx` 하단 프로젝트 정보·삭제 폼을 `<details>` (기본 접힘, summary 「프로젝트 정보·설정」 + Settings 아이콘).
+6. **「이전」 탭 라벨** — migration 탭 label 「이전」 → 「철거·이설」 (탭 id `migrations`·DB 무관).
+7. **캔버스 컨트롤 정리** — TopologyCanvas 툴바의 캔버스 표시 크기 4단계 컨트롤을 native `<details>` 「⋯ 더보기」 드롭다운으로 묶음 (MoreHorizontal 아이콘). 클릭-아웃 리스너 없는 native disclosure 라 모바일 dropdown 버그 회피.
+
+**부수 개선**: `CollapsibleLayout` 에 `bottomDefaultCollapsed` prop — URL 에 `?tab=` 이 있으면(탭·진행단계 클릭) 하단 패널 펼친 채 시작 → 탭 누를 때마다 다시 펼치는 수고 제거. 프로젝트 fresh 진입(탭 파라미터 없음)은 기존대로 캔버스 집중(접힘).
 
 **기별명세서 정산 규칙** (owner 결정 2026-05-20):
 - **광케이블 포설 공종** — 케이블 거리(`relocation_cables.total_length`)로 산출. **단 `status='existing'`(기설) 케이블 거리는 기별명세서 정산에 반영 금지.** 포설 정산 = Σ(total_length where status != existing).

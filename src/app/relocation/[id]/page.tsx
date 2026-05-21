@@ -11,8 +11,9 @@ import {
   Radio,
   ArrowRightLeft,
   ExternalLink,
+  Upload,
 } from 'lucide-react'
-import { Sparkles } from 'lucide-react'
+import { Sparkles, Settings } from 'lucide-react'
 import { createClient } from '@/lib/supabase/server'
 import { updateProject, deleteProject } from '../actions'
 import FacilitiesTab from './FacilitiesTab'
@@ -24,14 +25,14 @@ import MigrationsTab, {
   type MigrationCircuitRow,
   type CoreAssignmentForMigration,
 } from './MigrationsTab'
-import LeftPanel from './LeftPanel'
 import { HighlightProvider } from './HighlightContext'
 import { seedTestData } from './seed-actions'
 import TopologyCanvas from './TopologyCanvas'
 import CollapsibleLayout from './CollapsibleLayout'
+import ProgressStepBar, { type ProgressStep } from './ProgressStepBar'
 import { loadRelocationCanvasData } from './canvas-data'
 import VerifyTab from './VerifyTab'
-import { runVerification, type VerifyResult } from '@/lib/relocation-verify'
+import { runVerification } from '@/lib/relocation-verify'
 import PhasesTab, { type PhaseRow, type PhaseTaskRow } from './PhasesTab'
 import ExportTab from './ExportTab'
 import SpliceTab, { type SpliceRow } from './SpliceTab'
@@ -57,7 +58,7 @@ const TABS: { id: TabId; label: string; icon: typeof Cable }[] = [
   { id: 'cables', label: '케이블', icon: Cable },
   { id: 'circuits', label: '회선', icon: Radio },
   { id: 'cores', label: '코어배정', icon: Layers },
-  { id: 'migrations', label: '이전', icon: ArrowRightLeft },
+  { id: 'migrations', label: '철거·이설', icon: ArrowRightLeft },
   { id: 'splice', label: '직선도', icon: Layers },
   { id: 'phases', label: '차수', icon: Calendar },
   { id: 'verify', label: '검증', icon: AlertCircle },
@@ -167,89 +168,157 @@ export default async function RelocationProjectPage({
     }
   }
 
-  // 검증 결과 (verify 탭 전용) — 접속·스플리터는 별도 조회, 나머지는 캔버스 데이터 재사용
-  let verifyResult: VerifyResult | null = null
-  if (tab === 'verify') {
-    const { data: splRows } = await supabase
-      .from('relocation_splices')
-      .select('facility_id')
-      .eq('project_id', id)
-    const { data: sptRows } = await supabase
-      .from('relocation_splitters')
-      .select('facility_id, input_a_cable_id, input_b_cable_id')
-      .eq('project_id', id)
+  // ── 항상 조회 — 진행 표시줄·탭 배지·검증을 모든 탭에서 계산하기 위함 ──
+  // 접속 (직선도 탭 콘텐츠 + 검증 룰 C2·U1·U2 입력)
+  const { data: splRows } = await supabase
+    .from('relocation_splices')
+    .select(
+      'id, facility_id, in_cable_id, in_core, out_cable_id, out_core, is_continuous',
+    )
+    .eq('project_id', id)
+  const splices = (splRows ?? []) as SpliceRow[]
 
-    verifyResult = runVerification({
-      facilities: facilities.map((f) => ({
-        id: f.id,
-        closure_type: f.closure_type,
-        seq_no: f.seq_no,
-        name: f.name,
-        closure_spec: f.closure_spec,
-      })),
-      cables: cables.map((c) => ({
-        id: c.id,
-        from_facility_id: c.from_facility_id,
-        to_facility_id: c.to_facility_id,
-        spec: c.spec,
-        status: c.status,
-        cable_code: c.cable_code,
-      })),
-      circuits: circuits.map((c) => ({
-        id: c.id,
-        circuit_id: c.circuit_id,
-        kind: c.kind,
-      })),
-      assignments: assignments.map((a) => ({
-        circuit_id: a.circuit_id,
-        segment_idx: a.segment_idx,
-        cable_id: a.cable_id,
-      })),
-      splices: (splRows ?? []) as { facility_id: string }[],
-      splitters: (sptRows ?? []) as {
-        facility_id: string
-        input_a_cable_id: string | null
-        input_b_cable_id: string | null
-      }[],
-      facilityTasks: facilityTasks.map((t) => ({ facility_id: t.facility_id })),
-    })
-  }
+  // 스플리터 (검증 룰 R1)
+  const { data: sptRows } = await supabase
+    .from('relocation_splitters')
+    .select('facility_id, input_a_cable_id, input_b_cable_id')
+    .eq('project_id', id)
 
-  // 차수 (phases 탭 전용)
-  let phases: PhaseRow[] = []
+  // 차수
+  const { data: phRows } = await supabase
+    .from('relocation_phases')
+    .select(
+      'id, phase_no, required_teams, estimated_minutes, status, window_start, window_end',
+    )
+    .eq('project_id', id)
+    .order('phase_no')
+  const phases = (phRows ?? []) as PhaseRow[]
+
+  // 차수별 작업 (차수 탭 콘텐츠 전용)
   let phaseTasks: PhaseTaskRow[] = []
-  if (tab === 'phases') {
-    const { data: phRows } = await supabase
-      .from('relocation_phases')
+  if (tab === 'phases' && phases.length > 0) {
+    const { data: ptRows } = await supabase
+      .from('relocation_phase_tasks')
       .select(
-        'id, phase_no, required_teams, estimated_minutes, status, window_start, window_end',
+        'id, phase_id, facility_id, task_kind, estimated_minutes, simultaneity_group',
       )
-      .eq('project_id', id)
-      .order('phase_no')
-    phases = (phRows ?? []) as PhaseRow[]
-
-    if (phases.length > 0) {
-      const { data: ptRows } = await supabase
-        .from('relocation_phase_tasks')
-        .select('id, phase_id, facility_id, task_kind, estimated_minutes')
-        .in(
-          'phase_id',
-          phases.map((p) => p.id),
-        )
-      phaseTasks = (ptRows ?? []) as PhaseTaskRow[]
-    }
+      .in(
+        'phase_id',
+        phases.map((p) => p.id),
+      )
+    phaseTasks = (ptRows ?? []) as PhaseTaskRow[]
   }
 
-  // 접속 (직선도 탭 전용)
-  let splices: SpliceRow[] = []
-  if (tab === 'splice') {
-    const { data: spRows } = await supabase
-      .from('relocation_splices')
-      .select(
-        'id, facility_id, in_cable_id, in_core, out_cable_id, out_core, is_continuous',
-      )
-      .eq('project_id', id)
-    splices = (spRows ?? []) as SpliceRow[]
+  // 검증 — 모든 탭에서 실행 (진행 표시줄·검증 탭 배지·검증 탭 콘텐츠 공용)
+  const verifyResult = runVerification({
+    facilities: facilities.map((f) => ({
+      id: f.id,
+      closure_type: f.closure_type,
+      seq_no: f.seq_no,
+      name: f.name,
+      closure_spec: f.closure_spec,
+    })),
+    cables: cables.map((c) => ({
+      id: c.id,
+      from_facility_id: c.from_facility_id,
+      to_facility_id: c.to_facility_id,
+      spec: c.spec,
+      status: c.status,
+      cable_code: c.cable_code,
+    })),
+    circuits: circuits.map((c) => ({
+      id: c.id,
+      circuit_id: c.circuit_id,
+      kind: c.kind,
+    })),
+    assignments: assignments.map((a) => ({
+      circuit_id: a.circuit_id,
+      segment_idx: a.segment_idx,
+      cable_id: a.cable_id,
+      is_terminal: a.is_terminal,
+    })),
+    splices: splices.map((s) => ({
+      facility_id: s.facility_id,
+      in_cable_id: s.in_cable_id,
+      in_core: s.in_core,
+      out_cable_id: s.out_cable_id,
+      out_core: s.out_core,
+    })),
+    splitters: (sptRows ?? []) as {
+      facility_id: string
+      input_a_cable_id: string | null
+      input_b_cable_id: string | null
+    }[],
+    facilityTasks: facilityTasks.map((t) => ({ facility_id: t.facility_id })),
+  })
+
+  // ── 진행 표시줄 단계 + 탭 배지 ──
+  // 코어 배정이 하나도 없는 회선 수 — "코어배정" 탭 배지·진행 판정에 사용
+  const assignedCircuitIds = new Set(
+    assignments.map((a) => a.circuit_id).filter((cid): cid is string => !!cid),
+  )
+  const unassignedCircuitCount = circuits.filter(
+    (c) => !assignedCircuitIds.has(c.id),
+  ).length
+
+  const steps: ProgressStep[] = [
+    {
+      tab: 'facilities',
+      label: '시설',
+      done: facilities.length > 0,
+      detail: facilities.length > 0 ? `시설 ${facilities.length}개` : undefined,
+    },
+    {
+      tab: 'cables',
+      label: '케이블',
+      done: cables.length > 0,
+      detail: cables.length > 0 ? `케이블 ${cables.length}개` : undefined,
+    },
+    {
+      tab: 'cores',
+      label: '회선·코어',
+      done: circuits.length > 0 && unassignedCircuitCount === 0,
+      detail:
+        circuits.length > 0
+          ? unassignedCircuitCount > 0
+            ? `미배정 ${unassignedCircuitCount}`
+            : `회선 ${circuits.length}`
+          : undefined,
+    },
+    {
+      tab: 'verify',
+      label: '검증',
+      done: cables.length > 0 && verifyResult.redCount === 0,
+      warn: verifyResult.redCount > 0,
+      detail:
+        verifyResult.redCount > 0
+          ? `오류 ${verifyResult.redCount}`
+          : verifyResult.yellowCount > 0
+            ? `주의 ${verifyResult.yellowCount}`
+            : undefined,
+    },
+    {
+      tab: 'phases',
+      label: '차수',
+      done: phases.length > 0,
+      detail: phases.length > 0 ? `${phases.length}차수` : undefined,
+    },
+    {
+      tab: 'export',
+      label: '내보내기',
+      done: project.status === '완료',
+    },
+  ]
+
+  // 탭 배지 — 클릭하지 않아도 할 일이 보이게
+  const tabBadges: Partial<Record<TabId, { count: number; tone: 'red' | 'amber' }>> = {}
+  if (verifyResult.redCount > 0) {
+    tabBadges.verify = { count: verifyResult.redCount, tone: 'red' }
+  } else if (verifyResult.yellowCount > 0) {
+    tabBadges.verify = { count: verifyResult.yellowCount, tone: 'amber' }
+  }
+  if (unassignedCircuitCount > 0) {
+    tabBadges.cores = { count: unassignedCircuitCount, tone: 'amber' }
   }
 
   const topPanel = (
@@ -274,6 +343,13 @@ export default async function RelocationProjectPage({
               </p>
             </div>
             <div className="shrink-0 flex items-center gap-2 self-start">
+              <Link
+                href={`/relocation/${id}/import`}
+                className="inline-flex items-center gap-1 rounded-lg border border-slate-300 px-3 py-1.5 text-sm font-medium text-slate-700 hover:bg-slate-50"
+              >
+                <Upload className="h-4 w-4" />
+                데이터 가져오기
+              </Link>
               <Link
                 href={`/relocation/${id}/canvas`}
                 target="_blank"
@@ -329,6 +405,10 @@ export default async function RelocationProjectPage({
           closure_spec: f.closure_spec,
           install_address: f.install_address,
           notes: f.notes,
+          parent_facility_id: f.parent_facility_id,
+          is_marked: f.is_marked,
+          work_window_start: f.work_window_start,
+          work_window_end: f.work_window_end,
           x_hint: f.x_hint ?? null,
           y_hint: f.y_hint ?? null,
           lat: f.lat ?? null,
@@ -365,6 +445,7 @@ export default async function RelocationProjectPage({
             {TABS.map((t) => {
               const Icon = t.icon
               const active = tab === t.id
+              const badge = tabBadges[t.id]
               return (
                 <Link
                   key={t.id}
@@ -376,18 +457,30 @@ export default async function RelocationProjectPage({
                 >
                   <Icon className="h-4 w-4" />
                   {t.label}
+                  {badge && (
+                    <span
+                      className={
+                        'inline-flex min-w-[1.1rem] items-center justify-center rounded-full px-1 text-[10px] font-bold leading-none ' +
+                        (active
+                          ? badge.tone === 'red'
+                            ? 'bg-white text-rose-600'
+                            : 'bg-white text-amber-600'
+                          : badge.tone === 'red'
+                            ? 'bg-rose-100 text-rose-700'
+                            : 'bg-amber-100 text-amber-700')
+                      }
+                    >
+                      {badge.count}
+                    </span>
+                  )}
                 </Link>
               )
             })}
           </div>
         </nav>
 
-        {/* 좌측 패널 + 탭 콘텐츠 — 데스크톱은 grid, 모바일은 stack */}
-        <section className="grid gap-4 lg:grid-cols-[16rem_1fr]">
-          <div className="lg:sticky lg:top-16 lg:self-start lg:max-h-[calc(100vh-6rem)] lg:overflow-y-auto">
-            <LeftPanel facilities={facilities} />
-          </div>
-
+        {/* 탭 콘텐츠 — 시설 목록은 「시설」 탭과 캔버스 좌측 사이드바에 있으므로 별도 패널 제거 */}
+        <section>
           <div className="rounded-2xl bg-white shadow-sm border border-slate-200 p-4 sm:p-6 min-w-0">
             {tab === 'facilities' && (
               <FacilitiesTab projectId={project.id} facilities={facilities} />
@@ -454,7 +547,7 @@ export default async function RelocationProjectPage({
                 selectedFromCableId={selectedFromCableId}
               />
             )}
-            {tab === 'verify' && verifyResult && (
+            {tab === 'verify' && (
               <VerifyTab result={verifyResult} facilityCount={facilities.length} />
             )}
             {tab === 'phases' && (
@@ -467,6 +560,8 @@ export default async function RelocationProjectPage({
                   closure_type: f.closure_type,
                   seq_no: f.seq_no,
                   name: f.name,
+                  work_window_start: f.work_window_start,
+                  work_window_end: f.work_window_end,
                 }))}
               />
             )}
@@ -531,9 +626,13 @@ export default async function RelocationProjectPage({
           </div>
         </section>
 
-        {/* 프로젝트 메타 편집 + 삭제 */}
-        <section className="rounded-2xl bg-white shadow-sm border border-slate-200 p-6 space-y-4">
-          <h2 className="text-base font-semibold text-slate-900 tracking-tight">프로젝트 정보</h2>
+        {/* 프로젝트 메타 편집 + 삭제 — 기본 접힘 (모든 탭에서 페이지가 길어지지 않게) */}
+        <details className="rounded-2xl bg-white shadow-sm border border-slate-200">
+          <summary className="flex cursor-pointer list-none items-center gap-2 rounded-2xl px-6 py-4 text-base font-semibold tracking-tight text-slate-900 hover:bg-slate-50">
+            <Settings className="h-4 w-4 text-slate-500" />
+            프로젝트 정보·설정
+          </summary>
+          <div className="space-y-4 px-6 pb-6">
 
           <form action={updateProject} className="space-y-3">
             <input type="hidden" name="id" value={project.id} />
@@ -629,17 +728,22 @@ export default async function RelocationProjectPage({
               </button>
             </form>
           </details>
-        </section>
+          </div>
+        </details>
     </div>
   )
 
   return (
     <main className="min-h-screen pb-6">
       <HighlightProvider>
+        <div className="mx-auto max-w-6xl px-4 pt-3 sm:px-6">
+          <ProgressStepBar projectId={id} steps={steps} currentTab={tab} />
+        </div>
         <CollapsibleLayout
           topPanel={topPanel}
           canvas={canvasPanel}
           bottomPanel={bottomPanel}
+          bottomDefaultCollapsed={!tabRaw}
         />
       </HighlightProvider>
     </main>

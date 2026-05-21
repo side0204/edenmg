@@ -1,14 +1,20 @@
 'use client'
 
 import { useState } from 'react'
+import Link from 'next/link'
 import { useRouter } from 'next/navigation'
 import { toast } from 'sonner'
-import { MapPin, Trash2, Scale } from 'lucide-react'
+import { MapPin, Trash2, Scale, FileText, Link2, TriangleAlert } from 'lucide-react'
 import { formatFacilityCode } from '@/lib/relocation'
-import { formatMinutes, SHIFT_MINUTES } from '@/lib/relocation-phase-planner'
+import {
+  formatMinutes,
+  windowMinutes,
+  windowsOverlap,
+} from '@/lib/relocation-phase-planner'
 import {
   rebalancePhases,
   updatePhaseTeams,
+  updatePhaseWindow,
   movePhaseTask,
   deletePhase,
 } from './phase-actions'
@@ -81,11 +87,19 @@ export default function PhaseBoard({
 
       <ul className="space-y-3">
         {phases.map((ph) => {
-          const capacity = ph.required_teams * SHIFT_MINUTES
+          const winMin = windowMinutes(ph.window_start, ph.window_end)
+          const capacity = ph.required_teams * winMin
           const tasks = tasksByPhase.get(ph.id) ?? []
           const used = tasks.reduce((a, t) => a + (t.estimated_minutes ?? 0), 0)
           const pct = capacity > 0 ? Math.min(100, Math.round((used / capacity) * 100)) : 0
           const over = used > capacity
+          // 동시작업 그룹 — 차수 안에서 1·2… 번호 부여
+          const simGroupNo = new Map<string, number>()
+          for (const t of tasks) {
+            if (t.simultaneity_group && !simGroupNo.has(t.simultaneity_group)) {
+              simGroupNo.set(t.simultaneity_group, simGroupNo.size + 1)
+            }
+          }
 
           return (
             <li
@@ -96,6 +110,16 @@ export default function PhaseBoard({
                 <div className="flex items-center justify-between gap-2 flex-wrap">
                   <p className="text-sm font-bold text-slate-900">{ph.phase_no}차수</p>
                   <div className="flex items-center gap-2">
+                    {tasks.length > 0 && (
+                      <Link
+                        href={`/relocation/${projectId}/phases/${ph.phase_no}/instructions`}
+                        target="_blank"
+                        className="inline-flex items-center gap-0.5 rounded-md border border-slate-300 px-1.5 py-0.5 text-[11px] font-medium text-slate-700 hover:bg-slate-50"
+                      >
+                        <FileText className="h-3 w-3" />
+                        작업 지시서
+                      </Link>
+                    )}
                     <label className="flex items-center gap-1 text-xs text-slate-500">
                       투입 팀
                       <select
@@ -137,6 +161,49 @@ export default function PhaseBoard({
                   </div>
                 </div>
 
+                {/* 시공 시간대 */}
+                <div className="mt-1.5 flex items-center gap-1.5 text-xs text-slate-500">
+                  <span>시간대</span>
+                  <input
+                    type="time"
+                    value={ph.window_start.slice(0, 5)}
+                    disabled={busy}
+                    onChange={(e) =>
+                      run(
+                        () =>
+                          updatePhaseWindow(
+                            projectId,
+                            ph.id,
+                            e.target.value,
+                            ph.window_end.slice(0, 5),
+                          ),
+                        '시공 시간대를 변경했습니다',
+                      )
+                    }
+                    className="rounded-md border border-slate-300 px-1.5 py-0.5 text-xs"
+                  />
+                  <span>~</span>
+                  <input
+                    type="time"
+                    value={ph.window_end.slice(0, 5)}
+                    disabled={busy}
+                    onChange={(e) =>
+                      run(
+                        () =>
+                          updatePhaseWindow(
+                            projectId,
+                            ph.id,
+                            ph.window_start.slice(0, 5),
+                            e.target.value,
+                          ),
+                        '시공 시간대를 변경했습니다',
+                      )
+                    }
+                    className="rounded-md border border-slate-300 px-1.5 py-0.5 text-xs"
+                  />
+                  <span className="text-slate-400">({formatMinutes(winMin)})</span>
+                </div>
+
                 {/* 용량 바 */}
                 <div className="mt-2">
                   <div className="flex items-center justify-between text-[11px] text-slate-500">
@@ -168,6 +235,15 @@ export default function PhaseBoard({
                 ) : (
                   tasks.map((t) => {
                     const f = facilityById.get(t.facility_id)
+                    const windowConflict =
+                      !!f?.work_window_start &&
+                      !!f?.work_window_end &&
+                      !windowsOverlap(
+                        f.work_window_start,
+                        f.work_window_end,
+                        ph.window_start,
+                        ph.window_end,
+                      )
                     return (
                       <li
                         key={t.id}
@@ -180,6 +256,24 @@ export default function PhaseBoard({
                         <span className="flex-1 min-w-0 truncate text-slate-800">
                           {f?.name ?? '(삭제된 시설)'}
                         </span>
+                        {t.simultaneity_group && (
+                          <span
+                            title="동시작업 그룹 — 같은 차수에서 함께 작업"
+                            className="shrink-0 inline-flex items-center gap-0.5 rounded border border-indigo-200 bg-indigo-50 px-1 py-0.5 text-[10px] font-medium text-indigo-700"
+                          >
+                            <Link2 className="h-2.5 w-2.5" />
+                            묶음 {simGroupNo.get(t.simultaneity_group)}
+                          </span>
+                        )}
+                        {windowConflict && f && (
+                          <span
+                            title={`작업 가능 시간대 ${f.work_window_start?.slice(0, 5)}~${f.work_window_end?.slice(0, 5)} 가 이 차수 시간대와 겹치지 않습니다`}
+                            className="shrink-0 inline-flex items-center gap-0.5 rounded border border-rose-300 bg-rose-50 px-1 py-0.5 text-[10px] font-medium text-rose-700"
+                          >
+                            <TriangleAlert className="h-2.5 w-2.5" />
+                            시간대 불가
+                          </span>
+                        )}
                         <span className="shrink-0 rounded border border-slate-200 px-1.5 py-0.5 text-[10px] text-slate-500">
                           {t.task_kind.replace('_', '·')}
                         </span>

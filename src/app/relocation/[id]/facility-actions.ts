@@ -55,6 +55,8 @@ type FacilityFormParsed = {
   parent_facility_id: string | null
   notes: string | null
   is_marked: boolean
+  work_window_start: string | null
+  work_window_end: string | null
 }
 
 function parseFacilityForm(formData: FormData): FacilityFormParsed | string {
@@ -82,6 +84,20 @@ function parseFacilityForm(formData: FormData): FacilityFormParsed | string {
   const notes = String(formData.get('notes') ?? '').trim() || null
   const is_marked = formData.get('is_marked') === 'on'
 
+  // 작업 가능 시간대 — 특정 시간대만 작업 가능한 시설. 시작·종료 둘 다 또는 둘 다 비움.
+  const wwsRaw = String(formData.get('work_window_start') ?? '').trim()
+  const wweRaw = String(formData.get('work_window_end') ?? '').trim()
+  let work_window_start: string | null = null
+  let work_window_end: string | null = null
+  if (wwsRaw || wweRaw) {
+    const timeRe = /^\d{2}:\d{2}$/
+    if (!timeRe.test(wwsRaw) || !timeRe.test(wweRaw)) {
+      return '작업 가능 시간대는 시작·종료 모두 HH:MM 형식으로 입력하세요.'
+    }
+    work_window_start = wwsRaw
+    work_window_end = wweRaw
+  }
+
   return {
     closure_type,
     name,
@@ -90,6 +106,8 @@ function parseFacilityForm(formData: FormData): FacilityFormParsed | string {
     parent_facility_id,
     notes,
     is_marked,
+    work_window_start,
+    work_window_end,
   }
 }
 
@@ -158,6 +176,8 @@ export async function createFacility(formData: FormData) {
         parent_facility_id: parsed.parent_facility_id,
         is_marked: parsed.is_marked,
         notes: parsed.notes,
+        work_window_start: parsed.work_window_start,
+        work_window_end: parsed.work_window_end,
       })
 
       if (!error) {
@@ -221,6 +241,8 @@ export async function updateFacility(formData: FormData) {
       parent_facility_id: parsed.parent_facility_id,
       is_marked: parsed.is_marked,
       notes: parsed.notes,
+      work_window_start: parsed.work_window_start,
+      work_window_end: parsed.work_window_end,
     })
     .eq('id', id)
 
@@ -332,16 +354,22 @@ export async function createFacilityAtPosition(input: {
 
 
 /**
- * 캔버스 정보 패널에서 시설 기본 정보 수정 — 이름·함체 규격·비고.
+ * 캔버스 정보 패널에서 시설 기본 정보 수정 — 시설 정보 패널이 유일 정식 편집기.
+ * 이름·함체 규격·설치주소·비고 + 부모 국사·작업가능시간대·노란마크.
  * redirect 안 함 — JSON 결과 반환 (패널 안에서 router.refresh 처리).
  */
 export async function updateFacilityFromCanvas(input: {
   project_id: string
   id: string
+  closure_type: ClosureType
   name: string
   closure_spec: CableSpec | null
   install_address: string | null
   notes: string | null
+  parent_facility_id: string | null
+  is_marked: boolean
+  work_window_start: string | null
+  work_window_end: string | null
 }): Promise<{ ok: true } | { ok: false; error: string }> {
   if (!input.project_id || !input.id) return { ok: false, error: '대상이 올바르지 않습니다' }
   const name = (input.name ?? '').trim()
@@ -357,6 +385,29 @@ export async function updateFacilityFromCanvas(input: {
   const notes = (input.notes ?? '').trim() || null
   if (notes && notes.length > 1000) return { ok: false, error: '비고는 1000자 이하로 입력하세요' }
 
+  // 부모 국사 — 국사 내부 노드(MOFD·OJC·국사내장비)만 가질 수 있음
+  const parentId = (input.parent_facility_id ?? '').trim() || null
+  if (parentId && !isInternalNode(input.closure_type)) {
+    return { ok: false, error: '부모 시설은 MOFD·OJC·국사내장비만 가질 수 있습니다' }
+  }
+
+  // 작업 가능 시간대 — 시작·종료 둘 다 또는 둘 다 비움 (HH:MM)
+  const wws = (input.work_window_start ?? '').trim()
+  const wwe = (input.work_window_end ?? '').trim()
+  let workWindowStart: string | null = null
+  let workWindowEnd: string | null = null
+  if (wws || wwe) {
+    const timeRe = /^\d{2}:\d{2}$/
+    if (!timeRe.test(wws) || !timeRe.test(wwe)) {
+      return {
+        ok: false,
+        error: '작업 가능 시간대는 시작·종료 모두 HH:MM 형식으로 입력하세요',
+      }
+    }
+    workWindowStart = wws
+    workWindowEnd = wwe
+  }
+
   const { supabase } = await requireMember()
 
   const { error } = await supabase
@@ -366,6 +417,10 @@ export async function updateFacilityFromCanvas(input: {
       closure_spec: input.closure_spec ?? null,
       install_address: installAddress,
       notes,
+      parent_facility_id: parentId,
+      is_marked: !!input.is_marked,
+      work_window_start: workWindowStart,
+      work_window_end: workWindowEnd,
     })
     .eq('id', input.id)
 

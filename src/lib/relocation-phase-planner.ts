@@ -89,6 +89,35 @@ export function planPhases(units: WorkUnit[]): PhasePlan {
 // 자동 분할 후 실제 시공 시, 차수마다 투입 가능한 팀 수가 다를 수 있다.
 // 설계자가 차수별 팀 수를 조정하면 그 용량에 맞춰 작업을 다시 배치한다.
 
+export const DEFAULT_WINDOW_START = '02:00'
+export const DEFAULT_WINDOW_END = '05:00'
+
+// 'HH:MM' 또는 'HH:MM:SS' → 그날 0시 기준 분
+function timeToMin(t: string): number {
+  const parts = t.split(':')
+  return (Number(parts[0]) || 0) * 60 + (Number(parts[1]) || 0)
+}
+
+// 시간대 길이(분). 종료 ≤ 시작이면 자정을 넘는 것으로 본다 (예: 23:00~02:00).
+export function windowMinutes(start: string, end: string): number {
+  const s = timeToMin(start)
+  let e = timeToMin(end)
+  if (e <= s) e += 1440
+  return e - s
+}
+
+// 두 시간대가 겹치는지 — 자정을 넘지 않는 야간 시간대 기준 단순 비교.
+export function windowsOverlap(
+  aStart: string,
+  aEnd: string,
+  bStart: string,
+  bEnd: string,
+): boolean {
+  return (
+    timeToMin(aStart) < timeToMin(bEnd) && timeToMin(bStart) < timeToMin(aEnd)
+  )
+}
+
 export type PackUnit = {
   id: string // 차수 작업(phase_task) 식별자
   minutes: number
@@ -96,27 +125,36 @@ export type PackUnit = {
 
 export type PackedPhase = {
   teams: number
+  windowStart: string
+  windowEnd: string
   unitIds: string[]
   minutes: number
   overCapacity: boolean
 }
 
+export type RebalanceBin = {
+  teams: number
+  windowStart: string
+  windowEnd: string
+}
+
 /**
- * 작업 단위를 기존 차수(팀 수가 정해진)에 FFD 로 다시 채워 넣는다.
+ * 작업 단위를 기존 차수(팀 수·시간대가 정해진)에 FFD 로 다시 채워 넣는다.
+ * 차수 용량 = 팀 수 × 시간대 길이(분).
  *
- * @param units        재배치할 작업 단위
- * @param existingTeams 기존 차수들의 팀 수 (차수 번호 순)
- * @returns 비지 않은 차수만. 기존 차수에 다 안 들어가면 새 차수를 뒤에 추가.
+ * @returns 비지 않은 차수만. 기존 차수에 다 안 들어가면 새 차수(기본 02~05시)를 뒤에 추가.
  */
 export function rebalanceIntoPhases(
   units: PackUnit[],
-  existingTeams: number[],
+  existing: RebalanceBin[],
 ): PackedPhase[] {
   const work = [...units].sort((a, b) => b.minutes - a.minutes)
 
-  const bins = existingTeams.map((teams) => ({
-    teams,
-    capacity: Math.max(1, teams) * SHIFT_MINUTES,
+  const bins = existing.map((b) => ({
+    teams: b.teams,
+    windowStart: b.windowStart,
+    windowEnd: b.windowEnd,
+    capacity: Math.max(1, b.teams) * windowMinutes(b.windowStart, b.windowEnd),
     ids: [] as string[],
     minutes: 0,
   }))
@@ -139,6 +177,8 @@ export function rebalanceIntoPhases(
     .filter((b) => b.ids.length > 0)
     .map((b) => ({
       teams: b.teams,
+      windowStart: b.windowStart,
+      windowEnd: b.windowEnd,
       unitIds: b.ids,
       minutes: b.minutes,
       overCapacity: b.minutes > b.capacity,
@@ -152,6 +192,8 @@ export function rebalanceIntoPhases(
     for (const ep of extra.phases) {
       result.push({
         teams: extra.teams,
+        windowStart: DEFAULT_WINDOW_START,
+        windowEnd: DEFAULT_WINDOW_END,
         unitIds: ep.unitFacilityIds,
         minutes: ep.minutes,
         overCapacity: ep.overCapacity,
@@ -160,6 +202,54 @@ export function rebalanceIntoPhases(
   }
 
   return result
+}
+
+// ── 동시작업 그룹 — 절체 시 같은 차수에 묶여야 하는 시설 ────────────────
+//
+// 절체(cutover)는 케이블 양끝 함체에서 동시에 작업해야 회선이 안 끊긴다.
+// 기설이 아닌(절체 대상) 케이블로 연결된 시설들은 한 차수에서 분리되면 안 됨.
+// union-find 로 연결 요소를 구해 시설 → 그룹 번호 맵을 반환한다.
+export function buildSimultaneityGroups(
+  facilityIds: string[],
+  cables: { from_facility_id: string; to_facility_id: string; status: string }[],
+): Map<string, number> {
+  const parent = new Map<string, string>()
+  for (const id of facilityIds) parent.set(id, id)
+
+  function find(x: string): string {
+    let r = x
+    let p = parent.get(r)
+    while (p !== undefined && p !== r) {
+      r = p
+      p = parent.get(r)
+    }
+    return r
+  }
+
+  for (const c of cables) {
+    if (c.status === 'existing') continue
+    const a = c.from_facility_id
+    const b = c.to_facility_id
+    if (!parent.has(a) || !parent.has(b)) continue
+    const ra = find(a)
+    const rb = find(b)
+    if (ra !== rb) parent.set(ra, rb)
+  }
+
+  const groupOf = new Map<string, number>()
+  const rootNum = new Map<string, number>()
+  let next = 0
+  for (const id of facilityIds) {
+    const r = find(id)
+    let g = rootNum.get(r)
+    if (g === undefined) {
+      g = next
+      next += 1
+      rootNum.set(r, g)
+    }
+    groupOf.set(id, g)
+  }
+  return groupOf
 }
 
 // 분 → 'H시간 M분' 표시

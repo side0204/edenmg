@@ -23,6 +23,7 @@ export type PhaseTaskRow = {
   facility_id: string
   task_kind: string
   estimated_minutes: number | null
+  simultaneity_group: string | null
 }
 
 export type PhaseFacility = {
@@ -30,6 +31,8 @@ export type PhaseFacility = {
   closure_type: ClosureType
   seq_no: number
   name: string
+  work_window_start: string | null
+  work_window_end: string | null
 }
 
 export default function PhasesTab({

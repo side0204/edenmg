@@ -24,6 +24,8 @@ export type FacilityRow = {
   y_hint: number | null
   lat: number | null
   lng: number | null
+  work_window_start: string | null
+  work_window_end: string | null
 }
 
 // 함체일 때 보여줄 기본 권장 함체 규격 (참고용 — 폼에는 직접 추천 표시)
@@ -297,6 +299,30 @@ function FacilityRowItem({
               maxLength={200}
               className="mt-0.5 w-full rounded-lg border border-slate-300 px-2 py-1.5 text-sm"
             />
+          </div>
+
+          <div className="sm:col-span-2">
+            <label className="block text-[11px] text-slate-500">
+              작업 가능 시간대 (선택 — 특정 시간대에만 작업 가능한 시설)
+            </label>
+            <div className="mt-0.5 flex items-center gap-1.5">
+              <input
+                type="time"
+                name="work_window_start"
+                defaultValue={facility.work_window_start?.slice(0, 5) ?? ''}
+                className="rounded-lg border border-slate-300 px-2 py-1.5 text-sm"
+              />
+              <span className="text-slate-400">~</span>
+              <input
+                type="time"
+                name="work_window_end"
+                defaultValue={facility.work_window_end?.slice(0, 5) ?? ''}
+                className="rounded-lg border border-slate-300 px-2 py-1.5 text-sm"
+              />
+              <span className="text-[11px] text-slate-400">
+                비워두면 차수 시간대 안 아무때나
+              </span>
+            </div>
           </div>
 
           <div className="sm:col-span-2">

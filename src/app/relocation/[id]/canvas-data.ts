@@ -35,7 +35,7 @@ export async function loadRelocationCanvasData(
   const { data: fRows } = await supabase
     .from('relocation_facilities')
     .select(
-      'id, closure_type, seq_no, name, install_address, closure_spec, parent_facility_id, is_marked, notes, x_hint, y_hint, lat, lng',
+      'id, closure_type, seq_no, name, install_address, closure_spec, parent_facility_id, is_marked, notes, x_hint, y_hint, lat, lng, work_window_start, work_window_end',
     )
     .eq('project_id', projectId)
     .order('closure_type')

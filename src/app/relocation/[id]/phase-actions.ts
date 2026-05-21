@@ -6,8 +6,66 @@ import { createClient } from '@/lib/supabase/server'
 import {
   planPhases,
   rebalanceIntoPhases,
+  buildSimultaneityGroups,
   type WorkUnit,
+  type RebalanceBin,
 } from '@/lib/relocation-phase-planner'
+
+type SimCable = {
+  from_facility_id: string
+  to_facility_id: string
+  status: string
+}
+
+/**
+ * 시설별 작업시간 + 케이블 토폴로지 → 동시작업 그룹 단위.
+ *   - 절체 대상 케이블로 묶인 시설은 같은 그룹 = 같은 차수.
+ *   - units: 그룹을 하나의 패킹 단위로 (facilityId 자리에 그룹키).
+ *   - membersByGroup: 그룹키 → 소속 시설(작업시간 > 0) 목록.
+ *   - simultaneityOf: 시설 → 동시작업 그룹키 (그룹에 시설 2개 이상일 때만, 아니면 null).
+ */
+function buildGroupUnits(
+  facilityMinutes: Map<string, number>,
+  cables: SimCable[],
+): {
+  units: WorkUnit[]
+  membersByGroup: Map<string, string[]>
+  simultaneityOf: Map<string, string | null>
+} {
+  const allIds = new Set<string>()
+  for (const c of cables) {
+    allIds.add(c.from_facility_id)
+    allIds.add(c.to_facility_id)
+  }
+  for (const id of facilityMinutes.keys()) allIds.add(id)
+
+  const groupOf = buildSimultaneityGroups([...allIds], cables)
+
+  const membersByGroup = new Map<string, string[]>()
+  const minutesByGroup = new Map<string, number>()
+  for (const [fid, min] of facilityMinutes) {
+    if (min <= 0) continue
+    const key = `g${groupOf.get(fid) ?? -1}`
+    const arr = membersByGroup.get(key)
+    if (arr) arr.push(fid)
+    else membersByGroup.set(key, [fid])
+    minutesByGroup.set(key, (minutesByGroup.get(key) ?? 0) + min)
+  }
+
+  const units: WorkUnit[] = [...minutesByGroup.entries()].map(([key, minutes]) => ({
+    facilityId: key,
+    minutes,
+  }))
+
+  const simultaneityOf = new Map<string, string | null>()
+  for (const [key, members] of membersByGroup) {
+    for (const fid of members) {
+      simultaneityOf.set(fid, members.length >= 2 ? key : null)
+    }
+  }
+
+  return { units, membersByGroup, simultaneityOf }
+}
 
 // 지장이설 Step D-2 — 차수 자동 분할 server action.
 //   시설별 공종량(relocation_facility_tasks) 합계를 작업시간으로 보고
@@ -99,11 +157,12 @@ export async function runPhasePlanning(projectId: string): Promise<PhasePlanSumm
     )
   }
 
-  const units: WorkUnit[] = [...minutesByFacility.entries()]
-    .map(([facilityId, minutes]) => ({ facilityId, minutes: Math.round(minutes) }))
-    .filter((u) => u.minutes > 0)
-
-  if (units.length === 0) {
+  const roundedMinutes = new Map<string, number>()
+  for (const [fid, min] of minutesByFacility) {
+    const r = Math.round(min)
+    if (r > 0) roundedMinutes.set(fid, r)
+  }
+  if (roundedMinutes.size === 0) {
     return {
       ok: false,
       error:
@@ -111,7 +170,12 @@ export async function runPhasePlanning(projectId: string): Promise<PhasePlanSumm
     }
   }
 
-  // 3. 차수 분할 계산
+  // 3. 동시작업 그룹 단위로 차수 분할
+  //    절체 대상 케이블로 묶인 시설들은 한 차수에서 분리되면 안 됨.
+  const { units, membersByGroup, simultaneityOf } = buildGroupUnits(
+    roundedMinutes,
+    cables,
+  )
   const plan = planPhases(units)
 
   // task_kind — 신설 케이블이 연결된 시설은 '함체신설_절단', 그 외 '기설접속'
@@ -130,7 +194,11 @@ export async function runPhasePlanning(projectId: string): Promise<PhasePlanSumm
     .eq('project_id', projectId)
   if (delErr) return { ok: false, error: '기존 차수 삭제 실패: ' + delErr.message }
 
-  // 5. 차수 + 차수별 작업 insert
+  // 5. 차수 + 차수별 작업 insert (그룹 → 소속 시설 전개)
+  const totalFacilities = [...membersByGroup.values()].reduce(
+    (acc, m) => acc + m.length,
+    0,
+  )
   let phaseNo = 0
   for (const ph of plan.phases) {
     phaseNo += 1
@@ -150,18 +218,23 @@ export async function runPhasePlanning(projectId: string): Promise<PhasePlanSumm
     }
     const phaseId = (phaseRow as { id: string }).id
 
-    const { error: tErr } = await supabase.from('relocation_phase_tasks').insert(
-      ph.unitFacilityIds.map((facilityId) => ({
-        phase_id: phaseId,
-        facility_id: facilityId,
-        task_kind: facilitiesWithNewCable.has(facilityId)
-          ? '함체신설_절단'
-          : '기설접속',
-        cores_continuous: 0,
-        cores_noncontinuous: 0,
-        estimated_minutes: minutesByFacility.get(facilityId) ?? 0,
-      })),
-    )
+    const taskRows: Record<string, unknown>[] = []
+    for (const groupKey of ph.unitFacilityIds) {
+      for (const fid of membersByGroup.get(groupKey) ?? []) {
+        taskRows.push({
+          phase_id: phaseId,
+          facility_id: fid,
+          task_kind: facilitiesWithNewCable.has(fid) ? '함체신설_절단' : '기설접속',
+          cores_continuous: 0,
+          cores_noncontinuous: 0,
+          estimated_minutes: roundedMinutes.get(fid) ?? 0,
+          simultaneity_group: simultaneityOf.get(fid) ?? null,
+        })
+      }
+    }
+    const { error: tErr } = await supabase
+      .from('relocation_phase_tasks')
+      .insert(taskRows)
     if (tErr) return { ok: false, error: '차수 작업 저장 실패: ' + tErr.message }
   }
 
@@ -172,7 +245,7 @@ export async function runPhasePlanning(projectId: string): Promise<PhasePlanSumm
     phaseCount: plan.phases.length,
     teams: plan.teams,
     totalMinutes: plan.totalMinutes,
-    facilityCount: units.length,
+    facilityCount: totalFacilities,
   }
 }
 
@@ -219,6 +292,34 @@ export async function updatePhaseTeams(
     .update({ required_teams: t })
     .eq('id', phaseId)
   if (error) return { ok: false, error: '팀 수 저장 실패: ' + error.message }
+
+  revalidatePath(`/relocation/${projectId}`)
+  return { ok: true }
+}
+
+/** 차수별 시공 시간대(window_start~window_end) 변경. 용량 = 팀 수 × 시간대 길이. */
+export async function updatePhaseWindow(
+  projectId: string,
+  phaseId: string,
+  windowStart: string,
+  windowEnd: string,
+): Promise<SimpleResult> {
+  if (!projectId || !phaseId) return { ok: false, error: '대상이 올바르지 않습니다' }
+  const re = /^\d{2}:\d{2}$/
+  if (!re.test(windowStart) || !re.test(windowEnd)) {
+    return { ok: false, error: '시간 형식이 올바르지 않습니다 (HH:MM)' }
+  }
+  if (windowStart === windowEnd) {
+    return { ok: false, error: '시작·종료 시각이 같을 수 없습니다' }
+  }
+
+  const { supabase } = await requireMember()
+
+  const { error } = await supabase
+    .from('relocation_phases')
+    .update({ window_start: windowStart, window_end: windowEnd })
+    .eq('id', phaseId)
+  if (error) return { ok: false, error: '시간대 저장 실패: ' + error.message }
 
   revalidatePath(`/relocation/${projectId}`)
   return { ok: true }
@@ -314,7 +415,7 @@ export async function rebalancePhases(projectId: string): Promise<RebalanceSumma
 
   const { data: phRows, error: phErr } = await supabase
     .from('relocation_phases')
-    .select('id, phase_no, required_teams')
+    .select('id, phase_no, required_teams, window_start, window_end')
     .eq('project_id', projectId)
     .order('phase_no')
   if (phErr) return { ok: false, error: '차수 조회 실패: ' + phErr.message }
@@ -322,6 +423,8 @@ export async function rebalancePhases(projectId: string): Promise<RebalanceSumma
     id: string
     phase_no: number
     required_teams: number
+    window_start: string
+    window_end: string
   }[]
   if (phases.length === 0) {
     return { ok: false, error: '먼저 「차수 자동 분할」을 실행하세요' }
@@ -344,13 +447,35 @@ export async function rebalancePhases(projectId: string): Promise<RebalanceSumma
     return { ok: false, error: '차수에 배정된 작업이 없습니다' }
   }
 
-  // 작업을 차수별 팀 수(용량)에 맞춰 재패킹
-  const existingTeams = phases.map((p) => p.required_teams)
-  const items = tasks.map((t, i) => ({
-    id: String(i),
-    minutes: t.estimated_minutes ?? 0,
+  const { data: cRows, error: cErr } = await supabase
+    .from('relocation_cables')
+    .select('from_facility_id, to_facility_id, status')
+    .eq('project_id', projectId)
+  if (cErr) return { ok: false, error: '케이블 조회 실패: ' + cErr.message }
+  const cables = (cRows ?? []) as SimCable[]
+
+  // 시설별 작업시간·task_kind 수집
+  const facilityMinutes = new Map<string, number>()
+  const taskKindByFacility = new Map<string, string>()
+  for (const t of tasks) {
+    facilityMinutes.set(t.facility_id, t.estimated_minutes ?? 0)
+    taskKindByFacility.set(t.facility_id, t.task_kind)
+  }
+
+  // 동시작업 그룹 단위로 차수별 팀 수(용량)에 맞춰 재패킹
+  const { units, membersByGroup, simultaneityOf } = buildGroupUnits(
+    facilityMinutes,
+    cables,
+  )
+  const existing: RebalanceBin[] = phases.map((p) => ({
+    teams: p.required_teams,
+    windowStart: p.window_start,
+    windowEnd: p.window_end,
   }))
-  const packed = rebalanceIntoPhases(items, existingTeams)
+  const packed = rebalanceIntoPhases(
+    units.map((u) => ({ id: u.facilityId, minutes: u.minutes })),
+    existing,
+  )
 
   // 기존 차수 삭제 (phase_tasks cascade)
   const { error: delErr } = await supabase
@@ -359,7 +484,7 @@ export async function rebalancePhases(projectId: string): Promise<RebalanceSumma
     .eq('project_id', projectId)
   if (delErr) return { ok: false, error: '기존 차수 삭제 실패: ' + delErr.message }
 
-  // 재생성
+  // 재생성 (그룹 → 소속 시설 전개)
   let phaseNo = 0
   for (const pp of packed) {
     phaseNo += 1
@@ -369,6 +494,8 @@ export async function rebalancePhases(projectId: string): Promise<RebalanceSumma
         project_id: projectId,
         phase_no: phaseNo,
         required_teams: pp.teams,
+        window_start: pp.windowStart,
+        window_end: pp.windowEnd,
         estimated_minutes: pp.minutes,
         status: '계획',
       })
@@ -379,19 +506,23 @@ export async function rebalancePhases(projectId: string): Promise<RebalanceSumma
     }
     const phaseId = (phaseRow as { id: string }).id
 
-    const { error: tErr } = await supabase.from('relocation_phase_tasks').insert(
-      pp.unitIds.map((idx) => {
-        const t = tasks[Number(idx)]
-        return {
+    const taskRows: Record<string, unknown>[] = []
+    for (const groupKey of pp.unitIds) {
+      for (const fid of membersByGroup.get(groupKey) ?? []) {
+        taskRows.push({
           phase_id: phaseId,
-          facility_id: t.facility_id,
-          task_kind: t.task_kind,
+          facility_id: fid,
+          task_kind: taskKindByFacility.get(fid) ?? '기설접속',
           cores_continuous: 0,
           cores_noncontinuous: 0,
-          estimated_minutes: t.estimated_minutes ?? 0,
-        }
-      }),
-    )
+          estimated_minutes: facilityMinutes.get(fid) ?? 0,
+          simultaneity_group: simultaneityOf.get(fid) ?? null,
+        })
+      }
+    }
+    const { error: tErr } = await supabase
+      .from('relocation_phase_tasks')
+      .insert(taskRows)
     if (tErr) return { ok: false, error: '차수 작업 저장 실패: ' + tErr.message }
   }
 

@@ -7,6 +7,7 @@ import { Plus, Trash2, Layers, ArrowRight } from 'lucide-react'
 import { formatFacilityCode, type ClosureType } from '@/lib/relocation'
 import type { CableSpec } from '@/lib/connection'
 import { createSplice, deleteSplice } from './splice-actions'
+import SpliceDiagram from './SpliceDiagram'
 
 // 직선도(접속) 탭 — 함체 안에서 입력 케이블 코어 ↔ 출력 케이블 코어 접속 매핑.
 
@@ -230,6 +231,14 @@ export default function SpliceTab({
               </ul>
             )}
           </section>
+
+          {/* 직선도 */}
+          {facilitySplices.length > 0 && (
+            <section className="space-y-2">
+              <h4 className="text-sm font-semibold text-slate-700">직선도</h4>
+              <SpliceDiagram splices={facilitySplices} cableLabel={cableLabel} />
+            </section>
+          )}
 
           {/* 접속 추가 */}
           <section className="border border-slate-200 rounded-xl p-4 bg-white space-y-3">

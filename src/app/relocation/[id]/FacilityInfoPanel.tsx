@@ -17,6 +17,7 @@ import {
   CLOSURE_TYPE_LABEL,
   CLOSURE_TYPE_CATEGORY,
   formatFacilityCode,
+  isInternalNode,
   type ClosureType,
 } from '@/lib/relocation'
 import type { CableSpec } from '@/lib/connection'
@@ -29,11 +30,13 @@ import {
 } from './facility-task-actions'
 
 // 시설 정보 패널 — 캔버스에서 시설(모든 종류) 선택 시 우측에 표시.
-//   - 시설 기본 정보 수정 (이름·함체 규격·설치 주소·비고)
+//   시설의 유일 정식 편집기 (「시설」 탭 폼과 필드를 일치시킴).
+//   - 시설 기본 정보 (이름·함체 규격·설치 주소·비고)
+//   - 부모 국사 (MOFD·OJC·국사내장비) · 작업 가능 시간대 · 노란 마크
 //   - 공종량 (relocation_facility_tasks) — 기별명세서용
 //   - 사용 자재 (relocation_facility_materials) — 기별명세서용
 // 작업이 있는 시설만 공종·자재를 등록. 없으면 비워둔다.
-// 함체 규격은 접속함체 종류에만 표시.
+// 함체 규격은 접속함체 종류에만, 부모 국사는 국사 내부 노드에만 표시.
 
 export type FacilityPanelData = {
   id: string
@@ -43,6 +46,18 @@ export type FacilityPanelData = {
   closure_spec: CableSpec | null
   install_address: string | null
   notes: string | null
+  parent_facility_id: string | null
+  is_marked: boolean
+  work_window_start: string | null
+  work_window_end: string | null
+}
+
+// 부모 국사 후보 (국사 종류 시설)
+export type FacilityStationOption = {
+  id: string
+  closure_type: ClosureType
+  seq_no: number
+  name: string
 }
 
 export type TaskTypeOption = {
@@ -69,6 +84,7 @@ export type FacilityMaterialItem = {
 export default function FacilityInfoPanel({
   projectId,
   facility,
+  stations,
   cableCount,
   taskTypes,
   tasks,
@@ -80,6 +96,7 @@ export default function FacilityInfoPanel({
 }: {
   projectId: string
   facility: FacilityPanelData
+  stations: FacilityStationOption[]
   cableCount: number
   taskTypes: TaskTypeOption[]
   tasks: FacilityTaskItem[]
@@ -94,9 +111,18 @@ export default function FacilityInfoPanel({
   const [spec, setSpec] = useState<string>(facility.closure_spec ?? '')
   const [address, setAddress] = useState(facility.install_address ?? '')
   const [notes, setNotes] = useState(facility.notes ?? '')
+  const [parentId, setParentId] = useState<string>(facility.parent_facility_id ?? '')
+  const [isMarked, setIsMarked] = useState(facility.is_marked)
+  const [windowStart, setWindowStart] = useState(
+    facility.work_window_start?.slice(0, 5) ?? '',
+  )
+  const [windowEnd, setWindowEnd] = useState(
+    facility.work_window_end?.slice(0, 5) ?? '',
+  )
 
-  // 함체 규격은 접속함체 종류에만 표시
+  // 함체 규격은 접속함체 종류에만, 부모 국사는 국사 내부 노드에만 표시
   const isClosure = CLOSURE_TYPE_CATEGORY[facility.closure_type] === '접속함체'
+  const isInternal = isInternalNode(facility.closure_type)
 
   // 공종 추가 폼
   const [newTaskType, setNewTaskType] = useState('')
@@ -138,10 +164,15 @@ export default function FacilityInfoPanel({
     const result = await updateFacilityFromCanvas({
       project_id: projectId,
       id: facility.id,
+      closure_type: facility.closure_type,
       name: name.trim(),
       closure_spec: isClosure && spec ? (spec as CableSpec) : null,
       install_address: address.trim() || null,
       notes: notes.trim() || null,
+      parent_facility_id: isInternal && parentId ? parentId : null,
+      is_marked: isMarked,
+      work_window_start: windowStart || null,
+      work_window_end: windowEnd || null,
     })
     setBusy(false)
     if (!result.ok) {
@@ -366,6 +397,60 @@ export default function FacilityInfoPanel({
               className="mt-0.5 w-full rounded-md border border-slate-300 px-2 py-1 text-xs resize-none"
             />
           </div>
+          {isInternal && (
+            <div>
+              <label className="block text-[11px] font-medium text-slate-600">
+                부모 국사
+              </label>
+              <select
+                value={parentId}
+                onChange={(e) => setParentId(e.target.value)}
+                className="mt-0.5 w-full rounded-md border border-slate-300 px-2 py-1 text-xs"
+              >
+                <option value="">(없음)</option>
+                {stations.map((s) => (
+                  <option key={s.id} value={s.id}>
+                    {formatFacilityCode(s.closure_type, s.seq_no)} {s.name}
+                  </option>
+                ))}
+              </select>
+              <p className="mt-0.5 text-[10px] text-slate-400">
+                MOFD·OJC·국사내장비는 소속 국사를 지정합니다.
+              </p>
+            </div>
+          )}
+          <div>
+            <label className="block text-[11px] font-medium text-slate-600">
+              작업 가능 시간대
+            </label>
+            <div className="mt-0.5 flex items-center gap-1">
+              <input
+                type="time"
+                value={windowStart}
+                onChange={(e) => setWindowStart(e.target.value)}
+                className="rounded-md border border-slate-300 px-1.5 py-1 text-xs"
+              />
+              <span className="text-slate-400">~</span>
+              <input
+                type="time"
+                value={windowEnd}
+                onChange={(e) => setWindowEnd(e.target.value)}
+                className="rounded-md border border-slate-300 px-1.5 py-1 text-xs"
+              />
+            </div>
+            <p className="mt-0.5 text-[10px] text-slate-400">
+              특정 시간대에만 작업 가능한 시설. 비우면 차수 시간대 안 아무때나.
+            </p>
+          </div>
+          <label className="flex items-center gap-1.5 text-[11px] text-slate-600">
+            <input
+              type="checkbox"
+              checked={isMarked}
+              onChange={(e) => setIsMarked(e.target.checked)}
+              className="rounded"
+            />
+            노란색 마크 (의미 미상 — 보존용)
+          </label>
           <div className="flex justify-end">
             <button
               type="button"

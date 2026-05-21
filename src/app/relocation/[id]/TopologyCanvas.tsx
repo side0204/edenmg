@@ -13,6 +13,7 @@ import {
   Expand,
   Shrink,
   Crosshair,
+  MoreHorizontal,
   Map as MapIcon,
   Network,
   TriangleAlert,
@@ -95,6 +96,10 @@ type FacilityNode = {
   closure_spec: CableSpec | null
   install_address: string | null
   notes: string | null
+  parent_facility_id: string | null
+  is_marked: boolean
+  work_window_start: string | null
+  work_window_end: string | null
   x_hint: number | null
   y_hint: number | null
   lat: number | null
@@ -1381,31 +1386,6 @@ export default function TopologyCanvas({
             </>
           )}
 
-          {/* 캔버스 표시 영역 크기 단계 — compact/normal/tall/fullscreen */}
-          <div className="ml-2 inline-flex items-center rounded-md border border-slate-300 overflow-hidden">
-            <button
-              type="button"
-              onClick={shrinkCanvas}
-              disabled={canvasSize === 'compact'}
-              className="inline-flex items-center justify-center w-7 h-7 text-slate-700 hover:bg-slate-50 disabled:opacity-30 disabled:cursor-not-allowed"
-              title="캔버스 축소"
-            >
-              <Shrink className="h-3.5 w-3.5" />
-            </button>
-            <span className="px-2 text-[11px] font-medium text-slate-600 border-x border-slate-200 h-7 inline-flex items-center min-w-[3rem] justify-center">
-              {CANVAS_SIZE_LABEL[canvasSize]}
-            </span>
-            <button
-              type="button"
-              onClick={expandCanvas}
-              disabled={canvasSize === 'fullscreen'}
-              className="inline-flex items-center justify-center w-7 h-7 text-slate-700 hover:bg-slate-50 disabled:opacity-30 disabled:cursor-not-allowed"
-              title="캔버스 확장"
-            >
-              <Expand className="h-3.5 w-3.5" />
-            </button>
-          </div>
-
           <button
             type="button"
             onClick={() => setLegendOpen(true)}
@@ -1414,6 +1394,44 @@ export default function TopologyCanvas({
             <BookOpen className="h-3 w-3" />
             표준 범례
           </button>
+
+          {/* 더보기 — 자주 안 쓰는 컨트롤(캔버스 표시 크기 등)을 묶어 툴바를 정리 */}
+          <details className="relative ml-1">
+            <summary
+              className="inline-flex h-7 w-7 cursor-pointer list-none items-center justify-center rounded-md border border-slate-300 text-slate-700 hover:bg-slate-50 [&::-webkit-details-marker]:hidden"
+              title="더보기"
+            >
+              <MoreHorizontal className="h-3.5 w-3.5" />
+            </summary>
+            <div className="absolute right-0 top-8 z-30 w-48 rounded-lg border border-slate-200 bg-white p-2.5 shadow-lg">
+              <p className="px-0.5 pb-1 text-[10px] font-semibold uppercase tracking-wide text-slate-400">
+                캔버스 표시 크기
+              </p>
+              <div className="inline-flex w-full items-center overflow-hidden rounded-md border border-slate-300">
+                <button
+                  type="button"
+                  onClick={shrinkCanvas}
+                  disabled={canvasSize === 'compact'}
+                  className="inline-flex h-7 flex-1 items-center justify-center text-slate-700 hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-30"
+                  title="캔버스 축소"
+                >
+                  <Shrink className="h-3.5 w-3.5" />
+                </button>
+                <span className="inline-flex h-7 min-w-[3rem] items-center justify-center border-x border-slate-200 px-2 text-[11px] font-medium text-slate-600">
+                  {CANVAS_SIZE_LABEL[canvasSize]}
+                </span>
+                <button
+                  type="button"
+                  onClick={expandCanvas}
+                  disabled={canvasSize === 'fullscreen'}
+                  className="inline-flex h-7 flex-1 items-center justify-center text-slate-700 hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-30"
+                  title="캔버스 확장"
+                >
+                  <Expand className="h-3.5 w-3.5" />
+                </button>
+              </div>
+            </div>
+          </details>
 
           <button
             type="button"
@@ -2337,7 +2355,19 @@ export default function TopologyCanvas({
                   closure_spec: f.closure_spec,
                   install_address: f.install_address,
                   notes: f.notes,
+                  parent_facility_id: f.parent_facility_id,
+                  is_marked: f.is_marked,
+                  work_window_start: f.work_window_start,
+                  work_window_end: f.work_window_end,
                 }}
+                stations={facilities
+                  .filter((x) => x.closure_type === '국사')
+                  .map((x) => ({
+                    id: x.id,
+                    closure_type: x.closure_type,
+                    seq_no: x.seq_no,
+                    name: x.name,
+                  }))}
                 cableCount={facilityCableCount.get(f.id) ?? 0}
                 taskTypes={taskTypes ?? []}
                 tasks={(facilityTasks ?? []).filter((t) => t.facility_id === f.id)}
