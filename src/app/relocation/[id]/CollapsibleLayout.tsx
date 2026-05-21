@@ -20,8 +20,10 @@ export default function CollapsibleLayout({
   canvas: React.ReactNode
   bottomPanel: React.ReactNode
 }) {
-  const [topCollapsed, setTopCollapsed] = useState(false)
-  const [bottomCollapsed, setBottomCollapsed] = useState(false)
+  // 기본값 접힘 — 설계 화면 진입 시 캔버스에 바로 집중 (owner 요청).
+  //   도식·지도 모드 공통 (CollapsibleLayout 이 두 모드를 모두 감쌈).
+  const [topCollapsed, setTopCollapsed] = useState(true)
+  const [bottomCollapsed, setBottomCollapsed] = useState(true)
 
   const focused = topCollapsed && bottomCollapsed
   const toggleFocus = () => {

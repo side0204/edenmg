@@ -179,7 +179,7 @@ export default async function RelocationProjectPage({
               </h1>
               <p className="mt-1 text-sm text-slate-500">
                 {project.client} · {project.region ?? '지역 미정'}
-                {project.surveyed_at && ` · 답사 ${project.surveyed_at}`}
+                {project.surveyed_at && ` · 계약 ${project.surveyed_at}`}
                 {designerName && ` · 설계자 ${designerName}`}
               </p>
             </div>
@@ -401,7 +401,7 @@ export default async function RelocationProjectPage({
                 />
               </div>
               <div>
-                <label className="block text-sm font-medium text-slate-700">현장답사일</label>
+                <label className="block text-sm font-medium text-slate-700">공사계약일</label>
                 <input
                   type="date"
                   name="surveyed_at"

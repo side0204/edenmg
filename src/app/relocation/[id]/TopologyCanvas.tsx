@@ -139,6 +139,20 @@ const ROUTE_GAP_COLOR = '#d97706' // amber-600 (끊긴 중간경로 — 추정 �
 const FAULT_COLOR    = '#dc2626'  // red-600 (고장점 위치 마커)
 const DRAG_THRESHOLD = 4          // px — 클릭/드래그 구분
 const CABLE_OFFSET_GAP = 7        // px — 같은 경로 여러 케이블 평행 간격
+// 시설 라벨 흰색 외곽선 — 지도 모드에서 배경 지도 글자와 구분 (지도 제작사 표준 기법).
+//   두껍다고 느껴지면 줄이고, 잘 안 보이면 올린다.
+const LABEL_HALO_WIDTH = 3        // px
+
+// 지도 모드 — fit 시 setBounds 가 잡는 기본 줌에서 추가 확대 단계 (LEVEL 낮을수록 확대).
+const MAP_FIT_ZOOM_IN_STEPS = 2
+// 지도 모드 — 시설 노드 배율. 배율 = MAP_NODE_SCALE_STEP ^ (기본 단계 + 줌 축소 단계).
+//   MAP_NODE_BASE_SCALE_STEPS: 기준 줌에서도 항상 적용되는 기본 축소 단계.
+//   지도를 기준 줌보다 축소(level 증가)하면 MAP_NODE_SCALE_MAX_STEPS 단계까지 추가로 작아지고,
+//   그 이상은 최소 배율로 고정 — 너무 작아져 클릭/식별이 어려워지는 것 방지.
+//   배율이 너무 작/크다고 느껴지면 STEP 을 1 에 가깝게(덜 축소) 하거나 단계 수를 조정한다.
+const MAP_NODE_SCALE_STEP = 0.82       // 1 단계당 시설 배율
+const MAP_NODE_BASE_SCALE_STEPS = 2    // 기준 줌에서의 기본 축소 단계
+const MAP_NODE_SCALE_MAX_STEPS = 2     // 줌 축소를 따라가는 추가 단계 상한
 
 // polyline 의 arc-length 비율(0~1) 위치 점 — 고장점 마커용
 function pointAlongPolyline(
@@ -239,6 +253,10 @@ export default function TopologyCanvas({
   const [mapDragPos, setMapDragPos] = useState<Record<string, { x: number; y: number }>>({})
   const [placingId, setPlacingId] = useState<string | null>(null)
   const [showUnplaced, setShowUnplaced] = useState(false)
+
+  // 지도 모드 시설 노드 줌 연동의 기준 줌 — fit 직후의 지도 level.
+  //   이 level 보다 축소(level 증가)하면 시설 도형이 함께 작아진다.
+  const [mapBaseLevel, setMapBaseLevel] = useState<number | null>(null)
   const placingIdRef = useRef<string | null>(null)
   useEffect(() => {
     placingIdRef.current = placingId
@@ -320,6 +338,21 @@ export default function TopologyCanvas({
     // 의존성 필요성을 못 보므로 명시적으로 포함 (지도 pan/zoom 시 재투영 필수).
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [mode, facilities, positions, initialPositions, kakaoMap, mapEpoch, mapDragPos])
+
+  // 지도 모드 시설 노드 배율 — 기본 축소 단계 + 기준 줌보다 축소한 만큼 추가 축소.
+  //   도식 모드는 항상 1 (축소 없음). 확대(level 감소)는 추가 축소 없이 기본 배율 유지.
+  //   추가 축소는 MAP_NODE_SCALE_MAX_STEPS 단계까지, 이후는 최소 배율로 고정.
+  const mapNodeScale = useMemo(() => {
+    if (mode !== 'map') return 1
+    let extra = 0
+    if (kakaoMap && mapBaseLevel != null) {
+      const delta = kakaoMap.getLevel() - mapBaseLevel  // > 0 = 기준보다 축소
+      if (delta > 0) extra = Math.min(delta, MAP_NODE_SCALE_MAX_STEPS)
+    }
+    return MAP_NODE_SCALE_STEP ** (MAP_NODE_BASE_SCALE_STEPS + extra)
+    // mapEpoch = 지도 줌/이동 카운터. getLevel() 은 가변 상태라 명시 의존성 필요.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [mode, kakaoMap, mapBaseLevel, mapEpoch])
 
   const cableById = useMemo(() => new Map(cables.map((c) => [c.id, c])), [cables])
 
@@ -450,13 +483,15 @@ export default function TopologyCanvas({
   // 시설 추가 도구 패널 접기 상태 — owner 요청 (2026-05-20):
   //   "시설을 선택할 때는 펼쳐서 선택, 그리기 할 때는 접어서 그리기"
   //   → 시설 종류 chip 클릭 시 자동 접힘. 다시 펼치려면 헤더 클릭.
-  const [toolsCollapsed, setToolsCollapsed] = useState(false)
+  //   기본값 접힘 — 진입 시 캔버스에 바로 집중 (owner 요청).
+  const [toolsCollapsed, setToolsCollapsed] = useState(true)
 
   // 광케이블 카테고리 펼침 상태 (시설 카테고리 openCategories 와 별개)
   const [cableCatOpen, setCableCatOpen] = useState(false)
 
-  // 좌측 시설 목록 사이드바 — 클릭 시 해당 시설 위치로 캔버스 이동
-  const [sidebarCollapsed, setSidebarCollapsed] = useState(false)
+  // 좌측 시설 목록 사이드바 — 클릭 시 해당 시설 위치로 캔버스 이동.
+  //   기본값 접힘 — 진입 시 캔버스에 바로 집중 (owner 요청).
+  const [sidebarCollapsed, setSidebarCollapsed] = useState(true)
 
   // 카테고리별 시설 그룹 (좌측 사이드바용)
   const facilitiesByCategory = useMemo(() => {
@@ -628,7 +663,9 @@ export default function TopologyCanvas({
     return () => svg.removeEventListener('wheel', onWheel)
   }, [toSvgCoord, mode])
 
-  // 지도 모드 — GPS 가 있는 시설들이 모두 보이도록 지도 fit
+  // 지도 모드 — GPS 가 있는 시설들이 모두 보이도록 지도 fit.
+  //   setBounds 가 잡는 기본 줌에서 MAP_FIT_ZOOM_IN_STEPS 만큼 더 확대한다.
+  //   fit 직후 level 을 시설 노드 줌 연동의 기준(mapBaseLevel)으로 저장.
   const fitMapToFacilities = useCallback(() => {
     const m = kakaoMap
     if (!m) return
@@ -639,12 +676,18 @@ export default function TopologyCanvas({
     if (withGps.length === 0) return
     if (withGps.length === 1) {
       m.setCenter(new kakao.maps.LatLng(withGps[0].lat, withGps[0].lng))
-      m.setLevel(3)
+      m.setLevel(Math.max(1, 3 - MAP_FIT_ZOOM_IN_STEPS))
+      setMapBaseLevel(m.getLevel())
       return
     }
     const bounds = new kakao.maps.LatLngBounds()
     for (const f of withGps) bounds.extend(new kakao.maps.LatLng(f.lat, f.lng))
     m.setBounds(bounds)
+    // setBounds 는 모든 시설이 여유 있게 들어가도록 줌을 잡는다 — 한 단계 더 확대.
+    if (MAP_FIT_ZOOM_IN_STEPS > 0) {
+      m.setLevel(Math.max(1, m.getLevel() - MAP_FIT_ZOOM_IN_STEPS))
+    }
+    setMapBaseLevel(m.getLevel())
   }, [kakaoMap, facilities])
 
   // 지도 첫 준비 시 1회 — 시설 GPS 범위로 자동 fit
@@ -1554,98 +1597,6 @@ export default function TopologyCanvas({
         </div>
       )}
 
-      {/* 지도 모드 검색창 + 미배치 시설 배치. SDK 준비 완료 후에만 노출. */}
-      {mode === 'map' && mapStatus === 'ready' && (
-        <div className="px-4 py-2 border-b border-slate-100 bg-slate-50 space-y-2">
-          <div className="flex items-start gap-2">
-            <div className="flex-1 min-w-0">
-              <MapSearchBox
-                onPick={(lat, lng) => {
-                  const m = kakaoMap
-                  if (!m) return
-                  m.setCenter(new kakao.maps.LatLng(lat, lng))
-                  m.setLevel(3)
-                }}
-              />
-            </div>
-            {unplacedFacilities.length > 0 && (
-              <button
-                type="button"
-                onClick={() => setShowUnplaced((v) => !v)}
-                className={
-                  'shrink-0 inline-flex items-center gap-1 rounded-md px-2.5 h-8 text-xs font-medium border ' +
-                  (showUnplaced
-                    ? 'bg-amber-500 text-white border-amber-500'
-                    : 'bg-white text-amber-700 border-amber-300 hover:bg-amber-50')
-                }
-              >
-                <MapPin className="h-3.5 w-3.5" />
-                미배치 {unplacedFacilities.length}
-              </button>
-            )}
-          </div>
-
-          {/* 배치 대기 배너 — 「배치」 누른 시설을 지도 클릭으로 위치 지정 */}
-          {placingFacility && (
-            <div className="flex items-center justify-between gap-2 rounded-md bg-slate-900 px-3 py-1.5 text-xs font-medium text-white">
-              <span className="min-w-0 truncate">
-                지도를 클릭해 「{placingFacility.name}」 위치를 지정하세요
-              </span>
-              <button
-                type="button"
-                onClick={() => setPlacingId(null)}
-                className="shrink-0 inline-flex items-center gap-1 text-slate-300 hover:text-white"
-              >
-                <X className="h-3.5 w-3.5" />
-                취소
-              </button>
-            </div>
-          )}
-
-          {/* 미배치 시설 패널 — 일괄 펼치기 + 개별 배치 */}
-          {showUnplaced && unplacedFacilities.length > 0 && (
-            <div className="rounded-lg border border-slate-200 bg-white p-2 space-y-2">
-              <button
-                type="button"
-                onClick={onBulkPlace}
-                className="w-full rounded-md bg-emerald-600 px-2 py-1.5 text-xs font-semibold text-white hover:bg-emerald-700"
-              >
-                미배치 시설 {unplacedFacilities.length}개를 지도 중앙에 펼치기
-              </button>
-              <p className="px-0.5 text-[10px] text-slate-500 leading-snug">
-                펼친 뒤 시설을 드래그해 실제 위치로 옮기세요. 또는 아래에서 「배치」를
-                누른 뒤 지도를 클릭하세요.
-              </p>
-              <ul className="max-h-44 space-y-1 overflow-y-auto">
-                {unplacedFacilities.map((f) => (
-                  <li
-                    key={f.id}
-                    className="flex items-center justify-between gap-2 rounded-md border border-slate-200 px-2 py-1"
-                  >
-                    <span className="min-w-0 truncate text-[11px] text-slate-700">
-                      <span className="font-mono text-slate-500">
-                        {formatFacilityCode(f.closure_type, f.seq_no)}
-                      </span>{' '}
-                      {f.name}
-                    </span>
-                    <button
-                      type="button"
-                      onClick={() => {
-                        setPlacingId(f.id)
-                        setShowUnplaced(false)
-                      }}
-                      className="shrink-0 rounded-md bg-slate-900 px-2 py-0.5 text-[10px] font-medium text-white hover:bg-slate-800"
-                    >
-                      배치
-                    </button>
-                  </li>
-                ))}
-              </ul>
-            </div>
-          )}
-        </div>
-      )}
-
       {/* 좌측 시설 목록 사이드바 + SVG 캔버스 — 가로 flex */}
       <div
         className={isFullscreen ? 'flex flex-1 min-h-0' : 'flex'}
@@ -1727,6 +1678,106 @@ export default function TopologyCanvas({
               ▶ 시설 목록
             </button>
           )}
+
+          {/* 지도 모드 검색창 — 캔버스 중앙 최상단 floating.
+              별도 바 대신 지도 위에 띄워 캔버스를 더 넓게 쓴다. SDK 준비 후에만 노출.
+              바깥 래퍼는 in-flow 블록(relative) — 블록은 부모 폭 100% 라 flex 가운데
+              정렬이 확실히 먹는다 (absolute + left/right 는 폭이 안 늘어나는 경우가 있었음).
+              지도/SVG 는 absolute inset-0 라 이 in-flow 래퍼에 밀리지 않는다.
+              빈 좌우 영역은 pointer-events-none 으로 지도 조작을 막지 않는다. */}
+          {mode === 'map' && mapStatus === 'ready' && (
+            <div className="relative z-20 flex justify-center px-2 pt-2 pointer-events-none">
+              <div className="w-full max-w-md space-y-2 pointer-events-auto">
+                <div className="flex items-start gap-1.5 rounded-lg bg-white/95 p-1.5 shadow-lg ring-1 ring-slate-200 backdrop-blur-sm">
+                  <div className="flex-1 min-w-0">
+                    <MapSearchBox
+                      onPick={(lat, lng) => {
+                        const m = kakaoMap
+                        if (!m) return
+                        m.setCenter(new kakao.maps.LatLng(lat, lng))
+                        m.setLevel(3)
+                      }}
+                    />
+                  </div>
+                  {unplacedFacilities.length > 0 && (
+                    <button
+                      type="button"
+                      onClick={() => setShowUnplaced((v) => !v)}
+                      className={
+                        'shrink-0 inline-flex items-center gap-1 rounded-md px-2.5 h-8 text-xs font-medium border ' +
+                        (showUnplaced
+                          ? 'bg-amber-500 text-white border-amber-500'
+                          : 'bg-white text-amber-700 border-amber-300 hover:bg-amber-50')
+                      }
+                    >
+                      <MapPin className="h-3.5 w-3.5" />
+                      미배치 {unplacedFacilities.length}
+                    </button>
+                  )}
+                </div>
+
+                {/* 배치 대기 배너 — 「배치」 누른 시설을 지도 클릭으로 위치 지정 */}
+                {placingFacility && (
+                  <div className="flex items-center justify-between gap-2 rounded-md bg-slate-900 px-3 py-1.5 text-xs font-medium text-white shadow-lg">
+                    <span className="min-w-0 truncate">
+                      지도를 클릭해 「{placingFacility.name}」 위치를 지정하세요
+                    </span>
+                    <button
+                      type="button"
+                      onClick={() => setPlacingId(null)}
+                      className="shrink-0 inline-flex items-center gap-1 text-slate-300 hover:text-white"
+                    >
+                      <X className="h-3.5 w-3.5" />
+                      취소
+                    </button>
+                  </div>
+                )}
+
+                {/* 미배치 시설 패널 — 일괄 펼치기 + 개별 배치 */}
+                {showUnplaced && unplacedFacilities.length > 0 && (
+                  <div className="rounded-lg border border-slate-200 bg-white p-2 space-y-2 shadow-lg">
+                    <button
+                      type="button"
+                      onClick={onBulkPlace}
+                      className="w-full rounded-md bg-emerald-600 px-2 py-1.5 text-xs font-semibold text-white hover:bg-emerald-700"
+                    >
+                      미배치 시설 {unplacedFacilities.length}개를 지도 중앙에 펼치기
+                    </button>
+                    <p className="px-0.5 text-[10px] text-slate-500 leading-snug">
+                      펼친 뒤 시설을 드래그해 실제 위치로 옮기세요. 또는 아래에서 「배치」를
+                      누른 뒤 지도를 클릭하세요.
+                    </p>
+                    <ul className="max-h-44 space-y-1 overflow-y-auto">
+                      {unplacedFacilities.map((f) => (
+                        <li
+                          key={f.id}
+                          className="flex items-center justify-between gap-2 rounded-md border border-slate-200 px-2 py-1"
+                        >
+                          <span className="min-w-0 truncate text-[11px] text-slate-700">
+                            <span className="font-mono text-slate-500">
+                              {formatFacilityCode(f.closure_type, f.seq_no)}
+                            </span>{' '}
+                            {f.name}
+                          </span>
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setPlacingId(f.id)
+                              setShowUnplaced(false)
+                            }}
+                            className="shrink-0 rounded-md bg-slate-900 px-2 py-0.5 text-[10px] font-medium text-white hover:bg-slate-800"
+                          >
+                            배치
+                          </button>
+                        </li>
+                      ))}
+                    </ul>
+                  </div>
+                )}
+              </div>
+            </div>
+          )}
+
           {/* 카카오맵 배경 — 항상 mount, 지도 모드에서만 표시. SVG 가 위에 투명 오버레이. */}
           <div
             ref={mapSetContainer}
@@ -2071,6 +2122,12 @@ export default function TopologyCanvas({
             const isNew = facilityIsNew.get(f.id) ?? false
             const isSelected = selectedId === f.id
             const cableCount = facilityCableCount.get(f.id) ?? 0
+            const nodeCx = NODE_SIZE.width / 2
+            const nodeCy = NODE_SIZE.height / 2 - 10
+            // 라벨 — 글자 크기는 원래대로 고정. 도형이 축소된 만큼 위치만 중심 쪽으로 당겨
+            //   축소된 도형 바로 아래에 붙도록 한다 (scale=1 이면 원래 좌표 그대로).
+            const labelCodeY = nodeCy + mapNodeScale * (NODE_SIZE.height - 20 - nodeCy)
+            const labelNameY = labelCodeY + 12
             return (
               <g
                 key={f.id}
@@ -2083,49 +2140,81 @@ export default function TopologyCanvas({
                 }}
                 onPointerDown={(e) => onPointerDown(e, f.id)}
               >
-                {/* 선택 강조 — 도형 뒤 동그란 후광 */}
-                {isSelected && (
-                  <circle
-                    cx={NODE_SIZE.width / 2}
-                    cy={NODE_SIZE.height / 2 - 10}
-                    r={22}
-                    fill={SELECTED_COLOR}
-                    fillOpacity={0.18}
-                    stroke={SELECTED_COLOR}
-                    strokeWidth={2}
-                    strokeDasharray="3 3"
-                  />
-                )}
-
-                <FacilityShape closureType={f.closure_type} isNew={isNew} />
-
-                {/* 연결 케이블 수 배지 — 동일 시설 연결 직관 확인 (도형 우상단) */}
-                {cableCount > 0 && (
-                  <g style={{ pointerEvents: 'none' }}>
+                {/* 도형 — 지도 모드 줌 축소 시 노드 중심 기준으로 함께 축소.
+                    중심(GPS 투영점)은 불변 → 케이블 연결점 유지. 라벨은 이 그룹 밖이라 원래 크기. */}
+                <g
+                  transform={
+                    mapNodeScale !== 1
+                      ? `translate(${nodeCx}, ${nodeCy}) scale(${mapNodeScale}) translate(${-nodeCx}, ${-nodeCy})`
+                      : undefined
+                  }
+                >
+                  {/* 선택 강조 — 도형 뒤 동그란 후광 */}
+                  {isSelected && (
                     <circle
-                      cx={NODE_SIZE.width / 2 + 17}
-                      cy={NODE_SIZE.height / 2 - 26}
-                      r={8}
-                      fill="#0f766e"
-                      stroke="white"
-                      strokeWidth={1.5}
+                      cx={NODE_SIZE.width / 2}
+                      cy={NODE_SIZE.height / 2 - 10}
+                      r={22}
+                      fill={SELECTED_COLOR}
+                      fillOpacity={0.18}
+                      stroke={SELECTED_COLOR}
+                      strokeWidth={2}
+                      strokeDasharray="3 3"
                     />
-                    <text
-                      x={NODE_SIZE.width / 2 + 17}
-                      y={NODE_SIZE.height / 2 - 22.5}
-                      textAnchor="middle"
-                      fill="white"
-                      style={{ fontSize: 9, fontFamily: 'system-ui', fontWeight: 700 }}
-                    >
-                      {cableCount}
-                    </text>
-                  </g>
-                )}
+                  )}
 
-                <text x={NODE_SIZE.width / 2} y={NODE_SIZE.height - 20} textAnchor="middle" className="fill-slate-700" style={{ fontSize: 9, fontFamily: 'monospace', fontWeight: 700 }}>
+                  <FacilityShape closureType={f.closure_type} isNew={isNew} />
+
+                  {/* 연결 케이블 수 배지 — 동일 시설 연결 직관 확인 (도형 우상단) */}
+                  {cableCount > 0 && (
+                    <g style={{ pointerEvents: 'none' }}>
+                      <circle
+                        cx={NODE_SIZE.width / 2 + 17}
+                        cy={NODE_SIZE.height / 2 - 26}
+                        r={8}
+                        fill="#0f766e"
+                        stroke="white"
+                        strokeWidth={1.5}
+                      />
+                      <text
+                        x={NODE_SIZE.width / 2 + 17}
+                        y={NODE_SIZE.height / 2 - 22.5}
+                        textAnchor="middle"
+                        fill="white"
+                        style={{ fontSize: 9, fontFamily: 'system-ui', fontWeight: 700 }}
+                      >
+                        {cableCount}
+                      </text>
+                    </g>
+                  )}
+                </g>
+
+                {/* 라벨 — 도형이 축소돼도 글자 크기는 처음 크기로 고정.
+                    흰색 외곽선(paintOrder=stroke → 외곽선이 글자 뒤)으로 배경 지도 글자와 구분. */}
+                <text
+                  x={nodeCx}
+                  y={labelCodeY}
+                  textAnchor="middle"
+                  className="fill-slate-700"
+                  stroke="#ffffff"
+                  strokeWidth={LABEL_HALO_WIDTH}
+                  strokeLinejoin="round"
+                  paintOrder="stroke"
+                  style={{ fontSize: 9, fontFamily: 'monospace', fontWeight: 700 }}
+                >
                   {code}
                 </text>
-                <text x={NODE_SIZE.width / 2} y={NODE_SIZE.height - 8} textAnchor="middle" className="fill-slate-900" style={{ fontSize: 10, fontFamily: 'system-ui' }}>
+                <text
+                  x={nodeCx}
+                  y={labelNameY}
+                  textAnchor="middle"
+                  className="fill-slate-900"
+                  stroke="#ffffff"
+                  strokeWidth={LABEL_HALO_WIDTH}
+                  strokeLinejoin="round"
+                  paintOrder="stroke"
+                  style={{ fontSize: 10, fontFamily: 'system-ui', fontWeight: 600 }}
+                >
                   {f.name.length > 12 ? f.name.slice(0, 11) + '…' : f.name}
                 </text>
               </g>

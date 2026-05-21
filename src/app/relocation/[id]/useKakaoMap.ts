@@ -29,6 +29,12 @@ export type KakaoMapView = {
   epoch: number
 }
 
+// 지도 기본 초기 위치 — 모든 프로젝트 공통. 시설 좌표가 없는(빈) 프로젝트에서 이 위치를 보여준다.
+//   주소를 지오코딩해 정확 좌표로 이동하고, 실패 시 FALLBACK(미산로 도로 인근)을 쓴다.
+//   시설이 있는 프로젝트는 ready 후 TopologyCanvas 의 fitMapToFacilities 가 다시 fit 한다.
+const DEFAULT_CENTER_ADDRESS = '경기도 시흥시 미산로 62'
+const DEFAULT_CENTER_FALLBACK = { lat: 37.4242637, lng: 126.7929056 }
+
 export function useKakaoMap(enabled: boolean): KakaoMapView {
   const [container, setContainerState] = useState<HTMLDivElement | null>(null)
   const setContainer = useCallback((el: HTMLDivElement | null) => {
@@ -75,21 +81,46 @@ export function useKakaoMap(enabled: boolean): KakaoMapView {
       .then(() => {
         if (cancelled) return
         const m = new kakao.maps.Map(container, {
-          center: new kakao.maps.LatLng(37.5665, 126.978),
-          level: 4,
+          center: new kakao.maps.LatLng(
+            DEFAULT_CENTER_FALLBACK.lat,
+            DEFAULT_CENTER_FALLBACK.lng,
+          ),
+          level: 3,
         })
         mapInstanceRef.current = m
         kakao.maps.event.addListener(m, 'bounds_changed', bumpEpoch)
         kakao.maps.event.addListener(m, 'zoom_changed', bumpEpoch)
         kakao.maps.event.addListener(m, 'idle', bumpEpoch)
-        setMap(m)
-        setStatus('ready')
-        // 컨테이너 레이아웃이 늦게 잡힐 때 대비
-        setTimeout(() => {
+
+        // 지도 준비 완료 처리. ready 를 지오코딩 이후로 미뤄 fitMapToFacilities 와의
+        //   경합을 피한다 — ready 후에야 TopologyCanvas 가 시설 범위로 fit 하기 때문.
+        const finish = () => {
           if (cancelled) return
-          m.relayout()
-          bumpEpoch()
-        }, 120)
+          setMap(m)
+          setStatus('ready')
+          // 컨테이너 레이아웃이 늦게 잡힐 때 대비
+          setTimeout(() => {
+            if (cancelled) return
+            m.relayout()
+            bumpEpoch()
+          }, 120)
+        }
+
+        // 기본 초기 위치 = 미산로 62. 주소→좌표 변환 성공 시 정확 위치로 이동.
+        try {
+          const geocoder = new kakao.maps.services.Geocoder()
+          geocoder.addressSearch(DEFAULT_CENTER_ADDRESS, (result, status) => {
+            if (cancelled) return
+            if (status === 'OK' && Array.isArray(result) && result.length > 0) {
+              m.setCenter(
+                new kakao.maps.LatLng(Number(result[0].y), Number(result[0].x)),
+              )
+            }
+            finish()
+          })
+        } catch {
+          finish()
+        }
       })
       .catch((e: unknown) => {
         if (cancelled) return

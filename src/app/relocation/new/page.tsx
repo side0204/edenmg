@@ -72,7 +72,6 @@ export default async function NewRelocationProjectPage() {
               name="title"
               required
               maxLength={200}
-              placeholder="예: 필동 충무로 도로공사 지장이설"
               className="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2 text-base focus:border-slate-900 focus:outline-none focus:ring-1 focus:ring-slate-900"
             />
           </div>
@@ -83,13 +82,12 @@ export default async function NewRelocationProjectPage() {
               type="text"
               name="region"
               maxLength={100}
-              placeholder="예: 서울 중구"
               className="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2 text-base focus:border-slate-900 focus:outline-none focus:ring-1 focus:ring-slate-900"
             />
           </div>
 
           <div>
-            <label className="block text-sm font-medium text-slate-700">현장답사일</label>
+            <label className="block text-sm font-medium text-slate-700">공사계약일</label>
             <input
               type="date"
               name="surveyed_at"

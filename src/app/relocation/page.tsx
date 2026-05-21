@@ -139,7 +139,7 @@ export default async function RelocationListPage() {
                       )}
                       {p.surveyed_at && (
                         <div className="flex gap-2">
-                          <dt className="w-16 shrink-0 text-slate-400">답사일</dt>
+                          <dt className="w-16 shrink-0 text-slate-400">계약일</dt>
                           <dd>{p.surveyed_at}</dd>
                         </div>
                       )}

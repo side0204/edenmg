@@ -923,6 +923,14 @@ LGU+ 협력사 본업 — 광케이블 지장이설 코어구성도·직선도 �
   - **삭제**: 1차 시도의 `MapCanvas.tsx`·`RelocationCanvas.tsx`
   - **레이아웃 노하우** (정보 패널 잘림 디버깅 — owner 3회 반복 보고로 확인): 다단계 `flex-1`/`height:100%` 높이 체인은 일부 브라우저(크롬)에서 안쪽 자식까지 확정 높이를 전달 못 함 → 패널이 화면 밖으로 늘어남. **해결: 별도 레이아웃을 만들지 말고 검증된 코드 경로 재사용.** 캔버스 행은 명시적 `vh` 높이(`CANVAS_SIZE_HEIGHT`), 전용 라우트도 임베드 모드 그대로 쓰고 `initialCanvasSize` 만 다르게. 정보 패널 루트는 `h-full` 빼고 flex `stretch`+`min-h-0`+`overflow-y-auto`
   - **운영**: 카카오 JS 키·웹 도메인·`NEXT_PUBLIC_KAKAO_MAP_KEY`(.env.local + Vercel) 등록 완료
+- ✅ **Step C-5.1 — 지도 모드 UX 일괄 보강 (2026-05-20)** (마이그 없음, [`TopologyCanvas.tsx`](./src/app/relocation/[id]/TopologyCanvas.tsx)·[`useKakaoMap.ts`](./src/app/relocation/[id]/useKakaoMap.ts)·[`CollapsibleLayout.tsx`](./src/app/relocation/[id]/CollapsibleLayout.tsx)·프로젝트 폼)
+  - **지도 줌**: fit 시 `MAP_FIT_ZOOM_IN_STEPS=2` 만큼 더 확대 (setBounds 후 level 축소). 빈 프로젝트는 생성 시 level 3.
+  - **시설물 줌 연동 축소**: 지도 축소(level 증가) 시 시설 도형도 함께 축소. 배율 = `MAP_NODE_SCALE_STEP(0.82) ^ (기본 단계 + 줌 단계)`. `MAP_NODE_BASE_SCALE_STEPS=2`(기본 ≈67%), `MAP_NODE_SCALE_MAX_STEPS=2`(2단계까지 추가 축소 후 최소 고정). 도형은 노드 중심 기준 scale → 케이블 연결점(GPS 투영점) 불변. `mapBaseLevel`(fit 직후 level) 기준.
+  - **시설 라벨 글자 고정**: 도형은 축소돼도 글자(시설코드·시설명)는 원래 크기 유지 — 도형은 안쪽 scale 그룹, 라벨은 그룹 밖 별도 렌더 + y 위치만 축소 따라감. 배경 지도 글자와 구분 위해 흰색 외곽선(`paintOrder=stroke`, `LABEL_HALO_WIDTH=3`) + 시설명 fontWeight 600.
+  - **패널 기본 접힘**: `CollapsibleLayout` 상·하단(집중 모드)·`toolsCollapsed`(시설·케이블 추가)·`sidebarCollapsed`(시설 목록) 모두 기본 접힘 — 설계 화면 진입 시 캔버스 집중.
+  - **검색창 중앙 최상단 floating**: 캔버스 위 별도 바 → 지도 위 floating 오버레이(검색 + 미배치 패널). 가운데 정렬은 in-flow `relative` 블록 + `flex justify-center` (absolute + `left-0 right-0`/`left-1/2 -translate-x-1/2` 는 폭이 안 늘어나 정렬 실패 — owner 3회 보고). 래퍼 `pointer-events-none`/검색창 `pointer-events-auto` 로 빈 좌우는 지도 통과.
+  - **지도 초기 위치**: 서울 시청 → `경기도 시흥시 미산로 62` (모든 프로젝트 공통). `useKakaoMap` 이 Kakao Geocoder 로 주소 변환 후 `ready` 처리 → `fitMapToFacilities` 와 경합 회피 (시설 있는 프로젝트는 fit 이 덮어씀). 지오코딩 실패 시 폴백 좌표(37.4243, 126.7929).
+  - **프로젝트 생성 폼**: 제목·지역 placeholder 예시 제거. `현장답사일` → `공사계약일` 라벨 변경 (생성·상세 폼, 목록 카드·헤더 표시 텍스트). DB 컬럼·폼 필드명 `surveyed_at` 은 식별자라 유지.
 - ⏳ **Step D**: 검증 로직 (룰 12개, § 6-2) + 차수 자동 분할 (§ 6-3)
 - ⏳ **Step E**: SVG 시각화 (코어구성도·직선도) 내보내기 + 기별명세서
 
