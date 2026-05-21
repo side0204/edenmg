@@ -3199,10 +3199,12 @@ function FacilityShape({
   const cx = NODE_SIZE.width / 2
   const cy = NODE_SIZE.height / 2 - 10
   const isFallback = isNew ? NEW_COLOR : EXISTING_COLOR
-  // 접속함체가 기설(existing)이면 규격색 대신 검정 (owner 결정 2026-05-21)
+  // 접속함체 색상은 설치 구분으로 — 기설=검정, 신설=빨강 (owner 결정 2026-05-22)
   const stdColor =
-    CLOSURE_TYPE_CATEGORY[closureType] === '접속함체' && installStatus === 'existing'
-      ? '#111827'
+    CLOSURE_TYPE_CATEGORY[closureType] === '접속함체'
+      ? installStatus === 'existing'
+        ? '#111827'
+        : '#dc2626'
       : CLOSURE_TYPE_COLOR[closureType] ?? isFallback
 
   // ===== 국사 카테고리 =====================================================
