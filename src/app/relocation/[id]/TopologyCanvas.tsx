@@ -932,8 +932,65 @@ export default function TopologyCanvas({
         snapY = true
       }
     }
+    // guide 는 화면에 그릴 가이드선의 실제 좌표 (시설 중심 기준 — 좌상단 + 절반)
     return {
       pos: { x: sx, y: sy },
+      guide: {
+        x: snapX ? sx + NODE_SIZE.width / 2 : null,
+        y: snapY ? sy + NODE_SIZE.height / 2 - 10 : null,
+      },
+    }
+  }
+
+  // 케이블 꺾은선(경로점) 드래그 스냅 — 경로점을 양옆 점(앞점·뒷점)의 x/y 에 맞춰
+  //   정렬해 선분을 수직·수평으로 만든다. 앞점·뒷점 = 시설 중심 또는 이웃 경로점.
+  const snapWaypoint = (
+    nx: number,
+    ny: number,
+    cableId: string,
+    index: number,
+  ): { x: number; y: number; guide: { x: number | null; y: number | null } } => {
+    const c = cables.find((x) => x.id === cableId)
+    const noSnap = { x: nx, y: ny, guide: { x: null, y: null } }
+    if (!c) return noSnap
+    const from = effectivePositions[c.from_facility_id]
+    const to = effectivePositions[c.to_facility_id]
+    if (!from || !to) return noSnap
+    const wps = effectiveWaypoints(cableId)
+    const fromCenter = {
+      x: from.x + NODE_SIZE.width / 2,
+      y: from.y + NODE_SIZE.height / 2 - 10,
+    }
+    const toCenter = {
+      x: to.x + NODE_SIZE.width / 2,
+      y: to.y + NODE_SIZE.height / 2 - 10,
+    }
+    const prev = index === 0 ? fromCenter : { x: wps[index - 1].x, y: wps[index - 1].y }
+    const next =
+      index >= wps.length - 1 ? toCenter : { x: wps[index + 1].x, y: wps[index + 1].y }
+    let sx = nx
+    let sy = ny
+    let bestDx = SNAP_THRESHOLD
+    let bestDy = SNAP_THRESHOLD
+    let snapX = false
+    let snapY = false
+    for (const p of [prev, next]) {
+      const ddx = Math.abs(p.x - nx)
+      if (ddx <= bestDx) {
+        bestDx = ddx
+        sx = p.x
+        snapX = true
+      }
+      const ddy = Math.abs(p.y - ny)
+      if (ddy <= bestDy) {
+        bestDy = ddy
+        sy = p.y
+        snapY = true
+      }
+    }
+    return {
+      x: sx,
+      y: sy,
       guide: { x: snapX ? sx : null, y: snapY ? sy : null },
     }
   }
@@ -1197,8 +1254,15 @@ export default function TopologyCanvas({
       const dy = y - wd.startY
       if (!wd.hasMoved && Math.hypot(dx, dy) < DRAG_THRESHOLD) return
       wd.hasMoved = true
-      const nx = x - wd.offsetX
-      const ny = y - wd.offsetY
+      let nx = x - wd.offsetX
+      let ny = y - wd.offsetY
+      // 도식 모드 — 경로점을 양옆 점 기준 수직·수평 정렬 스냅
+      if (mode !== 'map') {
+        const snapped = snapWaypoint(nx, ny, wd.cableId, wd.index)
+        nx = snapped.x
+        ny = snapped.y
+        setSnapGuide(snapped.guide)
+      }
       // 지도 모드 — 픽셀을 GPS 좌표로 역변환
       let llPart: { lat: number; lng: number } | null = null
       if (mode === 'map' && kakaoMap) {
@@ -1291,6 +1355,7 @@ export default function TopologyCanvas({
     const wd = waypointDragRef.current
     if (wd) {
       waypointDragRef.current = null
+      setSnapGuide(null)
       if (wd.hasMoved) {
         const result = await saveCableWaypoints(
           projectId,
@@ -2022,14 +2087,14 @@ export default function TopologyCanvas({
             </g>
           )}
 
-          {/* 좌클릭 드래그 정렬 가이드 — 다른 시설과 수직·수평이 맞을 때 점선 */}
+          {/* 드래그 정렬 가이드 — 시설·경로점이 수직·수평으로 맞을 때 점선 */}
           {snapGuide && (snapGuide.x !== null || snapGuide.y !== null) && (
             <g style={{ pointerEvents: 'none' }}>
               {snapGuide.x !== null && (
                 <line
-                  x1={snapGuide.x + NODE_SIZE.width / 2}
+                  x1={snapGuide.x}
                   y1={viewport.y}
-                  x2={snapGuide.x + NODE_SIZE.width / 2}
+                  x2={snapGuide.x}
                   y2={viewport.y + viewport.height}
                   stroke={SELECTED_COLOR}
                   strokeWidth={1}
@@ -2041,9 +2106,9 @@ export default function TopologyCanvas({
               {snapGuide.y !== null && (
                 <line
                   x1={viewport.x}
-                  y1={snapGuide.y + NODE_SIZE.height / 2 - 10}
+                  y1={snapGuide.y}
                   x2={viewport.x + viewport.width}
-                  y2={snapGuide.y + NODE_SIZE.height / 2 - 10}
+                  y2={snapGuide.y}
                   stroke={SELECTED_COLOR}
                   strokeWidth={1}
                   strokeDasharray="5 4"
