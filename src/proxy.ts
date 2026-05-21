@@ -62,6 +62,21 @@ export async function proxy(request: NextRequest) {
     return NextResponse.redirect(url)
   }
 
+  // 접속 현황 — 마지막 활동 시각 갱신. em_seen 쿠키(5분 만료)로 쿨다운을 둬
+  // DB 쓰기를 사용자당 최대 5분에 한 번으로 제한한다 (모든 요청마다 쓰지 않음).
+  if (user && !request.cookies.get('em_seen')) {
+    await supabase
+      .from('employees')
+      .update({ last_seen_at: new Date().toISOString() })
+      .eq('auth_user_id', user.id)
+    response.cookies.set('em_seen', '1', {
+      maxAge: 300,
+      path: '/',
+      httpOnly: true,
+      sameSite: 'lax',
+    })
+  }
+
   // 현장 직원의 사무 그룹 URL 직접 접근 차단 — 차단 prefix 일 때만 DB 조회
   if (user && FIELD_BLOCKED_PREFIXES.some((p) => path === p || path.startsWith(p + '/') || path === p)) {
     const { data } = await supabase

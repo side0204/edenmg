@@ -1005,6 +1005,16 @@ UI/UX 검토 결과 owner 가 우선순위 순으로 진행하기로 한 7항목
 
 **운영 검토** (§ 11 of plan doc): Supabase 무료 플랜은 지장이설 모듈 자체 영향 0 (이미지 미저장). 다만 접속일보 사진 누적이 별도로 6-10개월 안 Storage 한도 도달 가능 → PhotoUploader 클라이언트 압축 권장.
 
+### ✅ 완료 (접속 현황 · 로그 — 베타 사용 모니터링, 2026-05-21)
+
+owner 요구: 베타 운영 중 사용자 경험 반영을 위해 현재 접속자·로그 기록을 관리자만 보게. "너무 복잡하지 않게" → 페이지 단위 분석 대신 접속 상태 + 로그인/로그아웃 기록만.
+
+- **마이그** [`0047_activity_log.sql`](./supabase/migrations/0047_activity_log.sql) — `employees.last_seen_at timestamptz` + `activity_logs` 테이블(login/logout, append-only — update/delete GRANT 미부여) + RLS 2개(select=같은 회사 admin, insert=본인 행).
+- **last_seen_at 갱신** [`proxy.ts`](./src/proxy.ts) — 인증된 요청마다 갱신하되 `em_seen` 쿠키(maxAge 300초)로 쿨다운 → 사용자당 최대 5분에 1회 DB 쓰기. 모든 요청마다 쓰지 않음.
+- **로그인·로그아웃 기록** [`login/actions.ts`](./src/app/login/actions.ts) — `logActivity` 헬퍼. signIn 성공 후 'login', signOut 전(세션 유효 시)에 'logout' 1행 insert. 실패해도 로그인/로그아웃 흐름은 안 막음.
+- **관리자 페이지** [`/admin/activity`](./src/app/admin/activity/page.tsx) — admin 전용. 「현재 접속 중」(last_seen 최근 10분) + 「로그인 기록」(activity_logs 최근 100건). 홈 관리 카드에 「접속 현황 · 로그」 진입점.
+- **후속 후보**: 페이지·기능 단위 사용 분석(어느 메뉴를 많이 쓰는지)은 owner 가 더 깊은 데이터를 원할 때. 현재는 접속 여부·로그인 빈도까지.
+
 ### 🟡 미완 / 후속
 
 - **운영 작업 (owner 가 Supabase Dashboard 에서 SQL 실행 필요)** ⚠️
@@ -1047,6 +1057,8 @@ UI/UX 검토 결과 owner 가 우선순위 순으로 진행하기로 한 7항목
   - [`0043_cable_distances.sql`](./supabase/migrations/0043_cable_distances.sql) — 지장이설 케이블 정산 거리: `relocation_cables.total_length` + `end_distance` numeric (기별명세서용 구간 거리)
   - [`0044_relocation_facility_materials.sql`](./supabase/migrations/0044_relocation_facility_materials.sql) — 지장이설 접속함체 사용 자재: `relocation_facility_materials` 테이블 (시설별 자재, 기별명세서용). 공종량은 0037 의 `relocation_facility_tasks` 재사용
   - [`0045_relocation_facility_geo.sql`](./supabase/migrations/0045_relocation_facility_geo.sql) — 지장이설 시설 GPS 좌표: `relocation_facilities.lat`/`lng` (카카오맵 지도 모드 배치용)
+  - [`0046_facility_work_window.sql`](./supabase/migrations/0046_facility_work_window.sql) — 지장이설 시설 작업 가능 시간대: `relocation_facilities.work_window_start`/`end` (owner 실행 완료)
+  - [`0047_activity_log.sql`](./supabase/migrations/0047_activity_log.sql) — 베타 모니터링: `employees.last_seen_at` + `activity_logs`(로그인·로그아웃, append-only) + RLS
 - **외선일보 별도 entity (v2)** — 접속일보와 동일 패턴으로 외선팀 전용 모듈. 외선 작업 특성(케이블 포설구간·전주번호 등)에 맞는 구조 별도 설계.
 - **접속일보 후속 (v2)** — segment-level 작업자 태그, 사진 첨부 + EXIF, 국사·함체 마스터 테이블화, 재접속 이력 조회, 지도 시각화
 - **M3 Phase 2 후속** — 사진 첨부 + EXIF·워터마크 (PRD M3-06), 일보 결재함 통합 (현재는 작업 상세에서 진입), 일반 일보 월별 CSV 리포트
