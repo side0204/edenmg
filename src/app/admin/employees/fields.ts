@@ -8,7 +8,7 @@ export const PERMISSION_VALUES: readonly Permission[] = [
   'team_leader',
   'admin',
 ]
-export const POSITION_VALUES = ['이사', '부장', '차장', '과장', '대리', '사원'] as const
+export const POSITION_VALUES = ['이사', '부장', '차장', '과장', '대리', '주임', '사원'] as const
 export const TEAM_VALUES = ['지장', '계획', '공가', '청약', '정산', '자재', '지원'] as const
 // 0027 마이그에서 enum rename: 공무→사무, 외선→외선팀, 접속→접속팀.
 // 신규 추가: 자재담당, 장비팀, 신호수.
