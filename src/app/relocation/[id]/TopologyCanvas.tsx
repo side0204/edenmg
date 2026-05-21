@@ -2461,6 +2461,10 @@ export default function TopologyCanvas({
             if (!pos) return null
             const code = formatFacilityCode(f.closure_type, f.seq_no)
             const isNew = facilityIsNew.get(f.id) ?? false
+            // 신설 접속함체 — 라벨 글자도 빨강 (도형 색과 일치)
+            const isNewClosure =
+              CLOSURE_TYPE_CATEGORY[f.closure_type] === '접속함체' &&
+              f.install_status === 'new'
             const isSelected = selectedId === f.id
             const cableCount = facilityCableCount.get(f.id) ?? 0
             const nodeCx = NODE_SIZE.width / 2
@@ -2630,7 +2634,7 @@ export default function TopologyCanvas({
                   x={nodeCx}
                   y={labelCodeY}
                   textAnchor="middle"
-                  className="fill-slate-700"
+                  className={isNewClosure ? 'fill-red-600' : 'fill-slate-700'}
                   stroke="#ffffff"
                   strokeWidth={LABEL_HALO_WIDTH}
                   strokeLinejoin="round"
@@ -2650,7 +2654,7 @@ export default function TopologyCanvas({
                         x={nodeCx}
                         y={labelNameY}
                         textAnchor="middle"
-                        className="fill-slate-900"
+                        className={isNewClosure ? 'fill-red-600' : 'fill-slate-900'}
                         stroke="#ffffff"
                         strokeWidth={LABEL_HALO_WIDTH}
                         strokeLinejoin="round"
@@ -2696,7 +2700,7 @@ export default function TopologyCanvas({
                         x={startX + r * 2 + gap}
                         y={labelNameY}
                         textAnchor="start"
-                        className="fill-slate-900"
+                        className={isNewClosure ? 'fill-red-600' : 'fill-slate-900'}
                         stroke="#ffffff"
                         strokeWidth={LABEL_HALO_WIDTH}
                         strokeLinejoin="round"
