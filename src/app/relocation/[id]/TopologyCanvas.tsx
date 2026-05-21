@@ -143,6 +143,7 @@ const ROUTE_COLOR    = '#7c3aed'  // violet-600 (고장점 검색 경로 강조)
 const ROUTE_GAP_COLOR = '#d97706' // amber-600 (끊긴 중간경로 — 추정 연결)
 const FAULT_COLOR    = '#dc2626'  // red-600 (고장점 위치 마커)
 const DRAG_THRESHOLD = 4          // px — 클릭/드래그 구분
+const SNAP_THRESHOLD = 14         // px — 좌클릭 드래그 시 다른 시설과 수직·수평 정렬 스냅 거리
 const CABLE_OFFSET_GAP = 7        // px — 같은 경로 여러 케이블 평행 간격
 // 시설 라벨 흰색 외곽선 — 지도 모드에서 배경 지도 글자와 구분 (지도 제작사 표준 기법).
 //   두껍다고 느껴지면 줄이고, 잘 안 보이면 올린다.
@@ -298,6 +299,8 @@ export default function TopologyCanvas({
   //   initialPositions 에서 좌표를 얻으므로 캔버스에 즉시 표시됨.
   const [positions, setPositions] = useState<Record<string, { x: number; y: number }>>({})
   const [dragging, setDragging] = useState<string | null>(null)
+  // 좌클릭 드래그 중 활성 정렬 가이드 — 다른 시설과 x/y 가 맞을 때 점선 표시
+  const [snapGuide, setSnapGuide] = useState<{ x: number | null; y: number | null } | null>(null)
 
   // 케이블 경로 편집 — 선택된 케이블의 중간 waypoint 를 드래그/추가/삭제.
   //   selectedCableId: 현재 경로 편집 중인 케이블
@@ -523,6 +526,7 @@ export default function TopologyCanvas({
   // 클릭/드래그 구분용 ref — 이동 거리가 threshold 미만이면 click
   const interactionRef = useRef<{
     id: string
+    button: number          // 0 = 좌클릭(정렬 스냅) · 그 외 = 우클릭 등(자유 이동)
     startX: number
     startY: number
     offsetX: number
@@ -883,6 +887,57 @@ export default function TopologyCanvas({
     }
   }
 
+  // 케이블 연결 시 정렬 — 두 번째 시설(moveId)을 첫 번째 시설(anchorId) 기준으로
+  //   수직 또는 수평에 맞춘다. x 차이가 작으면 수직(같은 x), y 차이가 작으면 수평(같은 y).
+  //   도식 모드 전용 (지도 모드는 GPS 좌표라 호출 안 함).
+  const alignFacilityForCable = (anchorId: string, moveId: string) => {
+    const anchor = effectivePositions[anchorId]
+    const target = effectivePositions[moveId]
+    if (!anchor || !target) return
+    const dx = Math.abs(target.x - anchor.x)
+    const dy = Math.abs(target.y - anchor.y)
+    if (dx === 0 || dy === 0) return // 이미 수직 또는 수평 정렬됨
+    const aligned =
+      dx <= dy
+        ? { x: anchor.x, y: target.y } // 수직 정렬 (같은 x)
+        : { x: target.x, y: anchor.y } // 수평 정렬 (같은 y)
+    setPositions((prev) => ({ ...prev, [moveId]: aligned }))
+    void saveNodePositions(projectId, [{ id: moveId, x: aligned.x, y: aligned.y }])
+  }
+
+  // 좌클릭 드래그 스냅 — 드래그 위치(np)를 다른 시설들의 x/y 에 맞춰 정렬.
+  //   x·y 각각 독립으로 가장 가까운 시설 좌표에 SNAP_THRESHOLD 안이면 스냅.
+  const snapToFacilities = (
+    np: { x: number; y: number },
+    draggedId: string,
+  ): { pos: { x: number; y: number }; guide: { x: number | null; y: number | null } } => {
+    let sx = np.x
+    let sy = np.y
+    let bestDx = SNAP_THRESHOLD
+    let bestDy = SNAP_THRESHOLD
+    let snapX = false
+    let snapY = false
+    for (const [fid, p] of Object.entries(effectivePositions)) {
+      if (fid === draggedId) continue
+      const ddx = Math.abs(p.x - np.x)
+      if (ddx <= bestDx) {
+        bestDx = ddx
+        sx = p.x
+        snapX = true
+      }
+      const ddy = Math.abs(p.y - np.y)
+      if (ddy <= bestDy) {
+        bestDy = ddy
+        sy = p.y
+        snapY = true
+      }
+    }
+    return {
+      pos: { x: sx, y: sy },
+      guide: { x: snapX ? sx : null, y: snapY ? sy : null },
+    }
+  }
+
   const handleNodeClick = (id: string) => {
     // 고장점 검색 모드 — 시설 클릭은 드릴다운 step 1 (시설물) 선택
     if (faultSearchOpen) {
@@ -918,7 +973,8 @@ export default function TopologyCanvas({
       setSelectedId(id)
       return
     }
-    // 두 번째 클릭 — 연결 시작
+    // 두 번째 클릭 — 연결 시작. 두 번째 시설을 첫 번째 기준 수직/수평 정렬.
+    alignFacilityForCable(selectedId, id)
     setPendingConnection({ fromId: selectedId, toId: id })
     setSelectedId(null)
   }
@@ -1068,6 +1124,7 @@ export default function TopologyCanvas({
     if (!pos) return
     interactionRef.current = {
       id,
+      button: e.button,
       startX: x,
       startY: y,
       offsetX: x - pos.x,
@@ -1116,11 +1173,18 @@ export default function TopologyCanvas({
         setDragging(ir.id)
         setSelectedId(null)
       }
-      const np = { x: x - ir.offsetX, y: y - ir.offsetY }
+      let np = { x: x - ir.offsetX, y: y - ir.offsetY }
       // 지도 모드는 mapDragPos(임시 픽셀)에, 도식 모드는 positions(영구 레이아웃)에 기록
       if (mode === 'map') {
         setMapDragPos((prev) => ({ ...prev, [ir.id]: np }))
       } else {
+        // 좌클릭(button 0) 드래그 — 다른 시설과 수직·수평 정렬 스냅.
+        //   우클릭 등은 스냅 없이 자유 이동.
+        if (ir.button === 0) {
+          const snapped = snapToFacilities(np, ir.id)
+          np = snapped.pos
+          setSnapGuide(snapped.guide)
+        }
         setPositions((prev) => ({ ...prev, [ir.id]: np }))
       }
       return
@@ -1180,6 +1244,7 @@ export default function TopologyCanvas({
     const ir = interactionRef.current
     if (ir) {
       interactionRef.current = null
+      setSnapGuide(null)
       if (ir.hasMoved) {
         setDragging(null)
         const pos = effectivePositions[ir.id]
@@ -1315,7 +1380,7 @@ export default function TopologyCanvas({
                       ? ' · 케이블 경로 편집 — 선 클릭 = 경로점 추가 · 점 드래그 = 이동 · 점 우클릭 = 삭제'
                       : selectedId
                         ? ' · 다른 시설을 클릭하면 케이블이 연결됩니다 (취소: 빈 영역 클릭)'
-                        : ' · 시설 클릭 = 연결 · 케이블 클릭 = 경로 편집 · 빈 영역 드래그 = 이동 · 휠 = 확대/축소'
+                        : ' · 시설 클릭 = 케이블 연결 · 좌클릭 드래그 = 정렬 이동 · 우클릭 드래그 = 자유 이동 · 빈 영역 드래그 = 화면 이동'
               )}
         </p>
         <div className="flex items-center gap-1">
@@ -1954,6 +2019,38 @@ export default function TopologyCanvas({
                   />
                 )
               })}
+            </g>
+          )}
+
+          {/* 좌클릭 드래그 정렬 가이드 — 다른 시설과 수직·수평이 맞을 때 점선 */}
+          {snapGuide && (snapGuide.x !== null || snapGuide.y !== null) && (
+            <g style={{ pointerEvents: 'none' }}>
+              {snapGuide.x !== null && (
+                <line
+                  x1={snapGuide.x + NODE_SIZE.width / 2}
+                  y1={viewport.y}
+                  x2={snapGuide.x + NODE_SIZE.width / 2}
+                  y2={viewport.y + viewport.height}
+                  stroke={SELECTED_COLOR}
+                  strokeWidth={1}
+                  strokeDasharray="5 4"
+                  strokeOpacity={0.7}
+                  vectorEffect="non-scaling-stroke"
+                />
+              )}
+              {snapGuide.y !== null && (
+                <line
+                  x1={viewport.x}
+                  y1={snapGuide.y + NODE_SIZE.height / 2 - 10}
+                  x2={viewport.x + viewport.width}
+                  y2={snapGuide.y + NODE_SIZE.height / 2 - 10}
+                  stroke={SELECTED_COLOR}
+                  strokeWidth={1}
+                  strokeDasharray="5 4"
+                  strokeOpacity={0.7}
+                  vectorEffect="non-scaling-stroke"
+                />
+              )}
             </g>
           )}
 
