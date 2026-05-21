@@ -263,6 +263,20 @@ export const CABLE_STATUS_COLOR: Record<CableStatus, string> = {
 }
 
 
+// 시설 설치 구분 — 접속함체의 기설/신설 (마이그 0050)
+export type FacilityInstallStatus = 'existing' | 'new'
+
+export const FACILITY_INSTALL_STATUS_VALUES: readonly FacilityInstallStatus[] = [
+  'existing',
+  'new',
+]
+
+export const FACILITY_INSTALL_STATUS_LABEL: Record<FacilityInstallStatus, string> = {
+  existing: '기설',
+  new: '신설',
+}
+
+
 export type CoreLifecycle = 'preexisting' | 'relocating' | 'new'
 
 export const CORE_LIFECYCLE_VALUES: readonly CoreLifecycle[] = [

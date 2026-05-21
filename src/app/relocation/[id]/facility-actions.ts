@@ -5,8 +5,10 @@ import { revalidatePath } from 'next/cache'
 import { createClient } from '@/lib/supabase/server'
 import {
   CLOSURE_TYPE_VALUES,
+  FACILITY_INSTALL_STATUS_VALUES,
   isInternalNode,
   type ClosureType,
+  type FacilityInstallStatus,
 } from '@/lib/relocation'
 import type { CableSpec } from '@/lib/connection'
 import { CABLE_SPEC_VALUES } from '@/lib/connection'
@@ -47,6 +49,10 @@ function isCableSpec(v: string): v is CableSpec {
   return (CABLE_SPEC_VALUES as readonly string[]).includes(v)
 }
 
+function isInstallStatus(v: string): v is FacilityInstallStatus {
+  return (FACILITY_INSTALL_STATUS_VALUES as readonly string[]).includes(v)
+}
+
 type FacilityFormParsed = {
   closure_type: ClosureType
   name: string
@@ -57,6 +63,7 @@ type FacilityFormParsed = {
   is_marked: boolean
   work_window_start: string | null
   work_window_end: string | null
+  install_status: FacilityInstallStatus
 }
 
 function parseFacilityForm(formData: FormData): FacilityFormParsed | string {
@@ -84,6 +91,12 @@ function parseFacilityForm(formData: FormData): FacilityFormParsed | string {
   const notes = String(formData.get('notes') ?? '').trim() || null
   const is_marked = formData.get('is_marked') === 'on'
 
+  // 설치 구분 — 기설/신설. 미입력(접속함체 아닌 종류)이면 'new' 기본.
+  const installRaw = String(formData.get('install_status') ?? '').trim()
+  const install_status: FacilityInstallStatus = isInstallStatus(installRaw)
+    ? installRaw
+    : 'new'
+
   // 작업 가능 시간대 — 특정 시간대만 작업 가능한 시설. 시작·종료 둘 다 또는 둘 다 비움.
   const wwsRaw = String(formData.get('work_window_start') ?? '').trim()
   const wweRaw = String(formData.get('work_window_end') ?? '').trim()
@@ -108,6 +121,7 @@ function parseFacilityForm(formData: FormData): FacilityFormParsed | string {
     is_marked,
     work_window_start,
     work_window_end,
+    install_status,
   }
 }
 
@@ -178,6 +192,7 @@ export async function createFacility(formData: FormData) {
         notes: parsed.notes,
         work_window_start: parsed.work_window_start,
         work_window_end: parsed.work_window_end,
+        install_status: parsed.install_status,
       })
 
       if (!error) {
@@ -243,6 +258,7 @@ export async function updateFacility(formData: FormData) {
       notes: parsed.notes,
       work_window_start: parsed.work_window_start,
       work_window_end: parsed.work_window_end,
+      install_status: parsed.install_status,
     })
     .eq('id', id)
 
@@ -280,6 +296,7 @@ export async function createFacilityAtPosition(input: {
   closure_spec?: CableSpec | null
   install_address?: string | null
   parent_facility_id?: string | null
+  install_status?: FacilityInstallStatus | null
 }): Promise<
   | { ok: true; id: string; seq_no: number }
   | { ok: false; error: string }
@@ -324,6 +341,10 @@ export async function createFacilityAtPosition(input: {
           x_hint: Math.round(input.x),
           y_hint: Math.round(input.y),
           is_marked: false,
+          install_status:
+            input.install_status && isInstallStatus(input.install_status)
+              ? input.install_status
+              : 'new',
         })
         .select('id')
         .maybeSingle()
@@ -370,6 +391,7 @@ export async function updateFacilityFromCanvas(input: {
   is_marked: boolean
   work_window_start: string | null
   work_window_end: string | null
+  install_status: FacilityInstallStatus
 }): Promise<{ ok: true } | { ok: false; error: string }> {
   if (!input.project_id || !input.id) return { ok: false, error: '대상이 올바르지 않습니다' }
   const name = (input.name ?? '').trim()
@@ -410,6 +432,10 @@ export async function updateFacilityFromCanvas(input: {
 
   const { supabase } = await requireMember()
 
+  const installStatus: FacilityInstallStatus = isInstallStatus(input.install_status)
+    ? input.install_status
+    : 'new'
+
   const { error } = await supabase
     .from('relocation_facilities')
     .update({
@@ -421,6 +447,7 @@ export async function updateFacilityFromCanvas(input: {
       is_marked: !!input.is_marked,
       work_window_start: workWindowStart,
       work_window_end: workWindowEnd,
+      install_status: installStatus,
     })
     .eq('id', input.id)
 
@@ -509,6 +536,7 @@ export async function createFacilityAtLatLng(input: {
   closure_spec?: CableSpec | null
   install_address?: string | null
   parent_facility_id?: string | null
+  install_status?: FacilityInstallStatus | null
 }): Promise<
   | { ok: true; id: string; seq_no: number }
   | { ok: false; error: string }
@@ -557,6 +585,10 @@ export async function createFacilityAtLatLng(input: {
           parent_facility_id: input.parent_facility_id ?? null,
           master_facility_id: input.master_facility_id ?? null,
           is_marked: false,
+          install_status:
+            input.install_status && isInstallStatus(input.install_status)
+              ? input.install_status
+              : 'new',
         })
         .select('id')
         .maybeSingle()

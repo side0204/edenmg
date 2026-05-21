@@ -2,7 +2,10 @@ import { Plus, Pencil, Trash2 } from 'lucide-react'
 import {
   CLOSURE_TYPE_LABEL,
   CLOSURE_TYPE_VALUES,
+  CLOSURE_TYPE_CATEGORY,
   CABLE_SPEC_VALUES,
+  FACILITY_INSTALL_STATUS_VALUES,
+  FACILITY_INSTALL_STATUS_LABEL,
   formatFacilityCode,
   isInternalNode,
   type ClosureType,
@@ -27,6 +30,7 @@ export type FacilityRow = {
   work_window_start: string | null
   work_window_end: string | null
   created_at: string | null
+  install_status: string
 }
 
 // 함체일 때 보여줄 기본 권장 함체 규격 (참고용 — 폼에는 직접 추천 표시)
@@ -121,6 +125,21 @@ export default function FacilitiesTab({
               {stations.map((s) => (
                 <option key={s.id} value={s.id}>
                   {formatFacilityCode(s.closure_type, s.seq_no)} {s.name}
+                </option>
+              ))}
+            </select>
+          </div>
+
+          <div>
+            <label className="block text-xs font-medium text-slate-600">설치 구분 (접속함체)</label>
+            <select
+              name="install_status"
+              defaultValue="new"
+              className="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2 text-sm"
+            >
+              {FACILITY_INSTALL_STATUS_VALUES.map((s) => (
+                <option key={s} value={s}>
+                  {FACILITY_INSTALL_STATUS_LABEL[s]}
                 </option>
               ))}
             </select>
@@ -290,6 +309,25 @@ function FacilityRowItem({
               ))}
             </select>
           </div>
+
+          {CLOSURE_TYPE_CATEGORY[facility.closure_type] === '접속함체' ? (
+            <div>
+              <label className="block text-[11px] text-slate-500">설치 구분</label>
+              <select
+                name="install_status"
+                defaultValue={facility.install_status}
+                className="mt-0.5 w-full rounded-lg border border-slate-300 px-2 py-1.5 text-sm"
+              >
+                {FACILITY_INSTALL_STATUS_VALUES.map((s) => (
+                  <option key={s} value={s}>
+                    {FACILITY_INSTALL_STATUS_LABEL[s]}
+                  </option>
+                ))}
+              </select>
+            </div>
+          ) : (
+            <input type="hidden" name="install_status" value={facility.install_status} />
+          )}
 
           <div className="sm:col-span-2">
             <label className="block text-[11px] text-slate-500">설치장소명</label>

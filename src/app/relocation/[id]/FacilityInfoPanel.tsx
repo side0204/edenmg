@@ -16,9 +16,12 @@ import {
   CABLE_SPEC_VALUES,
   CLOSURE_TYPE_LABEL,
   CLOSURE_TYPE_CATEGORY,
+  FACILITY_INSTALL_STATUS_VALUES,
+  FACILITY_INSTALL_STATUS_LABEL,
   formatFacilityCode,
   isInternalNode,
   type ClosureType,
+  type FacilityInstallStatus,
 } from '@/lib/relocation'
 import type { CableSpec } from '@/lib/connection'
 import { updateFacilityFromCanvas, deleteFacilityFromCanvas } from './facility-actions'
@@ -50,6 +53,7 @@ export type FacilityPanelData = {
   is_marked: boolean
   work_window_start: string | null
   work_window_end: string | null
+  install_status: string
 }
 
 // 부모 국사 후보 (국사 종류 시설)
@@ -119,8 +123,12 @@ export default function FacilityInfoPanel({
   const [windowEnd, setWindowEnd] = useState(
     facility.work_window_end?.slice(0, 5) ?? '',
   )
+  const [installStatus, setInstallStatus] = useState<FacilityInstallStatus>(
+    facility.install_status === 'existing' ? 'existing' : 'new',
+  )
 
   // 함체 규격은 접속함체 종류에만, 부모 국사는 국사 내부 노드에만 표시
+  // 설치 구분(기설/신설)도 접속함체에만 표시
   const isClosure = CLOSURE_TYPE_CATEGORY[facility.closure_type] === '접속함체'
   const isInternal = isInternalNode(facility.closure_type)
 
@@ -173,6 +181,7 @@ export default function FacilityInfoPanel({
       is_marked: isMarked,
       work_window_start: windowStart || null,
       work_window_end: windowEnd || null,
+      install_status: installStatus,
     })
     setBusy(false)
     if (!result.ok) {
@@ -386,6 +395,26 @@ export default function FacilityInfoPanel({
                 {CABLE_SPEC_VALUES.map((s) => (
                   <option key={s} value={s}>
                     {s}
+                  </option>
+                ))}
+              </select>
+            </div>
+          )}
+          {isClosure && (
+            <div>
+              <label className="block text-[11px] font-medium text-slate-600">
+                설치 구분
+              </label>
+              <select
+                value={installStatus}
+                onChange={(e) =>
+                  setInstallStatus(e.target.value as FacilityInstallStatus)
+                }
+                className="mt-0.5 w-full rounded-md border border-slate-300 px-2 py-1 text-xs"
+              >
+                {FACILITY_INSTALL_STATUS_VALUES.map((s) => (
+                  <option key={s} value={s}>
+                    {FACILITY_INSTALL_STATUS_LABEL[s]}
                   </option>
                 ))}
               </select>

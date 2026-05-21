@@ -29,6 +29,8 @@ import {
   cableSpecColor,
   installationTypeDash,
   CABLE_INSTALLATION_TYPE_VALUES,
+  FACILITY_INSTALL_STATUS_VALUES,
+  FACILITY_INSTALL_STATUS_LABEL,
   formatFacilityCode,
   type ClosureType,
   type ClosureCategory,
@@ -36,6 +38,7 @@ import {
   type CableSpec,
   type CableInstallationType,
   type CoreLifecycle,
+  type FacilityInstallStatus,
 } from '@/lib/relocation'
 import { CABLE_STATUS_LABEL, CABLE_STATUS_VALUES } from '@/lib/relocation'
 import { autoLayoutPositions, NODE_SIZE } from './auto-layout'
@@ -105,6 +108,7 @@ type FacilityNode = {
   lat: number | null
   lng: number | null
   created_at: string | null
+  install_status: string
 }
 
 // 경로점 — x/y 는 도식 캔버스 좌표, lat/lng 는 지도 모드 GPS 좌표(Phase 4),
@@ -2660,6 +2664,7 @@ export default function TopologyCanvas({
                   is_marked: f.is_marked,
                   work_window_start: f.work_window_start,
                   work_window_end: f.work_window_end,
+                  install_status: f.install_status,
                 }}
                 stations={facilities
                   .filter((x) => x.closure_type === '국사')
@@ -2752,7 +2757,11 @@ function NewFacilityModal({
   const [masterId, setMasterId] = useState<string | null>(null)
   const [closureSpec, setClosureSpec] = useState<string>('')
   const [installAddress, setInstallAddress] = useState('')
+  const [installStatus, setInstallStatus] = useState<FacilityInstallStatus>('new')
   const [submitting, setSubmitting] = useState(false)
+
+  // 설치 구분(기설/신설) 은 접속함체 종류에만 노출
+  const isClosureCategory = CLOSURE_TYPE_CATEGORY[closureType] === '접속함체'
 
   // 시설 종류와 master.facility_type 매핑:
   //   '국사' → 'station'
@@ -2808,6 +2817,7 @@ function NewFacilityModal({
             master_facility_id: masterId,
             closure_spec: spec,
             install_address: installAddress.trim() || null,
+            install_status: isClosureCategory ? installStatus : null,
           })
         : await createFacilityAtLatLng({
             project_id: projectId,
@@ -2818,6 +2828,7 @@ function NewFacilityModal({
             master_facility_id: masterId,
             closure_spec: spec,
             install_address: installAddress.trim() || null,
+            install_status: isClosureCategory ? installStatus : null,
           })
     setSubmitting(false)
     if (!result.ok) {
@@ -2897,6 +2908,25 @@ function NewFacilityModal({
                 {CABLE_SPEC_VALUES.map((s) => (
                   <option key={s} value={s}>
                     {s}
+                  </option>
+                ))}
+              </select>
+            </div>
+          )}
+
+          {isClosureCategory && (
+            <div>
+              <label className="block text-xs font-medium text-slate-700">설치 구분</label>
+              <select
+                value={installStatus}
+                onChange={(e) =>
+                  setInstallStatus(e.target.value as FacilityInstallStatus)
+                }
+                className="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2 text-sm"
+              >
+                {FACILITY_INSTALL_STATUS_VALUES.map((s) => (
+                  <option key={s} value={s}>
+                    {FACILITY_INSTALL_STATUS_LABEL[s]}
                   </option>
                 ))}
               </select>

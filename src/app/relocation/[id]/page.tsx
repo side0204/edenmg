@@ -414,6 +414,7 @@ export default async function RelocationProjectPage({
           lat: f.lat ?? null,
           lng: f.lng ?? null,
           created_at: f.created_at ?? null,
+          install_status: f.install_status ?? 'new',
         }))}
         cables={cables.map((c) => ({
           id: c.id,
