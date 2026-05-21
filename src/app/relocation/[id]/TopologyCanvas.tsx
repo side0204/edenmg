@@ -2231,19 +2231,29 @@ export default function TopologyCanvas({
                 {/* 라벨 */}
                 <text
                   x={labelPt.x}
-                  y={labelPt.y - 7}
+                  y={labelPt.y - 13}
                   textAnchor="middle"
                   className="fill-slate-700"
-                  style={{ fontSize: 12, fontFamily: 'system-ui', pointerEvents: 'none' }}
+                  style={{
+                    fontSize: 20,
+                    fontWeight: 700,
+                    fontFamily: 'system-ui',
+                    pointerEvents: 'none',
+                  }}
                 >
                   {c.spec}
                 </text>
                 <text
                   x={labelPt.x}
-                  y={labelPt.y + 8}
+                  y={labelPt.y + 13}
                   textAnchor="middle"
                   className="fill-slate-400"
-                  style={{ fontSize: 11, fontFamily: 'monospace', pointerEvents: 'none' }}
+                  style={{
+                    fontSize: 20,
+                    fontWeight: 700,
+                    fontFamily: 'monospace',
+                    pointerEvents: 'none',
+                  }}
                 >
                   {c.cable_code}
                 </text>
@@ -2255,7 +2265,7 @@ export default function TopologyCanvas({
                     <g pointerEvents="none">
                       <rect
                         x={labelPt.x - 15}
-                        y={labelPt.y + 12}
+                        y={labelPt.y + 24}
                         width={30}
                         height={11}
                         rx={5.5}
@@ -2263,7 +2273,7 @@ export default function TopologyCanvas({
                       />
                       <text
                         x={labelPt.x}
-                        y={labelPt.y + 20}
+                        y={labelPt.y + 32}
                         textAnchor="middle"
                         fill="white"
                         style={{ fontSize: 7.5, fontWeight: 700, fontFamily: 'system-ui' }}
