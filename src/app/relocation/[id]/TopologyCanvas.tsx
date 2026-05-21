@@ -189,7 +189,7 @@ function pointAlongPolyline(
 }
 
 // 케이블 라인 스타일 산출 — LGU+ 표준 범례 적용 (2026-05-20)
-//   - 색(stroke): 케이블 규격 (cableSpecColor — 1C~12C 빨강 / 13C~36C 청록 / ...)
+//   - 색(stroke): 기설 = 검정 / 그 외 = 케이블 규격 (cableSpecColor — 1C~12C 빨강 / 13C~36C 청록 / ...)
 //   - dash: 설치 구분 (installationTypeDash — 가공/구내/해저 solid · 입상 dotted · 지중 dashed)
 //   - width·opacity: 상태 (신설 두껍게 · 철거 흐리게)
 function edgeStyle(
@@ -197,7 +197,11 @@ function edgeStyle(
   status: CableStatus,
   installationType: CableInstallationType | null,
 ): { stroke: string; dash: string; width: number; opacity: number } {
-  const stroke = cableSpecColor(spec as Parameters<typeof cableSpecColor>[0])
+  // 기설 케이블은 규격 색 대신 일괄 검정 (owner 결정 2026-05-21)
+  const stroke =
+    status === 'existing'
+      ? '#111827'
+      : cableSpecColor(spec as Parameters<typeof cableSpecColor>[0])
   const dash = installationTypeDash(installationType)
   let width = 1.8
   let opacity = 1
