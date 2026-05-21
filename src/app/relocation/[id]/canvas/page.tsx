@@ -81,6 +81,7 @@ export default async function RelocationCanvasPage({
               closure_type: f.closure_type,
               seq_no: f.seq_no,
               name: f.name,
+              facility_code: f.facility_code ?? null,
               closure_spec: f.closure_spec,
               install_address: f.install_address,
               notes: f.notes,

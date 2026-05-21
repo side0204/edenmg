@@ -56,6 +56,7 @@ function isInstallStatus(v: string): v is FacilityInstallStatus {
 type FacilityFormParsed = {
   closure_type: ClosureType
   name: string
+  facility_code: string | null
   install_address: string | null
   closure_spec: CableSpec | null
   parent_facility_id: string | null
@@ -75,6 +76,9 @@ function parseFacilityForm(formData: FormData): FacilityFormParsed | string {
   const name = String(formData.get('name') ?? '').trim()
   if (!name) return '시설 이름을 입력하세요.'
   if (name.length > 200) return '이름은 200자 이하로 입력하세요.'
+
+  const facility_code =
+    String(formData.get('facility_code') ?? '').trim().slice(0, 100) || null
 
   const install_address = String(formData.get('install_address') ?? '').trim() || null
 
@@ -119,6 +123,7 @@ function parseFacilityForm(formData: FormData): FacilityFormParsed | string {
   return {
     closure_type,
     name,
+    facility_code,
     install_address,
     closure_spec,
     parent_facility_id,
@@ -191,6 +196,7 @@ export async function createFacility(formData: FormData) {
         closure_type: parsed.closure_type,
         seq_no: seqNo,
         name: parsed.name,
+        facility_code: parsed.facility_code,
         install_address: parsed.install_address,
         closure_spec: parsed.closure_spec,
         parent_facility_id: parsed.parent_facility_id,
@@ -258,6 +264,7 @@ export async function updateFacility(formData: FormData) {
     .from('relocation_facilities')
     .update({
       name: parsed.name,
+      facility_code: parsed.facility_code,
       install_address: parsed.install_address,
       closure_spec: parsed.closure_spec,
       parent_facility_id: parsed.parent_facility_id,
@@ -305,6 +312,7 @@ export async function createFacilityAtPosition(input: {
   install_address?: string | null
   parent_facility_id?: string | null
   install_status?: FacilityInstallStatus | null
+  facility_code?: string | null
 }): Promise<
   | { ok: true; id: string; seq_no: number }
   | { ok: false; error: string }
@@ -342,6 +350,7 @@ export async function createFacilityAtPosition(input: {
           closure_type: input.closure_type,
           seq_no: seqNo,
           name,
+          facility_code: input.facility_code?.trim().slice(0, 100) || null,
           install_address: input.install_address ?? null,
           closure_spec: input.closure_spec ?? null,
           parent_facility_id: input.parent_facility_id ?? null,
@@ -392,6 +401,7 @@ export async function updateFacilityFromCanvas(input: {
   id: string
   closure_type: ClosureType
   name: string
+  facility_code: string | null
   closure_spec: CableSpec | null
   install_address: string | null
   notes: string | null
@@ -455,6 +465,7 @@ export async function updateFacilityFromCanvas(input: {
     .from('relocation_facilities')
     .update({
       name,
+      facility_code: input.facility_code?.trim().slice(0, 100) || null,
       closure_spec: input.closure_spec ?? null,
       install_address: installAddress,
       notes,
@@ -553,6 +564,7 @@ export async function createFacilityAtLatLng(input: {
   install_address?: string | null
   parent_facility_id?: string | null
   install_status?: FacilityInstallStatus | null
+  facility_code?: string | null
 }): Promise<
   | { ok: true; id: string; seq_no: number }
   | { ok: false; error: string }
@@ -594,6 +606,7 @@ export async function createFacilityAtLatLng(input: {
           closure_type: input.closure_type,
           seq_no: seqNo,
           name,
+          facility_code: input.facility_code?.trim().slice(0, 100) || null,
           lat: input.lat,
           lng: input.lng,
           install_address: input.install_address ?? null,

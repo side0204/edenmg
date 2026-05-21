@@ -46,6 +46,7 @@ export type FacilityPanelData = {
   closure_type: ClosureType
   seq_no: number
   name: string
+  facility_code: string | null
   closure_spec: CableSpec | null
   install_address: string | null
   notes: string | null
@@ -113,6 +114,7 @@ export default function FacilityInfoPanel({
 }) {
   // 기본 정보 편집
   const [name, setName] = useState(facility.name)
+  const [facilityCode, setFacilityCode] = useState(facility.facility_code ?? '')
   const [spec, setSpec] = useState<string>(facility.closure_spec ?? '')
   const [address, setAddress] = useState(facility.install_address ?? '')
   const [notes, setNotes] = useState(facility.notes ?? '')
@@ -176,6 +178,7 @@ export default function FacilityInfoPanel({
       id: facility.id,
       closure_type: facility.closure_type,
       name: name.trim(),
+      facility_code: isClosure ? facilityCode.trim() || null : facility.facility_code,
       closure_spec: isClosure && spec ? (spec as CableSpec) : null,
       install_address: address.trim() || null,
       notes: notes.trim() || null,
@@ -401,6 +404,21 @@ export default function FacilityInfoPanel({
                   </option>
                 ))}
               </select>
+            </div>
+          )}
+          {isClosure && (
+            <div>
+              <label className="block text-[11px] font-medium text-slate-600">
+                접속함체 ID
+              </label>
+              <input
+                type="text"
+                value={facilityCode}
+                onChange={(e) => setFacilityCode(e.target.value)}
+                maxLength={100}
+                placeholder="접속함체 식별자 (선택)"
+                className="mt-0.5 w-full rounded-md border border-slate-300 px-2 py-1 text-xs"
+              />
             </div>
           )}
           {isClosure && (

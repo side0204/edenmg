@@ -96,6 +96,7 @@ type FacilityNode = {
   closure_type: ClosureType
   seq_no: number
   name: string
+  facility_code: string | null
   closure_spec: CableSpec | null
   install_address: string | null
   notes: string | null
@@ -2431,7 +2432,11 @@ export default function TopologyCanvas({
                     />
                   )}
 
-                  <FacilityShape closureType={f.closure_type} isNew={isNew} />
+                  <FacilityShape
+                    closureType={f.closure_type}
+                    isNew={isNew}
+                    installStatus={f.install_status}
+                  />
 
                   {/* 연결 케이블 수 배지 — 동일 시설 연결 직관 확인 (도형 우상단) */}
                   {cableCount > 0 && (
@@ -2681,6 +2686,7 @@ export default function TopologyCanvas({
                   closure_type: f.closure_type,
                   seq_no: f.seq_no,
                   name: f.name,
+                  facility_code: f.facility_code,
                   closure_spec: f.closure_spec,
                   install_address: f.install_address,
                   notes: f.notes,
@@ -2783,6 +2789,7 @@ function NewFacilityModal({
   const [closureSpec, setClosureSpec] = useState<string>('')
   const [installAddress, setInstallAddress] = useState('')
   const [installStatus, setInstallStatus] = useState<FacilityInstallStatus>('new')
+  const [facilityCode, setFacilityCode] = useState('')
   const [submitting, setSubmitting] = useState(false)
 
   // 설치 구분(기설/신설) 은 접속함체 종류에만 노출
@@ -2843,6 +2850,7 @@ function NewFacilityModal({
             closure_spec: spec,
             install_address: installAddress.trim() || null,
             install_status: isClosureCategory ? installStatus : null,
+            facility_code: isClosureCategory ? facilityCode.trim() || null : null,
           })
         : await createFacilityAtLatLng({
             project_id: projectId,
@@ -2854,6 +2862,7 @@ function NewFacilityModal({
             closure_spec: spec,
             install_address: installAddress.trim() || null,
             install_status: isClosureCategory ? installStatus : null,
+            facility_code: isClosureCategory ? facilityCode.trim() || null : null,
           })
     setSubmitting(false)
     if (!result.ok) {
@@ -2941,6 +2950,22 @@ function NewFacilityModal({
 
           {isClosureCategory && (
             <div>
+              <label className="block text-xs font-medium text-slate-700">
+                접속함체 ID
+              </label>
+              <input
+                type="text"
+                value={facilityCode}
+                onChange={(e) => setFacilityCode(e.target.value)}
+                maxLength={100}
+                placeholder="접속함체 식별자 (선택)"
+                className="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2 text-sm"
+              />
+            </div>
+          )}
+
+          {isClosureCategory && (
+            <div>
               <label className="block text-xs font-medium text-slate-700">설치 구분</label>
               <select
                 value={installStatus}
@@ -3007,14 +3032,20 @@ function NewFacilityModal({
 function FacilityShape({
   closureType,
   isNew,
+  installStatus,
 }: {
   closureType: ClosureType
   isNew: boolean
+  installStatus?: string
 }) {
   const cx = NODE_SIZE.width / 2
   const cy = NODE_SIZE.height / 2 - 10
   const isFallback = isNew ? NEW_COLOR : EXISTING_COLOR
-  const stdColor = CLOSURE_TYPE_COLOR[closureType] ?? isFallback
+  // 접속함체가 기설(existing)이면 규격색 대신 검정 (owner 결정 2026-05-21)
+  const stdColor =
+    CLOSURE_TYPE_CATEGORY[closureType] === '접속함체' && installStatus === 'existing'
+      ? '#111827'
+      : CLOSURE_TYPE_COLOR[closureType] ?? isFallback
 
   // ===== 국사 카테고리 =====================================================
   if (closureType === '국사') {
