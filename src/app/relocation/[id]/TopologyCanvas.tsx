@@ -2231,10 +2231,10 @@ export default function TopologyCanvas({
                 {/* 라벨 */}
                 <text
                   x={labelPt.x}
-                  y={labelPt.y - 4}
+                  y={labelPt.y - 7}
                   textAnchor="middle"
                   className="fill-slate-700"
-                  style={{ fontSize: 9, fontFamily: 'system-ui', pointerEvents: 'none' }}
+                  style={{ fontSize: 12, fontFamily: 'system-ui', pointerEvents: 'none' }}
                 >
                   {c.spec}
                 </text>
@@ -2243,7 +2243,7 @@ export default function TopologyCanvas({
                   y={labelPt.y + 8}
                   textAnchor="middle"
                   className="fill-slate-400"
-                  style={{ fontSize: 8, fontFamily: 'monospace', pointerEvents: 'none' }}
+                  style={{ fontSize: 11, fontFamily: 'monospace', pointerEvents: 'none' }}
                 >
                   {c.cable_code}
                 </text>
