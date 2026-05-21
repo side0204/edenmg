@@ -18,16 +18,17 @@ import {
   CLOSURE_TYPE_CATEGORY,
   FACILITY_INSTALL_STATUS_VALUES,
   FACILITY_INSTALL_STATUS_LABEL,
-  FACILITY_LABEL_POSITION_VALUES,
-  FACILITY_LABEL_POSITION_LABEL,
   formatFacilityCode,
   isInternalNode,
   type ClosureType,
   type FacilityInstallStatus,
-  type FacilityLabelPosition,
 } from '@/lib/relocation'
 import type { CableSpec } from '@/lib/connection'
-import { updateFacilityFromCanvas, deleteFacilityFromCanvas } from './facility-actions'
+import {
+  updateFacilityFromCanvas,
+  deleteFacilityFromCanvas,
+  saveFacilityLabelOffset,
+} from './facility-actions'
 import {
   addFacilityTask,
   removeFacilityTask,
@@ -59,7 +60,6 @@ export type FacilityPanelData = {
   work_window_start: string | null
   work_window_end: string | null
   install_status: string
-  label_position: string
 }
 
 // 부모 국사 후보 (국사 종류 시설)
@@ -134,13 +134,6 @@ export default function FacilityInfoPanel({
   const [installStatus, setInstallStatus] = useState<FacilityInstallStatus>(
     facility.install_status === 'existing' ? 'existing' : 'new',
   )
-  const [labelPosition, setLabelPosition] = useState<FacilityLabelPosition>(
-    (FACILITY_LABEL_POSITION_VALUES as readonly string[]).includes(
-      facility.label_position,
-    )
-      ? (facility.label_position as FacilityLabelPosition)
-      : 'bottom',
-  )
 
   // 함체 규격은 접속함체 종류에만, 부모 국사는 국사 내부 노드에만 표시
   // 설치 구분(기설/신설)도 접속함체에만 표시
@@ -199,7 +192,6 @@ export default function FacilityInfoPanel({
       work_window_start: windowStart || null,
       work_window_end: windowEnd || null,
       install_status: installStatus,
-      label_position: labelPosition,
     })
     setBusy(false)
     if (!result.ok) {
@@ -291,6 +283,19 @@ export default function FacilityInfoPanel({
       toast.error(result.error)
       return
     }
+    onChanged()
+  }
+
+  async function onResetLabel() {
+    if (busy) return
+    setBusy(true)
+    const result = await saveFacilityLabelOffset(projectId, facility.id, 0, 0)
+    setBusy(false)
+    if (!result.ok) {
+      toast.error(result.error)
+      return
+    }
+    toast.success('라벨 위치를 초기화했습니다')
     onChanged()
   }
 
@@ -480,22 +485,17 @@ export default function FacilityInfoPanel({
             <label className="block text-[11px] font-medium text-slate-600">
               라벨 위치
             </label>
-            <select
-              value={labelPosition}
-              onChange={(e) =>
-                setLabelPosition(e.target.value as FacilityLabelPosition)
-              }
-              className="mt-0.5 w-full rounded-md border border-slate-300 px-2 py-1 text-xs"
-            >
-              {FACILITY_LABEL_POSITION_VALUES.map((p) => (
-                <option key={p} value={p}>
-                  {FACILITY_LABEL_POSITION_LABEL[p]}
-                </option>
-              ))}
-            </select>
             <p className="mt-0.5 text-[10px] text-slate-400">
-              시설명이 겹칠 때 도형 기준 8방향으로 옮길 수 있습니다.
+              캔버스에서 시설명을 마우스로 끌어 원하는 곳에 둘 수 있습니다.
             </p>
+            <button
+              type="button"
+              onClick={onResetLabel}
+              disabled={busy}
+              className="mt-1 inline-flex items-center gap-1 rounded-md border border-slate-300 px-2 py-1 text-[11px] font-medium text-slate-700 hover:bg-slate-50 disabled:opacity-50"
+            >
+              라벨 위치 초기화
+            </button>
           </div>
           {isInternal && (
             <div>

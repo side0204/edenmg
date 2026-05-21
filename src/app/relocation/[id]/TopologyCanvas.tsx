@@ -49,6 +49,7 @@ import {
   createFacilityAtLatLng,
   updateFacilityLatLng,
   bulkPlaceFacilities,
+  saveFacilityLabelOffset,
 } from './facility-actions'
 import LegendPanel from './LegendPanel'
 import CableInfoPanel from './CableInfoPanel'
@@ -111,7 +112,8 @@ type FacilityNode = {
   lng: number | null
   created_at: string | null
   install_status: string
-  label_position: string
+  label_dx: number
+  label_dy: number
 }
 
 // 경로점 — x/y 는 도식 캔버스 좌표, lat/lng 는 지도 모드 GPS 좌표(Phase 4),
@@ -212,35 +214,6 @@ function estimateTextWidth(text: string, fontSize: number): number {
     w += fontSize * (ch.charCodeAt(0) > 0x1100 ? 1.0 : 0.58)
   }
   return w
-}
-
-// 라벨 위치(8방향) → 라벨 블록 translate offset.
-//   sideShift: 좌/우 가로 이동량 · topDy: 위로 올릴 때 세로 이동량
-//   centerDy: 도형 옆(좌/우)에 둘 때 도형 중앙 높이로 맞추는 세로 이동량
-function labelOffsetFor(
-  pos: string,
-  sideShift: number,
-  topDy: number,
-  centerDy: number,
-): { dx: number; dy: number } {
-  switch (pos) {
-    case 'top':
-      return { dx: 0, dy: topDy }
-    case 'left':
-      return { dx: -sideShift, dy: centerDy }
-    case 'right':
-      return { dx: sideShift, dy: centerDy }
-    case 'top_left':
-      return { dx: -sideShift, dy: topDy }
-    case 'top_right':
-      return { dx: sideShift, dy: topDy }
-    case 'bottom_left':
-      return { dx: -sideShift, dy: 0 }
-    case 'bottom_right':
-      return { dx: sideShift, dy: 0 }
-    default:
-      return { dx: 0, dy: 0 } // bottom (기본)
-  }
 }
 
 // 케이블 라인 스타일 산출 — LGU+ 표준 범례 적용 (2026-05-20)
@@ -356,6 +329,18 @@ export default function TopologyCanvas({
   const [dragging, setDragging] = useState<string | null>(null)
   // 좌클릭 드래그 중 활성 정렬 가이드 — 다른 시설과 x/y 가 맞을 때 점선 표시
   const [snapGuide, setSnapGuide] = useState<{ x: number | null; y: number | null } | null>(null)
+  // 시설명 라벨 드래그 offset — 로컬 override (서버 저장 전 부드러운 드래그용)
+  const [labelOffsets, setLabelOffsets] = useState<
+    Record<string, { dx: number; dy: number }>
+  >({})
+  const labelDragRef = useRef<{
+    id: string
+    startX: number
+    startY: number
+    startDx: number
+    startDy: number
+    hasMoved: boolean
+  } | null>(null)
 
   // 케이블 경로 편집 — 선택된 케이블의 중간 waypoint 를 드래그/추가/삭제.
   //   selectedCableId: 현재 경로 편집 중인 케이블
@@ -1284,6 +1269,27 @@ export default function TopologyCanvas({
     ;(e.target as Element).setPointerCapture(e.pointerId)
   }
 
+  // 시설명 라벨 드래그 시작 — 라벨 위 투명 hit rect 의 pointerdown.
+  const onLabelPointerDown = (
+    e: React.PointerEvent<SVGRectElement>,
+    facilityId: string,
+    curDx: number,
+    curDy: number,
+  ) => {
+    if (!editable) return
+    e.stopPropagation()
+    const { x, y } = toSvgCoord(e.clientX, e.clientY)
+    labelDragRef.current = {
+      id: facilityId,
+      startX: x,
+      startY: y,
+      startDx: curDx,
+      startDy: curDy,
+      hasMoved: false,
+    }
+    ;(e.target as Element).setPointerCapture(e.pointerId)
+  }
+
   // SVG 빈 영역 pointerdown — pan 시작. 노드 위는 노드 onPointerDown 에서 stopPropagation
   // 하므로 여기까지 안 옴.
   const onSvgPointerDown = (e: React.PointerEvent<SVGSVGElement>) => {
@@ -1337,6 +1343,23 @@ export default function TopologyCanvas({
         }
         setPositions((prev) => ({ ...prev, [ir.id]: np }))
       }
+      return
+    }
+    // 1.5) 시설명 라벨 드래그 진행 중
+    const ld = labelDragRef.current
+    if (ld) {
+      const { x, y } = toSvgCoord(e.clientX, e.clientY)
+      const dx = x - ld.startX
+      const dy = y - ld.startY
+      if (!ld.hasMoved && Math.hypot(dx, dy) < DRAG_THRESHOLD) return
+      ld.hasMoved = true
+      setLabelOffsets((prev) => ({
+        ...prev,
+        [ld.id]: {
+          dx: Math.round(ld.startDx + dx),
+          dy: Math.round(ld.startDy + dy),
+        },
+      }))
       return
     }
     // 2) 케이블 waypoint 드래그 진행 중
@@ -1441,6 +1464,27 @@ export default function TopologyCanvas({
         }
       } else {
         handleNodeClick(ir.id)
+      }
+      return
+    }
+    // 1.5) 시설명 라벨 드래그 마무리
+    const ld = labelDragRef.current
+    if (ld) {
+      labelDragRef.current = null
+      if (ld.hasMoved) {
+        const off = labelOffsets[ld.id]
+        if (off) {
+          const result = await saveFacilityLabelOffset(
+            projectId,
+            ld.id,
+            off.dx,
+            off.dy,
+          )
+          if (!result.ok) toast.error(result.error)
+        }
+      } else {
+        // 이동 없이 클릭 — 시설 선택 (도형 클릭과 동일)
+        handleNodeClick(ld.id)
       }
       return
     }
@@ -2427,7 +2471,8 @@ export default function TopologyCanvas({
             const facCodeFont = mode === 'map' ? 9 : 15
             const facNameFont = mode === 'map' ? 10 : 17
             const labelNameY = labelCodeY + (mode === 'map' ? 12 : 19)
-            // 라벨 위치 offset — 시설명 겹침 방지 (8방향)
+            // 라벨 위치 — 마우스 드래그 offset (시설명 겹침 방지).
+            //   드래그 중이면 로컬 override, 아니면 저장된 label_dx/label_dy.
             const labelDispName =
               f.name.length > 12 ? f.name.slice(0, 11) + '…' : f.name
             const labelW = Math.max(
@@ -2435,12 +2480,10 @@ export default function TopologyCanvas({
               estimateTextWidth(labelDispName, facNameFont) +
                 (installNoByFacility.get(f.id) ? facNameFont * 1.9 : 0),
             )
-            const labelOffset = labelOffsetFor(
-              f.label_position,
-              labelW / 2 + 22,
-              nodeCy - 32 - labelNameY,
-              nodeCy - (labelCodeY + labelNameY) / 2,
-            )
+            const labelOff = labelOffsets[f.id] ?? {
+              dx: f.label_dx,
+              dy: f.label_dy,
+            }
             return (
               <g
                 key={f.id}
@@ -2531,8 +2574,8 @@ export default function TopologyCanvas({
 
                 {/* 라벨 — 도형이 축소돼도 글자 크기는 처음 크기로 고정.
                     흰색 외곽선(paintOrder=stroke → 외곽선이 글자 뒤)으로 배경 지도 글자와 구분.
-                    g transform — 라벨 위치(8방향) offset 적용. */}
-                <g transform={`translate(${labelOffset.dx}, ${labelOffset.dy})`}>
+                    g transform — 마우스 드래그 offset 적용. */}
+                <g transform={`translate(${labelOff.dx}, ${labelOff.dy})`}>
                 <text
                   x={nodeCx}
                   y={labelCodeY}
@@ -2615,6 +2658,20 @@ export default function TopologyCanvas({
                     </>
                   )
                 })()}
+                {/* 라벨 드래그용 투명 hit area — 글자 위 전체를 덮어 드래그/선택 처리 */}
+                {editable && (
+                  <rect
+                    x={nodeCx - labelW / 2 - 5}
+                    y={labelCodeY - facCodeFont}
+                    width={labelW + 10}
+                    height={labelNameY - labelCodeY + facNameFont + 8}
+                    fill="transparent"
+                    style={{ cursor: 'move', pointerEvents: 'all' }}
+                    onPointerDown={(e) =>
+                      onLabelPointerDown(e, f.id, labelOff.dx, labelOff.dy)
+                    }
+                  />
+                )}
                 </g>
               </g>
             )
@@ -2743,7 +2800,6 @@ export default function TopologyCanvas({
                   work_window_start: f.work_window_start,
                   work_window_end: f.work_window_end,
                   install_status: f.install_status,
-                  label_position: f.label_position,
                 }}
                 stations={facilities
                   .filter((x) => x.closure_type === '국사')

@@ -6,11 +6,9 @@ import { createClient } from '@/lib/supabase/server'
 import {
   CLOSURE_TYPE_VALUES,
   FACILITY_INSTALL_STATUS_VALUES,
-  FACILITY_LABEL_POSITION_VALUES,
   isInternalNode,
   type ClosureType,
   type FacilityInstallStatus,
-  type FacilityLabelPosition,
 } from '@/lib/relocation'
 import type { CableSpec } from '@/lib/connection'
 import { CABLE_SPEC_VALUES } from '@/lib/connection'
@@ -53,10 +51,6 @@ function isCableSpec(v: string): v is CableSpec {
 
 function isInstallStatus(v: string): v is FacilityInstallStatus {
   return (FACILITY_INSTALL_STATUS_VALUES as readonly string[]).includes(v)
-}
-
-function isLabelPosition(v: string): v is FacilityLabelPosition {
-  return (FACILITY_LABEL_POSITION_VALUES as readonly string[]).includes(v)
 }
 
 type FacilityFormParsed = {
@@ -417,7 +411,6 @@ export async function updateFacilityFromCanvas(input: {
   work_window_start: string | null
   work_window_end: string | null
   install_status: FacilityInstallStatus
-  label_position: string
 }): Promise<{ ok: true } | { ok: false; error: string }> {
   if (!input.project_id || !input.id) return { ok: false, error: '대상이 올바르지 않습니다' }
   const name = (input.name ?? '').trim()
@@ -462,10 +455,6 @@ export async function updateFacilityFromCanvas(input: {
     ? input.install_status
     : 'new'
 
-  const labelPosition: FacilityLabelPosition = isLabelPosition(input.label_position)
-    ? input.label_position
-    : 'bottom'
-
   // 노란색 마크 내용 — 체크 해제 시 내용도 비움
   const markNote =
     input.is_marked && input.mark_note
@@ -486,13 +475,44 @@ export async function updateFacilityFromCanvas(input: {
       work_window_start: workWindowStart,
       work_window_end: workWindowEnd,
       install_status: installStatus,
-      label_position: labelPosition,
     })
     .eq('id', input.id)
 
   if (error) return { ok: false, error: '수정 실패: ' + error.message }
 
   revalidatePath(`/relocation/${input.project_id}`)
+  return { ok: true }
+}
+
+
+/**
+ * 캔버스에서 시설명 라벨을 마우스로 끌어 옮긴 offset(px) 저장.
+ * redirect 안 함 — JSON 결과 반환 (캔버스 컨텍스트 유지).
+ */
+export async function saveFacilityLabelOffset(
+  projectId: string,
+  facilityId: string,
+  dx: number,
+  dy: number,
+): Promise<{ ok: true } | { ok: false; error: string }> {
+  if (!projectId || !facilityId) return { ok: false, error: '대상이 올바르지 않습니다' }
+
+  const clamp = (v: number): number => {
+    if (!Number.isFinite(v)) return 0
+    return Math.max(-4000, Math.min(4000, Math.round(v)))
+  }
+
+  const { supabase } = await requireMember()
+
+  const { error } = await supabase
+    .from('relocation_facilities')
+    .update({ label_dx: clamp(dx), label_dy: clamp(dy) })
+    .eq('id', facilityId)
+    .eq('project_id', projectId) // RLS 보강
+
+  if (error) return { ok: false, error: '라벨 위치 저장 실패: ' + error.message }
+
+  revalidatePath(`/relocation/${projectId}`)
   return { ok: true }
 }
 
