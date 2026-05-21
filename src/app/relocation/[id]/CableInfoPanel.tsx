@@ -207,6 +207,16 @@ export default function CableInfoPanel({
         <div className="flex items-center gap-1">
           <button
             type="button"
+            onClick={onDelete}
+            disabled={submitting}
+            title="케이블 삭제"
+            className="inline-flex items-center gap-0.5 rounded-md border border-rose-300 px-1.5 py-0.5 text-[11px] font-medium text-rose-700 hover:bg-rose-50 disabled:opacity-40"
+          >
+            <Trash2 className="h-3.5 w-3.5" />
+            삭제
+          </button>
+          <button
+            type="button"
             onClick={onToggleCollapse}
             title="패널 접기"
             className="text-slate-400 hover:text-slate-900"
@@ -415,16 +425,7 @@ export default function CableInfoPanel({
         />
 
         {/* 액션 */}
-        <div className="border-t border-slate-200 pt-2 flex items-center justify-between gap-2">
-          <button
-            type="button"
-            onClick={onDelete}
-            disabled={submitting}
-            className="inline-flex items-center gap-1 rounded-md border border-rose-300 px-2 py-1 text-[11px] font-medium text-rose-700 hover:bg-rose-50 disabled:opacity-50"
-          >
-            <Trash2 className="h-3.5 w-3.5" />
-            케이블 삭제
-          </button>
+        <div className="border-t border-slate-200 pt-2 flex items-center justify-end gap-2">
           <button
             type="button"
             onClick={onSave}
