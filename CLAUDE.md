@@ -910,7 +910,13 @@ LGU+ 협력사 본업 — 광케이블 지장이설 코어구성도·직선도 �
   - [HighlightContext.tsx](src/app/relocation/[id]/HighlightContext.tsx) — `CanvasHighlight` 에 `gaps: {fromId,toId}[]` 추가
   - [TopologyCanvas.tsx](src/app/relocation/[id]/TopologyCanvas.tsx) — gap 을 amber 점선 + 방향 화살표 + 「추정경로」 라벨로 렌더 (끊긴 양쪽 시설 중심을 연결)
   - [FaultSearchPanel.tsx](src/app/relocation/[id]/FaultSearchPanel.tsx) — 회선 경로 시설 체인에서 gap 구간은 amber `⇢`, 상단에 끊긴 곳 수 경고 배너, leg 목록에 점선 「추정 중간경로」 행, 고장점 측정값이 gap 에 도달하면 `kind:'gap'` 결과 — 「약 N m 까지 정상 추적, 이후 끊긴 중간경로 부근 추정」 안내
-- ⏳ **Step C-4**: 자동 경로 탐색 server action — `is_terminal=true` 행 그룹핑 + 시설 그래프 BFS + 경유 케이블 자동 코어 할당 (코어 선택 정책: 빈 코어 중 가장 작은 번호)
+- ✅ **Step C-4 — 자동 코어 배정 (2026-05-21)**: 종단 2개를 잇는 경유 케이블에 빈 코어 자동 배정. 마이그 없음 (기존 테이블만 사용)
+  - 순수 알고리즘 [`src/lib/relocation-auto-assign.ts`](./src/lib/relocation-auto-assign.ts) — 케이블 그래프 BFS(`findCablePath`, 케이블끼리 시설 공유 시 인접) + 빈 코어 탐색(`findFreeCores`, 작은 번호 우선) + 계획 수립(`planAutoAssignments`)
+  - 종단(`is_terminal`)을 (회선·세그먼트)로 그룹핑 → 종단이 양 끝 케이블 **정확히 2개**에 분포해야 처리 (1코어 회선=케이블당 1행, 2코어=2행). 코어 수는 종단 케이블의 종단 행 수로 산출. 철거(`removing`) 케이블은 경유 제외 (종단 케이블은 허용). 경유 케이블엔 코어 1개=1행으로 배정. 빈 코어 부족 시 그 회선 전체 건너뜀 (all-or-nothing)
+  - server action [`auto-assign-actions.ts`](./src/app/relocation/[id]/auto-assign-actions.ts) `runAutoAssign` — 기존 자동 배정(`is_auto_assigned=true`) 삭제 후 재계산 (재실행 idempotent). 사람 입력(`is_auto_assigned=false`)·종단·기설(`preexisting`)은 보존. JSON 요약 반환
+  - [`AutoAssignButton.tsx`](./src/app/relocation/[id]/AutoAssignButton.tsx) — 코어배정 탭 상단 「자동 배정 실행」 버튼 (confirm 가드 + 토스트 요약 + 건너뛴 회선 사유 표시)
+  - 결과 미리보기 모달(사양 § 7-5-7)은 v1 생략 — 재실행 idempotent + ⚡ 배지로 식별·삭제 가능. 필요 시 후속
+- ✅ **코어 입력 단순화 (2026-05-21)**: owner 결정 — **한 케이블·한 회선(세그먼트)은 코어 1개만 사용**. 코어 배정 입력을 「시작 코어 / 끝 코어」 두 칸 → 「코어 번호」 한 칸으로 ([CableInfoPanel](./src/app/relocation/[id]/CableInfoPanel.tsx)·[CoresTab](./src/app/relocation/[id]/CoresTab.tsx)·[core-actions](./src/app/relocation/[id]/core-actions.ts) `core_no` 필드). 2코어·이원화 회선은 코어마다 행을 나눠 입력. DB `core_range_start/end` 범위 컬럼·exclusion constraint 는 그대로 두고 start=end 로 저장 (마이그 없음). auto-assign(C-4)도 이 모델대로 2026-05-21 재작업 — 1코어·2코어 회선 모두 지원
 - ✅ **Step C-5 — 카카오맵 연동 (Phase 1·1B·2·3·4 완료, 2026-05-20)** — 📋 계획: [docs/KAKAO_MAP_PLAN.md](./docs/KAKAO_MAP_PLAN.md)
   - **방식 (Option B)**: 카카오맵을 `TopologyCanvas` SVG 뒤 배경으로 통합. 상단 툴바 「도식/지도」 토글. 지도 모드는 시설 GPS(lat/lng)를 화면 픽셀로 투영(`containerPointFromCoords`)해 SVG 오버레이로 그림 — 29종 도형·케이블·정보 패널·고장점 검색 전부 지도 위에서 작동. 도식 모드는 무수정.
   - **신규 파일**: [`useKakaoMap.ts`](./src/app/relocation/[id]/useKakaoMap.ts) (지도 인스턴스 훅 — epoch 카운터로 pan/zoom 시 오버레이 재투영, 콜백 ref 로 컨테이너 전달) · [`MapSearchBox.tsx`](./src/app/relocation/[id]/MapSearchBox.tsx) (주소 Geocoder + 건물명 Places 검색) · [`canvas-data.ts`](./src/app/relocation/[id]/canvas-data.ts) (캔버스 8개 쿼리 공용 로더 — page.tsx·canvas 라우트 공유) · [`canvas/page.tsx`](./src/app/relocation/[id]/canvas/page.tsx) 전용 라우트
@@ -931,8 +937,26 @@ LGU+ 협력사 본업 — 광케이블 지장이설 코어구성도·직선도 �
   - **검색창 중앙 최상단 floating**: 캔버스 위 별도 바 → 지도 위 floating 오버레이(검색 + 미배치 패널). 가운데 정렬은 in-flow `relative` 블록 + `flex justify-center` (absolute + `left-0 right-0`/`left-1/2 -translate-x-1/2` 는 폭이 안 늘어나 정렬 실패 — owner 3회 보고). 래퍼 `pointer-events-none`/검색창 `pointer-events-auto` 로 빈 좌우는 지도 통과.
   - **지도 초기 위치**: 서울 시청 → `경기도 시흥시 미산로 62` (모든 프로젝트 공통). `useKakaoMap` 이 Kakao Geocoder 로 주소 변환 후 `ready` 처리 → `fitMapToFacilities` 와 경합 회피 (시설 있는 프로젝트는 fit 이 덮어씀). 지오코딩 실패 시 폴백 좌표(37.4243, 126.7929).
   - **프로젝트 생성 폼**: 제목·지역 placeholder 예시 제거. `현장답사일` → `공사계약일` 라벨 변경 (생성·상세 폼, 목록 카드·헤더 표시 텍스트). DB 컬럼·폼 필드명 `surveyed_at` 은 식별자라 유지.
-- ⏳ **Step D**: 검증 로직 (룰 12개, § 6-2) + 차수 자동 분할 (§ 6-3)
-- ⏳ **Step E**: SVG 시각화 (코어구성도·직선도) 내보내기 + 기별명세서
+- ✅ **Step D-1 — 자동 검증 (2026-05-21)**: 설계 검증 룰 엔진 + 검증 탭. 마이그 없음
+  - 순수 엔진 [`src/lib/relocation-verify.ts`](./src/lib/relocation-verify.ts) `runVerification` — 룰 8종: C1·C2(함체 케이블·접속 코어 한도, 빨강) · C3(신설 분기 4조 초과, 노랑) · S1(함체 규격, 노랑) · R1(RN 스플리터 입력 다이버시티, 빨강) · D1·D2(이원화 회선 케이블·함체 분리, 빨강) · T1(작업 함체 공종 수량 미입력, 노랑)
+  - O1·E1(코어 중복·기설 보존)은 DB exclusion constraint 가 강제 → 검증 탭 안내문으로만 표시. U1·U2(유니트·여장판 최적화)는 splice 입력 흐름 후 후속
+  - [`VerifyTab.tsx`](./src/app/relocation/[id]/VerifyTab.tsx) — 검증 탭 (오류·주의 카운트 + 발견 항목 카드). [page.tsx](./src/app/relocation/[id]/page.tsx) 가 verify 탭일 때 splices·splitters 추가 조회 후 `runVerification` 실행
+- ✅ **Step D-2 — 차수 자동 분할 (2026-05-21)**: 시설별 공종량으로 차수(새벽 02~05시 시공 단위) 자동 분할. 마이그 없음 (0038 테이블 사용)
+  - 순수 알고리즘 [`src/lib/relocation-phase-planner.ts`](./src/lib/relocation-phase-planner.ts) `planPhases` — 시설별 작업시간을 받아 FFD(First-Fit-Decreasing) 빈패킹. 가장 큰 시설이 들어갈 최소 팀 수(2~4) 자동 결정, 차수 가용 = 팀 수 × 180분
+  - server action [`phase-actions.ts`](./src/app/relocation/[id]/phase-actions.ts) `runPhasePlanning` — 시설별 공종량(`relocation_facility_tasks` × `task_type_master.standard_minutes`) 합계를 작업시간으로 산출 → `planPhases` → 기존 차수 삭제 후 `relocation_phases` + `relocation_phase_tasks` 생성 (재실행 idempotent). task_kind 는 신설 케이블 연결 시 '함체신설_절단' 그 외 '기설접속'
+  - [`PhasesTab.tsx`](./src/app/relocation/[id]/PhasesTab.tsx) + [`PhasePlanButton.tsx`](./src/app/relocation/[id]/PhasePlanButton.tsx) — 차수 탭. 「차수 자동 분할」 버튼 + 요약
+  - **차수 재조정 (2026-05-21)**: 실 시공 시 차수별 투입 가능 팀 수가 달라지는 것 대응. [`PhaseBoard.tsx`](./src/app/relocation/[id]/PhaseBoard.tsx) (client) — 차수별 「투입 팀」 1~4 조정 + 「차수 재조정」(설정 팀 수 용량대로 FFD 재패킹, 초과분은 새 차수) + 시설 수동 이동(차수 select) + 빈 차수 삭제. 알고리즘 `rebalanceIntoPhases`, server action `updatePhaseTeams`·`rebalancePhases`·`movePhaseTask`·`deletePhase`. 수동 이동으로 용량 초과 시 빨강 경고만 표시
+  - ⚠️ v1 범위: 시설 단위 빈패킹만. 동시작업 페어링(simultaneity)·의존성 DAG·`relocation_task_pairs`·작업 지시서(§ 6-4)는 splice 입력 흐름 후 후속
+- ✅ **Step E-1 — 기별명세서 내보내기 (2026-05-21)**: 내보내기 탭 = 정산 문서. 마이그 없음
+  - [`ExportTab.tsx`](./src/app/relocation/[id]/ExportTab.tsx) — 설계 요약(시설·케이블·회선·코어배정 수) + 케이블 포설 명세(status≠기설 — 구간·규격·상태·설치구분·거리 + 총 포설거리) + 함체별 공종 명세 + 함체별 자재 명세. 각 섹션 화면 표 + CSV 다운로드. 데이터는 canvas-data 재사용 (추가 쿼리 없음)
+  - CSV Route Handler [`/api/reports/relocation-statement`](./src/app/api/reports/relocation-statement/route.ts) — `?project=&type=cable|task|material`. UTF-8+BOM+CRLF (csv.ts), 회사 스코프는 relocation_* RLS 강제
+  - 기설(existing) 케이블은 정산 미반영 (포설 = Σ total_length where status≠existing)
+- ✅ **접속(splice) 입력 기능 (2026-05-21)**: 직선도 탭 = 함체 안 입력 케이블 코어 ↔ 출력 케이블 코어 접속 매핑. 마이그 없음 (0037 `relocation_splices` 사용)
+  - server action [`splice-actions.ts`](./src/app/relocation/[id]/splice-actions.ts) `createSplice`·`deleteSplice` (JSON 반환)
+  - [`SpliceTab.tsx`](./src/app/relocation/[id]/SpliceTab.tsx) (client) — 함체·시설 선택 → 그 시설 접속 목록 + 추가 폼 (입력 케이블·코어 → 출력 케이블·코어, 연속 코어 체크). 연결 케이블만 in/out select 에 표시
+  - [page.tsx](./src/app/relocation/[id]/page.tsx) — 직선도(splice) 탭일 때 splices 조회. `TabPlaceholder` 제거 (전 탭 구현 완료)
+  - 검증 룰 C2·U1·U2, 차수 동시작업 페어링, 직선도 SVG 의 입력 데이터원
+- ⏳ **Step E-2**: 코어구성도·직선도 SVG·도면 PDF 내보내기 — 코어구성도 토폴로지는 도식/지도 캔버스가 이미 시각화 제공. 직선도 SVG(함체 in/out 매트릭스)는 이제 splice 데이터로 생성 가능
 
 **기별명세서 정산 규칙** (owner 결정 2026-05-20):
 - **광케이블 포설 공종** — 케이블 거리(`relocation_cables.total_length`)로 산출. **단 `status='existing'`(기설) 케이블 거리는 기별명세서 정산에 반영 금지.** 포설 정산 = Σ(total_length where status != existing).

@@ -488,8 +488,7 @@ function CoreAssignSection({
   const [circuitMode, setCircuitMode] = useState('') // '' 미지정 | 'NEW' 새 회선 | circuit id
   const [newCircuitNo, setNewCircuitNo] = useState('')
   const [newCircuitKind, setNewCircuitKind] = useState<CircuitKind>('1코어')
-  const [coreStart, setCoreStart] = useState('')
-  const [coreEnd, setCoreEnd] = useState('')
+  const [coreNo, setCoreNo] = useState('')
   const [lifecycle, setLifecycle] = useState<CoreLifecycle>('new')
   const [segmentIdx, setSegmentIdx] = useState('0')
   const [isTerminal, setIsTerminal] = useState(true)
@@ -508,8 +507,7 @@ function CoreAssignSection({
     setCircuitMode('')
     setNewCircuitNo('')
     setNewCircuitKind('1코어')
-    setCoreStart('')
-    setCoreEnd('')
+    setCoreNo('')
     setLifecycle('new')
     setSegmentIdx('0')
     setIsTerminal(true)
@@ -517,18 +515,9 @@ function CoreAssignSection({
 
   async function onAdd() {
     if (busy) return
-    const s = Number.parseInt(coreStart, 10)
-    const e = Number.parseInt(coreEnd, 10)
-    if (!Number.isFinite(s) || s < 1) {
-      toast.error('시작 코어를 입력하세요')
-      return
-    }
-    if (!Number.isFinite(e) || e < 1) {
-      toast.error('끝 코어를 입력하세요')
-      return
-    }
-    if (e < s) {
-      toast.error('끝 코어는 시작 코어 이상이어야 합니다')
+    const core = Number.parseInt(coreNo, 10)
+    if (!Number.isFinite(core) || core < 1) {
+      toast.error('코어 번호를 입력하세요')
       return
     }
     if (circuitMode === 'NEW' && !newCircuitNo.trim()) {
@@ -545,8 +534,7 @@ function CoreAssignSection({
           ? { circuit_id: newCircuitNo.trim(), kind: newCircuitKind }
           : null,
       segment_idx: Number.parseInt(segmentIdx, 10) || 0,
-      core_range_start: s,
-      core_range_end: e,
+      core_no: core,
       lifecycle,
       is_terminal: isTerminal,
     })
@@ -689,31 +677,22 @@ function CoreAssignSection({
             </div>
           )}
 
-          <div className="grid grid-cols-2 gap-1.5">
-            <div>
-              <label className="block text-[10px] font-medium text-slate-600">
-                시작 코어
-              </label>
-              <input
-                type="number"
-                min={1}
-                max={576}
-                value={coreStart}
-                onChange={(e) => setCoreStart(e.target.value)}
-                className="mt-0.5 w-full rounded-md border border-slate-300 px-2 py-1 text-[11px]"
-              />
-            </div>
-            <div>
-              <label className="block text-[10px] font-medium text-slate-600">끝 코어</label>
-              <input
-                type="number"
-                min={1}
-                max={576}
-                value={coreEnd}
-                onChange={(e) => setCoreEnd(e.target.value)}
-                className="mt-0.5 w-full rounded-md border border-slate-300 px-2 py-1 text-[11px]"
-              />
-            </div>
+          <div>
+            <label className="block text-[10px] font-medium text-slate-600">
+              코어 번호
+            </label>
+            <input
+              type="number"
+              min={1}
+              max={576}
+              value={coreNo}
+              onChange={(e) => setCoreNo(e.target.value)}
+              placeholder="이 케이블에서 회선이 쓰는 코어 1개"
+              className="mt-0.5 w-full rounded-md border border-slate-300 px-2 py-1 text-[11px]"
+            />
+            <p className="mt-0.5 text-[9px] text-slate-400 leading-tight">
+              2코어·이원화 회선은 코어마다 한 번씩 나눠 배정하세요.
+            </p>
           </div>
 
           <div className="grid grid-cols-2 gap-1.5">

@@ -77,18 +77,13 @@ function parseCoreForm(formData: FormData): CoreFormParsed | string {
   const cable_id = String(formData.get('cable_id') ?? '').trim()
   if (!cable_id) return '케이블을 선택하세요.'
 
-  const startRaw = String(formData.get('core_range_start') ?? '').trim()
-  const start = Number.parseInt(startRaw, 10)
-  if (!Number.isFinite(start) || start < 1) {
-    return '시작 코어는 1 이상의 정수여야 합니다.'
+  // 한 케이블·한 회선(세그먼트)은 코어 1개만 사용 — 단일 코어 번호 입력.
+  // DB 는 core_range_start/end 범위 컬럼을 유지하되 start = end 로 저장.
+  const coreRaw = String(formData.get('core_no') ?? '').trim()
+  const core = Number.parseInt(coreRaw, 10)
+  if (!Number.isFinite(core) || core < 1) {
+    return '코어 번호는 1 이상의 정수여야 합니다.'
   }
-
-  const endRaw = String(formData.get('core_range_end') ?? '').trim()
-  const end = Number.parseInt(endRaw, 10)
-  if (!Number.isFinite(end) || end < 1) {
-    return '끝 코어는 1 이상의 정수여야 합니다.'
-  }
-  if (end < start) return '끝 코어는 시작 코어보다 크거나 같아야 합니다.'
 
   const lifecycleRaw = String(formData.get('lifecycle') ?? '').trim() || 'new'
   if (!isCoreLifecycle(lifecycleRaw)) return '코어 lifecycle 이 올바르지 않습니다.'
@@ -105,8 +100,8 @@ function parseCoreForm(formData: FormData): CoreFormParsed | string {
     circuit_id,
     segment_idx,
     cable_id,
-    core_range_start: start,
-    core_range_end: end,
+    core_range_start: core,
+    core_range_end: core,
     lifecycle: lifecycleRaw,
     status,
     is_terminal,
@@ -114,8 +109,8 @@ function parseCoreForm(formData: FormData): CoreFormParsed | string {
   }
 }
 
-function overlapErrorMessage(start: number, end: number): string {
-  return `코어 범위 ${start}~${end} 가 같은 케이블의 다른 배정과 겹칩니다. 다른 코어 번호를 선택해주세요.`
+function overlapErrorMessage(core: number): string {
+  return `코어 ${core} 는 이미 같은 케이블의 다른 회선에 배정되어 있습니다. 다른 코어 번호를 선택해주세요.`
 }
 
 
@@ -147,7 +142,7 @@ export async function createCoreAssignment(formData: FormData) {
   if (error) {
     const friendly =
       error.message.includes('exclude') || error.code === '23P01'
-        ? overlapErrorMessage(parsed.core_range_start, parsed.core_range_end)
+        ? overlapErrorMessage(parsed.core_range_start)
         : '등록 실패: ' + error.message
     redirect(`/relocation/${projectId}?tab=cores&err=` + encodeURIComponent(friendly))
   }
@@ -155,9 +150,7 @@ export async function createCoreAssignment(formData: FormData) {
   revalidatePath(`/relocation/${projectId}`)
   redirect(
     `/relocation/${projectId}?tab=cores&ok=` +
-      encodeURIComponent(
-        `코어 ${parsed.core_range_start}~${parsed.core_range_end} 배정 완료`,
-      ),
+      encodeURIComponent(`코어 ${parsed.core_range_start} 배정 완료`),
   )
 }
 
@@ -194,7 +187,7 @@ export async function updateCoreAssignment(formData: FormData) {
   if (error) {
     const friendly =
       error.message.includes('exclude') || error.code === '23P01'
-        ? overlapErrorMessage(parsed.core_range_start, parsed.core_range_end)
+        ? overlapErrorMessage(parsed.core_range_start)
         : '수정 실패: ' + error.message
     redirect(`/relocation/${projectId}?tab=cores&err=` + encodeURIComponent(friendly))
   }
@@ -241,8 +234,7 @@ export async function addCoreAssignmentFromCanvas(input: {
   circuit_id: string | null
   new_circuit: { circuit_id: string; kind: string } | null
   segment_idx: number
-  core_range_start: number
-  core_range_end: number
+  core_no: number
   lifecycle: string
   is_terminal: boolean
 }): Promise<{ ok: true } | { ok: false; error: string }> {
@@ -250,16 +242,10 @@ export async function addCoreAssignmentFromCanvas(input: {
     return { ok: false, error: '케이블 정보가 없습니다' }
   }
 
-  const start = Math.trunc(input.core_range_start)
-  const end = Math.trunc(input.core_range_end)
-  if (!Number.isFinite(start) || start < 1) {
-    return { ok: false, error: '시작 코어는 1 이상의 정수여야 합니다' }
-  }
-  if (!Number.isFinite(end) || end < 1) {
-    return { ok: false, error: '끝 코어는 1 이상의 정수여야 합니다' }
-  }
-  if (end < start) {
-    return { ok: false, error: '끝 코어는 시작 코어보다 크거나 같아야 합니다' }
+  // 한 케이블·한 회선(세그먼트)은 코어 1개만 — 단일 코어 번호.
+  const core = Math.trunc(input.core_no)
+  if (!Number.isFinite(core) || core < 1) {
+    return { ok: false, error: '코어 번호는 1 이상의 정수여야 합니다' }
   }
 
   const segment_idx = Math.trunc(input.segment_idx)
@@ -313,8 +299,8 @@ export async function addCoreAssignmentFromCanvas(input: {
     circuit_id: circuitId,
     segment_idx,
     cable_id: input.cable_id,
-    core_range_start: start,
-    core_range_end: end,
+    core_range_start: core,
+    core_range_end: core,
     lifecycle: input.lifecycle,
     status: null,
     is_terminal: input.is_terminal,
@@ -325,7 +311,7 @@ export async function addCoreAssignmentFromCanvas(input: {
   if (error) {
     const friendly =
       error.message.includes('exclude') || error.code === '23P01'
-        ? overlapErrorMessage(start, end)
+        ? overlapErrorMessage(core)
         : '코어 배정 실패: ' + error.message
     return { ok: false, error: friendly }
   }

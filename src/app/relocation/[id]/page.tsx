@@ -30,6 +30,11 @@ import { seedTestData } from './seed-actions'
 import TopologyCanvas from './TopologyCanvas'
 import CollapsibleLayout from './CollapsibleLayout'
 import { loadRelocationCanvasData } from './canvas-data'
+import VerifyTab from './VerifyTab'
+import { runVerification, type VerifyResult } from '@/lib/relocation-verify'
+import PhasesTab, { type PhaseRow, type PhaseTaskRow } from './PhasesTab'
+import ExportTab from './ExportTab'
+import SpliceTab, { type SpliceRow } from './SpliceTab'
 
 // 지장이설 프로젝트 상세 — 메인 작업 화면.
 // 사양 § 7: 시설·케이블·회선·코어배정·직선도·차수·검증·내보내기 8 탭.
@@ -160,6 +165,91 @@ export default async function RelocationProjectPage({
         .in('migration_id', migIds)
       migrationCircuits = (mcRows ?? []) as MigrationCircuitRow[]
     }
+  }
+
+  // 검증 결과 (verify 탭 전용) — 접속·스플리터는 별도 조회, 나머지는 캔버스 데이터 재사용
+  let verifyResult: VerifyResult | null = null
+  if (tab === 'verify') {
+    const { data: splRows } = await supabase
+      .from('relocation_splices')
+      .select('facility_id')
+      .eq('project_id', id)
+    const { data: sptRows } = await supabase
+      .from('relocation_splitters')
+      .select('facility_id, input_a_cable_id, input_b_cable_id')
+      .eq('project_id', id)
+
+    verifyResult = runVerification({
+      facilities: facilities.map((f) => ({
+        id: f.id,
+        closure_type: f.closure_type,
+        seq_no: f.seq_no,
+        name: f.name,
+        closure_spec: f.closure_spec,
+      })),
+      cables: cables.map((c) => ({
+        id: c.id,
+        from_facility_id: c.from_facility_id,
+        to_facility_id: c.to_facility_id,
+        spec: c.spec,
+        status: c.status,
+        cable_code: c.cable_code,
+      })),
+      circuits: circuits.map((c) => ({
+        id: c.id,
+        circuit_id: c.circuit_id,
+        kind: c.kind,
+      })),
+      assignments: assignments.map((a) => ({
+        circuit_id: a.circuit_id,
+        segment_idx: a.segment_idx,
+        cable_id: a.cable_id,
+      })),
+      splices: (splRows ?? []) as { facility_id: string }[],
+      splitters: (sptRows ?? []) as {
+        facility_id: string
+        input_a_cable_id: string | null
+        input_b_cable_id: string | null
+      }[],
+      facilityTasks: facilityTasks.map((t) => ({ facility_id: t.facility_id })),
+    })
+  }
+
+  // 차수 (phases 탭 전용)
+  let phases: PhaseRow[] = []
+  let phaseTasks: PhaseTaskRow[] = []
+  if (tab === 'phases') {
+    const { data: phRows } = await supabase
+      .from('relocation_phases')
+      .select(
+        'id, phase_no, required_teams, estimated_minutes, status, window_start, window_end',
+      )
+      .eq('project_id', id)
+      .order('phase_no')
+    phases = (phRows ?? []) as PhaseRow[]
+
+    if (phases.length > 0) {
+      const { data: ptRows } = await supabase
+        .from('relocation_phase_tasks')
+        .select('id, phase_id, facility_id, task_kind, estimated_minutes')
+        .in(
+          'phase_id',
+          phases.map((p) => p.id),
+        )
+      phaseTasks = (ptRows ?? []) as PhaseTaskRow[]
+    }
+  }
+
+  // 접속 (직선도 탭 전용)
+  let splices: SpliceRow[] = []
+  if (tab === 'splice') {
+    const { data: spRows } = await supabase
+      .from('relocation_splices')
+      .select(
+        'id, facility_id, in_cable_id, in_core, out_cable_id, out_core, is_continuous',
+      )
+      .eq('project_id', id)
+    splices = (spRows ?? []) as SpliceRow[]
   }
 
   const topPanel = (
@@ -364,8 +454,79 @@ export default async function RelocationProjectPage({
                 selectedFromCableId={selectedFromCableId}
               />
             )}
-            {(tab === 'splice' || tab === 'phases' || tab === 'verify' || tab === 'export') && (
-              <TabPlaceholder tab={tab} />
+            {tab === 'verify' && verifyResult && (
+              <VerifyTab result={verifyResult} facilityCount={facilities.length} />
+            )}
+            {tab === 'phases' && (
+              <PhasesTab
+                projectId={project.id}
+                phases={phases}
+                phaseTasks={phaseTasks}
+                facilities={facilities.map((f) => ({
+                  id: f.id,
+                  closure_type: f.closure_type,
+                  seq_no: f.seq_no,
+                  name: f.name,
+                }))}
+              />
+            )}
+            {tab === 'export' && (
+              <ExportTab
+                projectId={project.id}
+                facilities={facilities.map((f) => ({
+                  id: f.id,
+                  closure_type: f.closure_type,
+                  seq_no: f.seq_no,
+                  name: f.name,
+                }))}
+                cables={cables.map((c) => ({
+                  from_facility_id: c.from_facility_id,
+                  to_facility_id: c.to_facility_id,
+                  spec: c.spec,
+                  status: c.status,
+                  cable_code: c.cable_code,
+                  installation_type: c.installation_type,
+                  total_length: c.total_length,
+                }))}
+                facilityTasks={facilityTasks.map((t) => ({
+                  facility_id: t.facility_id,
+                  task_type_id: t.task_type_id,
+                  quantity: t.quantity,
+                }))}
+                facilityMaterials={facilityMaterials.map((m) => ({
+                  facility_id: m.facility_id,
+                  name: m.name,
+                  spec: m.spec,
+                  unit: m.unit,
+                  quantity: m.quantity,
+                }))}
+                taskTypes={taskTypes.map((t) => ({
+                  id: t.id,
+                  name: t.name,
+                  unit_label: t.unit_label,
+                }))}
+                circuitCount={circuits.length}
+                coreAssignmentCount={assignments.length}
+              />
+            )}
+            {tab === 'splice' && (
+              <SpliceTab
+                projectId={project.id}
+                facilities={facilities.map((f) => ({
+                  id: f.id,
+                  closure_type: f.closure_type,
+                  seq_no: f.seq_no,
+                  name: f.name,
+                }))}
+                cables={cables.map((c) => ({
+                  id: c.id,
+                  from_facility_id: c.from_facility_id,
+                  to_facility_id: c.to_facility_id,
+                  cable_code: c.cable_code,
+                  spec: c.spec,
+                }))}
+                splices={splices}
+              />
             )}
           </div>
         </section>
@@ -482,20 +643,5 @@ export default async function RelocationProjectPage({
         />
       </HighlightProvider>
     </main>
-  )
-}
-
-
-function TabPlaceholder({ tab }: { tab: TabId }) {
-  const label = TABS.find((t) => t.id === tab)?.label ?? tab
-  return (
-    <div className="text-center py-12">
-      <p className="text-sm text-slate-500">
-        <strong className="font-semibold">{label}</strong> 탭 — Phase 3 에서 구현 예정
-      </p>
-      <p className="mt-2 text-xs text-slate-400">
-        검증 룰·차수 자동 분할·SVG 시각화·엑셀 출력은 다음 단계에서 추가됩니다.
-      </p>
-    </div>
   )
 }

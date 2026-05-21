@@ -14,6 +14,7 @@ import {
   updateCoreAssignment,
   deleteCoreAssignment,
 } from './core-actions'
+import AutoAssignButton from './AutoAssignButton'
 
 export type CoreAssignmentRow = {
   id: string
@@ -78,6 +79,25 @@ export default function CoresTab({
 
   return (
     <div className="space-y-6">
+      {/* 자동 배정 */}
+      <section className="rounded-xl border border-amber-200 bg-amber-50 p-4 space-y-2 sm:space-y-0 sm:flex sm:items-center sm:justify-between sm:gap-3">
+        <div className="min-w-0">
+          <h3 className="flex items-center gap-1 text-sm font-semibold text-amber-900">
+            <Zap className="h-4 w-4" />
+            자동 코어 배정
+          </h3>
+          <p className="mt-0.5 text-xs text-amber-700">
+            회선의 양 끝 케이블을{' '}
+            <Flag className="inline h-3 w-3 -mt-0.5 text-blue-600" /> 종단으로 표시해두면,
+            두 종단을 잇는 경유 케이블에 빈 코어(가장 작은 번호)를 자동으로 채웁니다.
+            사람이 입력·수정한 배정은 유지됩니다.
+          </p>
+        </div>
+        <div className="shrink-0">
+          <AutoAssignButton projectId={projectId} />
+        </div>
+      </section>
+
       {/* 신규 등록 폼 */}
       <section className="border border-slate-200 rounded-xl p-4 space-y-3 bg-slate-50">
         <h3 className="flex items-center gap-1 text-sm font-semibold text-slate-700">
@@ -131,32 +151,22 @@ export default function CoresTab({
               </select>
             </div>
 
-            <div>
+            <div className="sm:col-span-2">
               <label className="block text-xs font-medium text-slate-600">
-                시작 코어 <span className="text-rose-600">*</span>
+                코어 번호 <span className="text-rose-600">*</span>
               </label>
               <input
                 type="number"
-                name="core_range_start"
+                name="core_no"
                 required
                 min={1}
                 max={576}
                 className="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2 text-sm"
               />
-            </div>
-
-            <div>
-              <label className="block text-xs font-medium text-slate-600">
-                끝 코어 <span className="text-rose-600">*</span>
-              </label>
-              <input
-                type="number"
-                name="core_range_end"
-                required
-                min={1}
-                max={576}
-                className="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2 text-sm"
-              />
+              <p className="mt-0.5 text-[11px] text-slate-500">
+                이 케이블에서 회선이 쓰는 코어 1개. 2코어·이원화 회선은 코어마다 한
+                행씩 나눠 입력
+              </p>
             </div>
 
             <div>
@@ -383,28 +393,15 @@ function CoreRowItem({
             </select>
           </div>
 
-          <div>
-            <label className="block text-[11px] text-slate-500">시작 코어</label>
+          <div className="sm:col-span-2">
+            <label className="block text-[11px] text-slate-500">코어 번호</label>
             <input
               type="number"
-              name="core_range_start"
+              name="core_no"
               required
               min={1}
               max={576}
               defaultValue={assignment.core_range_start}
-              className="mt-0.5 w-full rounded-lg border border-slate-300 px-2 py-1.5 text-sm"
-            />
-          </div>
-
-          <div>
-            <label className="block text-[11px] text-slate-500">끝 코어</label>
-            <input
-              type="number"
-              name="core_range_end"
-              required
-              min={1}
-              max={576}
-              defaultValue={assignment.core_range_end}
               className="mt-0.5 w-full rounded-lg border border-slate-300 px-2 py-1.5 text-sm"
             />
           </div>
