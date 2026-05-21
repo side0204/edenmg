@@ -92,6 +92,7 @@ export default async function RelocationCanvasPage({
               y_hint: f.y_hint ?? null,
               lat: f.lat ?? null,
               lng: f.lng ?? null,
+              created_at: f.created_at ?? null,
             }))}
             cables={cables.map((c) => ({
               id: c.id,

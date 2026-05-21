@@ -104,6 +104,7 @@ type FacilityNode = {
   y_hint: number | null
   lat: number | null
   lng: number | null
+  created_at: string | null
 }
 
 // 경로점 — x/y 는 도식 캔버스 좌표, lat/lng 는 지도 모드 GPS 좌표(Phase 4),
@@ -187,6 +188,16 @@ function pointAlongPolyline(
     target -= segLens[i]
   }
   return pts[pts.length - 1]
+}
+
+// SVG 텍스트 폭 추정 — 한글·CJK(전각) ≈ 1.0×fontSize, ASCII ≈ 0.58×fontSize.
+//   접속함체 설치 순번 배지를 시설명 앞에 정확히 붙이기 위한 근사값.
+function estimateTextWidth(text: string, fontSize: number): number {
+  let w = 0
+  for (const ch of text) {
+    w += fontSize * (ch.charCodeAt(0) > 0x1100 ? 1.0 : 0.58)
+  }
+  return w
 }
 
 // 케이블 라인 스타일 산출 — LGU+ 표준 범례 적용 (2026-05-20)
@@ -404,6 +415,23 @@ export default function TopologyCanvas({
     }
     return m
   }, [cables])
+
+  // 접속함체 설치 순번 — 접속함체 시설을 생성 시각(설치 순서)대로 1,2,3… 번호 부여.
+  //   시설명 앞 녹색 원 배지로 표시.
+  const closureInstallNo = useMemo(() => {
+    const closures = facilities
+      .filter((f) => CLOSURE_TYPE_CATEGORY[f.closure_type] === '접속함체')
+      .slice()
+      .sort((a, b) => {
+        const ta = a.created_at ?? ''
+        const tb = b.created_at ?? ''
+        if (ta !== tb) return ta < tb ? -1 : 1
+        return a.id < b.id ? -1 : 1
+      })
+    const m = new Map<string, number>()
+    closures.forEach((f, i) => m.set(f.id, i + 1))
+    return m
+  }, [facilities])
 
   // 케이블별 회선·코어 배정 수 (케이블 라벨 배지)
   const coreCountByCable = useMemo(() => {
@@ -2416,19 +2444,75 @@ export default function TopologyCanvas({
                 >
                   {code}
                 </text>
-                <text
-                  x={nodeCx}
-                  y={labelNameY}
-                  textAnchor="middle"
-                  className="fill-slate-900"
-                  stroke="#ffffff"
-                  strokeWidth={LABEL_HALO_WIDTH}
-                  strokeLinejoin="round"
-                  paintOrder="stroke"
-                  style={{ fontSize: facNameFont, fontFamily: 'system-ui', fontWeight: 600 }}
-                >
-                  {f.name.length > 12 ? f.name.slice(0, 11) + '…' : f.name}
-                </text>
+                {(() => {
+                  const displayName =
+                    f.name.length > 12 ? f.name.slice(0, 11) + '…' : f.name
+                  const installNo = closureInstallNo.get(f.id)
+                  // 접속함체가 아니면 기존처럼 가운데 정렬 이름만
+                  if (!installNo) {
+                    return (
+                      <text
+                        x={nodeCx}
+                        y={labelNameY}
+                        textAnchor="middle"
+                        className="fill-slate-900"
+                        stroke="#ffffff"
+                        strokeWidth={LABEL_HALO_WIDTH}
+                        strokeLinejoin="round"
+                        paintOrder="stroke"
+                        style={{
+                          fontSize: facNameFont,
+                          fontFamily: 'system-ui',
+                          fontWeight: 600,
+                        }}
+                      >
+                        {displayName}
+                      </text>
+                    )
+                  }
+                  // 접속함체 — 시설명 앞에 설치 순번 (녹색 원 + 흰 숫자, 글자와 같은 크기)
+                  const F = facNameFont
+                  const r = F * 0.78
+                  const gap = 4
+                  const nameW = estimateTextWidth(displayName, F)
+                  const startX = nodeCx - (r * 2 + gap + nameW) / 2
+                  const circleCx = startX + r
+                  const circleCy = labelNameY - F * 0.35
+                  return (
+                    <>
+                      <circle
+                        cx={circleCx}
+                        cy={circleCy}
+                        r={r}
+                        fill="#16a34a"
+                        stroke="#ffffff"
+                        strokeWidth={1.5}
+                      />
+                      <text
+                        x={circleCx}
+                        y={circleCy + F * 0.35}
+                        textAnchor="middle"
+                        fill="#ffffff"
+                        style={{ fontSize: F, fontFamily: 'system-ui', fontWeight: 700 }}
+                      >
+                        {installNo}
+                      </text>
+                      <text
+                        x={startX + r * 2 + gap}
+                        y={labelNameY}
+                        textAnchor="start"
+                        className="fill-slate-900"
+                        stroke="#ffffff"
+                        strokeWidth={LABEL_HALO_WIDTH}
+                        strokeLinejoin="round"
+                        paintOrder="stroke"
+                        style={{ fontSize: F, fontFamily: 'system-ui', fontWeight: 600 }}
+                      >
+                        {displayName}
+                      </text>
+                    </>
+                  )
+                })()}
               </g>
             )
           })}
