@@ -190,8 +190,15 @@ function pointAlongPolyline(
   return pts[pts.length - 1]
 }
 
+// 설치 순번 배지 대상 시설 — 접속함체 5종 + RN 3종(RN_TPS·RN_LTE·TPS_LTE_외) + IJP.
+//   광Mux 는 제외.
+function isInstallNumbered(t: ClosureType): boolean {
+  const cat = CLOSURE_TYPE_CATEGORY[t]
+  return cat === '접속함체' || (cat === 'RN_IJP_광MUX' && t !== '광Mux')
+}
+
 // SVG 텍스트 폭 추정 — 한글·CJK(전각) ≈ 1.0×fontSize, ASCII ≈ 0.58×fontSize.
-//   접속함체 설치 순번 배지를 시설명 앞에 정확히 붙이기 위한 근사값.
+//   설치 순번 배지를 시설명 앞에 정확히 붙이기 위한 근사값.
 function estimateTextWidth(text: string, fontSize: number): number {
   let w = 0
   for (const ch of text) {
@@ -416,11 +423,27 @@ export default function TopologyCanvas({
     return m
   }, [cables])
 
-  // 접속함체 설치 순번 — 접속함체 시설을 생성 시각(설치 순서)대로 1,2,3… 번호 부여.
+  // 설치 순번 — 접속함체·RN·IJP 시설을 생성 시각(설치 순서)대로 1,2,3… 번호 부여.
   //   시설명 앞 녹색 원 배지로 표시.
-  const closureInstallNo = useMemo(() => {
-    const closures = facilities
-      .filter((f) => CLOSURE_TYPE_CATEGORY[f.closure_type] === '접속함체')
+  //   단, 기설 케이블 한 조만 연결된 시설은 제외 (작업 지점이 아님). 신설 한 조는 포함.
+  const installNoByFacility = useMemo(() => {
+    // 시설별 연결 케이블 목록
+    const byFacility = new Map<string, CableEdge[]>()
+    for (const c of cables) {
+      for (const fid of [c.from_facility_id, c.to_facility_id]) {
+        const arr = byFacility.get(fid)
+        if (arr) arr.push(c)
+        else byFacility.set(fid, [c])
+      }
+    }
+    const ordered = facilities
+      .filter((f) => {
+        if (!isInstallNumbered(f.closure_type)) return false
+        const conns = byFacility.get(f.id) ?? []
+        // 기설 케이블 한 조만 연결된 시설은 제외
+        if (conns.length === 1 && conns[0].status === 'existing') return false
+        return true
+      })
       .slice()
       .sort((a, b) => {
         const ta = a.created_at ?? ''
@@ -429,9 +452,9 @@ export default function TopologyCanvas({
         return a.id < b.id ? -1 : 1
       })
     const m = new Map<string, number>()
-    closures.forEach((f, i) => m.set(f.id, i + 1))
+    ordered.forEach((f, i) => m.set(f.id, i + 1))
     return m
-  }, [facilities])
+  }, [facilities, cables])
 
   // 케이블별 회선·코어 배정 수 (케이블 라벨 배지)
   const coreCountByCable = useMemo(() => {
@@ -2447,7 +2470,7 @@ export default function TopologyCanvas({
                 {(() => {
                   const displayName =
                     f.name.length > 12 ? f.name.slice(0, 11) + '…' : f.name
-                  const installNo = closureInstallNo.get(f.id)
+                  const installNo = installNoByFacility.get(f.id)
                   // 접속함체가 아니면 기존처럼 가운데 정렬 이름만
                   if (!installNo) {
                     return (
