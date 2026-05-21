@@ -61,6 +61,7 @@ type FacilityFormParsed = {
   parent_facility_id: string | null
   notes: string | null
   is_marked: boolean
+  mark_note: string | null
   work_window_start: string | null
   work_window_end: string | null
   install_status: FacilityInstallStatus
@@ -91,6 +92,10 @@ function parseFacilityForm(formData: FormData): FacilityFormParsed | string {
   const notes = String(formData.get('notes') ?? '').trim() || null
   const is_marked = formData.get('is_marked') === 'on'
 
+  // 노란색 마크 내용 — 체크 해제 시 내용도 비움
+  const markNoteRaw = String(formData.get('mark_note') ?? '').trim()
+  const mark_note = is_marked && markNoteRaw ? markNoteRaw.slice(0, 500) : null
+
   // 설치 구분 — 기설/신설. 미입력(접속함체 아닌 종류)이면 'new' 기본.
   const installRaw = String(formData.get('install_status') ?? '').trim()
   const install_status: FacilityInstallStatus = isInstallStatus(installRaw)
@@ -119,6 +124,7 @@ function parseFacilityForm(formData: FormData): FacilityFormParsed | string {
     parent_facility_id,
     notes,
     is_marked,
+    mark_note,
     work_window_start,
     work_window_end,
     install_status,
@@ -189,6 +195,7 @@ export async function createFacility(formData: FormData) {
         closure_spec: parsed.closure_spec,
         parent_facility_id: parsed.parent_facility_id,
         is_marked: parsed.is_marked,
+        mark_note: parsed.mark_note,
         notes: parsed.notes,
         work_window_start: parsed.work_window_start,
         work_window_end: parsed.work_window_end,
@@ -255,6 +262,7 @@ export async function updateFacility(formData: FormData) {
       closure_spec: parsed.closure_spec,
       parent_facility_id: parsed.parent_facility_id,
       is_marked: parsed.is_marked,
+      mark_note: parsed.mark_note,
       notes: parsed.notes,
       work_window_start: parsed.work_window_start,
       work_window_end: parsed.work_window_end,
@@ -389,6 +397,7 @@ export async function updateFacilityFromCanvas(input: {
   notes: string | null
   parent_facility_id: string | null
   is_marked: boolean
+  mark_note: string | null
   work_window_start: string | null
   work_window_end: string | null
   install_status: FacilityInstallStatus
@@ -436,6 +445,12 @@ export async function updateFacilityFromCanvas(input: {
     ? input.install_status
     : 'new'
 
+  // 노란색 마크 내용 — 체크 해제 시 내용도 비움
+  const markNote =
+    input.is_marked && input.mark_note
+      ? input.mark_note.trim().slice(0, 500) || null
+      : null
+
   const { error } = await supabase
     .from('relocation_facilities')
     .update({
@@ -445,6 +460,7 @@ export async function updateFacilityFromCanvas(input: {
       notes,
       parent_facility_id: parentId,
       is_marked: !!input.is_marked,
+      mark_note: markNote,
       work_window_start: workWindowStart,
       work_window_end: workWindowEnd,
       install_status: installStatus,

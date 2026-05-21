@@ -101,6 +101,7 @@ type FacilityNode = {
   notes: string | null
   parent_facility_id: string | null
   is_marked: boolean
+  mark_note: string | null
   work_window_start: string | null
   work_window_end: string | null
   x_hint: number | null
@@ -2454,6 +2455,29 @@ export default function TopologyCanvas({
                       </text>
                     </g>
                   )}
+
+                  {/* 노란색 마크 배지 — is_marked 시 도형 좌상단 (노란 원 + 흰 별) */}
+                  {f.is_marked && (
+                    <g style={{ pointerEvents: 'none' }}>
+                      <circle
+                        cx={NODE_SIZE.width / 2 - 17}
+                        cy={NODE_SIZE.height / 2 - 26}
+                        r={8}
+                        fill="#facc15"
+                        stroke="white"
+                        strokeWidth={1.5}
+                      />
+                      <text
+                        x={NODE_SIZE.width / 2 - 17}
+                        y={NODE_SIZE.height / 2 - 22.3}
+                        textAnchor="middle"
+                        fill="white"
+                        style={{ fontSize: 10, fontFamily: 'system-ui', fontWeight: 700 }}
+                      >
+                        ★
+                      </text>
+                    </g>
+                  )}
                 </g>
 
                 {/* 라벨 — 도형이 축소돼도 글자 크기는 처음 크기로 고정.
@@ -2662,6 +2686,7 @@ export default function TopologyCanvas({
                   notes: f.notes,
                   parent_facility_id: f.parent_facility_id,
                   is_marked: f.is_marked,
+                  mark_note: f.mark_note,
                   work_window_start: f.work_window_start,
                   work_window_end: f.work_window_end,
                   install_status: f.install_status,

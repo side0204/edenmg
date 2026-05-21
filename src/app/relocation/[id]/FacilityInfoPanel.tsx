@@ -51,6 +51,7 @@ export type FacilityPanelData = {
   notes: string | null
   parent_facility_id: string | null
   is_marked: boolean
+  mark_note: string | null
   work_window_start: string | null
   work_window_end: string | null
   install_status: string
@@ -117,6 +118,7 @@ export default function FacilityInfoPanel({
   const [notes, setNotes] = useState(facility.notes ?? '')
   const [parentId, setParentId] = useState<string>(facility.parent_facility_id ?? '')
   const [isMarked, setIsMarked] = useState(facility.is_marked)
+  const [markNote, setMarkNote] = useState(facility.mark_note ?? '')
   const [windowStart, setWindowStart] = useState(
     facility.work_window_start?.slice(0, 5) ?? '',
   )
@@ -179,6 +181,7 @@ export default function FacilityInfoPanel({
       notes: notes.trim() || null,
       parent_facility_id: isInternal && parentId ? parentId : null,
       is_marked: isMarked,
+      mark_note: isMarked ? markNote.trim() || null : null,
       work_window_start: windowStart || null,
       work_window_end: windowEnd || null,
       install_status: installStatus,
@@ -488,15 +491,27 @@ export default function FacilityInfoPanel({
               특정 시간대에만 작업 가능한 시설. 비우면 차수 시간대 안 아무때나.
             </p>
           </div>
-          <label className="flex items-center gap-1.5 text-[11px] text-slate-600">
-            <input
-              type="checkbox"
-              checked={isMarked}
-              onChange={(e) => setIsMarked(e.target.checked)}
-              className="rounded"
-            />
-            노란색 마크 (의미 미상 — 보존용)
-          </label>
+          <div>
+            <label className="flex items-center gap-1.5 text-[11px] text-slate-600">
+              <input
+                type="checkbox"
+                checked={isMarked}
+                onChange={(e) => setIsMarked(e.target.checked)}
+                className="rounded"
+              />
+              노란색 마크
+            </label>
+            {isMarked && (
+              <textarea
+                value={markNote}
+                onChange={(e) => setMarkNote(e.target.value)}
+                rows={2}
+                maxLength={500}
+                placeholder="마크 내용 — 이 시설을 표시한 이유·메모"
+                className="mt-1 w-full rounded-md border border-amber-300 bg-amber-50 px-2 py-1 text-xs resize-none"
+              />
+            )}
+          </div>
           <div className="flex justify-end">
             <button
               type="button"

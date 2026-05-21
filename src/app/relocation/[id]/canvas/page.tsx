@@ -86,6 +86,7 @@ export default async function RelocationCanvasPage({
               notes: f.notes,
               parent_facility_id: f.parent_facility_id,
               is_marked: f.is_marked,
+              mark_note: f.mark_note ?? null,
               work_window_start: f.work_window_start,
               work_window_end: f.work_window_end,
               x_hint: f.x_hint ?? null,

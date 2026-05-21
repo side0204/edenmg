@@ -22,6 +22,7 @@ export type FacilityRow = {
   closure_spec: CableSpec | null
   parent_facility_id: string | null
   is_marked: boolean
+  mark_note: string | null
   notes: string | null
   x_hint: number | null
   y_hint: number | null
@@ -168,7 +169,7 @@ export default function FacilitiesTab({
 
           <label className="sm:col-span-2 flex items-center gap-2 text-xs text-slate-600">
             <input type="checkbox" name="is_marked" className="rounded" />
-            노란색 마크 (의미 미상 — 보존만)
+            노란색 마크 (내용은 등록 후 시설 정보 패널에서 입력)
           </label>
 
           <div className="sm:col-span-2 flex justify-end">
@@ -375,15 +376,25 @@ function FacilityRowItem({
             />
           </div>
 
-          <label className="sm:col-span-2 flex items-center gap-2 text-xs text-slate-600">
-            <input
-              type="checkbox"
-              name="is_marked"
-              defaultChecked={facility.is_marked}
-              className="rounded"
+          <div className="sm:col-span-2">
+            <label className="flex items-center gap-2 text-xs text-slate-600">
+              <input
+                type="checkbox"
+                name="is_marked"
+                defaultChecked={facility.is_marked}
+                className="rounded"
+              />
+              노란색 마크
+            </label>
+            <textarea
+              name="mark_note"
+              rows={2}
+              defaultValue={facility.mark_note ?? ''}
+              maxLength={500}
+              placeholder="마크 내용 (체크 시에만 저장)"
+              className="mt-1 w-full rounded-lg border border-amber-300 bg-amber-50 px-2 py-1.5 text-sm"
             />
-            노란색 마크
-          </label>
+          </div>
 
           <div className="sm:col-span-2 flex justify-end gap-2">
             <button
