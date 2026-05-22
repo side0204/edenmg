@@ -2497,23 +2497,15 @@ export default function TopologyCanvas({
                     x: (pts[midIdx - 1].x + pts[midIdx].x) / 2,
                     y: (pts[midIdx - 1].y + pts[midIdx].y) / 2,
                   }
-            // 라벨 크기 — 도식은 크게, 지도는 작게. 자동 캡처 중엔 지도도 크게
-            //   (작은 글자는 화면 캡처 시 흐려짐).
+            // 라벨 크기 — 도식은 크게·볼드, 지도는 원래 작은 크기 (지도 가독성 우선)
             const labelBig = mode !== 'map'
-            const mapCapture = mode === 'map' && autoCaptureActive
-            const lblSpecFont = labelBig ? 20 : mapCapture ? 14 : 9
-            const lblCodeFont = labelBig ? 20 : mapCapture ? 12 : 8
-            // 케이블 라벨 굵기 — 또렷하게 (얇으면 캡처 시 흐려짐).
-            const lblWeight = labelBig ? 700 : 600
-            const lblSpecDy = labelBig ? -13 : mapCapture ? -6 : -4
-            const lblCodeDy = labelBig ? 13 : mapCapture ? 12 : 8
-            const lblBadgeRectDy = labelBig ? 24 : mapCapture ? 18 : 12
-            const lblBadgeTextDy = labelBig ? 32 : mapCapture ? 26 : 20
-            // 케이블 라벨 흰 배경판 폭 — 지도에서 배경과 분리 (긴 쪽 글자 기준)
-            const lblBoxW = Math.max(
-              estimateTextWidth(c.spec ?? '', lblSpecFont),
-              estimateTextWidth(c.cable_code ?? '', lblCodeFont),
-            )
+            const lblSpecFont = labelBig ? 20 : 9
+            const lblCodeFont = labelBig ? 20 : 8
+            const lblWeight = labelBig ? 700 : 400
+            const lblSpecDy = labelBig ? -13 : -4
+            const lblCodeDy = labelBig ? 13 : 8
+            const lblBadgeRectDy = labelBig ? 24 : 12
+            const lblBadgeTextDy = labelBig ? 32 : 20
             return (
               <g key={c.id} opacity={style.opacity}>
                 {/* 선택 강조 (파랑) / 선택 시설에 연결된 케이블 강조 (주황) */}
@@ -2596,35 +2588,16 @@ export default function TopologyCanvas({
                     />
                   )
                 })}
-                {/* 라벨 — 지도 모드는 흰 배경판으로 배경 지도와 분리. */}
-                {mode === 'map' && (c.spec || c.cable_code) && (
-                  <rect
-                    x={labelPt.x - lblBoxW / 2 - 4}
-                    y={labelPt.y + lblSpecDy - lblSpecFont}
-                    width={lblBoxW + 8}
-                    height={lblCodeDy - lblSpecDy + lblCodeFont + 4}
-                    rx={3}
-                    fill="#ffffff"
-                    fillOpacity={1}
-                    stroke="#cbd5e1"
-                    strokeWidth={0.75}
-                    style={{ pointerEvents: 'none' }}
-                  />
-                )}
+                {/* 라벨 */}
                 <text
                   x={labelPt.x}
                   y={labelPt.y + lblSpecDy}
                   textAnchor="middle"
-                  className="fill-slate-950"
-                  stroke="#ffffff"
-                  strokeWidth={LABEL_HALO_WIDTH}
-                  strokeLinejoin="round"
-                  paintOrder="stroke"
+                  className="fill-slate-700"
                   style={{
                     fontSize: lblSpecFont,
                     fontWeight: lblWeight,
-                    fontFamily: LABEL_FONT,
-                    letterSpacing: LABEL_TRACKING,
+                    fontFamily: 'system-ui',
                     pointerEvents: 'none',
                   }}
                 >
@@ -2634,17 +2607,11 @@ export default function TopologyCanvas({
                   x={labelPt.x}
                   y={labelPt.y + lblCodeDy}
                   textAnchor="middle"
-                  className="fill-slate-900"
-                  stroke="#ffffff"
-                  strokeWidth={LABEL_HALO_WIDTH}
-                  strokeLinejoin="round"
-                  paintOrder="stroke"
+                  className="fill-slate-400"
                   style={{
                     fontSize: lblCodeFont,
                     fontWeight: lblWeight,
-                    fontFamily: LABEL_FONT,
-                    letterSpacing: LABEL_TRACKING,
-                    fontVariantNumeric: 'tabular-nums',
+                    fontFamily: 'monospace',
                     pointerEvents: 'none',
                   }}
                 >
@@ -2669,7 +2636,7 @@ export default function TopologyCanvas({
                         y={labelPt.y + lblBadgeTextDy}
                         textAnchor="middle"
                         fill="white"
-                        style={{ fontSize: 7.5, fontWeight: 700, fontFamily: LABEL_FONT }}
+                        style={{ fontSize: 7.5, fontWeight: 700, fontFamily: 'system-ui' }}
                       >
                         회선 {cnt}
                       </text>
@@ -2725,16 +2692,14 @@ export default function TopologyCanvas({
             // 라벨 — 글자 크기는 원래대로 고정. 도형이 축소된 만큼 위치만 중심 쪽으로 당겨
             //   축소된 도형 바로 아래에 붙도록 한다 (scale=1 이면 원래 좌표 그대로).
             const labelCodeY = nodeCy + mapNodeScale * (NODE_SIZE.height - 20 - nodeCy)
-            // 라벨 크기 — 도식은 크게, 지도는 작게. 자동 캡처 중엔 지도도 크게.
-            //   작은 글자는 화면 캡처 시 흐려지므로 캡처할 땐 키운 채로 찍는다.
-            const facMapCapture = mode === 'map' && autoCaptureActive
-            const facCodeFont = mode === 'map' ? (facMapCapture ? 14 : 9) : 15
-            const facNameFont = mode === 'map' ? (facMapCapture ? 16 : 10) : 17
-            // 굵기 — 또렷하게. 얇은 획은 작은 크기에서 캡처 시 흐려져 "얇게+진하게" 양립 불가.
+            // 라벨 크기 — 도식은 크게, 지도는 작게 (지도 가독성 우선).
+            //   캡처도 평소 지도 화면 그대로 — 글자를 키우지 않는다 (키우면 상자가 겹침).
+            const facCodeFont = mode === 'map' ? 9 : 15
+            const facNameFont = mode === 'map' ? 10 : 17
+            // 굵기 — 또렷하게 (얇으면 캡처 시 흐려짐)
             const facCodeWeight = mode === 'map' ? 650 : 700
             const facNameWeight = 600
-            const labelNameY =
-              labelCodeY + (mode === 'map' ? (facMapCapture ? 18 : 12) : 19)
+            const labelNameY = labelCodeY + (mode === 'map' ? 12 : 19)
             // 라벨 위치 — 마우스 드래그 offset (시설명 겹침 방지).
             //   드래그 중이면 로컬 override, 아니면 저장된 label_dx/label_dy.
             // 시설명 — 잘라내지 않고 전체 표시 (라벨 박스가 글자에 맞춰 늘어남)
