@@ -1591,8 +1591,10 @@ export default function TopologyCanvas({
     : null
 
   const isFullscreen = canvasSize === 'fullscreen'
+  // 전체화면은 z-50 — 하단 탭바(BottomNav, z-40)를 덮어 가린다.
+  //   owner 요청: 최대 확장 시 홈/사무/작업/자재 탭이 캡처 화면을 가리지 않게.
   const wrapperClass = isFullscreen
-    ? 'fixed inset-0 z-40 bg-white border border-slate-200 overflow-hidden flex flex-col'
+    ? 'fixed inset-0 z-50 bg-white border border-slate-200 overflow-hidden flex flex-col'
     : 'border border-slate-200 rounded-xl bg-white overflow-hidden'
 
   return (
