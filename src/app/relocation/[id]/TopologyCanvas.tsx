@@ -20,6 +20,7 @@ import {
   MapPin,
   Search,
   Camera,
+  List,
 } from 'lucide-react'
 import {
   CABLE_SPEC_VALUES,
@@ -1662,6 +1663,22 @@ export default function TopologyCanvas({
             </button>
           </div>
 
+          {/* 시설 목록 보임/숨김 — 좌측 사이드바 토글 (도식·지도 공통) */}
+          <button
+            type="button"
+            onClick={() => setSidebarCollapsed((v) => !v)}
+            className={
+              'mr-1 inline-flex items-center gap-1 rounded-md border px-2 h-7 text-[11px] font-medium ' +
+              (!sidebarCollapsed
+                ? 'bg-slate-900 text-white border-slate-900'
+                : 'text-slate-700 border-slate-300 hover:bg-slate-50')
+            }
+            title={sidebarCollapsed ? '시설 목록 보이기' : '시설 목록 숨기기'}
+          >
+            <List className="h-3 w-3" />
+            시설 목록
+          </button>
+
           {/* 검색창 보임/숨김 — 지도 모드에서만 (검색은 지도 기능) */}
           {mode === 'map' && (
             <button
@@ -2097,15 +2114,6 @@ export default function TopologyCanvas({
         )}
 
         <div className="flex-1 min-w-0 relative">
-          {sidebarCollapsed && (
-            <button
-              type="button"
-              onClick={() => setSidebarCollapsed(false)}
-              className="absolute top-2 left-2 z-10 inline-flex items-center gap-1 rounded-md border border-slate-300 bg-white px-2 py-1 text-[11px] font-medium text-slate-700 hover:bg-slate-50 shadow-sm"
-            >
-              ▶ 시설 목록
-            </button>
-          )}
 
           {/* 지도 모드 검색창 — 캔버스 중앙 최상단 floating.
               별도 바 대신 지도 위에 띄워 캔버스를 더 넓게 쓴다. SDK 준비 후에만 노출.

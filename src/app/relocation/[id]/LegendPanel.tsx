@@ -37,7 +37,7 @@ export default function LegendPanel({
           <div>
             <h3 className="text-lg font-bold text-slate-900">LGU+ 표준 범례</h3>
             <p className="text-xs text-slate-500 mt-1">
-              건물/설치장소 + 광망 범례 (현장 답사·설계 표준)
+              건물/설치장소 + 광망 범례 (설계 표준)
             </p>
           </div>
           <button
@@ -122,7 +122,10 @@ function NetworkLegend() {
         <LegendRow icon={<LineIcon dash="none" color={cableSpecColor('72C')} />} label="37C ~ 72C" />
         <LegendRow icon={<LineIcon dash="none" color={cableSpecColor('144C')} />} label="73C ~ 144C" />
         <LegendRow icon={<LineIcon dash="none" color={cableSpecColor('288C')} />} label="145C ~ 288C" />
-        <LegendRow icon={<LineIcon dash="none" color="#111827" />} label="기타" />
+        <LegendRow
+          icon={<LineIcon dash="none" color="#111827" />}
+          label="기타(지장이설인 경우 기설케이블)"
+        />
       </CategoryGroup>
 
       <CategoryGroup title="접속함체">
