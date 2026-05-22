@@ -2,7 +2,17 @@
 
 import { useState } from 'react'
 import { toast } from 'sonner'
-import { X, Trash2, Save, TriangleAlert, ChevronLeft, ChevronRight, Flag, Plus } from 'lucide-react'
+import {
+  X,
+  Trash2,
+  Save,
+  TriangleAlert,
+  ChevronLeft,
+  ChevronRight,
+  Flag,
+  Plus,
+  RefreshCw,
+} from 'lucide-react'
 import {
   CABLE_STATUS_VALUES,
   CABLE_STATUS_LABEL,
@@ -12,6 +22,7 @@ import {
   CIRCUIT_KIND_VALUES,
   CIRCUIT_KIND_LABEL,
   isCircuitDiverse,
+  haversineMeters,
   type CableStatus,
   type CableInstallationType,
   type CoreLifecycle,
@@ -75,6 +86,10 @@ export default function CableInfoPanel({
   cable,
   fromName,
   toName,
+  fromLat,
+  fromLng,
+  toLat,
+  toLng,
   waypoints,
   circuits,
   assignments,
@@ -88,6 +103,11 @@ export default function CableInfoPanel({
   cable: CablePanelData
   fromName: string
   toName: string
+  // 시작·도착 시설 GPS — 경로점으로 경로 변경 시 거리 재계산용
+  fromLat: number | null
+  fromLng: number | null
+  toLat: number | null
+  toLng: number | null
   waypoints: CablePanelWaypoint[]
   circuits: CablePanelCircuit[]
   assignments: CablePanelAssignment[]
@@ -132,6 +152,39 @@ export default function CableInfoPanel({
 
   // 기설 케이블 거리는 기별명세서 정산(포설)에 반영 금지 — 함체 간 거리 파악·검색용.
   const isExisting = status === 'existing'
+
+  // 지도 경로 거리 재계산 가능 여부 — 시작·도착 시설 + 모든 경로점에 GPS 좌표가 있어야.
+  const canRecalc =
+    fromLat != null &&
+    fromLng != null &&
+    toLat != null &&
+    toLng != null &&
+    waypoints.every((w) => w.lat != null && w.lng != null)
+
+  // 경로점으로 경로를 바꾼 뒤, 지도상 실제 경로 거리로 전체거리·구간거리를 다시 채운다.
+  //   수동 입력값을 덮어쓰므로 설계자가 「재계산」 버튼을 눌렀을 때만 동작 (자동 X).
+  function onRecalcFromRoute() {
+    if (!canRecalc) {
+      toast.error('지도에 배치된 케이블만 경로 거리를 재계산할 수 있습니다')
+      return
+    }
+    // 경로 점 = 시작시설 → 경로점들 → 도착시설
+    const pts = [
+      { lat: fromLat as number, lng: fromLng as number },
+      ...waypoints.map((w) => ({ lat: w.lat as number, lng: w.lng as number })),
+      { lat: toLat as number, lng: toLng as number },
+    ]
+    // 구간별 거리 (pts.length - 1 개) — 앞 N개는 경로점 구간, 마지막 1개는 도착 구간
+    const segs: number[] = []
+    for (let i = 0; i < pts.length - 1; i++) {
+      segs.push(haversineMeters(pts[i], pts[i + 1]))
+    }
+    const round = (n: number) => Math.round(n)
+    setDists(segs.slice(0, waypoints.length).map((s) => String(round(s))))
+    setEndDistance(String(round(segs[segs.length - 1] ?? 0)))
+    setTotalLength(String(round(segs.reduce((a, b) => a + b, 0))))
+    toast.success('지도 경로 거리로 재계산했습니다. 확인 후 저장하세요.')
+  }
 
   async function onSave() {
     if (submitting) return
@@ -318,6 +371,22 @@ export default function CableInfoPanel({
             placeholder={isExisting ? '함체 간 케이블 거리' : '실제 포설 케이블 길이'}
             className="mt-0.5 w-full rounded-md border border-slate-300 px-2 py-1 text-xs"
           />
+          {canRecalc && (
+            <div className="mt-1">
+              <button
+                type="button"
+                onClick={onRecalcFromRoute}
+                className="inline-flex items-center gap-1 rounded-md border border-slate-300 bg-white px-2 py-1 text-[11px] font-medium text-slate-700 hover:bg-slate-50"
+              >
+                <RefreshCw className="h-3 w-3" />
+                지도 경로 거리로 재계산
+              </button>
+              <p className="mt-0.5 text-[10px] text-slate-400 leading-tight">
+                경로점을 옮겨 경로를 바꿨을 때 누르세요. 전체거리·구간거리를 지도
+                거리로 다시 채웁니다. 수동 입력값을 유지하려면 누르지 마세요.
+              </p>
+            </div>
+          )}
           {isExisting && (
             <p className="mt-0.5 text-[10px] text-blue-600">
               기설 케이블 거리는 기별명세서 정산에 반영되지 않습니다. 함체 간 거리

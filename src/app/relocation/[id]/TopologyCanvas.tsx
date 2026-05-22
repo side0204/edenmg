@@ -3052,6 +3052,10 @@ export default function TopologyCanvas({
                 }}
                 fromName={fromName}
                 toName={toName}
+                fromLat={fromF?.lat ?? null}
+                fromLng={fromF?.lng ?? null}
+                toLat={toF?.lat ?? null}
+                toLng={toF?.lng ?? null}
                 waypoints={wps}
                 circuits={circuits ?? []}
                 assignments={(coreAssignments ?? []).filter(
