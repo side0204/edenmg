@@ -36,7 +36,7 @@ const TILE_WAIT = 850    // 타일 이동 후 지도 타일 로딩 대기(ms)
 const PAD = 0.08         // bbox 가장자리 여백 (뷰포트 비율)
 // 시설 라벨 글자 변형 — 너비 0.75배(가로 압축)·높이 1.2배(세로 신장). 조밀한 장체.
 const LABEL_SCALE_X = 0.75
-const LABEL_SCALE_Y = 1.2
+const LABEL_SCALE_Y = 1.4
 
 function sleep(ms: number): Promise<void> {
   return new Promise((r) => setTimeout(r, ms))
@@ -145,7 +145,7 @@ function redrawFacilityLabels(
   ctx.lineJoin = 'round'
   // 자간 — 일부 TS lib.dom 에 letterSpacing 타입이 없어 느슨하게 설정 (Chrome 99+ 지원)
   const ctxLS = ctx as CanvasRenderingContext2D & { letterSpacing?: string }
-  ctxLS.letterSpacing = '0.1em'
+  ctxLS.letterSpacing = '0.14em'
 
   for (const f of facilities) {
     if (f.lat == null || f.lng == null) continue

@@ -178,10 +178,10 @@ const LABEL_HALO_WIDTH = 2.5      // px
 const LABEL_FONT = "'Pretendard Variable', Pretendard, system-ui, sans-serif"
 // 라벨 자간 — 약간 넓혀 글자가 서로 붙지 않게 (외곽선 번짐 방지 + 가독성).
 //   0.02em 은 작은 글자에서 눈에 안 띔 → 0.06em 으로. 더 넓게/좁게는 이 값만 조정.
-const LABEL_TRACKING = '0.1em'
+const LABEL_TRACKING = '0.14em'
 // 시설 라벨 글자 변형 — 너비 0.75배(가로 압축)·높이 1.2배(세로 신장). 조밀한 장체.
 const LABEL_SCALE_X = 0.75
-const LABEL_SCALE_Y = 1.2
+const LABEL_SCALE_Y = 1.4
 
 // 지도 모드 — fit 시 setBounds 가 잡는 기본 줌에서 추가 확대 단계 (LEVEL 낮을수록 확대).
 const MAP_FIT_ZOOM_IN_STEPS = 2
