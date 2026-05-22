@@ -170,7 +170,15 @@ const LABEL_LEADER_THRESHOLD = 26 // px — 라벨이 이만큼 멀어지면 시
 const CABLE_OFFSET_GAP = 7        // px — 같은 경로 여러 케이블 평행 간격
 // 시설 라벨 흰색 외곽선 — 지도 모드에서 배경 지도 글자와 구분 (지도 제작사 표준 기법).
 //   두껍다고 느껴지면 줄이고, 잘 안 보이면 올린다.
-const LABEL_HALO_WIDTH = 3        // px
+//   작은 글자에 3px 은 외곽선이 글자를 잠식해 뭉개 보임 → 2.5 로 (얇고 또렷하게).
+const LABEL_HALO_WIDTH = 2.5      // px
+// 캔버스 SVG 라벨 서체 — 앱 본문과 같은 Pretendard.
+//   system-ui/monospace(OS 기본) 보다 획이 가늘고 또렷해 지도 위 시인성이 좋다.
+//   variable 폰트라 500 안팎의 중간 굵기를 정확히 쓸 수 있다 — "얇으면서 진한" 느낌.
+const LABEL_FONT = "'Pretendard Variable', Pretendard, system-ui, sans-serif"
+// 라벨 자간 — 약간 넓혀 글자가 서로 붙지 않게 (외곽선 번짐 방지 + 가독성).
+//   0.02em 은 작은 글자에서 눈에 안 띔 → 0.06em 으로. 더 넓게/좁게는 이 값만 조정.
+const LABEL_TRACKING = '0.06em'
 
 // 지도 모드 — fit 시 setBounds 가 잡는 기본 줌에서 추가 확대 단계 (LEVEL 낮을수록 확대).
 const MAP_FIT_ZOOM_IN_STEPS = 2
@@ -2409,7 +2417,7 @@ export default function TopologyCanvas({
                         y={3}
                         textAnchor="middle"
                         fill={ROUTE_GAP_COLOR}
-                        style={{ fontSize: 8.5, fontWeight: 700, fontFamily: 'system-ui' }}
+                        style={{ fontSize: 8.5, fontWeight: 700, fontFamily: LABEL_FONT }}
                       >
                         추정경로
                       </text>
@@ -2493,7 +2501,8 @@ export default function TopologyCanvas({
             const labelBig = mode !== 'map'
             const lblSpecFont = labelBig ? 20 : 9
             const lblCodeFont = labelBig ? 20 : 8
-            const lblWeight = labelBig ? 700 : 400
+            // 지도 케이블 라벨 — "얇으면서 진한" 중간 굵기 (기존 400 은 지도 위에서 흐릿).
+            const lblWeight = labelBig ? 700 : 500
             const lblSpecDy = labelBig ? -13 : -4
             const lblCodeDy = labelBig ? 13 : 8
             const lblBadgeRectDy = labelBig ? 24 : 12
@@ -2580,16 +2589,22 @@ export default function TopologyCanvas({
                     />
                   )
                 })}
-                {/* 라벨 */}
+                {/* 라벨 — 지도 모드는 흰 외곽선(halo)으로 배경 지도와 분리.
+                    도식 모드는 배경이 흰색이라 외곽선이 보이지 않아 무해. */}
                 <text
                   x={labelPt.x}
                   y={labelPt.y + lblSpecDy}
                   textAnchor="middle"
-                  className="fill-slate-700"
+                  className="fill-slate-800"
+                  stroke="#ffffff"
+                  strokeWidth={LABEL_HALO_WIDTH}
+                  strokeLinejoin="round"
+                  paintOrder="stroke"
                   style={{
                     fontSize: lblSpecFont,
                     fontWeight: lblWeight,
-                    fontFamily: 'system-ui',
+                    fontFamily: LABEL_FONT,
+                    letterSpacing: LABEL_TRACKING,
                     pointerEvents: 'none',
                   }}
                 >
@@ -2599,11 +2614,17 @@ export default function TopologyCanvas({
                   x={labelPt.x}
                   y={labelPt.y + lblCodeDy}
                   textAnchor="middle"
-                  className="fill-slate-400"
+                  className="fill-slate-500"
+                  stroke="#ffffff"
+                  strokeWidth={LABEL_HALO_WIDTH}
+                  strokeLinejoin="round"
+                  paintOrder="stroke"
                   style={{
                     fontSize: lblCodeFont,
                     fontWeight: lblWeight,
-                    fontFamily: 'monospace',
+                    fontFamily: LABEL_FONT,
+                    letterSpacing: LABEL_TRACKING,
+                    fontVariantNumeric: 'tabular-nums',
                     pointerEvents: 'none',
                   }}
                 >
@@ -2628,7 +2649,7 @@ export default function TopologyCanvas({
                         y={labelPt.y + lblBadgeTextDy}
                         textAnchor="middle"
                         fill="white"
-                        style={{ fontSize: 7.5, fontWeight: 700, fontFamily: 'system-ui' }}
+                        style={{ fontSize: 7.5, fontWeight: 700, fontFamily: LABEL_FONT }}
                       >
                         회선 {cnt}
                       </text>
@@ -2687,6 +2708,10 @@ export default function TopologyCanvas({
             // 라벨 크기 — 도식은 크게, 지도는 원래 작은 크기 (지도 가독성 우선)
             const facCodeFont = mode === 'map' ? 9 : 15
             const facNameFont = mode === 'map' ? 10 : 17
+            // 굵기 — 지도는 "얇으면서 진한" 중간 굵기, 도식은 큼직하게.
+            //   Pretendard variable 이라 550/500 같은 중간값을 정확히 쓸 수 있다.
+            const facCodeWeight = mode === 'map' ? 550 : 700
+            const facNameWeight = mode === 'map' ? 500 : 600
             const labelNameY = labelCodeY + (mode === 'map' ? 12 : 19)
             // 라벨 위치 — 마우스 드래그 offset (시설명 겹침 방지).
             //   드래그 중이면 로컬 override, 아니면 저장된 label_dx/label_dy.
@@ -2826,7 +2851,7 @@ export default function TopologyCanvas({
                         y={NODE_SIZE.height / 2 - 22.5}
                         textAnchor="middle"
                         fill="white"
-                        style={{ fontSize: 9, fontFamily: 'system-ui', fontWeight: 700 }}
+                        style={{ fontSize: 9, fontFamily: LABEL_FONT, fontWeight: 700 }}
                       >
                         {cableCount}
                       </text>
@@ -2849,7 +2874,7 @@ export default function TopologyCanvas({
                         y={NODE_SIZE.height / 2 - 22.3}
                         textAnchor="middle"
                         fill="white"
-                        style={{ fontSize: 10, fontFamily: 'system-ui', fontWeight: 700 }}
+                        style={{ fontSize: 10, fontFamily: LABEL_FONT, fontWeight: 700 }}
                       >
                         ★
                       </text>
@@ -2885,7 +2910,13 @@ export default function TopologyCanvas({
                   strokeWidth={LABEL_HALO_WIDTH}
                   strokeLinejoin="round"
                   paintOrder="stroke"
-                  style={{ fontSize: facCodeFont, fontFamily: 'monospace', fontWeight: 700 }}
+                  style={{
+                    fontSize: facCodeFont,
+                    fontFamily: LABEL_FONT,
+                    fontWeight: facCodeWeight,
+                    letterSpacing: LABEL_TRACKING,
+                    fontVariantNumeric: 'tabular-nums',
+                  }}
                 >
                   {code}
                 </text>
@@ -2906,8 +2937,9 @@ export default function TopologyCanvas({
                         paintOrder="stroke"
                         style={{
                           fontSize: facNameFont,
-                          fontFamily: 'system-ui',
-                          fontWeight: 600,
+                          fontFamily: LABEL_FONT,
+                          fontWeight: facNameWeight,
+                          letterSpacing: LABEL_TRACKING,
                         }}
                       >
                         {displayName}
@@ -2937,7 +2969,12 @@ export default function TopologyCanvas({
                         y={circleCy + F * 0.35}
                         textAnchor="middle"
                         fill="#ffffff"
-                        style={{ fontSize: F, fontFamily: 'system-ui', fontWeight: 700 }}
+                        style={{
+                          fontSize: F,
+                          fontFamily: LABEL_FONT,
+                          fontWeight: 700,
+                          fontVariantNumeric: 'tabular-nums',
+                        }}
                       >
                         {installNo}
                       </text>
@@ -2950,7 +2987,12 @@ export default function TopologyCanvas({
                         strokeWidth={LABEL_HALO_WIDTH}
                         strokeLinejoin="round"
                         paintOrder="stroke"
-                        style={{ fontSize: F, fontFamily: 'system-ui', fontWeight: 600 }}
+                        style={{
+                          fontSize: F,
+                          fontFamily: LABEL_FONT,
+                          fontWeight: facNameWeight,
+                          letterSpacing: LABEL_TRACKING,
+                        }}
                       >
                         {displayName}
                       </text>
@@ -3016,7 +3058,7 @@ export default function TopologyCanvas({
                     y={pt.y - 21}
                     textAnchor="middle"
                     fill={FAULT_COLOR}
-                    style={{ fontSize: 10, fontWeight: 700, fontFamily: 'system-ui' }}
+                    style={{ fontSize: 10, fontWeight: 700, fontFamily: LABEL_FONT }}
                   >
                     고장점
                   </text>
@@ -3532,7 +3574,7 @@ function FacilityShape({
     return (
       <g>
         <rect x={cx - w / 2} y={cy - h / 2} width={w} height={h} fill="white" stroke={isFallback} strokeWidth={1.4} />
-        <text x={cx} y={cy + 3} textAnchor="middle" fill={isFallback} style={{ fontSize: 8, fontFamily: 'system-ui', fontWeight: 600 }}>
+        <text x={cx} y={cy + 3} textAnchor="middle" fill={isFallback} style={{ fontSize: 8, fontFamily: LABEL_FONT, fontWeight: 600 }}>
           {label}
         </text>
       </g>
@@ -3680,7 +3722,7 @@ function FacilityShape({
   return (
     <g>
       <rect x={cx - w / 2} y={cy - h / 2} width={w} height={h} fill="white" stroke={isFallback} strokeWidth={1.4} />
-      <text x={cx} y={cy + 3} textAnchor="middle" fill={isFallback} style={{ fontSize: 7, fontFamily: 'system-ui', fontWeight: 600 }}>
+      <text x={cx} y={cy + 3} textAnchor="middle" fill={isFallback} style={{ fontSize: 7, fontFamily: LABEL_FONT, fontWeight: 600 }}>
         {closureType}
       </text>
     </g>
@@ -3699,7 +3741,7 @@ function CircledText({ cx, cy, text, color }: { cx: number; cy: number; text: st
         y={cy + 4}
         textAnchor="middle"
         fill="white"
-        style={{ fontSize: text.length > 1 ? 10 : 12, fontFamily: 'system-ui', fontWeight: 700 }}
+        style={{ fontSize: text.length > 1 ? 10 : 12, fontFamily: LABEL_FONT, fontWeight: 700 }}
       >
         {text}
       </text>
@@ -3717,7 +3759,7 @@ function BoxedText({ cx, cy, text, color, width = 26 }: { cx: number; cy: number
         y={cy + 4}
         textAnchor="middle"
         fill="white"
-        style={{ fontSize: 9, fontFamily: 'system-ui', fontWeight: 700 }}
+        style={{ fontSize: 9, fontFamily: LABEL_FONT, fontWeight: 700 }}
       >
         {text}
       </text>
