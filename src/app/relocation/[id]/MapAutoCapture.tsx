@@ -19,6 +19,18 @@ import { X, ImageDown, ZoomIn, ZoomOut, Loader2, Check } from 'lucide-react'
 type LatLngLit = { lat: number; lng: number }
 type Bbox = { minLat: number; maxLat: number; minLng: number; maxLng: number }
 
+// 캡처 후 또렷하게 다시 그릴 시설 라벨 정보 (TopologyCanvas 가 GPS·이름 등을 넘김)
+type CaptureFacility = {
+  lat: number | null
+  lng: number | null
+  code: string
+  name: string
+  isNew: boolean
+  installNo: number | null
+  labelDx: number
+  labelDy: number
+}
+
 const OVERLAP = 0.06     // 타일 간 겹침 비율 (이음매 방지)
 const TILE_WAIT = 850    // 타일 이동 후 지도 타일 로딩 대기(ms)
 const PAD = 0.08         // bbox 가장자리 여백 (뷰포트 비율)
@@ -61,18 +73,154 @@ function planTiles(
   return { cols, rows, centers }
 }
 
+// 흰 외곽선(halo) 두른 텍스트 — 배경과 글자를 분리해 또렷하게.
+function drawHaloText(
+  ctx: CanvasRenderingContext2D,
+  text: string,
+  x: number,
+  y: number,
+  color: string,
+  haloWidth: number,
+): void {
+  if (!text) return
+  ctx.strokeStyle = '#ffffff'
+  ctx.lineWidth = haloWidth
+  ctx.strokeText(text, x, y)
+  ctx.fillStyle = color
+  ctx.fillText(text, x, y)
+}
+
+// 모서리 둥근 사각형 path — roundRect 미지원 브라우저 대비 arcTo 로 직접 그림.
+function roundRectPath(
+  ctx: CanvasRenderingContext2D,
+  x: number,
+  y: number,
+  w: number,
+  h: number,
+  r: number,
+): void {
+  const rr = Math.max(0, Math.min(r, w / 2, h / 2))
+  ctx.beginPath()
+  ctx.moveTo(x + rr, y)
+  ctx.arcTo(x + w, y, x + w, y + h, rr)
+  ctx.arcTo(x + w, y + h, x, y + h, rr)
+  ctx.arcTo(x, y + h, x, y, rr)
+  ctx.arcTo(x, y, x + w, y, rr)
+  ctx.closePath()
+}
+
+// 합성 이미지 위에 시설 라벨을 또렷한 벡터(canvas 2D 텍스트)로 다시 그린다.
+//   화면 캡처된 작은 글자는 흐리므로, 캡처 중엔 라벨을 숨기고 여기서 재합성.
+//   GPS → 합성 픽셀 변환은 planTiles 의 타일 격자와 동일한 선형 매핑.
+function redrawFacilityLabels(
+  ctx: CanvasRenderingContext2D,
+  opts: {
+    facilities: CaptureFacility[]
+    firstLat: number
+    firstLng: number
+    srcW: number
+    srcH: number
+    vLng: number
+    vLat: number
+    scale: number
+  },
+): void {
+  const { facilities, firstLat, firstLng, srcW, srcH, vLng, vLat, scale } = opts
+  if (vLng <= 0 || vLat <= 0) return
+  const pxPerLng = srcW / vLng
+  const pxPerLat = srcH / vLat
+  const codeFont = 9 * scale
+  const nameFont = 10 * scale
+  const lineGap = 12 * scale     // 시설코드 → 시설명 baseline 간격
+  const shapeGap = 22 * scale    // 시설 중심 → 시설코드 baseline (도형 아래)
+  const halo = 2.5 * scale
+  const pad = 5 * scale
+  const FF = "'Pretendard Variable', Pretendard, system-ui, sans-serif"
+
+  ctx.save()
+  ctx.textBaseline = 'alphabetic'
+  ctx.lineJoin = 'round'
+
+  for (const f of facilities) {
+    if (f.lat == null || f.lng == null) continue
+    const cx = srcW / 2 + (f.lng - firstLng) * pxPerLng + f.labelDx * scale
+    const cy = srcH / 2 + (firstLat - f.lat) * pxPerLat + f.labelDy * scale
+    const codeY = cy + shapeGap
+    const nameY = codeY + lineGap
+    const code = f.code || ''
+    const name = f.name || ''
+    const codeColor = f.isNew ? '#dc2626' : '#0f172a'
+    const nameColor = f.isNew ? '#dc2626' : '#020617'
+
+    // 글자 폭 측정 → 흰 배경판 크기
+    ctx.font = `650 ${codeFont}px ${FF}`
+    const wCode = code ? ctx.measureText(code).width : 0
+    ctx.font = `600 ${nameFont}px ${FF}`
+    const wNameText = name ? ctx.measureText(name).width : 0
+    const instExtra = f.installNo != null ? nameFont * 1.9 : 0
+    const boxW = Math.max(wCode, wNameText + instExtra) + pad * 2
+    const boxX = cx - boxW / 2
+    const boxY = codeY - codeFont
+    const boxH = nameY - codeY + nameFont + 8 * scale
+
+    // 흰 배경판
+    roundRectPath(ctx, boxX, boxY, boxW, boxH, 4 * scale)
+    ctx.fillStyle = '#ffffff'
+    ctx.fill()
+    ctx.strokeStyle = '#cbd5e1'
+    ctx.lineWidth = Math.max(0.5, 0.75 * scale)
+    ctx.stroke()
+
+    // 시설코드 (가운데 정렬)
+    ctx.textAlign = 'center'
+    ctx.font = `650 ${codeFont}px ${FF}`
+    drawHaloText(ctx, code, cx, codeY, codeColor, halo)
+
+    // 시설명
+    ctx.font = `600 ${nameFont}px ${FF}`
+    if (f.installNo != null) {
+      // 설치 순번 — 초록 원 + 흰 숫자, 그 뒤 이름(좌측 정렬)
+      const r = nameFont * 0.78
+      const gap = 4 * scale
+      const startX = cx - (r * 2 + gap + wNameText) / 2
+      const circleCx = startX + r
+      const circleCy = nameY - nameFont * 0.35
+      ctx.beginPath()
+      ctx.arc(circleCx, circleCy, r, 0, Math.PI * 2)
+      ctx.fillStyle = '#16a34a'
+      ctx.fill()
+      ctx.strokeStyle = '#ffffff'
+      ctx.lineWidth = Math.max(1, 1.5 * scale)
+      ctx.stroke()
+      ctx.font = `700 ${nameFont}px ${FF}`
+      ctx.fillStyle = '#ffffff'
+      ctx.fillText(String(f.installNo), circleCx, circleCy + nameFont * 0.35)
+      ctx.font = `600 ${nameFont}px ${FF}`
+      ctx.textAlign = 'left'
+      drawHaloText(ctx, name, startX + r * 2 + gap, nameY, nameColor, halo)
+    } else {
+      ctx.textAlign = 'center'
+      drawHaloText(ctx, name, cx, nameY, nameColor, halo)
+    }
+  }
+  ctx.restore()
+}
+
 type Phase = 'ready' | 'capturing' | 'done' | 'error'
 
 export default function MapAutoCapture({
   map,
   facilities,
   getMapRect,
+  onCaptureRunningChange,
   onClose,
 }: {
   map: kakao.maps.Map
-  facilities: { lat: number | null; lng: number | null }[]
+  facilities: CaptureFacility[]
   // 캡처할 지도 영역(캔버스)의 화면 위치 — getDisplayMedia 프레임에서 잘라낼 사각형
   getMapRect: () => DOMRect | null
+  // 캡처 진행 중 알림 — 부모가 시설 라벨을 숨겼다가(또렷한 재합성) 끝나면 복원
+  onCaptureRunningChange?: (running: boolean) => void
   onClose: () => void
 }) {
   const [phase, setPhase] = useState<Phase>('ready')
@@ -89,7 +237,8 @@ export default function MapAutoCapture({
   // 시설 GPS 경계
   const bbox = useMemo<Bbox | null>(() => {
     const pts = facilities.filter(
-      (f): f is LatLngLit => f.lat != null && f.lng != null,
+      (f): f is CaptureFacility & { lat: number; lng: number } =>
+        f.lat != null && f.lng != null,
     )
     if (pts.length === 0) return null
     let minLat = Infinity
@@ -166,6 +315,9 @@ export default function MapAutoCapture({
         throw new Error('화면 영상을 받지 못했습니다')
       }
 
+      // 시설 라벨 숨김 요청 — 캡처엔 안 찍히고, 끝난 뒤 또렷한 벡터로 다시 그린다
+      onCaptureRunningChange?.(true)
+
       // 지도 잠금 + 캡처 레벨 적용
       map.setDraggable(false)
       map.setZoomable(false)
@@ -229,6 +381,19 @@ export default function MapAutoCapture({
         bctx.drawImage(t, Math.round(col * stepX), Math.round(row * stepY))
       })
 
+      // 시설 라벨을 또렷한 벡터로 다시 그린다 (화면 캡처 글자는 작아서 흐림)
+      await document.fonts.ready
+      redrawFacilityLabels(bctx, {
+        facilities,
+        firstLat: plan.centers[0].lat,
+        firstLng: plan.centers[0].lng,
+        srcW,
+        srcH,
+        vLng,
+        vLat,
+        scale: scaleX,
+      })
+
       // PNG 로 변환 — 화면 공유 프레임이 보안 제약(tainted)이면 여기서 실패
       const blob = await new Promise<Blob>((resolve, reject) => {
         big.toBlob(
@@ -264,6 +429,7 @@ export default function MapAutoCapture({
       map.setDraggable(true)
       map.setZoomable(true)
       runningRef.current = false
+      onCaptureRunningChange?.(false)
     }
   }
 

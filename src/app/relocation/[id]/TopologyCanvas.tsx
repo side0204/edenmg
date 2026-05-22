@@ -329,6 +329,8 @@ export default function TopologyCanvas({
   const [captureBarSlot, setCaptureBarSlot] = useState<HTMLDivElement | null>(null)
   // 지도 자동 캡처(화면 공유) 활성 여부
   const [autoCaptureActive, setAutoCaptureActive] = useState(false)
+  // 자동 캡처 진행 중 — 시설 라벨을 화면에서 숨긴다 (캡처 후 또렷한 벡터로 다시 그림).
+  const [labelsHiddenForCapture, setLabelsHiddenForCapture] = useState(false)
   // 캡처할 지도 영역 — 화면 공유 프레임에서 잘라낼 사각형 측정용
   const canvasAreaRef = useRef<HTMLDivElement | null>(null)
   // 탭 메뉴(시설·케이블·회선·...) 오버레이 — 툴바 「탭 메뉴」 토글. ?tab= 있으면 기본 열림.
@@ -514,6 +516,25 @@ export default function TopologyCanvas({
       })),
     )
   }, [facilities, cables])
+
+  // 자동 캡처용 시설 라벨 데이터 — 캡처 후 또렷한 벡터로 다시 그릴 때 사용.
+  //   MapAutoCapture 에 안정적 참조로 넘긴다 (매 렌더 새 배열이면 내부 useMemo 가 깨짐).
+  const captureFacilities = useMemo(
+    () =>
+      facilities.map((f) => ({
+        lat: f.lat,
+        lng: f.lng,
+        code: f.facility_code || formatFacilityCode(f.closure_type, f.seq_no),
+        name: f.name,
+        isNew:
+          CLOSURE_TYPE_CATEGORY[f.closure_type] === '접속함체' &&
+          f.install_status === 'new',
+        installNo: installNoByFacility.get(f.id) ?? null,
+        labelDx: f.label_dx,
+        labelDy: f.label_dy,
+      })),
+    [facilities, installNoByFacility],
+  )
 
   // 케이블별 회선·코어 배정 수 (케이블 라벨 배지)
   const coreCountByCable = useMemo(() => {
@@ -2872,7 +2893,12 @@ export default function TopologyCanvas({
                 {/* 라벨 — 도형이 축소돼도 글자 크기는 처음 크기로 고정.
                     흰색 외곽선(paintOrder=stroke → 외곽선이 글자 뒤)으로 배경 지도 글자와 구분.
                     g transform — 마우스 드래그 offset 적용. */}
-                <g transform={`translate(${labelOff.dx}, ${labelOff.dy})`}>
+                <g
+                  transform={`translate(${labelOff.dx}, ${labelOff.dy})`}
+                  style={{
+                    visibility: labelsHiddenForCapture ? 'hidden' : undefined,
+                  }}
+                >
                 {/* 지도 모드 — 글자 뒤 흰 배경 박스로 지도 배경 글자와 시인성 확보 */}
                 {mode === 'map' && (
                   <rect
@@ -3209,10 +3235,11 @@ export default function TopologyCanvas({
         <div className="shrink-0">
           <MapAutoCapture
             map={kakaoMap}
-            facilities={facilities}
+            facilities={captureFacilities}
             getMapRect={() =>
               canvasAreaRef.current?.getBoundingClientRect() ?? null
             }
+            onCaptureRunningChange={setLabelsHiddenForCapture}
             onClose={() => setAutoCaptureActive(false)}
           />
         </div>
