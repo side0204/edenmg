@@ -23,15 +23,20 @@ export function buildCsv(headers: string[], rows: unknown[][]): string {
   return BOM + lines.join('\r\n') + '\r\n'
 }
 
-// 다운로드 응답 헬퍼 — Content-Disposition 의 파일명을 RFC 5987 로 둘 다 박는다
-// (구버전 IE 가 아니더라도 안전).
+// 다운로드 응답 헬퍼 — Content-Disposition 의 파일명을 RFC 5987 로 박는다.
+//   HTTP 헤더 값은 Latin-1(ByteString)만 허용 → 한글이 든 filename="..." 은
+//   Response 생성 시 TypeError 를 던진다. 그래서 filename= 에는 ASCII 대체 이름을,
+//   실제 한글 이름은 filename*(RFC 5987, percent-encoded) 으로 전달한다.
+//   모던 브라우저는 filename* 를 우선 사용해 한글 파일명으로 저장한다.
 export function csvResponse(body: string, filename: string): Response {
   const encoded = encodeURIComponent(filename)
+  const asciiFallback =
+    filename.replace(/[^\x20-\x7E]/g, '_').replace(/["\\]/g, '_') || 'download.csv'
   return new Response(body, {
     status: 200,
     headers: {
       'Content-Type': 'text/csv; charset=utf-8',
-      'Content-Disposition': `attachment; filename="${filename}"; filename*=UTF-8''${encoded}`,
+      'Content-Disposition': `attachment; filename="${asciiFallback}"; filename*=UTF-8''${encoded}`,
       'Cache-Control': 'no-store',
     },
   })
