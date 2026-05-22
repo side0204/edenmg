@@ -19,6 +19,7 @@ import {
   FACILITY_INSTALL_STATUS_VALUES,
   FACILITY_INSTALL_STATUS_LABEL,
   formatFacilityCode,
+  facilityIdLabel,
   isInternalNode,
   type ClosureType,
   type FacilityInstallStatus,
@@ -190,7 +191,7 @@ export default function FacilityInfoPanel({
       id: facility.id,
       closure_type: facility.closure_type,
       name: name.trim(),
-      facility_code: isClosure ? facilityCode.trim() || null : facility.facility_code,
+      facility_code: facilityCode.trim() || null,
       closure_spec: isClosure && spec ? (spec as CableSpec) : null,
       install_address: address.trim() || null,
       notes: notes.trim() || null,
@@ -483,21 +484,19 @@ export default function FacilityInfoPanel({
               </select>
             </div>
           )}
-          {isClosure && (
-            <div>
-              <label className="block text-[11px] font-medium text-slate-600">
-                접속함체 ID
-              </label>
-              <input
-                type="text"
-                value={facilityCode}
-                onChange={(e) => setFacilityCode(e.target.value)}
-                maxLength={100}
-                placeholder="접속함체 식별자 (선택)"
-                className="mt-0.5 w-full rounded-md border border-slate-300 px-2 py-1 text-xs"
-              />
-            </div>
-          )}
+          <div>
+            <label className="block text-[11px] font-medium text-slate-600">
+              {facilityIdLabel(facility.closure_type)}
+            </label>
+            <input
+              type="text"
+              value={facilityCode}
+              onChange={(e) => setFacilityCode(e.target.value)}
+              maxLength={100}
+              placeholder="미입력 시 자동 부여"
+              className="mt-0.5 w-full rounded-md border border-slate-300 px-2 py-1 text-xs"
+            />
+          </div>
           {isClosure && (
             <div>
               <label className="block text-[11px] font-medium text-slate-600">

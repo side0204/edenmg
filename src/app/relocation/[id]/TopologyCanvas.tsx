@@ -36,6 +36,7 @@ import {
   FACILITY_INSTALL_STATUS_VALUES,
   FACILITY_INSTALL_STATUS_LABEL,
   formatFacilityCode,
+  facilityIdLabel,
   isInstallNumbered,
   computeInstallNumbers,
   haversineMeters,
@@ -2626,7 +2627,8 @@ export default function TopologyCanvas({
           {facilities.map((f) => {
             const pos = effectivePositions[f.id]
             if (!pos) return null
-            const code = formatFacilityCode(f.closure_type, f.seq_no)
+            // 첫째 줄 ID — 설계자가 입력한 ID(facility_code) 우선, 없으면 자동 코드
+            const code = f.facility_code || formatFacilityCode(f.closure_type, f.seq_no)
             const isNew = facilityIsNew.get(f.id) ?? false
             // 신설 접속함체 — 라벨 글자도 빨강 (도형 색과 일치)
             const isNewClosure =
@@ -2645,8 +2647,8 @@ export default function TopologyCanvas({
             const labelNameY = labelCodeY + (mode === 'map' ? 12 : 19)
             // 라벨 위치 — 마우스 드래그 offset (시설명 겹침 방지).
             //   드래그 중이면 로컬 override, 아니면 저장된 label_dx/label_dy.
-            const labelDispName =
-              f.name.length > 12 ? f.name.slice(0, 11) + '…' : f.name
+            // 시설명 — 잘라내지 않고 전체 표시 (라벨 박스가 글자에 맞춰 늘어남)
+            const labelDispName = f.name
             const labelW = Math.max(
               estimateTextWidth(code, facCodeFont),
               estimateTextWidth(labelDispName, facNameFont) +
@@ -2845,8 +2847,7 @@ export default function TopologyCanvas({
                   {code}
                 </text>
                 {(() => {
-                  const displayName =
-                    f.name.length > 12 ? f.name.slice(0, 11) + '…' : f.name
+                  const displayName = f.name
                   const installNo = installNoByFacility.get(f.id)
                   // 접속함체가 아니면 기존처럼 가운데 정렬 이름만
                   if (!installNo) {
@@ -3235,7 +3236,7 @@ function NewFacilityModal({
             closure_spec: spec,
             install_address: installAddress.trim() || null,
             install_status: isClosureCategory ? installStatus : null,
-            facility_code: isClosureCategory ? facilityCode.trim() || null : null,
+            facility_code: facilityCode.trim() || null,
           })
         : await createFacilityAtLatLng({
             project_id: projectId,
@@ -3247,7 +3248,7 @@ function NewFacilityModal({
             closure_spec: spec,
             install_address: installAddress.trim() || null,
             install_status: isClosureCategory ? installStatus : null,
-            facility_code: isClosureCategory ? facilityCode.trim() || null : null,
+            facility_code: facilityCode.trim() || null,
           })
     setSubmitting(false)
     if (!result.ok) {
@@ -3333,21 +3334,19 @@ function NewFacilityModal({
             </div>
           )}
 
-          {isClosureCategory && (
-            <div>
-              <label className="block text-xs font-medium text-slate-700">
-                접속함체 ID
-              </label>
-              <input
-                type="text"
-                value={facilityCode}
-                onChange={(e) => setFacilityCode(e.target.value)}
-                maxLength={100}
-                placeholder="접속함체 식별자 (선택)"
-                className="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2 text-sm"
-              />
-            </div>
-          )}
+          <div>
+            <label className="block text-xs font-medium text-slate-700">
+              {facilityIdLabel(closureType)}
+            </label>
+            <input
+              type="text"
+              value={facilityCode}
+              onChange={(e) => setFacilityCode(e.target.value)}
+              maxLength={100}
+              placeholder="미입력 시 자동 부여"
+              className="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2 text-sm"
+            />
+          </div>
 
           {isClosureCategory && (
             <div>

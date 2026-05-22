@@ -238,6 +238,17 @@ export function formatFacilityCode(closureType: ClosureType, seqNo: number): str
   return `${prefix}-${String(seqNo).padStart(3, '0')}`
 }
 
+// 시설 ID 필드 라벨 — 시설 종류(카테고리)에 따라 다르게 부른다.
+//   국사·설치장소·IJP·광Mux → 설치장소ID / 모바일국소 → 모바일ID
+//   접속함체 → 접속함체ID / RN(TPS·LTE·외) → RNID
+export function facilityIdLabel(t: ClosureType): string {
+  const cat = CLOSURE_TYPE_CATEGORY[t]
+  if (cat === '접속함체') return '접속함체ID'
+  if (cat === '모바일국소') return '모바일ID'
+  if (t === 'RN_TPS' || t === 'RN_LTE' || t === 'TPS_LTE_외') return 'RNID'
+  return '설치장소ID'
+}
+
 
 // 두 GPS 좌표 사이 거리(m) — Haversine.
 //   지도에서 케이블을 추가할 때 두 시설 좌표로 전체거리 기본값을 채우는 데 쓴다.

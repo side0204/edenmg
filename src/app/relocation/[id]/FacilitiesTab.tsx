@@ -120,12 +120,12 @@ export default function FacilitiesTab({
           </div>
 
           <div>
-            <label className="block text-xs font-medium text-slate-600">접속함체 ID (접속함체)</label>
+            <label className="block text-xs font-medium text-slate-600">시설 ID</label>
             <input
               type="text"
               name="facility_code"
               maxLength={100}
-              placeholder="접속함체 식별자 (선택)"
+              placeholder="미입력 시 자동 부여"
               className="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2 text-sm"
             />
           </div>
@@ -326,43 +326,34 @@ function FacilityRowItem({
             </select>
           </div>
 
+          <div>
+            <label className="block text-[11px] text-slate-500">시설 ID</label>
+            <input
+              type="text"
+              name="facility_code"
+              defaultValue={facility.facility_code ?? ''}
+              maxLength={100}
+              placeholder="미입력 시 자동 부여"
+              className="mt-0.5 w-full rounded-lg border border-slate-300 px-2 py-1.5 text-sm"
+            />
+          </div>
           {CLOSURE_TYPE_CATEGORY[facility.closure_type] === '접속함체' ? (
-            <>
-              <div>
-                <label className="block text-[11px] text-slate-500">접속함체 ID</label>
-                <input
-                  type="text"
-                  name="facility_code"
-                  defaultValue={facility.facility_code ?? ''}
-                  maxLength={100}
-                  placeholder="접속함체 식별자 (선택)"
-                  className="mt-0.5 w-full rounded-lg border border-slate-300 px-2 py-1.5 text-sm"
-                />
-              </div>
-              <div>
-                <label className="block text-[11px] text-slate-500">설치 구분</label>
-                <select
-                  name="install_status"
-                  defaultValue={facility.install_status}
-                  className="mt-0.5 w-full rounded-lg border border-slate-300 px-2 py-1.5 text-sm"
-                >
-                  {FACILITY_INSTALL_STATUS_VALUES.map((s) => (
-                    <option key={s} value={s}>
-                      {FACILITY_INSTALL_STATUS_LABEL[s]}
-                    </option>
-                  ))}
-                </select>
-              </div>
-            </>
+            <div>
+              <label className="block text-[11px] text-slate-500">설치 구분</label>
+              <select
+                name="install_status"
+                defaultValue={facility.install_status}
+                className="mt-0.5 w-full rounded-lg border border-slate-300 px-2 py-1.5 text-sm"
+              >
+                {FACILITY_INSTALL_STATUS_VALUES.map((s) => (
+                  <option key={s} value={s}>
+                    {FACILITY_INSTALL_STATUS_LABEL[s]}
+                  </option>
+                ))}
+              </select>
+            </div>
           ) : (
-            <>
-              <input type="hidden" name="install_status" value={facility.install_status} />
-              <input
-                type="hidden"
-                name="facility_code"
-                value={facility.facility_code ?? ''}
-              />
-            </>
+            <input type="hidden" name="install_status" value={facility.install_status} />
           )}
 
           <div className="sm:col-span-2">
