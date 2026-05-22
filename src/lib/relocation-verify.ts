@@ -15,6 +15,8 @@ import {
   coreUnitIndex,
   formatFacilityCode,
   isCircuitDiverse,
+  findCutoverCables,
+  TIME_NEW_CLOSURE,
   type ClosureType,
   type CircuitKind,
 } from './relocation'
@@ -27,6 +29,7 @@ export type VFacility = {
   seq_no: number
   name: string
   closure_spec: CableSpec | null
+  install_status: string | null
 }
 
 export type VCable = {
@@ -69,7 +72,7 @@ export type VFacilityTask = {
   facility_id: string
 }
 
-export type Severity = 'red' | 'yellow'
+export type Severity = 'red' | 'yellow' | 'info'
 
 export type VerifyFinding = {
   rule: string // 'C1' 등
@@ -83,6 +86,7 @@ export type VerifyResult = {
   findings: VerifyFinding[]
   redCount: number
   yellowCount: number
+  infoCount: number
 }
 
 export type VerifyInput = {
@@ -406,8 +410,23 @@ export function runVerification(input: VerifyInput): VerifyResult {
     }
   }
 
-  // 정렬 — 빨강 먼저, 그 안에서 룰 코드순
-  const sevRank: Record<Severity, number> = { red: 0, yellow: 1 }
+  // ── X1 — 기설 케이블 절단 절체 (안내) ───────────────────────────────
+  //   신설 접속함체에 기설 케이블이 연결되면 그 케이블을 잘라 인입·접속해야 한다.
+  const cutover = findCutoverCables(cables, facilities)
+  for (const f of facilities) {
+    if (!cutover.facilityIds.has(f.id)) continue
+    const cnt = cutover.cableCountByFacility.get(f.id) ?? 0
+    findings.push({
+      rule: 'X1',
+      severity: 'info',
+      title: '기설 케이블 절단 절체',
+      detail: `기설 케이블 ${cnt}조를 절단해 이 신설 함체로 인입·접속(절체)합니다. 차수 작업시간에 함체 신설(절단) +${TIME_NEW_CLOSURE}분이 반영됩니다.`,
+      target: facilityLabel(f),
+    })
+  }
+
+  // 정렬 — 빨강 → 노랑 → 안내, 그 안에서 룰 코드순
+  const sevRank: Record<Severity, number> = { red: 0, yellow: 1, info: 2 }
   findings.sort(
     (a, b) => sevRank[a.severity] - sevRank[b.severity] || a.rule.localeCompare(b.rule),
   )
@@ -416,5 +435,6 @@ export function runVerification(input: VerifyInput): VerifyResult {
     findings,
     redCount: findings.filter((f) => f.severity === 'red').length,
     yellowCount: findings.filter((f) => f.severity === 'yellow').length,
+    infoCount: findings.filter((f) => f.severity === 'info').length,
   }
 }

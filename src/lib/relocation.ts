@@ -326,6 +326,77 @@ export function computeInstallNumbers(
 }
 
 
+// 신설 접속함체 — 접속함체 종류 + 설치구분이 신설.
+export function isNewClosure(
+  closure_type: ClosureType,
+  install_status: string | null,
+): boolean {
+  return (
+    CLOSURE_TYPE_CATEGORY[closure_type] === '접속함체' && install_status === 'new'
+  )
+}
+
+/**
+ * 절단 절체 — 기설 케이블이 신설 접속함체에 연결된 경우.
+ *   기설 케이블이 깔린 자리에 새 함체를 끼우려면 그 케이블을 잘라(절단)
+ *   양 끝을 새 함체로 인입·접속(절체)해야 한다.
+ *   판정: 케이블 status='existing' 이고 한쪽 끝 시설이 신설 접속함체.
+ *
+ * 반환:
+ *   - cables: 케이블 id → 어느 끝(from/to)이 신설 함체인지 (캔버스 ✂ 마크용)
+ *   - facilityIds: 절단 절체 작업이 필요한 신설 함체 id 집합
+ *   - cableCountByFacility: 신설 함체별 절단 대상 케이블 수
+ */
+export function findCutoverCables(
+  cables: {
+    id: string
+    status: string
+    from_facility_id: string
+    to_facility_id: string
+  }[],
+  facilities: {
+    id: string
+    closure_type: ClosureType
+    install_status: string | null
+  }[],
+): {
+  cables: Map<string, { from: boolean; to: boolean }>
+  facilityIds: Set<string>
+  cableCountByFacility: Map<string, number>
+} {
+  const newClosureIds = new Set(
+    facilities
+      .filter((f) => isNewClosure(f.closure_type, f.install_status))
+      .map((f) => f.id),
+  )
+  const cablesMap = new Map<string, { from: boolean; to: boolean }>()
+  const facilityIds = new Set<string>()
+  const cableCountByFacility = new Map<string, number>()
+  for (const c of cables) {
+    if (c.status !== 'existing') continue
+    const fromNew = newClosureIds.has(c.from_facility_id)
+    const toNew = newClosureIds.has(c.to_facility_id)
+    if (!fromNew && !toNew) continue
+    cablesMap.set(c.id, { from: fromNew, to: toNew })
+    if (fromNew) {
+      facilityIds.add(c.from_facility_id)
+      cableCountByFacility.set(
+        c.from_facility_id,
+        (cableCountByFacility.get(c.from_facility_id) ?? 0) + 1,
+      )
+    }
+    if (toNew) {
+      facilityIds.add(c.to_facility_id)
+      cableCountByFacility.set(
+        c.to_facility_id,
+        (cableCountByFacility.get(c.to_facility_id) ?? 0) + 1,
+      )
+    }
+  }
+  return { cables: cablesMap, facilityIds, cableCountByFacility }
+}
+
+
 export type CableStatus = 'existing' | 'relocating' | 'new' | 'removing'
 
 export const CABLE_STATUS_VALUES: readonly CableStatus[] = [

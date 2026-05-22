@@ -40,6 +40,7 @@ import {
   facilityIdLabel,
   isInstallNumbered,
   computeInstallNumbers,
+  findCutoverCables,
   haversineMeters,
   type ClosureType,
   type ClosureCategory,
@@ -519,6 +520,13 @@ export default function TopologyCanvas({
       })),
     )
   }, [facilities, cables])
+
+  // 절단 절체 — 기설 케이블이 신설 접속함체에 연결된 경우.
+  //   기설 케이블을 잘라(절단) 새 함체로 인입·접속(절체)해야 한다.
+  const cutover = useMemo(
+    () => findCutoverCables(cables, facilities),
+    [cables, facilities],
+  )
 
   // 자동 캡처용 시설 라벨 데이터 — 캡처 후 또렷한 벡터로 다시 그릴 때 사용.
   //   MapAutoCapture 에 안정적 참조로 넘긴다 (매 렌더 새 배열이면 내부 useMemo 가 깨짐).
@@ -2667,6 +2675,47 @@ export default function TopologyCanvas({
                     </g>
                   )
                 })()}
+                {/* 절단 절체 — 기설 케이블이 신설 함체에 인입. 신설 함체 끝에 ✂ 마크 */}
+                {(() => {
+                  const cut = cutover.cables.get(c.id)
+                  if (!cut || pts.length < 2) return null
+                  const along = (
+                    a: { x: number; y: number },
+                    b: { x: number; y: number },
+                  ) => {
+                    const dx = b.x - a.x
+                    const dy = b.y - a.y
+                    const len = Math.hypot(dx, dy)
+                    if (len < 1) return a
+                    const t = Math.min(24 / len, 0.4)
+                    return { x: a.x + dx * t, y: a.y + dy * t }
+                  }
+                  const marks: { x: number; y: number }[] = []
+                  if (cut.from) marks.push(along(pts[0], pts[1]))
+                  if (cut.to)
+                    marks.push(along(pts[pts.length - 1], pts[pts.length - 2]))
+                  return marks.map((m, i) => (
+                    <g key={`cut-${i}`} pointerEvents="none">
+                      <circle
+                        cx={m.x}
+                        cy={m.y}
+                        r={8}
+                        fill="white"
+                        stroke="#dc2626"
+                        strokeWidth={2}
+                      />
+                      <text
+                        x={m.x}
+                        y={m.y + 4}
+                        textAnchor="middle"
+                        fill="#dc2626"
+                        style={{ fontSize: 11, fontWeight: 700 }}
+                      >
+                        ✂
+                      </text>
+                    </g>
+                  ))
+                })()}
                 {/* 선택 시 waypoint 핸들 — 드래그 이동 / 우클릭 삭제.
                     지도 모드는 경로점 lat/lng 를 화면으로 투영한 위치에 표시. */}
                 {selected &&
@@ -2892,6 +2941,32 @@ export default function TopologyCanvas({
                     </g>
                   )}
                 </g>
+
+                {/* 절단 절체 배지 — 신설 함체 + 기설 케이블. 도형 위 빨강 알약.
+                    스케일 그룹 밖 — 줌 아웃해도 읽히게 크기 고정. */}
+                {cutover.facilityIds.has(f.id) && (
+                  <g pointerEvents="none">
+                    <rect
+                      x={nodeCx - 31}
+                      y={nodeCy - 53}
+                      width={62}
+                      height={15}
+                      rx={7.5}
+                      fill="#dc2626"
+                      stroke="white"
+                      strokeWidth={1.5}
+                    />
+                    <text
+                      x={nodeCx}
+                      y={nodeCy - 42.5}
+                      textAnchor="middle"
+                      fill="white"
+                      style={{ fontSize: 9, fontFamily: LABEL_FONT, fontWeight: 700 }}
+                    >
+                      절단 절체
+                    </text>
+                  </g>
+                )}
 
                 {/* 라벨 — 도형이 축소돼도 글자 크기는 처음 크기로 고정.
                     흰색 외곽선(paintOrder=stroke → 외곽선이 글자 뒤)으로 배경 지도 글자와 구분.

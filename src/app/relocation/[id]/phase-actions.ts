@@ -10,6 +10,11 @@ import {
   type WorkUnit,
   type RebalanceBin,
 } from '@/lib/relocation-phase-planner'
+import {
+  findCutoverCables,
+  TIME_NEW_CLOSURE,
+  type ClosureType,
+} from '@/lib/relocation'
 
 type SimCable = {
   from_facility_id: string
@@ -110,12 +115,18 @@ export async function runPhasePlanning(projectId: string): Promise<PhasePlanSumm
 
   const { supabase, me } = await requireMember()
 
-  // 1. 데이터 로드 — 케이블·공종량·공종 마스터
+  // 1. 데이터 로드 — 케이블·시설·공종량·공종 마스터
   const { data: cRows, error: cErr } = await supabase
     .from('relocation_cables')
-    .select('from_facility_id, to_facility_id, status')
+    .select('id, from_facility_id, to_facility_id, status')
     .eq('project_id', projectId)
   if (cErr) return { ok: false, error: '케이블 조회 실패: ' + cErr.message }
+
+  const { data: fRows, error: fErr } = await supabase
+    .from('relocation_facilities')
+    .select('id, closure_type, install_status')
+    .eq('project_id', projectId)
+  if (fErr) return { ok: false, error: '시설 조회 실패: ' + fErr.message }
 
   const { data: ftRows, error: ftErr } = await supabase
     .from('relocation_facility_tasks')
@@ -130,9 +141,15 @@ export async function runPhasePlanning(projectId: string): Promise<PhasePlanSumm
   if (ttErr) return { ok: false, error: '공종 마스터 조회 실패: ' + ttErr.message }
 
   const cables = (cRows ?? []) as {
+    id: string
     from_facility_id: string
     to_facility_id: string
     status: string
+  }[]
+  const facilities = (fRows ?? []) as {
+    id: string
+    closure_type: ClosureType
+    install_status: string | null
   }[]
   const facilityTasks = (ftRows ?? []) as {
     facility_id: string
@@ -157,6 +174,15 @@ export async function runPhasePlanning(projectId: string): Promise<PhasePlanSumm
     )
   }
 
+  // 절단 절체 — 신설 접속함체 + 기설 케이블. 함체 신설(절단) +20분 (사양 § 2-5).
+  const cutover = findCutoverCables(cables, facilities)
+  for (const fid of cutover.facilityIds) {
+    minutesByFacility.set(
+      fid,
+      (minutesByFacility.get(fid) ?? 0) + TIME_NEW_CLOSURE,
+    )
+  }
+
   const roundedMinutes = new Map<string, number>()
   for (const [fid, min] of minutesByFacility) {
     const r = Math.round(min)
@@ -178,7 +204,7 @@ export async function runPhasePlanning(projectId: string): Promise<PhasePlanSumm
   )
   const plan = planPhases(units)
 
-  // task_kind — 신설 케이블이 연결된 시설은 '함체신설_절단', 그 외 '기설접속'
+  // task_kind — 신설 케이블 연결 또는 기설 케이블 절단 절체 시설은 '함체신설_절단'
   const facilitiesWithNewCable = new Set<string>()
   for (const c of cables) {
     if (c.status === 'new') {
@@ -186,6 +212,7 @@ export async function runPhasePlanning(projectId: string): Promise<PhasePlanSumm
       facilitiesWithNewCable.add(c.to_facility_id)
     }
   }
+  for (const fid of cutover.facilityIds) facilitiesWithNewCable.add(fid)
 
   // 4. 기존 차수 삭제 (phase_tasks·task_pairs cascade)
   const { error: delErr } = await supabase

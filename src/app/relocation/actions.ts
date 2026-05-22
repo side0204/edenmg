@@ -48,7 +48,7 @@ async function projectRedCount(
   const [f, c, circ, a, spl, spt, ft] = await Promise.all([
     supabase
       .from('relocation_facilities')
-      .select('id, closure_type, seq_no, name, closure_spec')
+      .select('id, closure_type, seq_no, name, closure_spec, install_status')
       .eq('project_id', projectId),
     supabase
       .from('relocation_cables')

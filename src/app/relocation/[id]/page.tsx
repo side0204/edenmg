@@ -217,6 +217,7 @@ export default async function RelocationProjectPage({
       seq_no: f.seq_no,
       name: f.name,
       closure_spec: f.closure_spec,
+      install_status: f.install_status,
     })),
     cables: cables.map((c) => ({
       id: c.id,
