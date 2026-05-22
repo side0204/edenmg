@@ -143,6 +143,9 @@ function redrawFacilityLabels(
   ctx.save()
   ctx.textBaseline = 'alphabetic'
   ctx.lineJoin = 'round'
+  // 자간 — 일부 TS lib.dom 에 letterSpacing 타입이 없어 느슨하게 설정 (Chrome 99+ 지원)
+  const ctxLS = ctx as CanvasRenderingContext2D & { letterSpacing?: string }
+  ctxLS.letterSpacing = '0.1em'
 
   for (const f of facilities) {
     if (f.lat == null || f.lng == null) continue
@@ -162,9 +165,9 @@ function redrawFacilityLabels(
     ctx.translate(-cx, -codeY)
 
     // 글자 폭 측정 → 흰 배경판 크기
-    ctx.font = `350 ${codeFont}px ${FF}`
+    ctx.font = `650 ${codeFont}px ${FF}`
     const wCode = code ? ctx.measureText(code).width : 0
-    ctx.font = `350 ${nameFont}px ${FF}`
+    ctx.font = `600 ${nameFont}px ${FF}`
     const wNameText = name ? ctx.measureText(name).width : 0
     const instExtra = f.installNo != null ? nameFont * 1.9 : 0
     const boxW = Math.max(wCode, wNameText + instExtra) + pad * 2
@@ -182,11 +185,11 @@ function redrawFacilityLabels(
 
     // 시설코드 (가운데 정렬)
     ctx.textAlign = 'center'
-    ctx.font = `350 ${codeFont}px ${FF}`
+    ctx.font = `650 ${codeFont}px ${FF}`
     drawHaloText(ctx, code, cx, codeY, codeColor, halo)
 
     // 시설명
-    ctx.font = `350 ${nameFont}px ${FF}`
+    ctx.font = `600 ${nameFont}px ${FF}`
     if (f.installNo != null) {
       // 설치 순번 — 초록 원 + 흰 숫자, 그 뒤 이름(좌측 정렬)
       const r = nameFont * 0.78
@@ -204,7 +207,7 @@ function redrawFacilityLabels(
       ctx.font = `700 ${nameFont}px ${FF}`
       ctx.fillStyle = '#ffffff'
       ctx.fillText(String(f.installNo), circleCx, circleCy + nameFont * 0.35)
-      ctx.font = `350 ${nameFont}px ${FF}`
+      ctx.font = `600 ${nameFont}px ${FF}`
       ctx.textAlign = 'left'
       drawHaloText(ctx, name, startX + r * 2 + gap, nameY, nameColor, halo)
     } else {

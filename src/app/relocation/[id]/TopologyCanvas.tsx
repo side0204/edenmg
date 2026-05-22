@@ -178,7 +178,7 @@ const LABEL_HALO_WIDTH = 2.5      // px
 const LABEL_FONT = "'Pretendard Variable', Pretendard, system-ui, sans-serif"
 // 라벨 자간 — 약간 넓혀 글자가 서로 붙지 않게 (외곽선 번짐 방지 + 가독성).
 //   0.02em 은 작은 글자에서 눈에 안 띔 → 0.06em 으로. 더 넓게/좁게는 이 값만 조정.
-const LABEL_TRACKING = '0.06em'
+const LABEL_TRACKING = '0.1em'
 // 시설 라벨 글자 변형 — 너비 0.75배(가로 압축)·높이 1.2배(세로 신장). 조밀한 장체.
 const LABEL_SCALE_X = 0.75
 const LABEL_SCALE_Y = 1.2
@@ -2720,9 +2720,9 @@ export default function TopologyCanvas({
             //   캡처도 평소 지도 화면 그대로 — 글자를 키우지 않는다 (키우면 상자가 겹침).
             const facCodeFont = mode === 'map' ? 9 : 15
             const facNameFont = mode === 'map' ? 10 : 17
-            // 굵기 — 지도 모드는 350 (얇게), 도식 모드는 큼직하게
-            const facCodeWeight = mode === 'map' ? 350 : 700
-            const facNameWeight = mode === 'map' ? 350 : 600
+            // 굵기 — 지도 모드는 650, 도식 모드는 큼직하게
+            const facCodeWeight = mode === 'map' ? 650 : 700
+            const facNameWeight = 600
             const labelNameY = labelCodeY + (mode === 'map' ? 12 : 19)
             // 라벨 위치 — 마우스 드래그 offset (시설명 겹침 방지).
             //   드래그 중이면 로컬 override, 아니면 저장된 label_dx/label_dy.
