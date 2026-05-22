@@ -731,6 +731,7 @@ export default async function RelocationProjectPage({
           cable_code: c.cable_code,
           installation_type: c.installation_type,
           waypoints: Array.isArray(c.waypoints) ? c.waypoints : [],
+          mapWaypoints: Array.isArray(c.map_waypoints) ? c.map_waypoints : [],
           total_length: c.total_length,
           end_distance: c.end_distance,
         }))}

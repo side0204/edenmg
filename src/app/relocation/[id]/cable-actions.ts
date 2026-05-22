@@ -377,6 +377,8 @@ export async function updateCableFromCanvas(input: {
   installation_type: string | null
   total_length: number | null
   end_distance: number | null
+  // 경로점을 저장할 컬럼 — 도식 모드 'waypoints' · 지도 모드 'map_waypoints'
+  waypoint_column: 'waypoints' | 'map_waypoints'
   waypoints: Array<{
     x: number
     y: number
@@ -388,6 +390,12 @@ export async function updateCableFromCanvas(input: {
 }): Promise<{ ok: true } | { ok: false; error: string }> {
   if (!input.project_id || !input.cable_id) {
     return { ok: false, error: '케이블 정보가 없습니다' }
+  }
+  if (
+    input.waypoint_column !== 'waypoints' &&
+    input.waypoint_column !== 'map_waypoints'
+  ) {
+    return { ok: false, error: '경로점 저장 대상이 올바르지 않습니다' }
   }
   if (!isCableSpec(input.spec)) return { ok: false, error: '케이블 규격이 올바르지 않습니다' }
   if (!isCableStatus(input.status)) return { ok: false, error: '케이블 상태가 올바르지 않습니다' }
@@ -421,7 +429,7 @@ export async function updateCableFromCanvas(input: {
       installation_type,
       total_length: num(input.total_length),
       end_distance: num(input.end_distance),
-      waypoints: cleanWaypoints,
+      [input.waypoint_column]: cleanWaypoints,
     })
     .eq('id', input.cable_id)
     .eq('project_id', input.project_id) // RLS 보강

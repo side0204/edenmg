@@ -585,7 +585,7 @@ export async function setFacilityInstallOrder(input: {
   // 배지 대상 — TopologyCanvas 의 installNoByFacility 필터와 동일.
   //   기설 케이블 한 조만 연결된 시설은 작업 지점이 아니므로 제외.
   const eligible = facilities.filter((f) => {
-    if (!isInstallNumbered(f.closure_type)) return false
+    if (!isInstallNumbered()) return false
     const conns = connByFacility.get(f.id) ?? []
     if (conns.length === 1 && conns[0] === 'existing') return false
     return true

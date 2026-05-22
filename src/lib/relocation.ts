@@ -272,11 +272,10 @@ export function haversineMeters(
 // ===== 설치 순번 배지 ===================================================
 // 시설명 앞에 붙는 숫자 배지 — 접속함체·RN·IJP 의 설치(작업) 순서.
 
-// 설치 순번 배지 대상 시설 — 접속함체 5종 + RN 3종(RN_TPS·RN_LTE·TPS_LTE_외) + IJP.
-//   광Mux 는 제외.
-export function isInstallNumbered(t: ClosureType): boolean {
-  const cat = CLOSURE_TYPE_CATEGORY[t]
-  return cat === '접속함체' || (cat === 'RN_IJP_광MUX' && t !== '광Mux')
+// 설치 순번 배지 대상 시설 — 모든 시설 종류 (owner 결정 2026-05-23).
+//   원래 접속함체·RN·IJP 한정이었으나 국사·설치장소 등 전 시설로 확대.
+export function isInstallNumbered(): boolean {
+  return true
 }
 
 // 설치 구분(기설/신설) 을 갖는 시설 — 접속함체 + RN/IJP.

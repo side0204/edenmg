@@ -152,7 +152,8 @@ type CableEdge = {
   status: CableStatus
   cable_code: string
   installation_type: CableInstallationType | null
-  waypoints: Waypoint[]
+  waypoints: Waypoint[]      // 도식 모드 경로점 (x/y)
+  mapWaypoints: Waypoint[]   // 지도 모드 경로점 (lat/lng)
   total_length: number | null
   end_distance: number | null
 }
@@ -520,12 +521,23 @@ export default function TopologyCanvas({
 
   const cableById = useMemo(() => new Map(cables.map((c) => [c.id, c])), [cables])
 
-  // 케이블 waypoints — 로컬 override 우선, 없으면 서버 props
+  // 케이블 waypoints — 로컬 override 우선, 없으면 서버 props.
+  //   도식 모드는 waypoints(x/y), 지도 모드는 mapWaypoints(lat/lng) — 완전 분리.
   const effectiveWaypoints = useCallback(
-    (cableId: string): Waypoint[] =>
-      cableWaypoints[cableId] ?? cableById.get(cableId)?.waypoints ?? [],
-    [cableWaypoints, cableById],
+    (cableId: string): Waypoint[] => {
+      const override = cableWaypoints[cableId]
+      if (override) return override
+      const c = cableById.get(cableId)
+      if (!c) return []
+      return (mode === 'map' ? c.mapWaypoints : c.waypoints) ?? []
+    },
+    [cableWaypoints, cableById, mode],
   )
+
+  // 모드 전환 시 경로점 로컬 override 비움 — 모드마다 경로점 컬럼이 다르므로.
+  useEffect(() => {
+    setCableWaypoints({})
+  }, [mode])
 
   // 같은 두 시설 사이 여러 케이블 — 수직 offset 으로 평행하게 분리 (겹침 방지)
   const cableOffsets = useMemo(() => {
@@ -556,7 +568,7 @@ export default function TopologyCanvas({
     return m
   }, [cables])
 
-  // 설치 순번 — 접속함체·RN·IJP 시설명 앞 녹색 원 배지 번호.
+  // 설치 순번 — 모든 시설 종류의 시설명 앞 녹색 원 배지 번호.
   //   설계자가 정보 패널에서 지정한 install_order 우선, 없으면 생성 순서로 자동 배정.
   //   단, 기설 케이블 한 조만 연결된 시설은 제외 (작업 지점이 아님). 신설 한 조는 포함.
   const installNoByFacility = useMemo(() => {
@@ -570,7 +582,7 @@ export default function TopologyCanvas({
       }
     }
     const eligible = facilities.filter((f) => {
-      if (!isInstallNumbered(f.closure_type)) return false
+      if (!isInstallNumbered()) return false
       const conns = byFacility.get(f.id) ?? []
       // 기설 케이블 한 조만 연결된 시설은 제외
       if (conns.length === 1 && conns[0].status === 'existing') return false
@@ -1517,7 +1529,12 @@ export default function TopologyCanvas({
       ...current.slice(segmentIndex),
     ]
     setCableWaypoints((prev) => ({ ...prev, [cableId]: next }))
-    const result = await saveCableWaypoints(projectId, cableId, next)
+    const result = await saveCableWaypoints(
+      projectId,
+      cableId,
+      next,
+      mode === 'map' ? 'map_waypoints' : 'waypoints',
+    )
     if (!result.ok) toast.error(result.error)
   }
 
@@ -1526,7 +1543,12 @@ export default function TopologyCanvas({
     const current = effectiveWaypoints(cableId)
     const next = current.filter((_, i) => i !== index)
     setCableWaypoints((prev) => ({ ...prev, [cableId]: next }))
-    const result = await saveCableWaypoints(projectId, cableId, next)
+    const result = await saveCableWaypoints(
+      projectId,
+      cableId,
+      next,
+      mode === 'map' ? 'map_waypoints' : 'waypoints',
+    )
     if (!result.ok) toast.error(result.error)
   }
 
@@ -1805,6 +1827,7 @@ export default function TopologyCanvas({
           projectId,
           wd.cableId,
           effectiveWaypoints(wd.cableId),
+          mode === 'map' ? 'map_waypoints' : 'waypoints',
         )
         if (!result.ok) toast.error(result.error)
       }
@@ -3441,6 +3464,7 @@ export default function TopologyCanvas({
                 toLat={toF?.lat ?? null}
                 toLng={toF?.lng ?? null}
                 waypoints={wps}
+                waypointColumn={mode === 'map' ? 'map_waypoints' : 'waypoints'}
                 circuits={circuits ?? []}
                 assignments={(coreAssignments ?? []).filter(
                   (a) => a.cable_id === c.id,

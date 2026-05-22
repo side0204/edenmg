@@ -91,6 +91,7 @@ export default function CableInfoPanel({
   toLat,
   toLng,
   waypoints,
+  waypointColumn,
   circuits,
   assignments,
   onClose,
@@ -109,6 +110,8 @@ export default function CableInfoPanel({
   toLat: number | null
   toLng: number | null
   waypoints: CablePanelWaypoint[]
+  // 경로점 저장 컬럼 — 도식 모드 'waypoints' · 지도 모드 'map_waypoints'
+  waypointColumn: 'waypoints' | 'map_waypoints'
   circuits: CablePanelCircuit[]
   assignments: CablePanelAssignment[]
   onClose: () => void
@@ -197,6 +200,7 @@ export default function CableInfoPanel({
       installation_type: installationType || null,
       total_length: parseNum(totalLength),
       end_distance: parseNum(endDistance),
+      waypoint_column: waypointColumn,
       waypoints: waypoints.map((w, i) => ({
         x: w.x,
         y: w.y,

@@ -21,7 +21,19 @@ export type CableRow = {
   status: CableStatus
   cable_code: string
   installation_type: CableInstallationType | null
+  // 도식 모드 경로점 (x/y)
   waypoints: { x: number; y: number; pole_name?: string | null; dist?: number | null }[]
+  // 지도 모드 경로점 (lat/lng) — 도식과 분리 (마이그 0056)
+  map_waypoints:
+    | {
+        x: number
+        y: number
+        lat?: number | null
+        lng?: number | null
+        pole_name?: string | null
+        dist?: number | null
+      }[]
+    | null
   total_length: number | null
   end_distance: number | null
   notes: string | null

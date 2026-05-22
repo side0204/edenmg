@@ -71,11 +71,15 @@ type Waypoint = {
  * 한 케이블의 중간 경로 waypoint 일괄 저장 — 드래그·추가·삭제 후 호출.
  * 시작·종료점은 시설 위치에서 derive 하므로 저장 안 함 — 중간점만.
  * pole_name(전주명)·dist(구간거리)도 함께 보존.
+ *
+ * column — 도식 모드 경로점은 'waypoints', 지도 모드는 'map_waypoints'.
+ *   두 모드의 경로점을 별도 컬럼에 저장해 서로 간섭하지 않게 한다.
  */
 export async function saveCableWaypoints(
   projectId: string,
   cableId: string,
   waypoints: Waypoint[],
+  column: 'waypoints' | 'map_waypoints' = 'waypoints',
 ): Promise<{ ok: true } | { ok: false; error: string }> {
   const supabase = await createClient()
   const {
@@ -93,6 +97,9 @@ export async function saveCableWaypoints(
 
   if (!projectId || !cableId) {
     return { ok: false, error: '케이블 정보가 없습니다' }
+  }
+  if (column !== 'waypoints' && column !== 'map_waypoints') {
+    return { ok: false, error: '경로점 저장 대상이 올바르지 않습니다' }
   }
   if (waypoints.length > 200) {
     return { ok: false, error: '경로점이 너무 많습니다 (최대 200개)' }
@@ -114,7 +121,7 @@ export async function saveCableWaypoints(
 
   const { error } = await supabase
     .from('relocation_cables')
-    .update({ waypoints: clean })
+    .update({ [column]: clean })
     .eq('id', cableId)
     .eq('project_id', projectId) // RLS 보강
   if (error) {
