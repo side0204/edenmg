@@ -23,6 +23,7 @@ import {
   List,
   PanelTop,
   ImageDown,
+  Download,
 } from 'lucide-react'
 import {
   CABLE_SPEC_VALUES,
@@ -77,6 +78,7 @@ import { useKakaoMap } from './useKakaoMap'
 import MapSearchBox from './MapSearchBox'
 import MapCaptureGuide from './MapCaptureGuide'
 import MapAutoCapture from './MapAutoCapture'
+import { exportSchematicPng } from './export-schematic'
 
 export type FacilityMasterMini = {
   id: string
@@ -1016,6 +1018,49 @@ export default function TopologyCanvas({
     setViewport(computeFitViewport(effectivePositions))
   }
 
+  // 도식 모드 — 캔버스를 PNG 이미지로 내보내기.
+  const [exporting, setExporting] = useState(false)
+  const onExportSchematic = async () => {
+    const svg = svgRef.current
+    if (!svg || exporting) return
+    // 선택 강조·waypoint 핸들이 PNG 에 안 찍히게 먼저 해제
+    setSelectedId(null)
+    setSelectedCableId(null)
+    setFaultSearchOpen(false)
+    setExporting(true)
+    // 선택 해제가 DOM 에 반영될 때까지 한 프레임 대기
+    await new Promise<void>((r) =>
+      requestAnimationFrame(() => requestAnimationFrame(() => r())),
+    )
+    try {
+      // 내보내기 영역 — 전체 콘텐츠 bounding box + 여백 50px
+      let box = computeFitViewport(effectivePositions)
+      try {
+        const bb = svg.getBBox()
+        if (bb.width > 0 && bb.height > 0) {
+          const pad = 50
+          box = {
+            x: bb.x - pad,
+            y: bb.y - pad,
+            width: bb.width + pad * 2,
+            height: bb.height + pad * 2,
+          }
+        }
+      } catch {
+        /* getBBox 실패 시 fit viewport 사용 */
+      }
+      const d = new Date()
+      const p = (n: number) => String(n).padStart(2, '0')
+      const fileName = `지장이설_도식_${d.getFullYear()}${p(d.getMonth() + 1)}${p(d.getDate())}_${p(d.getHours())}${p(d.getMinutes())}.png`
+      await exportSchematicPng(svg, box, fileName)
+      toast.success('도식을 PNG 이미지로 내보냈습니다')
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : '도식 내보내기 실패')
+    } finally {
+      setExporting(false)
+    }
+  }
+
   // 특정 시설을 화면 중앙으로 — 좌측 사이드바에서 시설 클릭 시. 줌 레벨은 유지.
   const focusFacility = (id: string) => {
     if (mode === 'map') {
@@ -1867,6 +1912,20 @@ export default function TopologyCanvas({
             >
               <Camera className="h-3 w-3" />
               분할 캡처
+            </button>
+          )}
+
+          {/* 도식 내보내기 — 도식 모드. 캔버스를 PNG 이미지 파일로 저장 */}
+          {mode === 'schematic' && facilities.length > 0 && (
+            <button
+              type="button"
+              onClick={onExportSchematic}
+              disabled={exporting}
+              className="mr-1 inline-flex items-center gap-1 rounded-md border border-slate-300 px-2 h-7 text-[11px] font-medium text-slate-700 hover:bg-slate-50 disabled:opacity-50"
+              title="도식을 PNG 이미지 파일로 내보냅니다"
+            >
+              <Download className="h-3 w-3" />
+              {exporting ? '내보내는 중…' : '도식 내보내기'}
             </button>
           )}
 
