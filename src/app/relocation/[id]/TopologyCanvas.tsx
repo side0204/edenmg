@@ -19,6 +19,7 @@ import {
   TriangleAlert,
   MapPin,
   Search,
+  Camera,
 } from 'lucide-react'
 import {
   CABLE_SPEC_VALUES,
@@ -67,6 +68,7 @@ import FaultSearchPanel, {
 } from './FaultSearchPanel'
 import { useKakaoMap } from './useKakaoMap'
 import MapSearchBox from './MapSearchBox'
+import MapCaptureGuide from './MapCaptureGuide'
 
 export type FacilityMasterMini = {
   id: string
@@ -300,6 +302,8 @@ export default function TopologyCanvas({
   const [showUnplaced, setShowUnplaced] = useState(false)
   // 지도 모드 검색창 보임/숨김 — 툴바의 「검색」 토글로 제어
   const [searchVisible, setSearchVisible] = useState(true)
+  // 지도 모드 분할 캡처 가이드 활성 여부
+  const [captureActive, setCaptureActive] = useState(false)
 
   // 지도 모드 시설 노드 줌 연동의 기준 줌 — fit 직후의 지도 level.
   //   이 level 보다 축소(level 증가)하면 시설 도형이 함께 작아진다.
@@ -1624,7 +1628,10 @@ export default function TopologyCanvas({
           <div className="mr-1 inline-flex items-center rounded-md border border-slate-300 overflow-hidden">
             <button
               type="button"
-              onClick={() => setMode('schematic')}
+              onClick={() => {
+                setMode('schematic')
+                setCaptureActive(false)
+              }}
               className={
                 'inline-flex items-center gap-1 px-2 h-7 text-[11px] font-medium ' +
                 (mode === 'schematic'
@@ -1670,6 +1677,34 @@ export default function TopologyCanvas({
             >
               <Search className="h-3 w-3" />
               검색
+            </button>
+          )}
+
+          {/* 분할 캡처 — 지도 모드. 시설 영역을 격자로 나눠 스크린샷 가이드 */}
+          {mode === 'map' && mapStatus === 'ready' && (
+            <button
+              type="button"
+              onClick={() => {
+                if (captureActive) {
+                  setCaptureActive(false)
+                  return
+                }
+                setSelectedId(null)
+                setSelectedCableId(null)
+                setFaultSearchOpen(false)
+                fitMapToFacilities()
+                setCaptureActive(true)
+              }}
+              className={
+                'mr-1 inline-flex items-center gap-1 rounded-md border px-2 h-7 text-[11px] font-medium ' +
+                (captureActive
+                  ? 'bg-amber-500 text-white border-amber-500'
+                  : 'text-slate-700 border-slate-300 hover:bg-slate-50')
+              }
+              title="시설 영역을 격자로 나눠 캡처 (지도 이미지 내보내기)"
+            >
+              <Camera className="h-3 w-3" />
+              분할 캡처
             </button>
           )}
 
@@ -2078,7 +2113,7 @@ export default function TopologyCanvas({
               정렬이 확실히 먹는다 (absolute + left/right 는 폭이 안 늘어나는 경우가 있었음).
               지도/SVG 는 absolute inset-0 라 이 in-flow 래퍼에 밀리지 않는다.
               빈 좌우 영역은 pointer-events-none 으로 지도 조작을 막지 않는다. */}
-          {mode === 'map' && mapStatus === 'ready' && searchVisible && (
+          {mode === 'map' && mapStatus === 'ready' && searchVisible && !captureActive && (
             <div className="relative z-20 flex justify-center px-2 pt-2 pointer-events-none">
               <div className="w-full max-w-md space-y-2 pointer-events-auto">
                 <div className="flex items-start gap-1.5 rounded-lg bg-white/95 p-1.5 shadow-lg ring-1 ring-slate-200 backdrop-blur-sm">
@@ -2916,6 +2951,15 @@ export default function TopologyCanvas({
               )
             })()}
           </svg>
+
+          {/* 분할 캡처 가이드 — 지도 모드, 시설 영역을 격자로 나눠 스크린샷 */}
+          {captureActive && mode === 'map' && mapStatus === 'ready' && kakaoMap && (
+            <MapCaptureGuide
+              map={kakaoMap}
+              facilities={facilities}
+              onClose={() => setCaptureActive(false)}
+            />
+          )}
         </div>
 
         {/* 케이블 정보 패널 — 케이블 선택 시 우측 컬럼. 정보 수정·경로점 거리·삭제 */}

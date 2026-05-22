@@ -14,6 +14,8 @@ declare namespace kakao.maps {
     constructor()
     extend(latlng: LatLng): void
     isEmpty(): boolean
+    getSouthWest(): LatLng
+    getNorthEast(): LatLng
   }
 
   // 화면(컨테이너) 픽셀 좌표 — 좌표 ↔ 화면 변환 결과
@@ -41,9 +43,12 @@ declare namespace kakao.maps {
     setLevel(level: number): void
     getLevel(): number
     setBounds(bounds: LatLngBounds): void
+    getBounds(): LatLngBounds
     panTo(latlng: LatLng): void
     relayout(): void
     getProjection(): MapProjection
+    setDraggable(draggable: boolean): void
+    setZoomable(zoomable: boolean): void
   }
 
   interface MarkerOptions {
