@@ -600,6 +600,15 @@ export default function TopologyCanvas({
       g[CLOSURE_TYPE_CATEGORY[f.closure_type]].push(f)
     }
     const byCode = (a: FacilityNode, b: FacilityNode) => a.seq_no - b.seq_no
+    // 배지 번호순 — 배지 있는 시설 먼저(오름차순), 없는 시설은 뒤에 시설번호순
+    const byInstall = (a: FacilityNode, b: FacilityNode) => {
+      const na = installNoByFacility.get(a.id)
+      const nb = installNoByFacility.get(b.id)
+      if (na != null && nb != null) return na !== nb ? na - nb : byCode(a, b)
+      if (na != null) return -1
+      if (nb != null) return 1
+      return byCode(a, b)
+    }
     for (const cat of Object.keys(g) as ClosureCategory[]) {
       g[cat].sort((a, b) => {
         if (facilitySort === 'name') {
@@ -607,19 +616,13 @@ export default function TopologyCanvas({
           return c !== 0 ? c : byCode(a, b)
         }
         if (facilitySort === 'install') {
-          // 배지 번호 있는 시설 먼저(오름차순), 없는 시설은 뒤에 시설번호순
-          const na = installNoByFacility.get(a.id)
-          const nb = installNoByFacility.get(b.id)
-          if (na != null && nb != null) return na - nb
-          if (na != null) return -1
-          if (nb != null) return 1
-          return byCode(a, b)
+          return byInstall(a, b)
         }
         if (facilitySort === 'status') {
-          // 기설 먼저, 신설 나중 (접속함체만 의미 있음)
+          // 기설 먼저, 신설 나중. 같은 구분 안에서는 배지 번호순 (2차 정렬)
           const sa = a.install_status === 'existing' ? 0 : 1
           const sb = b.install_status === 'existing' ? 0 : 1
-          return sa !== sb ? sa - sb : byCode(a, b)
+          return sa !== sb ? sa - sb : byInstall(a, b)
         }
         return byCode(a, b)
       })
