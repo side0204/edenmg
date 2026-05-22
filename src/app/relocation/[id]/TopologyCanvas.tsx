@@ -303,6 +303,38 @@ function burstPoints(cx: number, cy: number): string {
 }
 
 
+// 케이블 연결 시 자동 정렬 — 시설을 허브(접속함체) 둘레 8슬롯에 배치.
+//   슬롯 우선순위: 수평·수직 4방향(우·좌·상·하) → 대각 4방향(좌상·우상·좌하·우하).
+//   허브 케이블이 1~2조면 일직선(2번째는 1번째 반대편), 3조 이상은 우선순위 순.
+const AUTO_PLACE_DISTANCE = 180 // 허브 ↔ 위성 노드 간격(px)
+// 슬롯 0~7 의 그리드 방향 (x: 우 +, y: 아래 +)
+const SLOT_VECTORS: { x: number; y: number }[] = [
+  { x: 1, y: 0 }, // 0 우
+  { x: -1, y: 0 }, // 1 좌
+  { x: 0, y: -1 }, // 2 상
+  { x: 0, y: 1 }, // 3 하
+  { x: -1, y: -1 }, // 4 좌상
+  { x: 1, y: -1 }, // 5 우상
+  { x: -1, y: 1 }, // 6 좌하
+  { x: 1, y: 1 }, // 7 우하
+]
+const SLOT_OPPOSITE = [1, 0, 3, 2, 7, 6, 5, 4]
+
+// 허브 기준 방향 벡터 → 가장 가까운 8방위 슬롯 인덱스
+function nearestSlot(dx: number, dy: number): number {
+  if (dx === 0 && dy === 0) return 0
+  let s = Math.round(Math.atan2(dy, dx) / (Math.PI / 4))
+  s = ((s % 8) + 8) % 8 // 0우 1우하 2하 3좌하 4좌 5좌상 6상 7우상
+  return [0, 7, 3, 6, 1, 4, 2, 5][s]
+}
+
+// 우선순위(0..7) 순으로 비어 있는 첫 슬롯
+function firstFreeSlot(occupied: Set<number>): number {
+  for (let i = 0; i < 8; i++) if (!occupied.has(i)) return i
+  return 0
+}
+
+
 export default function TopologyCanvas({
   projectId,
   facilities,
@@ -1201,22 +1233,62 @@ export default function TopologyCanvas({
     }
   }
 
-  // 케이블 연결 시 정렬 — 두 번째 시설(moveId)을 첫 번째 시설(anchorId) 기준으로
-  //   수직 또는 수평에 맞춘다. x 차이가 작으면 수직(같은 x), y 차이가 작으면 수평(같은 y).
-  //   도식 모드 전용 (지도 모드는 GPS 좌표라 호출 안 함).
-  const alignFacilityForCable = (anchorId: string, moveId: string) => {
-    const anchor = effectivePositions[anchorId]
-    const target = effectivePositions[moveId]
-    if (!anchor || !target) return
-    const dx = Math.abs(target.x - anchor.x)
-    const dy = Math.abs(target.y - anchor.y)
-    if (dx === 0 || dy === 0) return // 이미 수직 또는 수평 정렬됨
-    const aligned =
-      dx <= dy
-        ? { x: anchor.x, y: target.y } // 수직 정렬 (같은 x)
-        : { x: target.x, y: anchor.y } // 수평 정렬 (같은 y)
-    setPositions((prev) => ({ ...prev, [moveId]: aligned }))
-    void saveNodePositions(projectId, [{ id: moveId, x: aligned.x, y: aligned.y }])
+  // 케이블 연결 시 자동 정렬 — 허브(접속함체) 둘레 8슬롯 중 빈 곳에 위성 시설 배치.
+  //   허브 = 둘 중 접속함체(한쪽만 접속함체면 그쪽). 위성 = 나머지 시설.
+  //   허브에 케이블이 1조면 우측, 2조면 1번째 반대편(일직선),
+  //   3조 이상은 수평·수직 4방향 먼저, 그다음 대각 4방향.
+  //   도식 모드 전용. 설계자가 이후 드래그로 자유롭게 변경 가능.
+  const alignFacilityForCable = (aId: string, bId: string) => {
+    const fa = facilities.find((f) => f.id === aId)
+    const fb = facilities.find((f) => f.id === bId)
+    if (!fa || !fb) return
+    // 허브 결정 — 한쪽만 접속함체면 그쪽이 허브, 아니면 먼저 클릭한 쪽
+    const aClosure = CLOSURE_TYPE_CATEGORY[fa.closure_type] === '접속함체'
+    const bClosure = CLOSURE_TYPE_CATEGORY[fb.closure_type] === '접속함체'
+    let hubId = aId
+    let satId = bId
+    if (bClosure && !aClosure) {
+      hubId = bId
+      satId = aId
+    }
+    const hubPos = effectivePositions[hubId]
+    if (!hubPos) return
+
+    // 허브에 이미 연결된 이웃 시설 (이번에 잇는 위성은 제외)
+    const neighborIds = new Set<string>()
+    for (const c of cables) {
+      if (c.from_facility_id === hubId) neighborIds.add(c.to_facility_id)
+      else if (c.to_facility_id === hubId) neighborIds.add(c.from_facility_id)
+    }
+    neighborIds.delete(satId)
+    neighborIds.delete(hubId)
+
+    // 이웃이 점유한 슬롯
+    const occupied = new Set<number>()
+    for (const nId of neighborIds) {
+      const np = effectivePositions[nId]
+      if (!np) continue
+      occupied.add(nearestSlot(np.x - hubPos.x, np.y - hubPos.y))
+    }
+
+    let slot: number
+    if (neighborIds.size === 0) {
+      slot = 0 // 첫 케이블 — 우측(수평)
+    } else if (neighborIds.size === 1) {
+      // 두 번째 — 기존 이웃 반대편 (일직선)
+      const only = [...occupied][0] ?? 1
+      slot = SLOT_OPPOSITE[only]
+      if (occupied.has(slot)) slot = firstFreeSlot(occupied)
+    } else {
+      slot = firstFreeSlot(occupied)
+    }
+    const v = SLOT_VECTORS[slot]
+    const placed = {
+      x: hubPos.x + v.x * AUTO_PLACE_DISTANCE,
+      y: hubPos.y + v.y * AUTO_PLACE_DISTANCE,
+    }
+    setPositions((prev) => ({ ...prev, [satId]: placed }))
+    void saveNodePositions(projectId, [{ id: satId, x: placed.x, y: placed.y }])
   }
 
   // 좌클릭 드래그 스냅 — 드래그 위치(np)를 다른 시설들의 x/y 에 맞춰 정렬.
@@ -1344,8 +1416,7 @@ export default function TopologyCanvas({
       setSelectedId(id)
       return
     }
-    // 두 번째 클릭 — 연결 시작. 두 번째 시설을 첫 번째 기준 수직/수평 정렬.
-    alignFacilityForCable(selectedId, id)
+    // 두 번째 클릭 — 케이블 연결 모달 열기. 자동 정렬은 케이블 생성 후(onSaved).
     setPendingConnection({ fromId: selectedId, toId: id })
     setSelectedId(null)
   }
@@ -3489,6 +3560,13 @@ export default function TopologyCanvas({
           defaultSpec={cableTool}
           onClose={() => setPendingConnection(null)}
           onSaved={() => {
+            // 도식 모드 — 케이블 생성 후 위성 시설을 허브 둘레 슬롯으로 자동 정렬
+            if (mode === 'schematic' && pendingConnection) {
+              alignFacilityForCable(
+                pendingConnection.fromId,
+                pendingConnection.toId,
+              )
+            }
             setPendingConnection(null)
             router.refresh()
           }}
