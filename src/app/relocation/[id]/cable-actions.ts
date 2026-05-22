@@ -226,6 +226,7 @@ export async function createCableFromCanvas(input: {
   status: string
   cable_code: string
   installation_type: string | null
+  total_length: number | null
   notes: string | null
 }): Promise<{ ok: true; cable_code: string } | { ok: false; error: string }> {
   if (!input.project_id) return { ok: false, error: '프로젝트 id 가 없습니다' }
@@ -244,6 +245,13 @@ export async function createCableFromCanvas(input: {
   const installation_type =
     input.installation_type && isInstallationType(input.installation_type)
       ? input.installation_type
+      : null
+  // 전체거리 — 지도에서 두 시설 좌표로 자동 계산한 기본값. 음수·비유한수는 무시.
+  const total_length =
+    typeof input.total_length === 'number' &&
+    Number.isFinite(input.total_length) &&
+    input.total_length >= 0
+      ? input.total_length
       : null
   const notes = (input.notes ?? '').trim() || null
   const userCableCode = (input.cable_code ?? '').trim()
@@ -277,6 +285,7 @@ export async function createCableFromCanvas(input: {
       status,
       cable_code: cableCode,
       installation_type,
+      total_length,
       notes,
     })
 

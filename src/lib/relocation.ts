@@ -239,6 +239,25 @@ export function formatFacilityCode(closureType: ClosureType, seqNo: number): str
 }
 
 
+// 두 GPS 좌표 사이 거리(m) — Haversine.
+//   지도에서 케이블을 추가할 때 두 시설 좌표로 전체거리 기본값을 채우는 데 쓴다.
+export function haversineMeters(
+  a: { lat: number; lng: number },
+  b: { lat: number; lng: number },
+): number {
+  const R = 6371000 // 지구 반지름(m)
+  const toRad = (d: number): number => (d * Math.PI) / 180
+  const dLat = toRad(b.lat - a.lat)
+  const dLng = toRad(b.lng - a.lng)
+  const lat1 = toRad(a.lat)
+  const lat2 = toRad(b.lat)
+  const h =
+    Math.sin(dLat / 2) ** 2 +
+    Math.cos(lat1) * Math.cos(lat2) * Math.sin(dLng / 2) ** 2
+  return 2 * R * Math.asin(Math.sqrt(h))
+}
+
+
 // ===== 설치 순번 배지 ===================================================
 // 시설명 앞에 붙는 숫자 배지 — 접속함체·RN·IJP 의 설치(작업) 순서.
 

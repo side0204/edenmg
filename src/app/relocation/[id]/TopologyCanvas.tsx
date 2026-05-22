@@ -38,6 +38,7 @@ import {
   formatFacilityCode,
   isInstallNumbered,
   computeInstallNumbers,
+  haversineMeters,
   type ClosureType,
   type ClosureCategory,
   type CableStatus,
@@ -292,7 +293,8 @@ export default function TopologyCanvas({
   // 도식(schematic) / 지도(map) 모드.
   //   지도 모드 = 카카오맵을 SVG 캔버스 뒤 배경으로 깔고, 시설을 GPS 좌표로 투영해 배치.
   //   도식 모드는 기존 동작 그대로 — 모든 분기는 `mode === 'map'` 별도 경로.
-  const [mode, setMode] = useState<'schematic' | 'map'>('schematic')
+  //   기본값 = 지도 (owner 요청 2026-05-22) — 설계 진입 시 바로 지도가 열린다.
+  const [mode, setMode] = useState<'schematic' | 'map'>('map')
   const {
     setContainer: mapSetContainer,
     map: kakaoMap,
@@ -3696,10 +3698,25 @@ function ConnectionModal({
   const fromLabel = `${formatFacilityCode(from.closure_type, from.seq_no)} ${from.name}`
   const toLabel = `${formatFacilityCode(to.closure_type, to.seq_no)} ${to.name}`
 
+  // 전체거리 기본값 — 두 시설 GPS 좌표가 있으면 지도상 직선거리(m)로 자동 입력.
+  //   기설·신설 공통. 설계자가 필요시 수정 (waypoint 입력 후엔 도로 경로 거리로).
+  const autoLength =
+    from.lat != null && from.lng != null && to.lat != null && to.lng != null
+      ? Math.round(
+          haversineMeters(
+            { lat: from.lat, lng: from.lng },
+            { lat: to.lat, lng: to.lng },
+          ),
+        )
+      : null
+
   const [spec, setSpec] = useState<string>(defaultSpec ?? '144C')
   const [status, setStatus] = useState<string>('new')
   const [cableCode, setCableCode] = useState('')
   const [installationType, setInstallationType] = useState('')
+  const [totalLength, setTotalLength] = useState<string>(
+    autoLength != null ? String(autoLength) : '',
+  )
   const [notes, setNotes] = useState('')
   const [submitting, setSubmitting] = useState(false)
 
@@ -3716,6 +3733,7 @@ function ConnectionModal({
       status,
       cable_code: cableCode.trim(),
       installation_type: installationType || null,
+      total_length: totalLength.trim() === '' ? null : Number(totalLength),
       notes: notes.trim() || null,
     })
     setSubmitting(false)
@@ -3814,6 +3832,26 @@ function ConnectionModal({
                 </option>
               ))}
             </select>
+          </div>
+
+          <div>
+            <label className="block text-xs font-medium text-slate-700">
+              전체거리 (m)
+            </label>
+            <input
+              type="number"
+              min={0}
+              step="0.1"
+              value={totalLength}
+              onChange={(e) => setTotalLength(e.target.value)}
+              placeholder="전체거리"
+              className="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2 text-sm"
+            />
+            <p className="mt-1 text-[11px] text-slate-400">
+              {autoLength != null
+                ? '지도상 두 시설 직선거리로 자동 입력했습니다. 필요시 수정하세요.'
+                : '시설 GPS 좌표가 없어 자동 계산을 못 했습니다. 직접 입력하세요.'}
+            </p>
           </div>
 
           <div>
