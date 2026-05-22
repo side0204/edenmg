@@ -2,11 +2,11 @@ import { Plus, Pencil, Trash2 } from 'lucide-react'
 import {
   CLOSURE_TYPE_LABEL,
   CLOSURE_TYPE_VALUES,
-  CLOSURE_TYPE_CATEGORY,
   CABLE_SPEC_VALUES,
   FACILITY_INSTALL_STATUS_VALUES,
   FACILITY_INSTALL_STATUS_LABEL,
   formatFacilityCode,
+  hasInstallStatus,
   isInternalNode,
   type ClosureType,
 } from '@/lib/relocation'
@@ -147,7 +147,7 @@ export default function FacilitiesTab({
           </div>
 
           <div>
-            <label className="block text-xs font-medium text-slate-600">설치 구분 (접속함체)</label>
+            <label className="block text-xs font-medium text-slate-600">설치 구분 (접속함체·RN·IJP)</label>
             <select
               name="install_status"
               defaultValue="new"
@@ -337,7 +337,7 @@ function FacilityRowItem({
               className="mt-0.5 w-full rounded-lg border border-slate-300 px-2 py-1.5 text-sm"
             />
           </div>
-          {CLOSURE_TYPE_CATEGORY[facility.closure_type] === '접속함체' ? (
+          {hasInstallStatus(facility.closure_type) ? (
             <div>
               <label className="block text-[11px] text-slate-500">설치 구분</label>
               <select

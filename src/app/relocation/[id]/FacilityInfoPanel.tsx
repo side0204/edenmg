@@ -20,6 +20,7 @@ import {
   FACILITY_INSTALL_STATUS_LABEL,
   formatFacilityCode,
   facilityIdLabel,
+  hasInstallStatus,
   isInternalNode,
   type ClosureType,
   type FacilityInstallStatus,
@@ -145,8 +146,9 @@ export default function FacilityInfoPanel({
   )
 
   // 함체 규격은 접속함체 종류에만, 부모 국사는 국사 내부 노드에만 표시
-  // 설치 구분(기설/신설)도 접속함체에만 표시
   const isClosure = CLOSURE_TYPE_CATEGORY[facility.closure_type] === '접속함체'
+  // 설치 구분(기설/신설) 은 접속함체 + RN/IJP 에 표시
+  const showInstallStatus = hasInstallStatus(facility.closure_type)
   const isInternal = isInternalNode(facility.closure_type)
 
   // 공종 추가 폼
@@ -498,7 +500,7 @@ export default function FacilityInfoPanel({
               className="mt-0.5 w-full rounded-md border border-slate-300 px-2 py-1 text-xs"
             />
           </div>
-          {isClosure && (
+          {showInstallStatus && (
             <div>
               <label className="block text-[11px] font-medium text-slate-600">
                 설치 구분

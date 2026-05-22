@@ -39,6 +39,7 @@ import {
   formatFacilityCode,
   facilityIdLabel,
   isInstallNumbered,
+  hasInstallStatus,
   computeInstallNumbers,
   findCutoverCables,
   haversineMeters,
@@ -262,10 +263,16 @@ function edgeStyle(
 }
 
 // 시설 색 — 도면(FacilityShape)과 동일.
-//   접속함체는 설치 구분으로(기설=검정·신설=빨강), 그 외는 종류별 표준 색.
+//   접속함체: 기설=검정·신설=빨강.
+//   RN/IJP: 기설=검정·신설=종류별 표준 색.
+//   그 외: 종류별 표준 색.
 function facilityDiagramColor(closureType: ClosureType, installStatus: string): string {
   if (CLOSURE_TYPE_CATEGORY[closureType] === '접속함체') {
     return installStatus === 'existing' ? '#111827' : '#dc2626'
+  }
+  if (hasInstallStatus(closureType)) {
+    // RN/IJP — 기설이면 검정, 신설이면 종류별 표준 색
+    return installStatus === 'existing' ? '#111827' : CLOSURE_TYPE_COLOR[closureType]
   }
   return CLOSURE_TYPE_COLOR[closureType]
 }
@@ -3387,8 +3394,8 @@ function NewFacilityModal({
   const [facilityCode, setFacilityCode] = useState('')
   const [submitting, setSubmitting] = useState(false)
 
-  // 설치 구분(기설/신설) 은 접속함체 종류에만 노출
-  const isClosureCategory = CLOSURE_TYPE_CATEGORY[closureType] === '접속함체'
+  // 설치 구분(기설/신설) 은 접속함체 + RN/IJP 에 노출
+  const showInstallStatus = hasInstallStatus(closureType)
 
   // 시설 종류와 master.facility_type 매핑:
   //   '국사' → 'station'
@@ -3444,7 +3451,7 @@ function NewFacilityModal({
             master_facility_id: masterId,
             closure_spec: spec,
             install_address: installAddress.trim() || null,
-            install_status: isClosureCategory ? installStatus : null,
+            install_status: showInstallStatus ? installStatus : null,
             facility_code: facilityCode.trim() || null,
           })
         : await createFacilityAtLatLng({
@@ -3456,7 +3463,7 @@ function NewFacilityModal({
             master_facility_id: masterId,
             closure_spec: spec,
             install_address: installAddress.trim() || null,
-            install_status: isClosureCategory ? installStatus : null,
+            install_status: showInstallStatus ? installStatus : null,
             facility_code: facilityCode.trim() || null,
           })
     setSubmitting(false)
@@ -3557,7 +3564,7 @@ function NewFacilityModal({
             />
           </div>
 
-          {isClosureCategory && (
+          {showInstallStatus && (
             <div>
               <label className="block text-xs font-medium text-slate-700">설치 구분</label>
               <select

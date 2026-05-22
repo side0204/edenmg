@@ -279,6 +279,13 @@ export function isInstallNumbered(t: ClosureType): boolean {
   return cat === '접속함체' || (cat === 'RN_IJP_광MUX' && t !== '광Mux')
 }
 
+// 설치 구분(기설/신설) 을 갖는 시설 — 접속함체 + RN/IJP.
+//   국사·맨홀·가입자시설 등은 기설/신설 구분이 의미 없어 미표시. 광Mux 제외.
+export function hasInstallStatus(t: ClosureType): boolean {
+  const cat = CLOSURE_TYPE_CATEGORY[t]
+  return cat === '접속함체' || (cat === 'RN_IJP_광MUX' && t !== '광Mux')
+}
+
 /**
  * 설치 순번 배지 번호 산출.
  *   입력: 배지 대상(eligible)으로 이미 걸러진 시설 목록.
