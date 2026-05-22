@@ -277,6 +277,28 @@ function facilityDiagramColor(closureType: ClosureType, installStatus: string): 
   return CLOSURE_TYPE_COLOR[closureType]
 }
 
+// 폭발형 별(starburst) 꼭짓점 — 절단 절체 케이블 표시.
+//   접속함체 원형과 확실히 구분되도록 뾰족한 폭발 모양. 바깥 꼭짓점 길이를
+//   번갈아(길게·짧게) 둬 폭발 느낌을 준다.
+function burstPoints(cx: number, cy: number): string {
+  const spikes = 10
+  const outer = 11
+  const outerShort = 7.5
+  const inner = 4.5
+  const step = Math.PI / spikes
+  const pts: string[] = []
+  let a = -Math.PI / 2
+  for (let i = 0; i < spikes * 2; i++) {
+    const r =
+      i % 2 === 1 ? inner : (i / 2) % 2 === 0 ? outer : outerShort
+    pts.push(
+      `${(cx + r * Math.cos(a)).toFixed(2)},${(cy + r * Math.sin(a)).toFixed(2)}`,
+    )
+    a += step
+  }
+  return pts.join(' ')
+}
+
 
 export default function TopologyCanvas({
   projectId,
@@ -2682,7 +2704,8 @@ export default function TopologyCanvas({
                     </g>
                   )
                 })()}
-                {/* 절단 절체 — 기설 케이블이 신설 함체에 인입. 신설 함체 끝에 ✂ 마크 */}
+                {/* 절단 절체 — 기설 케이블이 신설 함체에 인입.
+                    신설 함체 끝에 빨강 폭발 마크 (접속함체 원형과 구분). */}
                 {(() => {
                   const cut = cutover.cables.get(c.id)
                   if (!cut || pts.length < 2) return null
@@ -2702,25 +2725,15 @@ export default function TopologyCanvas({
                   if (cut.to)
                     marks.push(along(pts[pts.length - 1], pts[pts.length - 2]))
                   return marks.map((m, i) => (
-                    <g key={`cut-${i}`} pointerEvents="none">
-                      <circle
-                        cx={m.x}
-                        cy={m.y}
-                        r={8}
-                        fill="white"
-                        stroke="#dc2626"
-                        strokeWidth={2}
-                      />
-                      <text
-                        x={m.x}
-                        y={m.y + 4}
-                        textAnchor="middle"
-                        fill="#dc2626"
-                        style={{ fontSize: 11, fontWeight: 700 }}
-                      >
-                        ✂
-                      </text>
-                    </g>
+                    <polygon
+                      key={`cut-${i}`}
+                      points={burstPoints(m.x, m.y)}
+                      fill="#dc2626"
+                      stroke="white"
+                      strokeWidth={1.5}
+                      strokeLinejoin="round"
+                      pointerEvents="none"
+                    />
                   ))
                 })()}
                 {/* 선택 시 waypoint 핸들 — 드래그 이동 / 우클릭 삭제.
