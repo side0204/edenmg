@@ -1,6 +1,7 @@
 'use client'
 
 import { useEffect, useMemo, useRef, useState } from 'react'
+import { createPortal } from 'react-dom'
 import {
   X,
   ChevronLeft,
@@ -24,8 +25,7 @@ import {
 
 type LatLngLit = { lat: number; lng: number }
 
-const MARGIN = 14          // 프레임 상·좌·우 여백(px)
-const BOTTOM = 104         // 하단 컨트롤 바 영역(px) — 캡처에 안 들어감
+const MARGIN = 14          // 프레임 상·하·좌·우 여백(px)
 const OVERLAP = 0.12       // 타일 간 겹침 비율
 const BRACKET_LEN = 26     // 코너 브래킷 길이(px)
 const BRACKET_THICK = 4    // 코너 브래킷 두께(px)
@@ -34,10 +34,13 @@ const BRACKET_COLOR = '#fbbf24'
 export default function MapCaptureGuide({
   map,
   facilities,
+  captureBarSlot,
   onClose,
 }: {
   map: kakao.maps.Map
   facilities: { lat: number | null; lng: number | null }[]
+  // 컨트롤 바를 portal 로 렌더할 캔버스 아래 영역 — 지도를 가리지 않게.
+  captureBarSlot: HTMLElement | null
   onClose: () => void
 }) {
   // 오버레이(= 지도 컨테이너) 크기 측정
@@ -56,12 +59,13 @@ export default function MapCaptureGuide({
     return () => ro.disconnect()
   }, [])
 
-  // 캡처 프레임 — 상·좌·우 여백 + 하단 컨트롤 바 자리를 뺀 직사각형
+  // 캡처 프레임 — 사방 여백만 뺀 직사각형. 컨트롤 바는 캔버스 밖(아래)이라
+  //   프레임이 캔버스를 거의 가득 채운다.
   const frame = useMemo(() => {
     const x = MARGIN
     const y = MARGIN
     const w = Math.max(0, size.w - MARGIN * 2)
-    const h = Math.max(0, size.h - MARGIN - BOTTOM)
+    const h = Math.max(0, size.h - MARGIN * 2)
     return { x, y, w, h }
   }, [size])
 
@@ -273,92 +277,90 @@ export default function MapCaptureGuide({
             />
           ))}
 
-          {/* 컨트롤 바 — 하단 딤 영역 (캡처에 안 들어감) */}
-          <div
-            className="absolute flex items-end justify-center px-3 pb-2"
-            style={{ left: 0, right: 0, top: fb, height: size.h - fb, pointerEvents: 'none' }}
-          >
-            <div
-              className="w-full max-w-2xl rounded-xl bg-white px-3 py-2 shadow-xl ring-1 ring-slate-200"
-              style={{ pointerEvents: 'auto' }}
-            >
-              {/* 1행 — 제목 · 줌 · 끝내기 */}
-              <div className="flex items-center gap-2">
-                <span className="inline-flex items-center gap-1 text-xs font-bold text-slate-800">
-                  <Camera className="h-3.5 w-3.5" />
-                  분할 캡처
-                </span>
-                <span className="text-[11px] text-slate-500">
-                  총 {total}장 · {grid.cols}열 × {grid.rows}행
-                </span>
-                <div className="ml-auto inline-flex items-center overflow-hidden rounded-md border border-slate-300">
-                  <button
-                    type="button"
-                    onClick={() => setLevel((l) => Math.min(14, l + 1))}
-                    className="inline-flex h-7 items-center gap-0.5 px-2 text-[11px] font-medium text-slate-700 hover:bg-slate-50"
-                    title="지도 축소 (장수 줄이기)"
-                  >
-                    <ZoomOut className="h-3.5 w-3.5" />
-                    축소
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => setLevel((l) => Math.max(1, l - 1))}
-                    className="inline-flex h-7 items-center gap-0.5 border-l border-slate-300 px-2 text-[11px] font-medium text-slate-700 hover:bg-slate-50"
-                    title="지도 확대 (더 선명·장수 늘기)"
-                  >
-                    <ZoomIn className="h-3.5 w-3.5" />
-                    확대
-                  </button>
-                </div>
-                <button
-                  type="button"
-                  onClick={onClose}
-                  className="inline-flex h-7 items-center gap-0.5 rounded-md border border-slate-300 px-2 text-[11px] font-medium text-slate-700 hover:bg-slate-50"
-                >
-                  <X className="h-3.5 w-3.5" />
-                  끝내기
-                </button>
-              </div>
+          {/* 컨트롤 바 — 캔버스 아래 별도 영역(portal). 지도를 가리지 않는다. */}
+          {captureBarSlot &&
+            createPortal(
+              <div className="px-3 py-2">
+                <div className="mx-auto w-full max-w-3xl">
+                  {/* 1행 — 제목 · 줌 · 끝내기 */}
+                  <div className="flex items-center gap-2">
+                    <span className="inline-flex items-center gap-1 text-xs font-bold text-slate-800">
+                      <Camera className="h-3.5 w-3.5" />
+                      분할 캡처
+                    </span>
+                    <span className="text-[11px] text-slate-500">
+                      총 {total}장 · {grid.cols}열 × {grid.rows}행
+                    </span>
+                    <div className="ml-auto inline-flex items-center overflow-hidden rounded-md border border-slate-300">
+                      <button
+                        type="button"
+                        onClick={() => setLevel((l) => Math.min(14, l + 1))}
+                        className="inline-flex h-7 items-center gap-0.5 px-2 text-[11px] font-medium text-slate-700 hover:bg-slate-50"
+                        title="지도 축소 (장수 줄이기)"
+                      >
+                        <ZoomOut className="h-3.5 w-3.5" />
+                        축소
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setLevel((l) => Math.max(1, l - 1))}
+                        className="inline-flex h-7 items-center gap-0.5 border-l border-slate-300 px-2 text-[11px] font-medium text-slate-700 hover:bg-slate-50"
+                        title="지도 확대 (더 선명·장수 늘기)"
+                      >
+                        <ZoomIn className="h-3.5 w-3.5" />
+                        확대
+                      </button>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={onClose}
+                      className="inline-flex h-7 items-center gap-0.5 rounded-md border border-slate-300 px-2 text-[11px] font-medium text-slate-700 hover:bg-slate-50"
+                    >
+                      <X className="h-3.5 w-3.5" />
+                      끝내기
+                    </button>
+                  </div>
 
-              {/* 2행 — 타일 네비게이션 */}
-              <div className="mt-1.5 flex items-center gap-2">
-                <button
-                  type="button"
-                  onClick={() => setTileIndex((i) => Math.max(0, i - 1))}
-                  disabled={tileIndex <= 0}
-                  className="inline-flex h-8 items-center gap-1 rounded-md border border-slate-300 px-2.5 text-xs font-medium text-slate-700 hover:bg-slate-50 disabled:opacity-40"
-                >
-                  <ChevronLeft className="h-4 w-4" />
-                  이전
-                </button>
-                <div className="flex-1 text-center">
-                  <span className="text-sm font-bold text-slate-900">
-                    {cur?.row}행 {cur?.col}열
-                  </span>
-                  <span className="ml-1.5 text-xs text-slate-500">
-                    {tileIndex + 1} / {total}
-                  </span>
-                </div>
-                <button
-                  type="button"
-                  onClick={() => setTileIndex((i) => Math.min(total - 1, i + 1))}
-                  disabled={isLast}
-                  className="inline-flex h-8 items-center gap-1 rounded-md bg-slate-900 px-2.5 text-xs font-medium text-white hover:bg-slate-800 disabled:opacity-40"
-                >
-                  다음
-                  <ChevronRight className="h-4 w-4" />
-                </button>
-              </div>
+                  {/* 2행 — 타일 네비게이션 */}
+                  <div className="mt-1.5 flex items-center gap-2">
+                    <button
+                      type="button"
+                      onClick={() => setTileIndex((i) => Math.max(0, i - 1))}
+                      disabled={tileIndex <= 0}
+                      className="inline-flex h-8 items-center gap-1 rounded-md border border-slate-300 px-2.5 text-xs font-medium text-slate-700 hover:bg-slate-50 disabled:opacity-40"
+                    >
+                      <ChevronLeft className="h-4 w-4" />
+                      이전
+                    </button>
+                    <div className="flex-1 text-center">
+                      <span className="text-sm font-bold text-slate-900">
+                        {cur?.row}행 {cur?.col}열
+                      </span>
+                      <span className="ml-1.5 text-xs text-slate-500">
+                        {tileIndex + 1} / {total}
+                      </span>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => setTileIndex((i) => Math.min(total - 1, i + 1))}
+                      disabled={isLast}
+                      className="inline-flex h-8 items-center gap-1 rounded-md bg-slate-900 px-2.5 text-xs font-medium text-white hover:bg-slate-800 disabled:opacity-40"
+                    >
+                      다음
+                      <ChevronRight className="h-4 w-4" />
+                    </button>
+                  </div>
 
-              {/* 3행 — 안내 */}
-              <p className="mt-1 text-center text-[10.5px] leading-snug text-slate-500">
-                {isLast
-                  ? `마지막 장입니다. 캡처한 ${total}장을 ${grid.cols}열 × ${grid.rows}행 격자로 배치하세요 (타일은 살짝 겹칩니다).`
-                  : '밝은 영역을 Win+Shift+S 로 캡처한 뒤 [다음 ▶]. 모서리 ⌐ 표시에 맞추세요.'}
-              </p>
-            </div>
-          </div>
+                  {/* 3행 — 안내 */}
+                  <p className="mt-1 text-center text-[10.5px] leading-snug text-slate-500">
+                    {isLast
+                      ? `마지막 장입니다. 캡처한 ${total}장을 ${grid.cols}열 × ${grid.rows}행 격자로 배치하세요 (타일은 살짝 겹칩니다).`
+                      : '밝은 영역을 Win+Shift+S 로 캡처한 뒤 [다음 ▶]. 모서리 ⌐ 표시에 맞추세요.'}
+                  </p>
+                </div>
+              </div>,
+              captureBarSlot,
+            )}
         </>
       )}
     </div>

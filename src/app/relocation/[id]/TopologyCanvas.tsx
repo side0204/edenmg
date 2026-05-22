@@ -315,6 +315,8 @@ export default function TopologyCanvas({
   const [searchVisible, setSearchVisible] = useState(true)
   // 지도 모드 분할 캡처 가이드 활성 여부
   const [captureActive, setCaptureActive] = useState(false)
+  // 분할 캡처 컨트롤 바를 portal 로 렌더할 캔버스 아래 영역 (지도를 안 가리게)
+  const [captureBarSlot, setCaptureBarSlot] = useState<HTMLDivElement | null>(null)
   // 탭 메뉴(시설·케이블·회선·...) 오버레이 — 툴바 「탭 메뉴」 토글. ?tab= 있으면 기본 열림.
   const [tabPanelOpen, setTabPanelOpen] = useState(tabPanelDefaultOpen ?? false)
 
@@ -2987,6 +2989,7 @@ export default function TopologyCanvas({
             <MapCaptureGuide
               map={kakaoMap}
               facilities={facilities}
+              captureBarSlot={captureBarSlot}
               onClose={() => setCaptureActive(false)}
             />
           )}
@@ -3122,6 +3125,14 @@ export default function TopologyCanvas({
           />
         )}
       </div>
+
+      {/* 분할 캡처 컨트롤 바 영역 — 캔버스(지도) 아래. MapCaptureGuide 가 portal 로 채운다. */}
+      {captureActive && mode === 'map' && mapStatus === 'ready' && (
+        <div
+          ref={setCaptureBarSlot}
+          className="shrink-0 border-t border-slate-200 bg-white"
+        />
+      )}
 
       {pendingConnection && fromFacility && toFacility && (
         <ConnectionModal
