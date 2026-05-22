@@ -419,6 +419,7 @@ export default async function RelocationProjectPage({
           install_status: f.install_status ?? 'new',
           label_dx: f.label_dx ?? 0,
           label_dy: f.label_dy ?? 0,
+          install_order: f.install_order ?? null,
         }))}
         cables={cables.map((c) => ({
           id: c.id,

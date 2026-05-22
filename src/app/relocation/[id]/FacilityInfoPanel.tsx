@@ -28,6 +28,7 @@ import {
   updateFacilityFromCanvas,
   deleteFacilityFromCanvas,
   saveFacilityLabelOffset,
+  setFacilityInstallOrder,
 } from './facility-actions'
 import {
   addFacilityTask,
@@ -96,6 +97,7 @@ export default function FacilityInfoPanel({
   facility,
   stations,
   cableCount,
+  installNo,
   taskTypes,
   tasks,
   materials,
@@ -108,6 +110,8 @@ export default function FacilityInfoPanel({
   facility: FacilityPanelData
   stations: FacilityStationOption[]
   cableCount: number
+  // 시설명 앞 설치 순번 배지 번호 — 배지 대상이 아니면 null
+  installNo: number | null
   taskTypes: TaskTypeOption[]
   tasks: FacilityTaskItem[]
   materials: FacilityMaterialItem[]
@@ -133,6 +137,10 @@ export default function FacilityInfoPanel({
   )
   const [installStatus, setInstallStatus] = useState<FacilityInstallStatus>(
     facility.install_status === 'existing' ? 'existing' : 'new',
+  )
+  // 설치 순번 배지 — 시설명 앞 숫자. installNo 가 null 이면 배지 대상 아님 (필드 숨김).
+  const [installNoInput, setInstallNoInput] = useState(
+    installNo != null ? String(installNo) : '',
   )
 
   // 함체 규격은 접속함체 종류에만, 부모 국사는 국사 내부 노드에만 표시
@@ -199,6 +207,28 @@ export default function FacilityInfoPanel({
       return
     }
     toast.success('시설 정보를 저장했습니다')
+    onChanged()
+  }
+
+  async function onSaveInstallNo() {
+    if (busy) return
+    const n = Number(installNoInput)
+    if (!Number.isInteger(n) || n < 1) {
+      toast.error('순번은 1 이상의 정수로 입력하세요')
+      return
+    }
+    setBusy(true)
+    const result = await setFacilityInstallOrder({
+      project_id: projectId,
+      facility_id: facility.id,
+      desired_no: n,
+    })
+    setBusy(false)
+    if (!result.ok) {
+      toast.error(result.error)
+      return
+    }
+    toast.success('설치 순번을 변경했습니다')
     onChanged()
   }
 
@@ -404,6 +434,36 @@ export default function FacilityInfoPanel({
               className="mt-0.5 w-full rounded-md border border-slate-300 px-2 py-1 text-xs"
             />
           </div>
+          {installNo != null && (
+            <div>
+              <label className="block text-[11px] font-medium text-slate-600">
+                설치 순번 (시설명 앞 숫자 배지)
+              </label>
+              <div className="mt-0.5 flex items-center gap-1">
+                <input
+                  type="number"
+                  min={1}
+                  step={1}
+                  value={installNoInput}
+                  onChange={(e) => setInstallNoInput(e.target.value)}
+                  className="w-16 rounded-md border border-slate-300 px-2 py-1 text-xs"
+                />
+                <button
+                  type="button"
+                  onClick={onSaveInstallNo}
+                  disabled={busy}
+                  className="inline-flex items-center gap-0.5 rounded-md border border-slate-300 px-2 py-1 text-[11px] font-medium text-slate-700 hover:bg-slate-50 disabled:opacity-50"
+                >
+                  <Save className="h-3 w-3" />
+                  적용
+                </button>
+              </div>
+              <p className="mt-0.5 text-[10px] text-slate-400">
+                같은 번호가 있으면 입력한 번호를 먼저 적용하고, 겹치던 시설은
+                다음 번호로 자동으로 밀립니다.
+              </p>
+            </div>
+          )}
           {isClosure && (
             <div>
               <label className="block text-[11px] font-medium text-slate-600">

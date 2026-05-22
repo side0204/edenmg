@@ -18,6 +18,7 @@ import {
   Network,
   TriangleAlert,
   MapPin,
+  Search,
 } from 'lucide-react'
 import {
   CABLE_SPEC_VALUES,
@@ -32,6 +33,8 @@ import {
   FACILITY_INSTALL_STATUS_VALUES,
   FACILITY_INSTALL_STATUS_LABEL,
   formatFacilityCode,
+  isInstallNumbered,
+  computeInstallNumbers,
   type ClosureType,
   type ClosureCategory,
   type CableStatus,
@@ -114,6 +117,7 @@ type FacilityNode = {
   install_status: string
   label_dx: number
   label_dy: number
+  install_order: number | null
 }
 
 // 경로점 — x/y 는 도식 캔버스 좌표, lat/lng 는 지도 모드 GPS 좌표(Phase 4),
@@ -200,13 +204,6 @@ function pointAlongPolyline(
   return pts[pts.length - 1]
 }
 
-// 설치 순번 배지 대상 시설 — 접속함체 5종 + RN 3종(RN_TPS·RN_LTE·TPS_LTE_외) + IJP.
-//   광Mux 는 제외.
-function isInstallNumbered(t: ClosureType): boolean {
-  const cat = CLOSURE_TYPE_CATEGORY[t]
-  return cat === '접속함체' || (cat === 'RN_IJP_광MUX' && t !== '광Mux')
-}
-
 // SVG 텍스트 폭 추정 — 한글·CJK(전각) ≈ 1.0×fontSize, ASCII ≈ 0.58×fontSize.
 //   설치 순번 배지를 시설명 앞에 정확히 붙이기 위한 근사값.
 function estimateTextWidth(text: string, fontSize: number): number {
@@ -242,6 +239,15 @@ function edgeStyle(
     opacity = 0.45
   }
   return { stroke, dash, width, opacity }
+}
+
+// 시설 색 — 도면(FacilityShape)과 동일.
+//   접속함체는 설치 구분으로(기설=검정·신설=빨강), 그 외는 종류별 표준 색.
+function facilityDiagramColor(closureType: ClosureType, installStatus: string): string {
+  if (CLOSURE_TYPE_CATEGORY[closureType] === '접속함체') {
+    return installStatus === 'existing' ? '#111827' : '#dc2626'
+  }
+  return CLOSURE_TYPE_COLOR[closureType]
 }
 
 
@@ -292,6 +298,8 @@ export default function TopologyCanvas({
   const [mapDragPos, setMapDragPos] = useState<Record<string, { x: number; y: number }>>({})
   const [placingId, setPlacingId] = useState<string | null>(null)
   const [showUnplaced, setShowUnplaced] = useState(false)
+  // 지도 모드 검색창 보임/숨김 — 툴바의 「검색」 토글로 제어
+  const [searchVisible, setSearchVisible] = useState(true)
 
   // 지도 모드 시설 노드 줌 연동의 기준 줌 — fit 직후의 지도 level.
   //   이 level 보다 축소(level 증가)하면 시설 도형이 함께 작아진다.
@@ -445,8 +453,8 @@ export default function TopologyCanvas({
     return m
   }, [cables])
 
-  // 설치 순번 — 접속함체·RN·IJP 시설을 생성 시각(설치 순서)대로 1,2,3… 번호 부여.
-  //   시설명 앞 녹색 원 배지로 표시.
+  // 설치 순번 — 접속함체·RN·IJP 시설명 앞 녹색 원 배지 번호.
+  //   설계자가 정보 패널에서 지정한 install_order 우선, 없으면 생성 순서로 자동 배정.
   //   단, 기설 케이블 한 조만 연결된 시설은 제외 (작업 지점이 아님). 신설 한 조는 포함.
   const installNoByFacility = useMemo(() => {
     // 시설별 연결 케이블 목록
@@ -458,24 +466,20 @@ export default function TopologyCanvas({
         else byFacility.set(fid, [c])
       }
     }
-    const ordered = facilities
-      .filter((f) => {
-        if (!isInstallNumbered(f.closure_type)) return false
-        const conns = byFacility.get(f.id) ?? []
-        // 기설 케이블 한 조만 연결된 시설은 제외
-        if (conns.length === 1 && conns[0].status === 'existing') return false
-        return true
-      })
-      .slice()
-      .sort((a, b) => {
-        const ta = a.created_at ?? ''
-        const tb = b.created_at ?? ''
-        if (ta !== tb) return ta < tb ? -1 : 1
-        return a.id < b.id ? -1 : 1
-      })
-    const m = new Map<string, number>()
-    ordered.forEach((f, i) => m.set(f.id, i + 1))
-    return m
+    const eligible = facilities.filter((f) => {
+      if (!isInstallNumbered(f.closure_type)) return false
+      const conns = byFacility.get(f.id) ?? []
+      // 기설 케이블 한 조만 연결된 시설은 제외
+      if (conns.length === 1 && conns[0].status === 'existing') return false
+      return true
+    })
+    return computeInstallNumbers(
+      eligible.map((f) => ({
+        id: f.id,
+        install_order: f.install_order,
+        created_at: f.created_at,
+      })),
+    )
   }, [facilities, cables])
 
   // 케이블별 회선·코어 배정 수 (케이블 라벨 배지)
@@ -579,7 +583,11 @@ export default function TopologyCanvas({
   //   기본값 접힘 — 진입 시 캔버스에 바로 집중 (owner 요청).
   const [sidebarCollapsed, setSidebarCollapsed] = useState(true)
 
-  // 카테고리별 시설 그룹 (좌측 사이드바용)
+  // 시설 목록 정렬 기준 — 사이드바 상단 드롭다운으로 선택.
+  type FacilitySortKey = 'code' | 'install' | 'status' | 'name'
+  const [facilitySort, setFacilitySort] = useState<FacilitySortKey>('code')
+
+  // 카테고리별 시설 그룹 (좌측 사이드바용). 그룹 안에서 facilitySort 로 정렬.
   const facilitiesByCategory = useMemo(() => {
     const g: Record<ClosureCategory, FacilityNode[]> = {
       국사: [],
@@ -591,11 +599,33 @@ export default function TopologyCanvas({
     for (const f of facilities) {
       g[CLOSURE_TYPE_CATEGORY[f.closure_type]].push(f)
     }
+    const byCode = (a: FacilityNode, b: FacilityNode) => a.seq_no - b.seq_no
     for (const cat of Object.keys(g) as ClosureCategory[]) {
-      g[cat].sort((a, b) => a.seq_no - b.seq_no)
+      g[cat].sort((a, b) => {
+        if (facilitySort === 'name') {
+          const c = a.name.localeCompare(b.name, 'ko')
+          return c !== 0 ? c : byCode(a, b)
+        }
+        if (facilitySort === 'install') {
+          // 배지 번호 있는 시설 먼저(오름차순), 없는 시설은 뒤에 시설번호순
+          const na = installNoByFacility.get(a.id)
+          const nb = installNoByFacility.get(b.id)
+          if (na != null && nb != null) return na - nb
+          if (na != null) return -1
+          if (nb != null) return 1
+          return byCode(a, b)
+        }
+        if (facilitySort === 'status') {
+          // 기설 먼저, 신설 나중 (접속함체만 의미 있음)
+          const sa = a.install_status === 'existing' ? 0 : 1
+          const sb = b.install_status === 'existing' ? 0 : 1
+          return sa !== sb ? sa - sb : byCode(a, b)
+        }
+        return byCode(a, b)
+      })
     }
     return g
-  }, [facilities])
+  }, [facilities, facilitySort, installNoByFacility])
 
   // 클릭/드래그 구분용 ref — 이동 거리가 threshold 미만이면 click
   const interactionRef = useRef<{
@@ -1622,6 +1652,24 @@ export default function TopologyCanvas({
             </button>
           </div>
 
+          {/* 검색창 보임/숨김 — 지도 모드에서만 (검색은 지도 기능) */}
+          {mode === 'map' && (
+            <button
+              type="button"
+              onClick={() => setSearchVisible((v) => !v)}
+              className={
+                'mr-1 inline-flex items-center gap-1 rounded-md border px-2 h-7 text-[11px] font-medium ' +
+                (searchVisible
+                  ? 'bg-slate-900 text-white border-slate-900'
+                  : 'text-slate-700 border-slate-300 hover:bg-slate-50')
+              }
+              title={searchVisible ? '검색창 숨기기' : '검색창 보이기'}
+            >
+              <Search className="h-3 w-3" />
+              검색
+            </button>
+          )}
+
           {/* 줌 컨트롤 — 도식 모드만 (지도 모드는 카카오맵 자체 줌) */}
           {mode === 'schematic' && (
             <button
@@ -1895,18 +1943,31 @@ export default function TopologyCanvas({
         {/* 좌측 시설 목록 — 클릭 시 해당 시설로 캔버스 이동 */}
         {!sidebarCollapsed && (
           <aside className="w-52 shrink-0 border-r border-slate-200 bg-slate-50 overflow-y-auto">
-            <div className="sticky top-0 bg-slate-50 px-3 py-2 border-b border-slate-200 flex items-center justify-between">
-              <span className="text-[11px] font-semibold text-slate-600">
-                시설 목록 ({facilities.length})
-              </span>
-              <button
-                type="button"
-                onClick={() => setSidebarCollapsed(true)}
-                className="text-slate-400 hover:text-slate-700 text-xs"
-                title="목록 접기"
+            <div className="sticky top-0 z-10 bg-slate-50 px-3 py-2 border-b border-slate-200">
+              <div className="flex items-center justify-between">
+                <span className="text-[11px] font-semibold text-slate-600">
+                  시설 목록 ({facilities.length})
+                </span>
+                <button
+                  type="button"
+                  onClick={() => setSidebarCollapsed(true)}
+                  className="text-slate-400 hover:text-slate-700 text-xs"
+                  title="목록 접기"
+                >
+                  ◀
+                </button>
+              </div>
+              <select
+                value={facilitySort}
+                onChange={(e) => setFacilitySort(e.target.value as FacilitySortKey)}
+                className="mt-1.5 w-full rounded-md border border-slate-300 bg-white px-1.5 py-1 text-[11px] text-slate-700"
+                title="시설 목록 정렬"
               >
-                ◀
-              </button>
+                <option value="code">시설번호순</option>
+                <option value="install">설치순번(배지)순</option>
+                <option value="status">기설·신설순</option>
+                <option value="name">이름순</option>
+              </select>
             </div>
             {facilities.length === 0 ? (
               <p className="px-3 py-3 text-[11px] text-slate-400 italic">
@@ -1925,6 +1986,13 @@ export default function TopologyCanvas({
                       <ul>
                         {list.map((f) => {
                           const active = selectedId === f.id
+                          // 설치 순번 배지 (접속함체·RN·IJP)
+                          const installNo = installNoByFacility.get(f.id)
+                          // 신설/기설 — 접속함체만 의미 있음 (다른 종류는 표시 안 함)
+                          const isClosureCat =
+                            CLOSURE_TYPE_CATEGORY[f.closure_type] === '접속함체'
+                          const isNew = f.install_status !== 'existing'
+                          const isNewClosure = isClosureCat && isNew
                           return (
                             <li key={f.id}>
                               <button
@@ -1937,14 +2005,46 @@ export default function TopologyCanvas({
                                     : 'text-slate-700 hover:bg-slate-100')
                                 }
                               >
+                                {/* 색 점 — 도면과 동일 (접속함체는 기설=검정·신설=빨강) */}
                                 <span
                                   className="inline-block w-2 h-2 rounded-full shrink-0"
-                                  style={{ backgroundColor: CLOSURE_TYPE_COLOR[f.closure_type] }}
+                                  style={{
+                                    backgroundColor: facilityDiagramColor(
+                                      f.closure_type,
+                                      f.install_status,
+                                    ),
+                                  }}
                                 />
                                 <span className="font-mono text-[10px] text-slate-500 shrink-0">
                                   {formatFacilityCode(f.closure_type, f.seq_no)}
                                 </span>
-                                <span className="truncate">{f.name}</span>
+                                {/* 설치 순번 배지 — 도면의 녹색 원 배지와 동일 색 */}
+                                {installNo != null && (
+                                  <span className="shrink-0 inline-flex h-3.5 w-3.5 items-center justify-center rounded-full bg-green-600 text-[8px] font-bold text-white">
+                                    {installNo}
+                                  </span>
+                                )}
+                                <span
+                                  className={
+                                    'truncate flex-1 ' +
+                                    (isNewClosure && !active ? 'text-red-600 font-medium' : '')
+                                  }
+                                >
+                                  {f.name}
+                                </span>
+                                {/* 신설/기설 — 접속함체만 */}
+                                {isClosureCat && (
+                                  <span
+                                    className={
+                                      'shrink-0 rounded px-1 py-px text-[9px] font-medium border ' +
+                                      (isNew
+                                        ? 'bg-red-50 text-red-600 border-red-200'
+                                        : 'bg-slate-100 text-slate-500 border-slate-300')
+                                    }
+                                  >
+                                    {isNew ? '신설' : '기설'}
+                                  </span>
+                                )}
                               </button>
                             </li>
                           )
@@ -1975,7 +2075,7 @@ export default function TopologyCanvas({
               정렬이 확실히 먹는다 (absolute + left/right 는 폭이 안 늘어나는 경우가 있었음).
               지도/SVG 는 absolute inset-0 라 이 in-flow 래퍼에 밀리지 않는다.
               빈 좌우 영역은 pointer-events-none 으로 지도 조작을 막지 않는다. */}
-          {mode === 'map' && mapStatus === 'ready' && (
+          {mode === 'map' && mapStatus === 'ready' && searchVisible && (
             <div className="relative z-20 flex justify-center px-2 pt-2 pointer-events-none">
               <div className="w-full max-w-md space-y-2 pointer-events-auto">
                 <div className="flex items-start gap-1.5 rounded-lg bg-white/95 p-1.5 shadow-lg ring-1 ring-slate-200 backdrop-blur-sm">
@@ -2864,6 +2964,7 @@ export default function TopologyCanvas({
                     name: x.name,
                   }))}
                 cableCount={facilityCableCount.get(f.id) ?? 0}
+                installNo={installNoByFacility.get(f.id) ?? null}
                 taskTypes={taskTypes ?? []}
                 tasks={(facilityTasks ?? []).filter((t) => t.facility_id === f.id)}
                 materials={(facilityMaterials ?? []).filter(
@@ -3204,12 +3305,7 @@ function FacilityShape({
   const cy = NODE_SIZE.height / 2 - 10
   const isFallback = isNew ? NEW_COLOR : EXISTING_COLOR
   // 접속함체 색상은 설치 구분으로 — 기설=검정, 신설=빨강 (owner 결정 2026-05-22)
-  const stdColor =
-    CLOSURE_TYPE_CATEGORY[closureType] === '접속함체'
-      ? installStatus === 'existing'
-        ? '#111827'
-        : '#dc2626'
-      : CLOSURE_TYPE_COLOR[closureType] ?? isFallback
+  const stdColor = facilityDiagramColor(closureType, installStatus ?? 'new')
 
   // ===== 국사 카테고리 =====================================================
   if (closureType === '국사') {

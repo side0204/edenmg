@@ -7,6 +7,8 @@ import {
   CLOSURE_TYPE_VALUES,
   FACILITY_INSTALL_STATUS_VALUES,
   isInternalNode,
+  isInstallNumbered,
+  computeInstallNumbers,
   type ClosureType,
   type FacilityInstallStatus,
 } from '@/lib/relocation'
@@ -513,6 +515,117 @@ export async function saveFacilityLabelOffset(
   if (error) return { ok: false, error: '라벨 위치 저장 실패: ' + error.message }
 
   revalidatePath(`/relocation/${projectId}`)
+  return { ok: true }
+}
+
+
+/**
+ * 시설명 앞 설치 순번 배지 번호를 설계자가 수동 지정 — 캔버스 시설 정보 패널에서.
+ *
+ * insert/shift 방식: 대상 시설을 desired_no 위치로 옮기고, 그 위치 이후 시설은
+ * 한 칸씩 뒤로 밀린다. 설계자가 입력한 번호가 우선 적용되고, 같은 번호를 갖던
+ * 기존 시설의 번호가 바뀐다. 결과는 항상 1..N 연속 번호.
+ *
+ * 배지 대상(접속함체·RN·IJP)의 install_order 를 한 번에 재정렬해 저장한다.
+ * redirect 안 함 — JSON 결과 반환 (캔버스 컨텍스트 유지).
+ */
+export async function setFacilityInstallOrder(input: {
+  project_id: string
+  facility_id: string
+  desired_no: number
+}): Promise<{ ok: true } | { ok: false; error: string }> {
+  if (!input.project_id || !input.facility_id) {
+    return { ok: false, error: '대상이 올바르지 않습니다' }
+  }
+  const desired = Math.trunc(Number(input.desired_no))
+  if (!Number.isFinite(desired) || desired < 1) {
+    return { ok: false, error: '순번은 1 이상의 정수로 입력하세요' }
+  }
+
+  const { supabase } = await requireMember()
+
+  // 프로젝트의 모든 시설 + 케이블 — 배지 대상(eligible) 판정에 필요
+  const { data: fRows, error: fErr } = await supabase
+    .from('relocation_facilities')
+    .select('id, closure_type, created_at, install_order')
+    .eq('project_id', input.project_id)
+  if (fErr) return { ok: false, error: '시설 조회 실패: ' + fErr.message }
+
+  const { data: cRows, error: cErr } = await supabase
+    .from('relocation_cables')
+    .select('from_facility_id, to_facility_id, status')
+    .eq('project_id', input.project_id)
+  if (cErr) return { ok: false, error: '케이블 조회 실패: ' + cErr.message }
+
+  type FRow = {
+    id: string
+    closure_type: ClosureType
+    created_at: string | null
+    install_order: number | null
+  }
+  const facilities = (fRows ?? []) as FRow[]
+  const cables = (cRows ?? []) as {
+    from_facility_id: string
+    to_facility_id: string
+    status: string
+  }[]
+
+  // 시설별 연결 케이블
+  const connByFacility = new Map<string, string[]>()
+  for (const c of cables) {
+    for (const fid of [c.from_facility_id, c.to_facility_id]) {
+      const arr = connByFacility.get(fid)
+      if (arr) arr.push(c.status)
+      else connByFacility.set(fid, [c.status])
+    }
+  }
+
+  // 배지 대상 — TopologyCanvas 의 installNoByFacility 필터와 동일.
+  //   기설 케이블 한 조만 연결된 시설은 작업 지점이 아니므로 제외.
+  const eligible = facilities.filter((f) => {
+    if (!isInstallNumbered(f.closure_type)) return false
+    const conns = connByFacility.get(f.id) ?? []
+    if (conns.length === 1 && conns[0] === 'existing') return false
+    return true
+  })
+
+  const target = eligible.find((f) => f.id === input.facility_id)
+  if (!target) {
+    return { ok: false, error: '이 시설은 설치 순번 배지 대상이 아닙니다' }
+  }
+
+  // 현재 번호 → 현재 순서대로 정렬
+  const current = computeInstallNumbers(
+    eligible.map((f) => ({
+      id: f.id,
+      install_order: f.install_order,
+      created_at: f.created_at,
+    })),
+  )
+  const orderedIds = eligible
+    .map((f) => f.id)
+    .sort((a, b) => (current.get(a) ?? 0) - (current.get(b) ?? 0))
+
+  // 대상 제거 후 desired 위치(1-based)에 삽입 — 범위 밖이면 끝으로
+  const without = orderedIds.filter((id) => id !== input.facility_id)
+  const insertAt = Math.min(Math.max(desired - 1, 0), without.length)
+  without.splice(insertAt, 0, input.facility_id)
+
+  // 1..N 재배정 — install_order 가 바뀌는 시설만 update
+  const orderById = new Map(eligible.map((f) => [f.id, f.install_order]))
+  for (let i = 0; i < without.length; i++) {
+    const id = without[i]
+    const newOrder = i + 1
+    if (orderById.get(id) === newOrder) continue
+    const { error } = await supabase
+      .from('relocation_facilities')
+      .update({ install_order: newOrder })
+      .eq('id', id)
+      .eq('project_id', input.project_id) // RLS 보강
+    if (error) return { ok: false, error: '순번 저장 실패: ' + error.message }
+  }
+
+  revalidatePath(`/relocation/${input.project_id}`)
   return { ok: true }
 }
 

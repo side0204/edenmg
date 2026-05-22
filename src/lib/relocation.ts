@@ -239,6 +239,63 @@ export function formatFacilityCode(closureType: ClosureType, seqNo: number): str
 }
 
 
+// ===== 설치 순번 배지 ===================================================
+// 시설명 앞에 붙는 숫자 배지 — 접속함체·RN·IJP 의 설치(작업) 순서.
+
+// 설치 순번 배지 대상 시설 — 접속함체 5종 + RN 3종(RN_TPS·RN_LTE·TPS_LTE_외) + IJP.
+//   광Mux 는 제외.
+export function isInstallNumbered(t: ClosureType): boolean {
+  const cat = CLOSURE_TYPE_CATEGORY[t]
+  return cat === '접속함체' || (cat === 'RN_IJP_광MUX' && t !== '광Mux')
+}
+
+/**
+ * 설치 순번 배지 번호 산출.
+ *   입력: 배지 대상(eligible)으로 이미 걸러진 시설 목록.
+ *   - install_order(설계자 수동 지정)가 있으면 그 번호를 우선 적용.
+ *   - 같은 번호가 둘이면 먼저 만난 쪽만 차지하고 나머지는 자동 배정으로 밀림 (방어).
+ *   - 수동 지정 안 된 시설은 created_at 순서로 빈 번호를 채워 배정.
+ *   결과: 시설 id → 1 이상의 정수.
+ */
+export function computeInstallNumbers(
+  facilities: {
+    id: string
+    install_order: number | null
+    created_at: string | null
+  }[],
+): Map<string, number> {
+  const result = new Map<string, number>()
+  const used = new Set<number>()
+
+  // 1) 설계자 수동 지정 — 그대로 적용
+  for (const f of facilities) {
+    if (f.install_order != null && f.install_order > 0 && !used.has(f.install_order)) {
+      result.set(f.id, f.install_order)
+      used.add(f.install_order)
+    }
+  }
+
+  // 2) 수동 지정 안 된(또는 번호 충돌로 밀린) 시설 — created_at 순으로 빈 번호 채움
+  const auto = facilities
+    .filter((f) => !result.has(f.id))
+    .slice()
+    .sort((a, b) => {
+      const ta = a.created_at ?? ''
+      const tb = b.created_at ?? ''
+      if (ta !== tb) return ta < tb ? -1 : 1
+      return a.id < b.id ? -1 : 1
+    })
+  let next = 1
+  for (const f of auto) {
+    while (used.has(next)) next += 1
+    result.set(f.id, next)
+    used.add(next)
+    next += 1
+  }
+  return result
+}
+
+
 export type CableStatus = 'existing' | 'relocating' | 'new' | 'removing'
 
 export const CABLE_STATUS_VALUES: readonly CableStatus[] = [
