@@ -3052,32 +3052,6 @@ export default function TopologyCanvas({
                   )}
                 </g>
 
-                {/* 절단 절체 배지 — 신설 함체 + 기설 케이블. 도형 위 빨강 알약.
-                    스케일 그룹 밖 — 줌 아웃해도 읽히게 크기 고정. */}
-                {cutover.facilityIds.has(f.id) && (
-                  <g pointerEvents="none">
-                    <rect
-                      x={nodeCx - 31}
-                      y={nodeCy - 53}
-                      width={62}
-                      height={15}
-                      rx={7.5}
-                      fill="#dc2626"
-                      stroke="white"
-                      strokeWidth={1.5}
-                    />
-                    <text
-                      x={nodeCx}
-                      y={nodeCy - 42.5}
-                      textAnchor="middle"
-                      fill="white"
-                      style={{ fontSize: 9, fontFamily: LABEL_FONT, fontWeight: 700 }}
-                    >
-                      절단 절체
-                    </text>
-                  </g>
-                )}
-
                 {/* 라벨 — 도형이 축소돼도 글자 크기는 처음 크기로 고정.
                     흰색 외곽선(paintOrder=stroke → 외곽선이 글자 뒤)으로 배경 지도 글자와 구분.
                     g transform — 마우스 드래그 offset 적용. */}
@@ -3228,9 +3202,9 @@ export default function TopologyCanvas({
             )
           })}
 
-          {/* 절단 절체 폭발 마크 — 시설 노드보다 위 레이어에 그려
-              접속함체 분기수 배지에 안 가리게 한다. 케이블 끝(신설 함체)에서
-              노드·배지를 벗어날 만큼 떨어뜨려 겹침도 피한다. */}
+          {/* 절단 절체 마크 — 폭발 모양 + 「절단 절체」 글자를 해당 케이블에.
+              시설 노드보다 위 레이어에 그려 분기수 배지에 안 가린다.
+              케이블 끝(신설 함체)에서 노드·배지를 벗어날 만큼 떨어뜨린다. */}
           {cables.map((c) => {
             const cut = cutover.cables.get(c.id)
             if (!cut) return null
@@ -3252,15 +3226,35 @@ export default function TopologyCanvas({
             if (cut.to)
               marks.push(along(pts[pts.length - 1], pts[pts.length - 2]))
             return marks.map((m, i) => (
-              <polygon
-                key={`cut-${c.id}-${i}`}
-                points={burstPoints(m.x, m.y)}
-                fill="#dc2626"
-                stroke="white"
-                strokeWidth={1.5}
-                strokeLinejoin="round"
-                pointerEvents="none"
-              />
+              <g key={`cut-${c.id}-${i}`} pointerEvents="none">
+                <polygon
+                  points={burstPoints(m.x, m.y)}
+                  fill="#dc2626"
+                  stroke="white"
+                  strokeWidth={1.5}
+                  strokeLinejoin="round"
+                />
+                {/* 「절단 절체」 글자 — 폭발 마크 바로 아래 빨강 알약 */}
+                <rect
+                  x={m.x - 31}
+                  y={m.y + 13}
+                  width={62}
+                  height={15}
+                  rx={7.5}
+                  fill="#dc2626"
+                  stroke="white"
+                  strokeWidth={1.5}
+                />
+                <text
+                  x={m.x}
+                  y={m.y + 23.7}
+                  textAnchor="middle"
+                  fill="white"
+                  style={{ fontSize: 9, fontFamily: LABEL_FONT, fontWeight: 700 }}
+                >
+                  절단 절체
+                </text>
+              </g>
             ))
           })}
 
