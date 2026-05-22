@@ -2638,6 +2638,40 @@ export default function TopologyCanvas({
                     style={{ pointerEvents: 'none' }}
                   />
                 )}
+                {/* 노란색 마크 강조 — 지도 모드: 도형 뒤 맥동 후광.
+                    스케일 그룹 밖에 둬 줌 아웃해도 작아지지 않아 멀리서도 눈에 띈다. */}
+                {f.is_marked && mode === 'map' && (
+                  <g style={{ pointerEvents: 'none' }}>
+                    <circle
+                      cx={nodeCx}
+                      cy={nodeCy}
+                      r={26}
+                      fill="#facc15"
+                      fillOpacity={0.3}
+                    />
+                    <circle
+                      cx={nodeCx}
+                      cy={nodeCy}
+                      r={22}
+                      fill="none"
+                      stroke="#eab308"
+                      strokeWidth={3.5}
+                    >
+                      <animate
+                        attributeName="r"
+                        values="20;38;20"
+                        dur="1.6s"
+                        repeatCount="indefinite"
+                      />
+                      <animate
+                        attributeName="stroke-opacity"
+                        values="0.95;0;0.95"
+                        dur="1.6s"
+                        repeatCount="indefinite"
+                      />
+                    </circle>
+                  </g>
+                )}
                 {/* 도형 — 지도 모드 줌 축소 시 노드 중심 기준으로 함께 축소.
                     중심(GPS 투영점)은 불변 → 케이블 연결점 유지. 라벨은 이 그룹 밖이라 원래 크기. */}
                 <g
