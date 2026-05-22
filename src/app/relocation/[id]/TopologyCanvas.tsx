@@ -28,6 +28,7 @@ import {
 import {
   CABLE_SPEC_VALUES,
   CLOSURE_TYPE_LABEL,
+  CLOSURE_TYPE_VALUES,
   CLOSURE_TYPE_COLOR,
   CLOSURE_CATEGORY_LABEL,
   groupClosureTypesByCategory,
@@ -1020,6 +1021,13 @@ export default function TopologyCanvas({
 
   // 도식 모드 — 캔버스를 PNG 이미지로 내보내기.
   const [exporting, setExporting] = useState(false)
+  // 내보내는 순간에만 SVG 좌상단에 그릴 시설물 범례
+  const [exportLegend, setExportLegend] = useState<{
+    entries: { type: ClosureType; installStatus: string }[]
+    x: number
+    y: number
+  } | null>(null)
+
   const onExportSchematic = async () => {
     const svg = svgRef.current
     if (!svg || exporting) return
@@ -1028,26 +1036,40 @@ export default function TopologyCanvas({
     setSelectedCableId(null)
     setFaultSearchOpen(false)
     setExporting(true)
-    // 선택 해제가 DOM 에 반영될 때까지 한 프레임 대기
+    // 선택 해제가 DOM 에 반영될 때까지 대기
     await new Promise<void>((r) =>
       requestAnimationFrame(() => requestAnimationFrame(() => r())),
     )
     try {
-      // 내보내기 영역 — 전체 콘텐츠 bounding box + 여백 50px
+      // 내보내기 영역 — 전체 콘텐츠 bounding box + 넉넉한 여백
+      const PAD = 140
       let box = computeFitViewport(effectivePositions)
       try {
         const bb = svg.getBBox()
         if (bb.width > 0 && bb.height > 0) {
-          const pad = 50
           box = {
-            x: bb.x - pad,
-            y: bb.y - pad,
-            width: bb.width + pad * 2,
-            height: bb.height + pad * 2,
+            x: bb.x - PAD,
+            y: bb.y - PAD,
+            width: bb.width + PAD * 2,
+            height: bb.height + PAD * 2,
           }
         }
       } catch {
         /* getBBox 실패 시 fit viewport 사용 */
+      }
+      // 도식에 포함된 시설 종류별 범례 — 좌상단에 배치
+      const entries = CLOSURE_TYPE_VALUES.filter((t) =>
+        facilities.some((f) => f.closure_type === t),
+      ).map((t) => {
+        const rep = facilities.find((f) => f.closure_type === t)
+        return { type: t, installStatus: rep?.install_status ?? 'new' }
+      })
+      if (entries.length > 0) {
+        setExportLegend({ entries, x: box.x + 30, y: box.y + 30 })
+        // 범례가 DOM 에 반영될 때까지 대기
+        await new Promise<void>((r) =>
+          requestAnimationFrame(() => requestAnimationFrame(() => r())),
+        )
       }
       const d = new Date()
       const p = (n: number) => String(n).padStart(2, '0')
@@ -1057,6 +1079,7 @@ export default function TopologyCanvas({
     } catch (e) {
       toast.error(e instanceof Error ? e.message : '도식 내보내기 실패')
     } finally {
+      setExportLegend(null)
       setExporting(false)
     }
   }
@@ -3244,6 +3267,15 @@ export default function TopologyCanvas({
                 </g>
               )
             })()}
+
+            {/* 도식 내보내기용 시설물 범례 — 내보내는 순간에만 좌상단에 표시 */}
+            {exportLegend && (
+              <ExportLegend
+                entries={exportLegend.entries}
+                x={exportLegend.x}
+                y={exportLegend.y}
+              />
+            )}
           </svg>
 
           {/* 분할 캡처 가이드 — 지도 모드, 시설 영역을 격자로 나눠 스크린샷 */}
@@ -3943,6 +3975,88 @@ function BoxedText({ cx, cy, text, color, width = 26 }: { cx: number; cy: number
       >
         {text}
       </text>
+    </g>
+  )
+}
+
+
+// 도식 내보내기용 시설물 범례 — 도식에 포함된 시설 종류를 좌상단에 작은 표로.
+//   내보내는 순간에만 SVG 에 렌더된다 (편집 중에는 안 보임).
+function ExportLegend({
+  entries,
+  x,
+  y,
+}: {
+  entries: { type: ClosureType; installStatus: string }[]
+  x: number
+  y: number
+}) {
+  const ROW_H = 36
+  const HEAD_H = 40
+  const PAD_B = 12
+  const ICON_AREA = 52
+  const FONT = 14
+  const ICON_SCALE = 0.44
+  const labelW = Math.max(
+    70,
+    ...entries.map((e) => estimateTextWidth(CLOSURE_TYPE_LABEL[e.type], FONT)),
+  )
+  const W = ICON_AREA + labelW + 20
+  const H = HEAD_H + entries.length * ROW_H + PAD_B
+  return (
+    <g transform={`translate(${x}, ${y})`} pointerEvents="none">
+      <rect
+        x={0}
+        y={0}
+        width={W}
+        height={H}
+        rx={10}
+        fill="#ffffff"
+        stroke="#94a3b8"
+        strokeWidth={1.5}
+      />
+      <text
+        x={16}
+        y={27}
+        fill="#0f172a"
+        style={{ fontSize: 17, fontWeight: 700, fontFamily: LABEL_FONT }}
+      >
+        범례
+      </text>
+      <line
+        x1={10}
+        y1={HEAD_H - 6}
+        x2={W - 10}
+        y2={HEAD_H - 6}
+        stroke="#e2e8f0"
+        strokeWidth={1}
+      />
+      {entries.map((e, i) => {
+        const rowY = HEAD_H + i * ROW_H
+        const iconCx = ICON_AREA / 2
+        const iconCy = rowY + ROW_H / 2
+        return (
+          <g key={e.type}>
+            <g
+              transform={`translate(${iconCx - (NODE_SIZE.width / 2) * ICON_SCALE}, ${iconCy - (NODE_SIZE.height / 2 - 10) * ICON_SCALE}) scale(${ICON_SCALE})`}
+            >
+              <FacilityShape
+                closureType={e.type}
+                isNew={e.installStatus !== 'existing'}
+                installStatus={e.installStatus}
+              />
+            </g>
+            <text
+              x={ICON_AREA}
+              y={iconCy + FONT * 0.36}
+              fill="#1e293b"
+              style={{ fontSize: FONT, fontFamily: LABEL_FONT }}
+            >
+              {CLOSURE_TYPE_LABEL[e.type]}
+            </text>
+          </g>
+        )
+      })}
     </g>
   )
 }
