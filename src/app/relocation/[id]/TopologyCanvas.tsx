@@ -1679,6 +1679,34 @@ export default function TopologyCanvas({
             시설 목록
           </button>
 
+          {/* 시설·케이블 추가 보임/숨김 — 좌측 사이드바 토글 (도식·지도 공통) */}
+          {editable && (
+            <button
+              type="button"
+              onClick={() => setToolsCollapsed((v) => !v)}
+              className={
+                'mr-1 inline-flex items-center gap-1 rounded-md border px-2 h-7 text-[11px] font-medium ' +
+                (!toolsCollapsed || addTool || cableTool
+                  ? 'bg-slate-900 text-white border-slate-900'
+                  : 'text-slate-700 border-slate-300 hover:bg-slate-50')
+              }
+              title={toolsCollapsed ? '시설·케이블 추가 패널 열기' : '닫기'}
+            >
+              <Plus className="h-3 w-3" />
+              시설·케이블 추가
+              {addTool && (
+                <span className="ml-0.5 rounded bg-blue-500 px-1 text-[9px] font-semibold text-white">
+                  {CLOSURE_TYPE_LABEL[addTool]}
+                </span>
+              )}
+              {cableTool && (
+                <span className="ml-0.5 rounded bg-emerald-500 px-1 text-[9px] font-semibold text-white">
+                  {cableTool}
+                </span>
+              )}
+            </button>
+          )}
+
           {/* 검색창 보임/숨김 — 지도 모드에서만 (검색은 지도 기능) */}
           {mode === 'map' && (
             <button
@@ -1836,161 +1864,7 @@ export default function TopologyCanvas({
         </div>
       </div>
 
-      {/* 추가 도구 패널 — 접기/펼치기 가능. 헤더 항상 표시, 카테고리 그룹은 펼친 상태일 때만.
-          시설 chip 클릭 시 자동 접힘 (owner 요청 — 그리기 작업 시 화면 최대화).
-          도식·지도 모드 모두 표시 — 지도 모드는 지도 클릭으로 시설 배치, 시설 2개 클릭으로 케이블 연결. */}
-      {editable && (
-        <div className="px-4 py-2 border-b border-slate-100 bg-slate-50">
-          <div className="flex items-center gap-2">
-            <button
-              type="button"
-              onClick={() => setToolsCollapsed((v) => !v)}
-              className="inline-flex items-center gap-1 text-[11px] font-medium text-slate-600 hover:text-slate-900"
-              title={toolsCollapsed ? '시설 추가 패널 펼치기' : '시설 추가 패널 접기'}
-            >
-              <span className="text-slate-400">{toolsCollapsed ? '▶' : '▼'}</span>
-              시설·케이블 추가
-              {addTool && (
-                <span className="ml-1 inline-flex items-center gap-1 rounded px-1.5 py-0.5 text-[10px] font-medium bg-blue-600 text-white">
-                  <span className="inline-block w-1.5 h-1.5 rounded-full bg-white" />
-                  {CLOSURE_TYPE_LABEL[addTool]}
-                </span>
-              )}
-              {cableTool && (
-                <span className="ml-1 inline-flex items-center gap-1 rounded px-1.5 py-0.5 text-[10px] font-medium bg-emerald-600 text-white">
-                  <span className="inline-block w-1.5 h-1.5 rounded-full bg-white" />
-                  케이블 {cableTool}
-                </span>
-              )}
-              {!addTool && !cableTool && toolsCollapsed && (
-                <span className="ml-1 text-[10px] text-slate-400">(클릭으로 펼치기)</span>
-              )}
-            </button>
-            {(addTool || cableTool) && (
-              <button
-                type="button"
-                onClick={() => {
-                  setAddTool(null)
-                  setCableTool(null)
-                }}
-                className="ml-auto inline-flex items-center gap-1 rounded-md px-2 py-0.5 text-[11px] font-medium text-slate-500 hover:text-slate-700"
-              >
-                <X className="h-3 w-3" />
-                취소
-              </button>
-            )}
-          </div>
-
-          {!toolsCollapsed && (
-            <div className="mt-1.5 space-y-1.5">
-              {(Object.keys(CLOSURE_CATEGORY_LABEL) as ClosureCategory[]).map((cat) => {
-                const types = groupedTypes[cat]
-                if (types.length === 0) return null
-                const open = openCategories[cat]
-                return (
-                  <div key={cat}>
-                    <button
-                      type="button"
-                      onClick={() => setOpenCategories((p) => ({ ...p, [cat]: !p[cat] }))}
-                      className="text-[10px] font-bold text-rose-600 uppercase tracking-wide hover:text-rose-800 flex items-center gap-1"
-                    >
-                      <span>{open ? '▼' : '▶'}</span>
-                      {CLOSURE_CATEGORY_LABEL[cat]}
-                      <span className="font-normal text-slate-400">({types.length})</span>
-                    </button>
-                    {open && (
-                      <div className="mt-1 ml-3 flex items-center gap-1.5 flex-wrap">
-                        {types.map((t) => {
-                          const active = addTool === t
-                          const color = CLOSURE_TYPE_COLOR[t]
-                          return (
-                            <button
-                              key={t}
-                              type="button"
-                              onClick={() => {
-                                // 같은 chip 다시 누름 = 해제 (펼친 상태 유지)
-                                // 다른 chip 선택 = 자동 접힘 (그리기 모드)
-                                if (active) {
-                                  setAddTool(null)
-                                } else {
-                                  setAddTool(t)
-                                  setCableTool(null)
-                                  setToolsCollapsed(true)
-                                }
-                              }}
-                              className={
-                                'inline-flex items-center gap-1 rounded-md px-2 py-0.5 text-[11px] font-medium border ' +
-                                (active
-                                  ? 'bg-blue-600 text-white border-blue-600'
-                                  : 'bg-white text-slate-700 border-slate-300 hover:bg-slate-100')
-                              }
-                            >
-                              <span
-                                className="inline-block w-2 h-2 rounded-full"
-                                style={{ backgroundColor: active ? 'white' : color }}
-                              />
-                              {CLOSURE_TYPE_LABEL[t]}
-                            </button>
-                          )
-                        })}
-                      </div>
-                    )}
-                  </div>
-                )
-              })}
-
-              {/* 광케이블 카테고리 — 규격 chip. 선택 후 시설 2 개 클릭으로 케이블 배치 */}
-              <div>
-                <button
-                  type="button"
-                  onClick={() => setCableCatOpen((v) => !v)}
-                  className="text-[10px] font-bold text-emerald-700 uppercase tracking-wide hover:text-emerald-900 flex items-center gap-1"
-                >
-                  <span>{cableCatOpen ? '▼' : '▶'}</span>
-                  광케이블
-                  <span className="font-normal text-slate-400">({CABLE_SPEC_VALUES.length})</span>
-                </button>
-                {cableCatOpen && (
-                  <div className="mt-1 ml-3 flex items-center gap-1.5 flex-wrap">
-                    {CABLE_SPEC_VALUES.map((s) => {
-                      const active = cableTool === s
-                      return (
-                        <button
-                          key={s}
-                          type="button"
-                          onClick={() => {
-                            if (active) {
-                              setCableTool(null)
-                            } else {
-                              setCableTool(s)
-                              setAddTool(null)
-                              setToolsCollapsed(true)
-                            }
-                          }}
-                          className={
-                            'inline-flex items-center gap-1 rounded-md px-2 py-0.5 text-[11px] font-medium border ' +
-                            (active
-                              ? 'bg-emerald-600 text-white border-emerald-600'
-                              : 'bg-white text-slate-700 border-slate-300 hover:bg-slate-100')
-                          }
-                        >
-                          <span
-                            className="inline-block w-3 h-1 rounded"
-                            style={{ backgroundColor: active ? 'white' : cableSpecColor(s) }}
-                          />
-                          {s}
-                        </button>
-                      )
-                    })}
-                  </div>
-                )}
-              </div>
-            </div>
-          )}
-        </div>
-      )}
-
-      {/* 좌측 시설 목록 사이드바 + SVG 캔버스 — 가로 flex */}
+      {/* 좌측 시설 목록 + 시설·케이블 추가 사이드바 + SVG 캔버스 — 가로 flex */}
       <div
         className={isFullscreen ? 'flex flex-1 min-h-0' : 'flex'}
         style={isFullscreen ? undefined : { height: CANVAS_SIZE_HEIGHT[canvasSize] }}
@@ -2110,6 +1984,145 @@ export default function TopologyCanvas({
                 })}
               </div>
             )}
+          </aside>
+        )}
+
+        {/* 시설·케이블 추가 사이드바 — 툴바 토글로 보임/숨김. 도식·지도 공통.
+            chip 선택 시 자동 접힘 (그리기 작업 시 화면 최대화 — owner 요청). */}
+        {editable && !toolsCollapsed && (
+          <aside className="w-60 shrink-0 border-r border-slate-200 bg-slate-50 overflow-y-auto">
+            <div className="sticky top-0 z-10 bg-slate-50 px-3 py-2 border-b border-slate-200 flex items-center justify-between">
+              <span className="text-[11px] font-semibold text-slate-600">
+                시설·케이블 추가
+              </span>
+              <button
+                type="button"
+                onClick={() => setToolsCollapsed(true)}
+                className="text-slate-400 hover:text-slate-700 text-xs"
+                title="패널 접기"
+              >
+                ◀
+              </button>
+            </div>
+            {(addTool || cableTool) && (
+              <div className="px-3 py-1.5 border-b border-slate-200">
+                <button
+                  type="button"
+                  onClick={() => {
+                    setAddTool(null)
+                    setCableTool(null)
+                  }}
+                  className="inline-flex items-center gap-1 rounded-md border border-slate-300 bg-white px-2 py-0.5 text-[11px] font-medium text-slate-600 hover:bg-slate-100"
+                >
+                  <X className="h-3 w-3" />
+                  선택 해제
+                </button>
+              </div>
+            )}
+            <div className="p-2 space-y-1.5">
+              {(Object.keys(CLOSURE_CATEGORY_LABEL) as ClosureCategory[]).map((cat) => {
+                const types = groupedTypes[cat]
+                if (types.length === 0) return null
+                const open = openCategories[cat]
+                return (
+                  <div key={cat}>
+                    <button
+                      type="button"
+                      onClick={() => setOpenCategories((p) => ({ ...p, [cat]: !p[cat] }))}
+                      className="text-[10px] font-bold text-rose-600 uppercase tracking-wide hover:text-rose-800 flex items-center gap-1"
+                    >
+                      <span>{open ? '▼' : '▶'}</span>
+                      {CLOSURE_CATEGORY_LABEL[cat]}
+                      <span className="font-normal text-slate-400">({types.length})</span>
+                    </button>
+                    {open && (
+                      <div className="mt-1 ml-2 flex items-center gap-1.5 flex-wrap">
+                        {types.map((t) => {
+                          const active = addTool === t
+                          const color = CLOSURE_TYPE_COLOR[t]
+                          return (
+                            <button
+                              key={t}
+                              type="button"
+                              onClick={() => {
+                                // 같은 chip 다시 누름 = 해제 (펼친 상태 유지)
+                                // 다른 chip 선택 = 자동 접힘 (그리기 모드)
+                                if (active) {
+                                  setAddTool(null)
+                                } else {
+                                  setAddTool(t)
+                                  setCableTool(null)
+                                  setToolsCollapsed(true)
+                                }
+                              }}
+                              className={
+                                'inline-flex items-center gap-1 rounded-md px-2 py-0.5 text-[11px] font-medium border ' +
+                                (active
+                                  ? 'bg-blue-600 text-white border-blue-600'
+                                  : 'bg-white text-slate-700 border-slate-300 hover:bg-slate-100')
+                              }
+                            >
+                              <span
+                                className="inline-block w-2 h-2 rounded-full"
+                                style={{ backgroundColor: active ? 'white' : color }}
+                              />
+                              {CLOSURE_TYPE_LABEL[t]}
+                            </button>
+                          )
+                        })}
+                      </div>
+                    )}
+                  </div>
+                )
+              })}
+
+              {/* 광케이블 카테고리 — 규격 chip. 선택 후 시설 2 개 클릭으로 케이블 배치 */}
+              <div>
+                <button
+                  type="button"
+                  onClick={() => setCableCatOpen((v) => !v)}
+                  className="text-[10px] font-bold text-emerald-700 uppercase tracking-wide hover:text-emerald-900 flex items-center gap-1"
+                >
+                  <span>{cableCatOpen ? '▼' : '▶'}</span>
+                  광케이블
+                  <span className="font-normal text-slate-400">({CABLE_SPEC_VALUES.length})</span>
+                </button>
+                {cableCatOpen && (
+                  <div className="mt-1 ml-2 flex items-center gap-1.5 flex-wrap">
+                    {CABLE_SPEC_VALUES.map((s) => {
+                      const active = cableTool === s
+                      return (
+                        <button
+                          key={s}
+                          type="button"
+                          onClick={() => {
+                            if (active) {
+                              setCableTool(null)
+                            } else {
+                              setCableTool(s)
+                              setAddTool(null)
+                              setToolsCollapsed(true)
+                            }
+                          }}
+                          className={
+                            'inline-flex items-center gap-1 rounded-md px-2 py-0.5 text-[11px] font-medium border ' +
+                            (active
+                              ? 'bg-emerald-600 text-white border-emerald-600'
+                              : 'bg-white text-slate-700 border-slate-300 hover:bg-slate-100')
+                          }
+                        >
+                          <span
+                            className="inline-block w-3 h-1 rounded"
+                            style={{ backgroundColor: active ? 'white' : cableSpecColor(s) }}
+                          />
+                          {s}
+                        </button>
+                      )
+                    })}
+                  </div>
+                )}
+              </div>
+            </div>
           </aside>
         )}
 
