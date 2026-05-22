@@ -2966,9 +2966,16 @@ export default function TopologyCanvas({
             const cableCount = facilityCableCount.get(f.id) ?? 0
             const nodeCx = NODE_SIZE.width / 2
             const nodeCy = NODE_SIZE.height / 2 - 10
+            // 도형 배율 — 지도 모드 줌 축소(mapNodeScale)에 더해, 접속함체는
+            //   지도 모드에서 0.65 배 추가 축소 (owner 결정 2026-05-23). 도식 모드는 1.
+            const shapeScale =
+              mode === 'map' &&
+              CLOSURE_TYPE_CATEGORY[f.closure_type] === '접속함체'
+                ? mapNodeScale * 0.65
+                : mapNodeScale
             // 라벨 — 글자 크기는 원래대로 고정. 도형이 축소된 만큼 위치만 중심 쪽으로 당겨
             //   축소된 도형 바로 아래에 붙도록 한다 (scale=1 이면 원래 좌표 그대로).
-            const labelCodeY = nodeCy + mapNodeScale * (NODE_SIZE.height - 20 - nodeCy)
+            const labelCodeY = nodeCy + shapeScale * (NODE_SIZE.height - 20 - nodeCy)
             // 라벨 크기 — 도식은 크게, 지도는 작게 (지도 가독성 우선).
             //   캡처도 평소 지도 화면 그대로 — 글자를 키우지 않는다 (키우면 상자가 겹침).
             const facCodeFont = mode === 'map' ? 9 : 15
@@ -3074,8 +3081,8 @@ export default function TopologyCanvas({
                     중심(GPS 투영점)은 불변 → 케이블 연결점 유지. 라벨은 이 그룹 밖이라 원래 크기. */}
                 <g
                   transform={
-                    mapNodeScale !== 1
-                      ? `translate(${nodeCx}, ${nodeCy}) scale(${mapNodeScale}) translate(${-nodeCx}, ${-nodeCy})`
+                    shapeScale !== 1
+                      ? `translate(${nodeCx}, ${nodeCy}) scale(${shapeScale}) translate(${-nodeCx}, ${-nodeCy})`
                       : undefined
                   }
                 >
