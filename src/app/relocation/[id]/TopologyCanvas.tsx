@@ -2501,8 +2501,8 @@ export default function TopologyCanvas({
             const labelBig = mode !== 'map'
             const lblSpecFont = labelBig ? 20 : 9
             const lblCodeFont = labelBig ? 20 : 8
-            // 지도 케이블 라벨 — "얇으면서 진한" 중간 굵기 (기존 400 은 지도 위에서 흐릿).
-            const lblWeight = labelBig ? 700 : 500
+            // 지도 케이블 라벨 — 아주 얇게 + 색은 거의 검정 (얇아도 또렷하게).
+            const lblWeight = labelBig ? 700 : 250
             const lblSpecDy = labelBig ? -13 : -4
             const lblCodeDy = labelBig ? 13 : 8
             const lblBadgeRectDy = labelBig ? 24 : 12
@@ -2595,7 +2595,7 @@ export default function TopologyCanvas({
                   x={labelPt.x}
                   y={labelPt.y + lblSpecDy}
                   textAnchor="middle"
-                  className="fill-slate-800"
+                  className="fill-slate-950"
                   stroke="#ffffff"
                   strokeWidth={LABEL_HALO_WIDTH}
                   strokeLinejoin="round"
@@ -2614,7 +2614,7 @@ export default function TopologyCanvas({
                   x={labelPt.x}
                   y={labelPt.y + lblCodeDy}
                   textAnchor="middle"
-                  className="fill-slate-500"
+                  className="fill-slate-900"
                   stroke="#ffffff"
                   strokeWidth={LABEL_HALO_WIDTH}
                   strokeLinejoin="round"
@@ -2708,10 +2708,10 @@ export default function TopologyCanvas({
             // 라벨 크기 — 도식은 크게, 지도는 원래 작은 크기 (지도 가독성 우선)
             const facCodeFont = mode === 'map' ? 9 : 15
             const facNameFont = mode === 'map' ? 10 : 17
-            // 굵기 — 지도는 "얇으면서 진한" 중간 굵기, 도식은 큼직하게.
-            //   Pretendard variable 이라 550/500 같은 중간값을 정확히 쓸 수 있다.
-            const facCodeWeight = mode === 'map' ? 550 : 700
-            const facNameWeight = mode === 'map' ? 500 : 600
+            // 굵기 — 지도는 아주 얇게(획 가늘게), 색은 거의 검정으로 진하게. 도식은 큼직하게.
+            //   Pretendard variable 이라 275/250 같은 얇은 값도 정확히 쓸 수 있다.
+            const facCodeWeight = mode === 'map' ? 275 : 700
+            const facNameWeight = mode === 'map' ? 250 : 600
             const labelNameY = labelCodeY + (mode === 'map' ? 12 : 19)
             // 라벨 위치 — 마우스 드래그 offset (시설명 겹침 방지).
             //   드래그 중이면 로컬 override, 아니면 저장된 label_dx/label_dy.
@@ -2905,7 +2905,7 @@ export default function TopologyCanvas({
                   x={nodeCx}
                   y={labelCodeY}
                   textAnchor="middle"
-                  className={isNewClosure ? 'fill-red-600' : 'fill-slate-700'}
+                  className={isNewClosure ? 'fill-red-600' : 'fill-slate-900'}
                   stroke="#ffffff"
                   strokeWidth={LABEL_HALO_WIDTH}
                   strokeLinejoin="round"
@@ -2930,7 +2930,7 @@ export default function TopologyCanvas({
                         x={nodeCx}
                         y={labelNameY}
                         textAnchor="middle"
-                        className={isNewClosure ? 'fill-red-600' : 'fill-slate-900'}
+                        className={isNewClosure ? 'fill-red-600' : 'fill-slate-950'}
                         stroke="#ffffff"
                         strokeWidth={LABEL_HALO_WIDTH}
                         strokeLinejoin="round"
@@ -2982,7 +2982,7 @@ export default function TopologyCanvas({
                         x={startX + r * 2 + gap}
                         y={labelNameY}
                         textAnchor="start"
-                        className={isNewClosure ? 'fill-red-600' : 'fill-slate-900'}
+                        className={isNewClosure ? 'fill-red-600' : 'fill-slate-950'}
                         stroke="#ffffff"
                         strokeWidth={LABEL_HALO_WIDTH}
                         strokeLinejoin="round"
