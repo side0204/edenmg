@@ -1610,32 +1610,9 @@ export default function TopologyCanvas({
 
   return (
     <div className={wrapperClass}>
-      <div className="px-4 py-2 border-b border-slate-100 flex items-center justify-between gap-2 flex-wrap">
-        <p className="text-xs text-slate-600">
+      <div className="px-4 py-2 border-b border-slate-100 flex items-center justify-between gap-2">
+        <p className="shrink-0 text-xs text-slate-600">
           시설 {facilities.length}개 · 케이블 {cables.length}개
-          {mode === 'map'
-            ? placingFacility
-              ? ' · 지도를 클릭해 시설 위치를 지정하세요'
-              : addTool
-                ? ` · 지도를 클릭해 ${CLOSURE_TYPE_LABEL[addTool]} 을(를) 배치하세요`
-                : cableTool
-                  ? ' · 시설 2개를 차례로 클릭해 케이블을 연결하세요'
-                  : selectedCableId
-                    ? ' · 케이블 경로 편집 — 선 클릭 = 경로점 추가 · 점 드래그 = 이동 · 점 우클릭 = 삭제'
-                    : unplacedFacilities.length > 0
-                      ? ` · 미배치 시설 ${unplacedFacilities.length}개 — 우측 「미배치」 버튼으로 배치`
-                      : ' · 시설 드래그 = 위치 이동 · 클릭 = 선택 · 검색창으로 위치 이동'
-            : editable && (
-                faultSearchOpen
-                  ? ' · 고장점 검색 — 케이블을 클릭해 회선을 선택하세요 (우측 패널)'
-                  : addTool
-                    ? ` · 캔버스를 클릭해 ${CLOSURE_TYPE_LABEL[addTool]} 을(를) 배치하세요`
-                    : selectedCableId
-                      ? ' · 케이블 경로 편집 — 선 클릭 = 경로점 추가 · 점 드래그 = 이동 · 점 우클릭 = 삭제'
-                      : selectedId
-                        ? ' · 다른 시설을 클릭하면 케이블이 연결됩니다 (취소: 빈 영역 클릭)'
-                        : ' · 시설 클릭 = 케이블 연결 · 좌클릭 드래그 = 정렬 이동 · 우클릭 드래그 = 자유 이동 · 빈 영역 드래그 = 화면 이동'
-              )}
         </p>
         <div className="flex items-center gap-1">
           {/* 도식 / 지도 모드 토글 */}
