@@ -22,6 +22,7 @@ import {
   Camera,
   List,
   PanelTop,
+  ImageDown,
 } from 'lucide-react'
 import {
   CABLE_SPEC_VALUES,
@@ -73,6 +74,7 @@ import FaultSearchPanel, {
 import { useKakaoMap } from './useKakaoMap'
 import MapSearchBox from './MapSearchBox'
 import MapCaptureGuide from './MapCaptureGuide'
+import MapAutoCapture from './MapAutoCapture'
 
 export type FacilityMasterMini = {
   id: string
@@ -317,6 +319,10 @@ export default function TopologyCanvas({
   const [captureActive, setCaptureActive] = useState(false)
   // 분할 캡처 컨트롤 바를 portal 로 렌더할 캔버스 아래 영역 (지도를 안 가리게)
   const [captureBarSlot, setCaptureBarSlot] = useState<HTMLDivElement | null>(null)
+  // 지도 자동 캡처(화면 공유) 활성 여부
+  const [autoCaptureActive, setAutoCaptureActive] = useState(false)
+  // 캡처할 지도 영역 — 화면 공유 프레임에서 잘라낼 사각형 측정용
+  const canvasAreaRef = useRef<HTMLDivElement | null>(null)
   // 탭 메뉴(시설·케이블·회선·...) 오버레이 — 툴바 「탭 메뉴」 토글. ?tab= 있으면 기본 열림.
   const [tabPanelOpen, setTabPanelOpen] = useState(tabPanelDefaultOpen ?? false)
 
@@ -1625,6 +1631,7 @@ export default function TopologyCanvas({
               onClick={() => {
                 setMode('schematic')
                 setCaptureActive(false)
+                setAutoCaptureActive(false)
               }}
               className={
                 'inline-flex items-center gap-1 px-2 h-7 text-[11px] font-medium ' +
@@ -1736,6 +1743,35 @@ export default function TopologyCanvas({
             </button>
           )}
 
+          {/* 자동 캡처 — 지도 모드. 화면 공유로 지도를 자동 캡처·합성 */}
+          {mode === 'map' && mapStatus === 'ready' && (
+            <button
+              type="button"
+              onClick={() => {
+                if (autoCaptureActive) {
+                  setAutoCaptureActive(false)
+                  return
+                }
+                setCaptureActive(false)
+                setSelectedId(null)
+                setSelectedCableId(null)
+                setFaultSearchOpen(false)
+                fitMapToFacilities()
+                setAutoCaptureActive(true)
+              }}
+              className={
+                'mr-1 inline-flex items-center gap-1 rounded-md border px-2 h-7 text-[11px] font-medium ' +
+                (autoCaptureActive
+                  ? 'bg-emerald-600 text-white border-emerald-600'
+                  : 'text-slate-700 border-slate-300 hover:bg-slate-50')
+              }
+              title="화면 공유로 지도를 자동 캡처해 한 장으로 합칩니다"
+            >
+              <ImageDown className="h-3 w-3" />
+              자동 캡처
+            </button>
+          )}
+
           {/* 분할 캡처 — 지도 모드. 시설 영역을 격자로 나눠 스크린샷 가이드 */}
           {mode === 'map' && mapStatus === 'ready' && (
             <button
@@ -1745,6 +1781,7 @@ export default function TopologyCanvas({
                   setCaptureActive(false)
                   return
                 }
+                setAutoCaptureActive(false)
                 setSelectedId(null)
                 setSelectedCableId(null)
                 setFaultSearchOpen(false)
@@ -2137,7 +2174,7 @@ export default function TopologyCanvas({
           </aside>
         )}
 
-        <div className="flex-1 min-w-0 relative">
+        <div ref={canvasAreaRef} className="flex-1 min-w-0 relative">
 
           {/* 지도 모드 검색창 — 캔버스 중앙 최상단 floating.
               별도 바 대신 지도 위에 띄워 캔버스를 더 넓게 쓴다. SDK 준비 후에만 노출.
@@ -2145,7 +2182,11 @@ export default function TopologyCanvas({
               정렬이 확실히 먹는다 (absolute + left/right 는 폭이 안 늘어나는 경우가 있었음).
               지도/SVG 는 absolute inset-0 라 이 in-flow 래퍼에 밀리지 않는다.
               빈 좌우 영역은 pointer-events-none 으로 지도 조작을 막지 않는다. */}
-          {mode === 'map' && mapStatus === 'ready' && searchVisible && !captureActive && (
+          {mode === 'map' &&
+            mapStatus === 'ready' &&
+            searchVisible &&
+            !captureActive &&
+            !autoCaptureActive && (
             <div className="relative z-20 flex justify-center px-2 pt-2 pointer-events-none">
               <div className="w-full max-w-md space-y-2 pointer-events-auto">
                 <div className="flex items-start gap-1.5 rounded-lg bg-white/95 p-1.5 shadow-lg ring-1 ring-slate-200 backdrop-blur-sm">
@@ -3132,6 +3173,20 @@ export default function TopologyCanvas({
           ref={setCaptureBarSlot}
           className="shrink-0 border-t border-slate-200 bg-white"
         />
+      )}
+
+      {/* 지도 자동 캡처 패널 — 캔버스(지도) 아래. 화면 공유로 자동 캡처·합성 */}
+      {autoCaptureActive && mode === 'map' && mapStatus === 'ready' && kakaoMap && (
+        <div className="shrink-0">
+          <MapAutoCapture
+            map={kakaoMap}
+            facilities={facilities}
+            getMapRect={() =>
+              canvasAreaRef.current?.getBoundingClientRect() ?? null
+            }
+            onClose={() => setAutoCaptureActive(false)}
+          />
+        </div>
       )}
 
       {pendingConnection && fromFacility && toFacility && (
