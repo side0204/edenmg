@@ -460,8 +460,9 @@ export default function FacilityInfoPanel({
                 </button>
               </div>
               <p className="mt-0.5 text-[10px] text-slate-400">
-                같은 번호가 있으면 입력한 번호를 먼저 적용하고, 겹치던 시설은
-                다음 번호로 자동으로 밀립니다.
+                입력한 번호를 그대로 적용합니다. 실제 시설 수보다 큰 번호도
+                가능하고, 같은 번호를 쓰던 시설이 있으면 두 시설의 번호를 서로
+                맞바꿉니다.
               </p>
             </div>
           )}

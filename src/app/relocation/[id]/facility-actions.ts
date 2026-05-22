@@ -522,11 +522,13 @@ export async function saveFacilityLabelOffset(
 /**
  * 시설명 앞 설치 순번 배지 번호를 설계자가 수동 지정 — 캔버스 시설 정보 패널에서.
  *
- * insert/shift 방식: 대상 시설을 desired_no 위치로 옮기고, 그 위치 이후 시설은
- * 한 칸씩 뒤로 밀린다. 설계자가 입력한 번호가 우선 적용되고, 같은 번호를 갖던
- * 기존 시설의 번호가 바뀐다. 결과는 항상 1..N 연속 번호.
+ * 맞교환(swap) 방식: 설계자가 입력한 번호를 대상 시설에 그대로 적용한다.
+ *   - 실제 시설 수보다 큰 번호도 그대로 허용 (1..N 연속 보장 안 함 — 빈 번호 가능).
+ *   - 같은 번호를 쓰던 다른 시설이 있으면 그 시설은 대상이 갖던 옛 번호를 받는다.
+ *   - 그 외 시설의 번호는 변하지 않는다.
  *
- * 배지 대상(접속함체·RN·IJP)의 install_order 를 한 번에 재정렬해 저장한다.
+ * 빈 번호가 자동 채워지지 않도록 배지 대상(접속함체·RN·IJP) 전 시설의
+ * install_order 를 현재 번호로 고정한다 (대상·교환 시설만 맞바꾼 값).
  * redirect 안 함 — JSON 결과 반환 (캔버스 컨텍스트 유지).
  */
 export async function setFacilityInstallOrder(input: {
@@ -594,7 +596,7 @@ export async function setFacilityInstallOrder(input: {
     return { ok: false, error: '이 시설은 설치 순번 배지 대상이 아닙니다' }
   }
 
-  // 현재 번호 → 현재 순서대로 정렬
+  // 배지 대상 전 시설의 현재 번호
   const current = computeInstallNumbers(
     eligible.map((f) => ({
       id: f.id,
@@ -602,25 +604,27 @@ export async function setFacilityInstallOrder(input: {
       created_at: f.created_at,
     })),
   )
-  const orderedIds = eligible
-    .map((f) => f.id)
-    .sort((a, b) => (current.get(a) ?? 0) - (current.get(b) ?? 0))
+  const oldNo = current.get(input.facility_id)
+  if (oldNo === desired) return { ok: true } // 변경 없음
 
-  // 대상 제거 후 desired 위치(1-based)에 삽입 — 범위 밖이면 끝으로
-  const without = orderedIds.filter((id) => id !== input.facility_id)
-  const insertAt = Math.min(Math.max(desired - 1, 0), without.length)
-  without.splice(insertAt, 0, input.facility_id)
+  // 새 번호 map — 현재 번호를 복사한 뒤 대상에 desired 적용.
+  //   같은 번호를 쓰던 시설이 있으면 그 시설은 대상의 옛 번호를 받는다 (맞교환).
+  const next = new Map(current)
+  const colliderId = [...current.entries()].find(
+    ([id, n]) => id !== input.facility_id && n === desired,
+  )?.[0]
+  next.set(input.facility_id, desired)
+  if (colliderId != null && oldNo != null) next.set(colliderId, oldNo)
 
-  // 1..N 재배정 — install_order 가 바뀌는 시설만 update
-  const orderById = new Map(eligible.map((f) => [f.id, f.install_order]))
-  for (let i = 0; i < without.length; i++) {
-    const id = without[i]
-    const newOrder = i + 1
-    if (orderById.get(id) === newOrder) continue
+  // 배지 대상 전 시설의 install_order 를 새 번호로 고정 — 빈 번호 자동 채움 방지.
+  //   저장된 install_order 와 다른 시설만 update.
+  for (const f of eligible) {
+    const newOrder = next.get(f.id)
+    if (newOrder == null || f.install_order === newOrder) continue
     const { error } = await supabase
       .from('relocation_facilities')
       .update({ install_order: newOrder })
-      .eq('id', id)
+      .eq('id', f.id)
       .eq('project_id', input.project_id) // RLS 보강
     if (error) return { ok: false, error: '순번 저장 실패: ' + error.message }
   }
