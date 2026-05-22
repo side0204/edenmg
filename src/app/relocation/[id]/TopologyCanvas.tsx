@@ -2826,38 +2826,6 @@ export default function TopologyCanvas({
                     </g>
                   )
                 })()}
-                {/* 절단 절체 — 기설 케이블이 신설 함체에 인입.
-                    신설 함체 끝에 빨강 폭발 마크 (접속함체 원형과 구분). */}
-                {(() => {
-                  const cut = cutover.cables.get(c.id)
-                  if (!cut || pts.length < 2) return null
-                  const along = (
-                    a: { x: number; y: number },
-                    b: { x: number; y: number },
-                  ) => {
-                    const dx = b.x - a.x
-                    const dy = b.y - a.y
-                    const len = Math.hypot(dx, dy)
-                    if (len < 1) return a
-                    const t = Math.min(24 / len, 0.4)
-                    return { x: a.x + dx * t, y: a.y + dy * t }
-                  }
-                  const marks: { x: number; y: number }[] = []
-                  if (cut.from) marks.push(along(pts[0], pts[1]))
-                  if (cut.to)
-                    marks.push(along(pts[pts.length - 1], pts[pts.length - 2]))
-                  return marks.map((m, i) => (
-                    <polygon
-                      key={`cut-${i}`}
-                      points={burstPoints(m.x, m.y)}
-                      fill="#dc2626"
-                      stroke="white"
-                      strokeWidth={1.5}
-                      strokeLinejoin="round"
-                      pointerEvents="none"
-                    />
-                  ))
-                })()}
                 {/* 선택 시 waypoint 핸들 — 드래그 이동 / 우클릭 삭제.
                     지도 모드는 경로점 lat/lng 를 화면으로 투영한 위치에 표시. */}
                 {selected &&
@@ -3258,6 +3226,42 @@ export default function TopologyCanvas({
                 </g>
               </g>
             )
+          })}
+
+          {/* 절단 절체 폭발 마크 — 시설 노드보다 위 레이어에 그려
+              접속함체 분기수 배지에 안 가리게 한다. 케이블 끝(신설 함체)에서
+              노드·배지를 벗어날 만큼 떨어뜨려 겹침도 피한다. */}
+          {cables.map((c) => {
+            const cut = cutover.cables.get(c.id)
+            if (!cut) return null
+            const pts = cablePathPoints(c)
+            if (pts.length < 2) return null
+            const along = (
+              a: { x: number; y: number },
+              b: { x: number; y: number },
+            ) => {
+              const dx = b.x - a.x
+              const dy = b.y - a.y
+              const len = Math.hypot(dx, dy)
+              if (len < 1) return a
+              const t = Math.min(58 / len, 0.45)
+              return { x: a.x + dx * t, y: a.y + dy * t }
+            }
+            const marks: { x: number; y: number }[] = []
+            if (cut.from) marks.push(along(pts[0], pts[1]))
+            if (cut.to)
+              marks.push(along(pts[pts.length - 1], pts[pts.length - 2]))
+            return marks.map((m, i) => (
+              <polygon
+                key={`cut-${c.id}-${i}`}
+                points={burstPoints(m.x, m.y)}
+                fill="#dc2626"
+                stroke="white"
+                strokeWidth={1.5}
+                strokeLinejoin="round"
+                pointerEvents="none"
+              />
+            ))
           })}
 
           {/* 고장점 마커 — 측정 거리로 추정한 위치 (노드 위에 표시) */}
