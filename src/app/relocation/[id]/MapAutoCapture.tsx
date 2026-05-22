@@ -34,6 +34,9 @@ type CaptureFacility = {
 const OVERLAP = 0.06     // 타일 간 겹침 비율 (이음매 방지)
 const TILE_WAIT = 850    // 타일 이동 후 지도 타일 로딩 대기(ms)
 const PAD = 0.08         // bbox 가장자리 여백 (뷰포트 비율)
+// 시설 라벨 글자 변형 — 너비 0.75배(가로 압축)·높이 1.2배(세로 신장). 조밀한 장체.
+const LABEL_SCALE_X = 0.75
+const LABEL_SCALE_Y = 1.2
 
 function sleep(ms: number): Promise<void> {
   return new Promise((r) => setTimeout(r, ms))
@@ -152,10 +155,16 @@ function redrawFacilityLabels(
     const codeColor = f.isNew ? '#dc2626' : '#0f172a'
     const nameColor = f.isNew ? '#dc2626' : '#020617'
 
+    // 글자 변형 — (cx, codeY) 기준 너비 0.75배·높이 1.2배 (조밀한 장체)
+    ctx.save()
+    ctx.translate(cx, codeY)
+    ctx.scale(LABEL_SCALE_X, LABEL_SCALE_Y)
+    ctx.translate(-cx, -codeY)
+
     // 글자 폭 측정 → 흰 배경판 크기
-    ctx.font = `650 ${codeFont}px ${FF}`
+    ctx.font = `350 ${codeFont}px ${FF}`
     const wCode = code ? ctx.measureText(code).width : 0
-    ctx.font = `600 ${nameFont}px ${FF}`
+    ctx.font = `350 ${nameFont}px ${FF}`
     const wNameText = name ? ctx.measureText(name).width : 0
     const instExtra = f.installNo != null ? nameFont * 1.9 : 0
     const boxW = Math.max(wCode, wNameText + instExtra) + pad * 2
@@ -173,11 +182,11 @@ function redrawFacilityLabels(
 
     // 시설코드 (가운데 정렬)
     ctx.textAlign = 'center'
-    ctx.font = `650 ${codeFont}px ${FF}`
+    ctx.font = `350 ${codeFont}px ${FF}`
     drawHaloText(ctx, code, cx, codeY, codeColor, halo)
 
     // 시설명
-    ctx.font = `600 ${nameFont}px ${FF}`
+    ctx.font = `350 ${nameFont}px ${FF}`
     if (f.installNo != null) {
       // 설치 순번 — 초록 원 + 흰 숫자, 그 뒤 이름(좌측 정렬)
       const r = nameFont * 0.78
@@ -195,13 +204,15 @@ function redrawFacilityLabels(
       ctx.font = `700 ${nameFont}px ${FF}`
       ctx.fillStyle = '#ffffff'
       ctx.fillText(String(f.installNo), circleCx, circleCy + nameFont * 0.35)
-      ctx.font = `600 ${nameFont}px ${FF}`
+      ctx.font = `350 ${nameFont}px ${FF}`
       ctx.textAlign = 'left'
       drawHaloText(ctx, name, startX + r * 2 + gap, nameY, nameColor, halo)
     } else {
       ctx.textAlign = 'center'
       drawHaloText(ctx, name, cx, nameY, nameColor, halo)
     }
+
+    ctx.restore()
   }
   ctx.restore()
 }
