@@ -393,59 +393,8 @@ export default async function RelocationProjectPage({
     </div>
   )
 
-  const canvasPanel = (
-    <div className="px-4 sm:px-6 my-2">
-      <TopologyCanvas
-        projectId={project.id}
-        facilities={facilities.map((f) => ({
-          id: f.id,
-          closure_type: f.closure_type,
-          seq_no: f.seq_no,
-          name: f.name,
-          facility_code: f.facility_code ?? null,
-          closure_spec: f.closure_spec,
-          install_address: f.install_address,
-          notes: f.notes,
-          parent_facility_id: f.parent_facility_id,
-          is_marked: f.is_marked,
-          mark_note: f.mark_note ?? null,
-          work_window_start: f.work_window_start,
-          work_window_end: f.work_window_end,
-          x_hint: f.x_hint ?? null,
-          y_hint: f.y_hint ?? null,
-          lat: f.lat ?? null,
-          lng: f.lng ?? null,
-          created_at: f.created_at ?? null,
-          install_status: f.install_status ?? 'new',
-          label_dx: f.label_dx ?? 0,
-          label_dy: f.label_dy ?? 0,
-          install_order: f.install_order ?? null,
-        }))}
-        cables={cables.map((c) => ({
-          id: c.id,
-          from_facility_id: c.from_facility_id,
-          to_facility_id: c.to_facility_id,
-          spec: c.spec,
-          status: c.status,
-          cable_code: c.cable_code,
-          installation_type: c.installation_type,
-          waypoints: Array.isArray(c.waypoints) ? c.waypoints : [],
-          total_length: c.total_length,
-          end_distance: c.end_distance,
-        }))}
-        editable={true}
-        facilityMasters={facilityMasters}
-        taskTypes={taskTypes}
-        facilityTasks={facilityTasks}
-        facilityMaterials={facilityMaterials}
-        circuits={circuits}
-        coreAssignments={assignments}
-      />
-    </div>
-  )
-
-  const bottomPanel = (
-    <div className="mx-auto max-w-6xl px-4 sm:px-6 space-y-5">
+  const tabPanel = (
+    <div className="mx-auto max-w-6xl px-4 sm:px-6 space-y-5 py-3">
         {/* 탭 바 */}
         <nav className="sticky top-0 z-10 -mx-4 sm:-mx-6 bg-slate-50/80 backdrop-blur border-b border-slate-200">
           <div className="mx-auto max-w-6xl px-4 sm:px-6 flex overflow-x-auto gap-1 py-2">
@@ -632,8 +581,12 @@ export default async function RelocationProjectPage({
             )}
           </div>
         </section>
+    </div>
+  )
 
-        {/* 프로젝트 메타 편집 + 삭제 — 기본 접힘 (모든 탭에서 페이지가 길어지지 않게) */}
+  const bottomPanel = (
+    <div className="mx-auto max-w-6xl px-4 sm:px-6">
+        {/* 프로젝트 메타 편집 + 삭제 */}
         <details className="rounded-2xl bg-white shadow-sm border border-slate-200">
           <summary className="flex cursor-pointer list-none items-center gap-2 rounded-2xl px-6 py-4 text-base font-semibold tracking-tight text-slate-900 hover:bg-slate-50">
             <Settings className="h-4 w-4 text-slate-500" />
@@ -740,6 +693,59 @@ export default async function RelocationProjectPage({
     </div>
   )
 
+  const canvasPanel = (
+    <div className="px-4 sm:px-6 my-2">
+      <TopologyCanvas
+        projectId={project.id}
+        facilities={facilities.map((f) => ({
+          id: f.id,
+          closure_type: f.closure_type,
+          seq_no: f.seq_no,
+          name: f.name,
+          facility_code: f.facility_code ?? null,
+          closure_spec: f.closure_spec,
+          install_address: f.install_address,
+          notes: f.notes,
+          parent_facility_id: f.parent_facility_id,
+          is_marked: f.is_marked,
+          mark_note: f.mark_note ?? null,
+          work_window_start: f.work_window_start,
+          work_window_end: f.work_window_end,
+          x_hint: f.x_hint ?? null,
+          y_hint: f.y_hint ?? null,
+          lat: f.lat ?? null,
+          lng: f.lng ?? null,
+          created_at: f.created_at ?? null,
+          install_status: f.install_status ?? 'new',
+          label_dx: f.label_dx ?? 0,
+          label_dy: f.label_dy ?? 0,
+          install_order: f.install_order ?? null,
+        }))}
+        cables={cables.map((c) => ({
+          id: c.id,
+          from_facility_id: c.from_facility_id,
+          to_facility_id: c.to_facility_id,
+          spec: c.spec,
+          status: c.status,
+          cable_code: c.cable_code,
+          installation_type: c.installation_type,
+          waypoints: Array.isArray(c.waypoints) ? c.waypoints : [],
+          total_length: c.total_length,
+          end_distance: c.end_distance,
+        }))}
+        editable={true}
+        facilityMasters={facilityMasters}
+        taskTypes={taskTypes}
+        facilityTasks={facilityTasks}
+        facilityMaterials={facilityMaterials}
+        circuits={circuits}
+        coreAssignments={assignments}
+        tabPanel={tabPanel}
+        tabPanelDefaultOpen={!!tabRaw}
+      />
+    </div>
+  )
+
   return (
     <main className="min-h-screen pb-6">
       <HighlightProvider>
@@ -750,7 +756,6 @@ export default async function RelocationProjectPage({
           topPanel={topPanel}
           canvas={canvasPanel}
           bottomPanel={bottomPanel}
-          bottomDefaultCollapsed={!tabRaw}
         />
       </HighlightProvider>
     </main>

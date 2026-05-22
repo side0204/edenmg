@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useMemo, useRef, useCallback, useEffect } from 'react'
+import { useState, useMemo, useRef, useCallback, useEffect, type ReactNode } from 'react'
 import { useRouter } from 'next/navigation'
 import { toast } from 'sonner'
 import {
@@ -21,6 +21,7 @@ import {
   Search,
   Camera,
   List,
+  PanelTop,
 } from 'lucide-react'
 import {
   CABLE_SPEC_VALUES,
@@ -266,6 +267,8 @@ export default function TopologyCanvas({
   circuits,
   coreAssignments,
   initialCanvasSize,
+  tabPanel,
+  tabPanelDefaultOpen,
 }: {
   projectId: string
   facilities: FacilityNode[]
@@ -279,6 +282,10 @@ export default function TopologyCanvas({
   coreAssignments?: CanvasCoreAssignment[]
   // 캔버스 표시 영역 시작 크기 — 전용 캔버스 라우트는 'tall' 로 크게 연다.
   initialCanvasSize?: 'compact' | 'normal' | 'tall' | 'fullscreen'
+  // 지장이설 탭 메뉴(시설·케이블·회선·...) — 캔버스 위 오버레이로 표시.
+  //   page.tsx 에서 탭 내비+콘텐츠를 넘긴다. 전용 캔버스 라우트는 안 넘김.
+  tabPanel?: ReactNode
+  tabPanelDefaultOpen?: boolean
 }) {
   const router = useRouter()
 
@@ -305,6 +312,8 @@ export default function TopologyCanvas({
   const [searchVisible, setSearchVisible] = useState(true)
   // 지도 모드 분할 캡처 가이드 활성 여부
   const [captureActive, setCaptureActive] = useState(false)
+  // 탭 메뉴(시설·케이블·회선·...) 오버레이 — 툴바 「탭 메뉴」 토글. ?tab= 있으면 기본 열림.
+  const [tabPanelOpen, setTabPanelOpen] = useState(tabPanelDefaultOpen ?? false)
 
   // 지도 모드 시설 노드 줌 연동의 기준 줌 — fit 직후의 지도 level.
   //   이 level 보다 축소(level 증가)하면 시설 도형이 함께 작아진다.
@@ -1665,6 +1674,24 @@ export default function TopologyCanvas({
             </button>
           </div>
 
+          {/* 탭 메뉴 보임/숨김 — 시설·케이블·회선·... 탭을 캔버스 위 오버레이로 */}
+          {tabPanel && (
+            <button
+              type="button"
+              onClick={() => setTabPanelOpen((v) => !v)}
+              className={
+                'mr-1 inline-flex items-center gap-1 rounded-md border px-2 h-7 text-[11px] font-medium ' +
+                (tabPanelOpen
+                  ? 'bg-slate-900 text-white border-slate-900'
+                  : 'text-slate-700 border-slate-300 hover:bg-slate-50')
+              }
+              title={tabPanelOpen ? '탭 메뉴 닫기' : '탭 메뉴 열기 (시설·케이블·회선·...)'}
+            >
+              <PanelTop className="h-3 w-3" />
+              탭 메뉴
+            </button>
+          )}
+
           {/* 시설 목록 보임/숨김 — 좌측 사이드바 토글 (도식·지도 공통) */}
           <button
             type="button"
@@ -2982,6 +3009,14 @@ export default function TopologyCanvas({
               facilities={facilities}
               onClose={() => setCaptureActive(false)}
             />
+          )}
+
+          {/* 탭 메뉴 오버레이 — 시설·케이블·회선·... 탭을 캔버스 위에 표시.
+              상단 「탭 메뉴」 버튼으로 토글. 캔버스를 덮고 그 안에서 작업한다. */}
+          {tabPanel && tabPanelOpen && (
+            <div className="absolute inset-0 z-40 overflow-y-auto bg-white">
+              {tabPanel}
+            </div>
           )}
         </div>
 

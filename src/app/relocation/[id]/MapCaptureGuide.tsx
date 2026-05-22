@@ -24,8 +24,8 @@ import {
 
 type LatLngLit = { lat: number; lng: number }
 
-const MARGIN = 14          // 프레임 좌·우·하 여백(px)
-const TOP = 104            // 상단 컨트롤 바 영역(px) — 캡처에 안 들어감
+const MARGIN = 14          // 프레임 상·좌·우 여백(px)
+const BOTTOM = 104         // 하단 컨트롤 바 영역(px) — 캡처에 안 들어감
 const OVERLAP = 0.12       // 타일 간 겹침 비율
 const BRACKET_LEN = 26     // 코너 브래킷 길이(px)
 const BRACKET_THICK = 4    // 코너 브래킷 두께(px)
@@ -56,13 +56,12 @@ export default function MapCaptureGuide({
     return () => ro.disconnect()
   }, [])
 
-  // 캡처 프레임 — 상단 컨트롤 바 자리 + 좌·우·하 여백을 뺀 직사각형.
-  //   컨트롤 바를 상단에 둬 지도를 아래로 밀어내고 화면 상단에서 작업한다.
+  // 캡처 프레임 — 상·좌·우 여백 + 하단 컨트롤 바 자리를 뺀 직사각형
   const frame = useMemo(() => {
     const x = MARGIN
-    const y = TOP
+    const y = MARGIN
     const w = Math.max(0, size.w - MARGIN * 2)
-    const h = Math.max(0, size.h - TOP - MARGIN)
+    const h = Math.max(0, size.h - MARGIN - BOTTOM)
     return { x, y, w, h }
   }, [size])
 
@@ -274,10 +273,10 @@ export default function MapCaptureGuide({
             />
           ))}
 
-          {/* 컨트롤 바 — 상단 딤 영역 (캡처에 안 들어감) */}
+          {/* 컨트롤 바 — 하단 딤 영역 (캡처에 안 들어감) */}
           <div
-            className="absolute flex items-start justify-center px-3 pt-2"
-            style={{ left: 0, right: 0, top: 0, height: fy, pointerEvents: 'none' }}
+            className="absolute flex items-end justify-center px-3 pb-2"
+            style={{ left: 0, right: 0, top: fb, height: size.h - fb, pointerEvents: 'none' }}
           >
             <div
               className="w-full max-w-2xl rounded-xl bg-white px-3 py-2 shadow-xl ring-1 ring-slate-200"
