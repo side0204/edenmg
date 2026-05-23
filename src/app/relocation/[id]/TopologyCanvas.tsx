@@ -2131,10 +2131,12 @@ export default function TopologyCanvas({
           }
         }
 
-        // 모든 후보 점수화: crossings 우선, bends, length 순으로 정렬해 가장 좋은 후보 선택
+        // 후보 점수화 — bends 적은 것 우선 (긴 detour 회피).
+        //   같은 bends 안에서는 crossings 적은 것, 그 다음 length 짧은 것.
+        //   시설 가로지름 보다 「긴 detour 가 다른 cable 과 path 공유」 가 더 큰 시각 문제.
         candidates.sort(
           (a, b) =>
-            a.crossings - b.crossings || a.bends - b.bends || a.length - b.length,
+            a.bends - b.bends || a.crossings - b.crossings || a.length - b.length,
         )
         if (candidates.length > 0) {
           midPoints = candidates[0].waypoints
