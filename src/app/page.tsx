@@ -916,23 +916,6 @@ export default async function Home() {
         </section>
       ) : undefined,
 
-    help: (
-      <section className="rounded-2xl bg-white shadow-sm border border-slate-200 dark:bg-slate-900 dark:border-slate-800 p-6 space-y-3">
-        <h2 className="flex items-center gap-2 text-base font-semibold text-slate-700 tracking-tight dark:text-slate-300">
-          <BookOpen className="h-5 w-5 text-slate-400" />
-          사용법
-        </h2>
-        <p className="text-sm text-slate-500 dark:text-slate-400">
-          직무·권한에 맞는 시나리오별 사용 가이드.
-        </p>
-        <Link
-          href="/help"
-          className="block rounded-lg border border-slate-200 hover:border-slate-900 px-4 py-3 text-base font-medium text-slate-900 dark:border-slate-800 dark:hover:border-slate-100 dark:text-slate-100 text-center"
-        >
-          사용법 보기 →
-        </Link>
-      </section>
-    ),
   }
 
   const visibleCardIds = prefs.order.filter(
@@ -956,6 +939,13 @@ export default async function Home() {
               className="inline-flex items-center rounded-lg border border-slate-300 px-2.5 py-2 text-slate-600 hover:bg-slate-50 dark:border-slate-700 dark:text-slate-300 dark:hover:bg-slate-800"
             >
               <Settings2 className="h-4 w-4" />
+            </Link>
+            <Link
+              href="/help"
+              className="inline-flex items-center gap-1 rounded-lg border border-slate-300 px-3 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50 dark:border-slate-700 dark:text-slate-300 dark:hover:bg-slate-800"
+            >
+              <BookOpen className="h-4 w-4" />
+              사용법
             </Link>
             <form action={signOut}>
               <button className="rounded-lg border border-slate-300 px-3 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50 dark:border-slate-700 dark:text-slate-300 dark:hover:bg-slate-800">
