@@ -372,6 +372,7 @@ export async function updateCable(formData: FormData) {
 export async function updateCableFromCanvas(input: {
   project_id: string
   cable_id: string
+  cable_code: string // LGU+ 제공 ID 또는 NEW-XXXX-NNNNNN (자동 생성). 변경 가능.
   spec: string
   status: string
   installation_type: string | null
@@ -399,6 +400,12 @@ export async function updateCableFromCanvas(input: {
   }
   if (!isCableSpec(input.spec)) return { ok: false, error: '케이블 규격이 올바르지 않습니다' }
   if (!isCableStatus(input.status)) return { ok: false, error: '케이블 상태가 올바르지 않습니다' }
+  // 케이블 ID — 빈값 차단, 길이 제한 (운영상 100자), 같은 프로젝트 안 UNIQUE 는 DB 가 강제
+  const cable_code = (input.cable_code ?? '').trim()
+  if (!cable_code) return { ok: false, error: '케이블 ID 는 비울 수 없습니다' }
+  if (cable_code.length > 100) {
+    return { ok: false, error: '케이블 ID 는 100자 이하여야 합니다' }
+  }
   const installation_type =
     input.installation_type && isInstallationType(input.installation_type)
       ? input.installation_type
@@ -424,6 +431,7 @@ export async function updateCableFromCanvas(input: {
   const { error } = await supabase
     .from('relocation_cables')
     .update({
+      cable_code,
       spec: input.spec,
       status: input.status,
       installation_type,
@@ -435,7 +443,14 @@ export async function updateCableFromCanvas(input: {
     .eq('project_id', input.project_id) // RLS 보강
 
   if (error) {
-    return { ok: false, error: '케이블 수정 실패: ' + error.message }
+    const isUnique =
+      error.message.includes('unique') ||
+      error.message.includes('duplicate') ||
+      error.code === '23505'
+    const friendly = isUnique
+      ? `같은 케이블 ID 가 이미 등록되어 있습니다: ${cable_code}`
+      : '케이블 수정 실패: ' + error.message
+    return { ok: false, error: friendly }
   }
 
   revalidatePath(`/relocation/${input.project_id}`)

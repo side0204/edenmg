@@ -615,6 +615,15 @@ export function coreUnitIndex(spec: CableSpec, core: number): number | null {
   return Math.floor((core - 1) / meta.unitSize) + 1
 }
 
+// 케이블 규격 → 코어 수. META 우선, 없으면 "1C(드랍)"/"576C" 같은 라벨에서 숫자 파싱.
+//   1C·1C(드랍)·2C·2C(드랍) → 1·1·2·2 / 576C → 576
+export function cableSpecCoreCount(spec: CableSpec): number {
+  const meta = CABLE_SPEC_META[spec]
+  if (meta) return meta.cores
+  const m = /^(\d+)C/.exec(spec)
+  return m ? Math.max(1, Number.parseInt(m[1], 10)) : 1
+}
+
 
 // ===== 함체 규격 메타 (수용 한도) =====================================
 // 사양서 § 2-2

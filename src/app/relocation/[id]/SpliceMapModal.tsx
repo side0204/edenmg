@@ -1,0 +1,227 @@
+'use client'
+
+import { useEffect, useState } from 'react'
+import { createPortal } from 'react-dom'
+import { toast } from 'sonner'
+import { X, ArrowRight, Flag } from 'lucide-react'
+import { CORE_LIFECYCLE_LABEL, type CoreLifecycle } from '@/lib/relocation'
+import { moveCoreAssignmentFromCanvas } from './core-actions'
+import type { CablePanelCircuit, CablePanelAssignment } from './CableInfoPanel'
+
+// 선번장 — 케이블의 전체 코어(1~N)를 표로 보여주고, 각 회선의 코어 번호를
+// 빈 코어로 옮길 수 있게 한다. 다른 케이블로의 이동은 미지원 (같은 케이블 안만).
+
+export default function SpliceMapModal({
+  projectId,
+  cableId,
+  cableCode,
+  coreCount,
+  circuits,
+  assignments,
+  onClose,
+  onChanged,
+}: {
+  projectId: string
+  cableId: string
+  cableCode: string
+  coreCount: number
+  circuits: CablePanelCircuit[]
+  assignments: CablePanelAssignment[]
+  onClose: () => void
+  onChanged: () => void
+}) {
+  const [editingId, setEditingId] = useState<string | null>(null)
+  const [busy, setBusy] = useState(false)
+  const [mounted, setMounted] = useState(false)
+
+  // 부모(CableInfoPanel) 가 overflow-y-auto · 캔버스 fullscreen z-40 안에 있어,
+  // 같은 트리에 모달을 두면 stacking context 에 갇혀 안 보일 수 있다.
+  // document.body 에 portal 로 mount 해 어떤 stacking 도 우회.
+  useEffect(() => {
+    setMounted(true)
+    // 모달 열려 있을 때 ESC 로 닫기
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') onClose()
+    }
+    document.addEventListener('keydown', onKey)
+    // body 스크롤 잠금
+    const prev = document.body.style.overflow
+    document.body.style.overflow = 'hidden'
+    return () => {
+      document.removeEventListener('keydown', onKey)
+      document.body.style.overflow = prev
+    }
+  }, [onClose])
+
+  const circuitMap = new Map(circuits.map((c) => [c.id, c]))
+
+  // 코어 번호 → 배정 매핑. start = end 단일 코어 모델이라 start 하나만 본다.
+  // 같은 코어에 여러 행이 있을 일은 없지만(exclusion constraint), 만약 있으면 첫 행만.
+  const byCore = new Map<number, CablePanelAssignment>()
+  for (const a of assignments) {
+    if (a.core_range_start >= 1 && a.core_range_start <= coreCount) {
+      if (!byCore.has(a.core_range_start)) byCore.set(a.core_range_start, a)
+    }
+  }
+  const used = new Set(byCore.keys())
+  const freeCores: number[] = []
+  for (let i = 1; i <= coreCount; i++) if (!used.has(i)) freeCores.push(i)
+
+  function circuitLabel(id: string | null): string {
+    if (!id) return '미지정'
+    const c = circuitMap.get(id)
+    if (!c) return '(삭제됨)'
+    return c.subscriber_name ? `${c.circuit_id} · ${c.subscriber_name}` : c.circuit_id
+  }
+
+  async function onMove(assignmentId: string, newCore: number) {
+    if (busy) return
+    setBusy(true)
+    const result = await moveCoreAssignmentFromCanvas({
+      project_id: projectId,
+      assignment_id: assignmentId,
+      new_core_no: newCore,
+    })
+    setBusy(false)
+    if (!result.ok) {
+      toast.error(result.error)
+      return
+    }
+    toast.success(`코어 ${newCore} 로 변경했습니다`)
+    setEditingId(null)
+    onChanged()
+  }
+
+  if (!mounted) return null
+
+  // document.body portal — 부모 stacking 우회. z-index 100 으로 sonner toast(보통 50~80)보다 높이.
+  return createPortal(
+    <div
+      className="fixed inset-0 z-[100] bg-slate-900/40 flex items-center justify-center p-4"
+      onClick={onClose}
+    >
+      <div
+        className="relative w-full max-w-2xl max-h-[85vh] bg-white rounded-xl shadow-xl flex flex-col overflow-hidden"
+        onClick={(e) => e.stopPropagation()}
+      >
+        {/* 헤더 */}
+        <div className="sticky top-0 z-10 flex items-center justify-between border-b border-slate-200 bg-white px-4 py-3">
+          <div>
+            <h2 className="text-base font-bold text-slate-900">선번장</h2>
+            <p className="text-xs text-slate-500 font-mono">
+              {cableCode} · 총 {coreCount} 코어 · 사용 {used.size} · 빈 {freeCores.length}
+            </p>
+          </div>
+          <button
+            type="button"
+            onClick={onClose}
+            className="rounded-md p-1 text-slate-400 hover:bg-slate-100 hover:text-slate-900"
+          >
+            <X className="h-5 w-5" />
+          </button>
+        </div>
+
+        {/* 코어 목록 */}
+        <div className="flex-1 overflow-y-auto">
+          <table className="w-full text-xs">
+            <thead className="sticky top-0 bg-slate-50 border-b border-slate-200">
+              <tr className="text-left text-slate-600">
+                <th className="px-3 py-2 font-medium w-14">코어</th>
+                <th className="px-3 py-2 font-medium">회선</th>
+                <th className="px-3 py-2 font-medium w-20">구분</th>
+                <th className="px-3 py-2 font-medium w-14">종단</th>
+                <th className="px-3 py-2 font-medium w-32 text-right">코어 변경</th>
+              </tr>
+            </thead>
+            <tbody>
+              {Array.from({ length: coreCount }, (_, i) => {
+                const coreNo = i + 1
+                const a = byCore.get(coreNo)
+                const isEditing = a && editingId === a.id
+                return (
+                  <tr key={coreNo} className="border-b border-slate-100">
+                    <td className="px-3 py-2 font-mono text-slate-700">{coreNo}</td>
+                    <td className="px-3 py-2">
+                      {a ? (
+                        <span className="text-slate-800">{circuitLabel(a.circuit_id)}</span>
+                      ) : (
+                        <span className="text-slate-300 italic">(빈)</span>
+                      )}
+                    </td>
+                    <td className="px-3 py-2 text-slate-500">
+                      {a ? CORE_LIFECYCLE_LABEL[a.lifecycle as CoreLifecycle] : '—'}
+                    </td>
+                    <td className="px-3 py-2">
+                      {a?.is_terminal ? (
+                        <span className="inline-flex items-center gap-0.5 text-blue-700">
+                          <Flag className="h-3 w-3" />
+                        </span>
+                      ) : (
+                        <span className="text-slate-300">—</span>
+                      )}
+                    </td>
+                    <td className="px-3 py-2 text-right">
+                      {a ? (
+                        isEditing ? (
+                          <div className="flex items-center justify-end gap-1">
+                            <select
+                              autoFocus
+                              defaultValue=""
+                              onChange={(e) => {
+                                const v = Number.parseInt(e.target.value, 10)
+                                if (Number.isFinite(v) && v >= 1) onMove(a.id, v)
+                              }}
+                              disabled={busy}
+                              className="rounded-md border border-slate-300 px-1.5 py-0.5 text-[11px] bg-white"
+                            >
+                              <option value="" disabled>
+                                빈 코어 선택
+                              </option>
+                              {freeCores.map((n) => (
+                                <option key={n} value={n}>
+                                  코어 {n}
+                                </option>
+                              ))}
+                            </select>
+                            <button
+                              type="button"
+                              onClick={() => setEditingId(null)}
+                              disabled={busy}
+                              className="rounded-md px-1.5 py-0.5 text-[11px] text-slate-500 hover:bg-slate-100"
+                            >
+                              취소
+                            </button>
+                          </div>
+                        ) : (
+                          <button
+                            type="button"
+                            onClick={() => setEditingId(a.id)}
+                            disabled={busy || freeCores.length === 0}
+                            title={freeCores.length === 0 ? '빈 코어가 없습니다' : '코어 변경'}
+                            className="inline-flex items-center gap-0.5 rounded-md border border-slate-300 bg-white px-1.5 py-0.5 text-[11px] font-medium text-slate-700 hover:bg-slate-50 disabled:opacity-40 disabled:cursor-not-allowed"
+                          >
+                            <ArrowRight className="h-3 w-3" />
+                            변경
+                          </button>
+                        )
+                      ) : (
+                        <span className="text-slate-300 text-[11px]">—</span>
+                      )}
+                    </td>
+                  </tr>
+                )
+              })}
+            </tbody>
+          </table>
+        </div>
+
+        {/* 푸터 */}
+        <div className="border-t border-slate-200 bg-slate-50 px-4 py-2 text-[11px] text-slate-500">
+          코어 변경은 같은 케이블 안에서만 가능합니다. 다른 케이블로 이동하려면 기존
+          배정을 삭제 후 새로 추가하세요.
+        </div>
+      </div>
+    </div>,
+    document.body,
+  )
+}

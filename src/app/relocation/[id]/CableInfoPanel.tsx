@@ -21,6 +21,7 @@ import {
   CORE_LIFECYCLE_LABEL,
   CIRCUIT_KIND_VALUES,
   CIRCUIT_KIND_LABEL,
+  cableSpecCoreCount,
   isCircuitDiverse,
   haversineMeters,
   type CableStatus,
@@ -32,8 +33,10 @@ import { CABLE_SPEC_VALUES, type CableSpec } from '@/lib/connection'
 import { updateCableFromCanvas, deleteCableFromCanvas } from './cable-actions'
 import {
   addCoreAssignmentFromCanvas,
+  bulkAddCoresFromCanvas,
   removeCoreAssignmentFromCanvas,
 } from './core-actions'
+import SpliceMapModal from './SpliceMapModal'
 
 // 케이블 정보 패널 — 캔버스에서 케이블 클릭 시 우측에 표시.
 // 규격·상태·설치구분·전체거리 수정 + 경로점(전주명·구간거리) 입력 + 거리 검증 + 삭제.
@@ -120,6 +123,7 @@ export default function CableInfoPanel({
   collapsed: boolean
   onToggleCollapse: () => void
 }) {
+  const [cableCode, setCableCode] = useState<string>(cable.cable_code)
   const [spec, setSpec] = useState<CableSpec>(cable.spec)
   const [status, setStatus] = useState<CableStatus>(cable.status)
   const [installationType, setInstallationType] = useState<string>(
@@ -191,10 +195,16 @@ export default function CableInfoPanel({
 
   async function onSave() {
     if (submitting) return
+    const trimmedCode = cableCode.trim()
+    if (!trimmedCode) {
+      toast.error('케이블 ID 는 비울 수 없습니다')
+      return
+    }
     setSubmitting(true)
     const result = await updateCableFromCanvas({
       project_id: projectId,
       cable_id: cable.id,
+      cable_code: trimmedCode,
       spec,
       status,
       installation_type: installationType || null,
@@ -292,10 +302,27 @@ export default function CableInfoPanel({
       </div>
 
       <div className="p-3 space-y-3">
-        {/* 구간 */}
-        <div className="rounded-lg bg-slate-50 px-2.5 py-1.5 text-[11px] text-slate-600">
-          <p className="font-mono text-slate-700">{cable.cable_code}</p>
-          <p className="mt-0.5">
+        {/* 구간 + 케이블 ID 편집 */}
+        <div className="rounded-lg bg-slate-50 px-2.5 py-1.5 text-[11px] text-slate-600 space-y-1">
+          <div>
+            <label className="block text-[10px] font-medium text-slate-500">
+              케이블 ID
+            </label>
+            <input
+              type="text"
+              value={cableCode}
+              onChange={(e) => setCableCode(e.target.value)}
+              maxLength={100}
+              placeholder="LGU+ 제공 ID 또는 NEW-XXXX-NNNNNN"
+              className="mt-0.5 w-full rounded-md border border-slate-300 bg-white px-2 py-1 text-[11px] font-mono text-slate-800"
+            />
+            {cableCode.trim() !== cable.cable_code && (
+              <p className="mt-0.5 text-[10px] text-amber-700">
+                저장 시 ID 가 변경됩니다 (기존: {cable.cable_code})
+              </p>
+            )}
+          </div>
+          <p className="pt-0.5">
             {fromName} <span className="text-slate-400">→</span> {toName}
           </p>
         </div>
@@ -303,7 +330,7 @@ export default function CableInfoPanel({
         {/* 회선·코어 배정 — 케이블 선택 시 스크롤 없이 바로 입력 (패널 상단 배치) */}
         <CoreAssignSection
           projectId={projectId}
-          cableId={cable.id}
+          cable={cable}
           circuits={circuits}
           assignments={assignments}
           onChanged={onCoreChanged}
@@ -545,31 +572,58 @@ function DistanceRow({
 
 // 회선·코어 배정 — 케이블 정보 패널 안의 인라인 입력 폼 (워크플로우 3단계).
 // 종단으로 표시한 케이블에 회선·사용코어를 입력한다.
+//   - 단일 모드: 회선 1개 + 코어 1개 직접 지정
+//   - 일괄 모드: 회선번호 콤마 구분 입력 → 빈 코어 오름차순 자동 배정
+//   - 선번장: 전체 코어맵 + 회선의 코어 번호를 다른 빈 코어로 변경
 function CoreAssignSection({
   projectId,
-  cableId,
+  cable,
   circuits,
   assignments,
   onChanged,
 }: {
   projectId: string
-  cableId: string
+  cable: CablePanelData
   circuits: CablePanelCircuit[]
   assignments: CablePanelAssignment[]
   onChanged: () => void
 }) {
+  const cableId = cable.id
+  const coreCount = cableSpecCoreCount(cable.spec)
   const [adding, setAdding] = useState(false)
+  const [showSpliceMap, setShowSpliceMap] = useState(false)
+  const [mode, setMode] = useState<'single' | 'bulk'>('single')
+  // 단일 모드
   const [circuitMode, setCircuitMode] = useState('') // '' 미지정 | 'NEW' 새 회선 | circuit id
   const [newCircuitNo, setNewCircuitNo] = useState('')
   const [newCircuitKind, setNewCircuitKind] = useState<CircuitKind>('1코어')
   const [newCircuitLocation, setNewCircuitLocation] = useState('')
   const [coreNo, setCoreNo] = useState('')
+  // 일괄 모드 — 회선번호 콤마 구분 + 옵션 한꺼번에
+  const [bulkCircuits, setBulkCircuits] = useState('')
+  const [bulkKind, setBulkKind] = useState<CircuitKind>('1코어')
+  const [bulkLocation, setBulkLocation] = useState('')
+  // 공통 옵션
   const [lifecycle, setLifecycle] = useState<CoreLifecycle>('new')
   const [segmentIdx, setSegmentIdx] = useState('0')
   const [isTerminal, setIsTerminal] = useState(true)
   const [busy, setBusy] = useState(false)
 
   const circuitMap = new Map(circuits.map((c) => [c.id, c]))
+  const usedCount = assignments.length
+  const freeCount = Math.max(0, coreCount - usedCount)
+
+  // 일괄 모드 미리보기 — 입력값 정제 후 몇 개 회선이 어느 코어에 들어갈지 표시
+  const bulkPreview = (() => {
+    if (mode !== 'bulk') return null
+    const raw = Array.from(
+      new Set(bulkCircuits.split(',').map((s) => s.trim()).filter((s) => s.length > 0)),
+    )
+    const usedSet = new Set(assignments.map((a) => a.core_range_start))
+    const free: number[] = []
+    for (let i = 1; i <= coreCount; i++) if (!usedSet.has(i)) free.push(i)
+    return { raw, free, fits: raw.length <= free.length }
+  })()
 
   function circuitLabel(id: string | null): string {
     if (!id) return '미지정 회선'
@@ -579,21 +633,29 @@ function CoreAssignSection({
   }
 
   function resetForm() {
+    setMode('single')
     setCircuitMode('')
     setNewCircuitNo('')
     setNewCircuitKind('1코어')
     setNewCircuitLocation('')
     setCoreNo('')
+    setBulkCircuits('')
+    setBulkKind('1코어')
+    setBulkLocation('')
     setLifecycle('new')
     setSegmentIdx('0')
     setIsTerminal(true)
   }
 
-  async function onAdd() {
+  async function onAddSingle() {
     if (busy) return
     const core = Number.parseInt(coreNo, 10)
     if (!Number.isFinite(core) || core < 1) {
       toast.error('코어 번호를 입력하세요')
+      return
+    }
+    if (core > coreCount) {
+      toast.error(`코어 번호는 1 ~ ${coreCount} 범위여야 합니다 (${cable.spec})`)
       return
     }
     if (circuitMode === 'NEW' && !newCircuitNo.trim()) {
@@ -625,6 +687,45 @@ function CoreAssignSection({
     }
     toast.success('회선·코어를 배정했습니다')
     resetForm()
+    setAdding(false)
+    onChanged()
+  }
+
+  async function onAddBulk() {
+    if (busy) return
+    const numbers = bulkCircuits.split(',').map((s) => s.trim()).filter((s) => s.length > 0)
+    if (numbers.length === 0) {
+      toast.error('회선번호를 콤마(,)로 구분해 입력하세요')
+      return
+    }
+    setBusy(true)
+    const result = await bulkAddCoresFromCanvas({
+      project_id: projectId,
+      cable_id: cableId,
+      cable_core_count: coreCount,
+      circuit_numbers: numbers,
+      kind: bulkKind,
+      subscriber_name: bulkLocation.trim() || null,
+      lifecycle,
+      is_terminal: isTerminal,
+      segment_idx: Number.parseInt(segmentIdx, 10) || 0,
+    })
+    setBusy(false)
+    if (!result.ok) {
+      toast.error(result.error)
+      return
+    }
+    if (result.skipped.length > 0) {
+      toast.warning(
+        `${result.created}건 배정 / ${result.skipped.length}건 실패: ${result.skipped
+          .map((s) => `${s.circuit}(${s.reason})`)
+          .join(', ')}`,
+      )
+    } else {
+      toast.success(`${result.created}개 회선을 일괄 배정했습니다`)
+    }
+    resetForm()
+    setAdding(false)
     onChanged()
   }
 
@@ -643,20 +744,29 @@ function CoreAssignSection({
 
   return (
     <div className="rounded-lg border border-teal-300 bg-teal-50/60 p-2.5">
-      <div className="flex items-center justify-between">
+      <div className="flex items-center justify-between flex-wrap gap-1">
         <p className="text-xs font-bold text-teal-800">
-          회선·코어 배정 ({assignments.length})
+          회선·코어 배정 ({usedCount}/{coreCount})
         </p>
-        {!adding && (
+        <div className="flex items-center gap-1">
           <button
             type="button"
-            onClick={() => setAdding(true)}
-            className="inline-flex items-center gap-0.5 rounded-md bg-slate-900 px-1.5 py-0.5 text-[10px] font-medium text-white hover:bg-slate-800"
+            onClick={() => setShowSpliceMap(true)}
+            className="inline-flex items-center gap-0.5 rounded-md border border-teal-400 bg-white px-1.5 py-0.5 text-[10px] font-medium text-teal-800 hover:bg-teal-50"
           >
-            <Plus className="h-3 w-3" />
-            추가
+            선번장
           </button>
-        )}
+          {!adding && (
+            <button
+              type="button"
+              onClick={() => setAdding(true)}
+              className="inline-flex items-center gap-0.5 rounded-md bg-slate-900 px-1.5 py-0.5 text-[10px] font-medium text-white hover:bg-slate-800"
+            >
+              <Plus className="h-3 w-3" />
+              추가
+            </button>
+          )}
+        </div>
       </div>
 
       {/* 기존 배정 목록 */}
@@ -706,88 +816,202 @@ function CoreAssignSection({
       {/* 추가 폼 */}
       {adding && (
         <div className="mt-2 rounded-lg border border-slate-200 bg-slate-50 p-2 space-y-2">
-          <div>
-            <label className="block text-[10px] font-medium text-slate-600">회선</label>
-            <select
-              value={circuitMode}
-              onChange={(e) => setCircuitMode(e.target.value)}
-              className="mt-0.5 w-full rounded-md border border-slate-300 px-2 py-1 text-[11px] bg-white"
+          {/* 모드 토글 — 단일 / 일괄 */}
+          <div className="flex items-center gap-1 rounded-md bg-slate-200/60 p-0.5">
+            <button
+              type="button"
+              onClick={() => setMode('single')}
+              className={
+                'flex-1 rounded px-2 py-0.5 text-[10px] font-medium ' +
+                (mode === 'single'
+                  ? 'bg-white text-slate-900 shadow-sm'
+                  : 'text-slate-500 hover:text-slate-700')
+              }
             >
-              <option value="">(미지정)</option>
-              {circuits.map((c) => (
-                <option key={c.id} value={c.id}>
-                  {c.circuit_id}
-                  {c.subscriber_name ? ` · ${c.subscriber_name}` : ''}
-                  {isCircuitDiverse(c.kind as CircuitKind) ? ' [이원화]' : ''}
-                </option>
-              ))}
-              <option value="NEW">+ 새 회선 입력</option>
-            </select>
+              단일
+            </button>
+            <button
+              type="button"
+              onClick={() => setMode('bulk')}
+              className={
+                'flex-1 rounded px-2 py-0.5 text-[10px] font-medium ' +
+                (mode === 'bulk'
+                  ? 'bg-white text-slate-900 shadow-sm'
+                  : 'text-slate-500 hover:text-slate-700')
+              }
+            >
+              일괄 (콤마)
+            </button>
           </div>
 
-          {circuitMode === 'NEW' && (
-            <div className="grid grid-cols-2 gap-1.5">
+          {mode === 'single' ? (
+            <>
               <div>
-                <label className="block text-[10px] font-medium text-slate-600">
-                  회선번호
-                </label>
-                <input
-                  type="text"
-                  value={newCircuitNo}
-                  onChange={(e) => setNewCircuitNo(e.target.value)}
-                  placeholder="예: 5572607"
-                  maxLength={100}
-                  className="mt-0.5 w-full rounded-md border border-slate-300 px-2 py-1 text-[11px]"
-                />
-              </div>
-              <div>
-                <label className="block text-[10px] font-medium text-slate-600">종류</label>
+                <label className="block text-[10px] font-medium text-slate-600">회선</label>
                 <select
-                  value={newCircuitKind}
-                  onChange={(e) => setNewCircuitKind(e.target.value as CircuitKind)}
+                  value={circuitMode}
+                  onChange={(e) => setCircuitMode(e.target.value)}
                   className="mt-0.5 w-full rounded-md border border-slate-300 px-2 py-1 text-[11px] bg-white"
                 >
-                  {CIRCUIT_KIND_VALUES.map((k) => (
-                    <option key={k} value={k}>
-                      {CIRCUIT_KIND_LABEL[k]}
+                  <option value="">(미지정)</option>
+                  {circuits.map((c) => (
+                    <option key={c.id} value={c.id}>
+                      {c.circuit_id}
+                      {c.subscriber_name ? ` · ${c.subscriber_name}` : ''}
+                      {isCircuitDiverse(c.kind as CircuitKind) ? ' [이원화]' : ''}
                     </option>
                   ))}
+                  <option value="NEW">+ 새 회선 입력</option>
                 </select>
               </div>
-              <div className="col-span-2">
+
+              {circuitMode === 'NEW' && (
+                <div className="grid grid-cols-2 gap-1.5">
+                  <div>
+                    <label className="block text-[10px] font-medium text-slate-600">
+                      회선번호
+                    </label>
+                    <input
+                      type="text"
+                      value={newCircuitNo}
+                      onChange={(e) => setNewCircuitNo(e.target.value)}
+                      placeholder="예: 5572607"
+                      maxLength={100}
+                      className="mt-0.5 w-full rounded-md border border-slate-300 px-2 py-1 text-[11px]"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-[10px] font-medium text-slate-600">종류</label>
+                    <select
+                      value={newCircuitKind}
+                      onChange={(e) => setNewCircuitKind(e.target.value as CircuitKind)}
+                      className="mt-0.5 w-full rounded-md border border-slate-300 px-2 py-1 text-[11px] bg-white"
+                    >
+                      {CIRCUIT_KIND_VALUES.map((k) => (
+                        <option key={k} value={k}>
+                          {CIRCUIT_KIND_LABEL[k]}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+                  <div className="col-span-2">
+                    <label className="block text-[10px] font-medium text-slate-600">
+                      설치장소
+                    </label>
+                    <input
+                      type="text"
+                      value={newCircuitLocation}
+                      onChange={(e) => setNewCircuitLocation(e.target.value)}
+                      placeholder="가입자 설치장소명 (선택)"
+                      maxLength={200}
+                      className="mt-0.5 w-full rounded-md border border-slate-300 px-2 py-1 text-[11px]"
+                    />
+                  </div>
+                </div>
+              )}
+
+              <div>
                 <label className="block text-[10px] font-medium text-slate-600">
-                  설치장소
+                  코어 번호 (1 ~ {coreCount})
                 </label>
                 <input
-                  type="text"
-                  value={newCircuitLocation}
-                  onChange={(e) => setNewCircuitLocation(e.target.value)}
-                  placeholder="가입자 설치장소명 (선택)"
-                  maxLength={200}
+                  type="number"
+                  min={1}
+                  max={coreCount}
+                  value={coreNo}
+                  onChange={(e) => setCoreNo(e.target.value)}
+                  placeholder="이 케이블에서 회선이 쓰는 코어 1개"
                   className="mt-0.5 w-full rounded-md border border-slate-300 px-2 py-1 text-[11px]"
                 />
+                <p className="mt-0.5 text-[9px] text-slate-400 leading-tight">
+                  2코어·이원화 회선은 코어마다 한 번씩 나눠 배정하세요.
+                </p>
               </div>
-            </div>
+            </>
+          ) : (
+            <>
+              <div>
+                <label className="block text-[10px] font-medium text-slate-600">
+                  회선번호 (콤마 구분)
+                </label>
+                <textarea
+                  value={bulkCircuits}
+                  onChange={(e) => setBulkCircuits(e.target.value)}
+                  placeholder="예: 5572607, 5572608, 5572609"
+                  rows={3}
+                  className="mt-0.5 w-full rounded-md border border-slate-300 px-2 py-1 text-[11px] font-mono"
+                />
+                <p className="mt-0.5 text-[9px] text-slate-400 leading-tight">
+                  콤마(,)로 구분된 회선번호를 한 번에 입력하세요. 빈 코어 중 작은
+                  번호부터 오름차순 자동 배정됩니다. 이미 있는 회선번호는 재사용.
+                </p>
+                {bulkPreview && bulkPreview.raw.length > 0 && (
+                  <div
+                    className={
+                      'mt-1 rounded-md border px-2 py-1 text-[10px] ' +
+                      (bulkPreview.fits
+                        ? 'border-emerald-300 bg-emerald-50 text-emerald-800'
+                        : 'border-rose-300 bg-rose-50 text-rose-800')
+                    }
+                  >
+                    {bulkPreview.fits ? (
+                      <>
+                        <span className="font-medium">
+                          {bulkPreview.raw.length}개 회선 → 코어{' '}
+                          {bulkPreview.free
+                            .slice(0, bulkPreview.raw.length)
+                            .join(', ')}
+                        </span>
+                      </>
+                    ) : (
+                      <>
+                        빈 코어 부족: 회선 {bulkPreview.raw.length}개 vs 빈 코어{' '}
+                        {bulkPreview.free.length}개
+                      </>
+                    )}
+                  </div>
+                )}
+              </div>
+
+              <div className="grid grid-cols-2 gap-1.5">
+                <div>
+                  <label className="block text-[10px] font-medium text-slate-600">
+                    종류 (일괄 적용)
+                  </label>
+                  <select
+                    value={bulkKind}
+                    onChange={(e) => setBulkKind(e.target.value as CircuitKind)}
+                    className="mt-0.5 w-full rounded-md border border-slate-300 px-2 py-1 text-[11px] bg-white"
+                  >
+                    {CIRCUIT_KIND_VALUES.map((k) => (
+                      <option key={k} value={k}>
+                        {CIRCUIT_KIND_LABEL[k]}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+                <div>
+                  <label className="block text-[10px] font-medium text-slate-600">
+                    설치장소 (일괄 · 선택)
+                  </label>
+                  <input
+                    type="text"
+                    value={bulkLocation}
+                    onChange={(e) => setBulkLocation(e.target.value)}
+                    placeholder="공통일 때만 입력"
+                    maxLength={200}
+                    className="mt-0.5 w-full rounded-md border border-slate-300 px-2 py-1 text-[11px]"
+                  />
+                </div>
+              </div>
+              <p className="text-[9px] text-slate-400 leading-tight">
+                일괄 입력은 새 회선번호 전용입니다. 기존 회선번호가 섞여 있으면
+                기존 회선은 재사용되고 종류·설치장소 입력은 무시됩니다.
+              </p>
+            </>
           )}
 
-          <div>
-            <label className="block text-[10px] font-medium text-slate-600">
-              코어 번호
-            </label>
-            <input
-              type="number"
-              min={1}
-              max={576}
-              value={coreNo}
-              onChange={(e) => setCoreNo(e.target.value)}
-              placeholder="이 케이블에서 회선이 쓰는 코어 1개"
-              className="mt-0.5 w-full rounded-md border border-slate-300 px-2 py-1 text-[11px]"
-            />
-            <p className="mt-0.5 text-[9px] text-slate-400 leading-tight">
-              2코어·이원화 회선은 코어마다 한 번씩 나눠 배정하세요.
-            </p>
-          </div>
-
+          {/* 공통 옵션 — 구분·세그먼트·종단 */}
           <div className="grid grid-cols-2 gap-1.5">
             <div>
               <label className="block text-[10px] font-medium text-slate-600">구분</label>
@@ -832,28 +1056,45 @@ function CoreAssignSection({
             회선의 출발/도착점이면 체크. 자동 경로 탐색의 입력이 됩니다.
           </p>
 
-          <div className="flex items-center justify-end gap-1.5 pt-0.5">
-            <button
-              type="button"
-              onClick={() => {
-                setAdding(false)
-                resetForm()
-              }}
-              className="rounded-md border border-slate-300 px-2 py-1 text-[10px] font-medium text-slate-600 hover:bg-white"
-            >
-              취소
-            </button>
-            <button
-              type="button"
-              onClick={onAdd}
-              disabled={busy}
-              className="inline-flex items-center gap-0.5 rounded-md bg-slate-900 px-2.5 py-1 text-[10px] font-medium text-white hover:bg-slate-800 disabled:bg-slate-300"
-            >
-              <Plus className="h-3 w-3" />
-              {busy ? '배정 중...' : '배정'}
-            </button>
+          <div className="flex items-center justify-between gap-1.5 pt-0.5 text-[10px] text-slate-500">
+            <span>빈 코어 {freeCount}개</span>
+            <div className="flex items-center gap-1.5">
+              <button
+                type="button"
+                onClick={() => {
+                  setAdding(false)
+                  resetForm()
+                }}
+                className="rounded-md border border-slate-300 px-2 py-1 text-[10px] font-medium text-slate-600 hover:bg-white"
+              >
+                취소
+              </button>
+              <button
+                type="button"
+                onClick={mode === 'single' ? onAddSingle : onAddBulk}
+                disabled={busy}
+                className="inline-flex items-center gap-0.5 rounded-md bg-slate-900 px-2.5 py-1 text-[10px] font-medium text-white hover:bg-slate-800 disabled:bg-slate-300"
+              >
+                <Plus className="h-3 w-3" />
+                {busy ? '배정 중...' : mode === 'single' ? '배정' : '일괄 배정'}
+              </button>
+            </div>
           </div>
         </div>
+      )}
+
+      {/* 선번장 모달 */}
+      {showSpliceMap && (
+        <SpliceMapModal
+          projectId={projectId}
+          cableId={cableId}
+          cableCode={cable.cable_code}
+          coreCount={coreCount}
+          circuits={circuits}
+          assignments={assignments}
+          onClose={() => setShowSpliceMap(false)}
+          onChanged={onChanged}
+        />
       )}
     </div>
   )
