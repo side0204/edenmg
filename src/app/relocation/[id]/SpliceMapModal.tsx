@@ -5,7 +5,10 @@ import { createPortal } from 'react-dom'
 import { toast } from 'sonner'
 import { X, ArrowRight, Flag } from 'lucide-react'
 import { CORE_LIFECYCLE_LABEL, type CoreLifecycle } from '@/lib/relocation'
-import { moveCoreAssignmentFromCanvas } from './core-actions'
+import {
+  moveCoreAssignmentFromCanvas,
+  swapCoreAssignmentsFromCanvas,
+} from './core-actions'
 import type { CablePanelCircuit, CablePanelAssignment } from './CableInfoPanel'
 
 // 선번장 — 케이블의 전체 코어(1~N)를 표로 보여주고, 각 회선의 코어 번호를
@@ -92,6 +95,25 @@ export default function SpliceMapModal({
     onChanged()
   }
 
+  // 사용 중 코어와 swap — 두 회선의 코어 번호를 서로 교체.
+  async function onSwap(aId: string, bId: string, aCore: number, bCore: number) {
+    if (busy) return
+    setBusy(true)
+    const result = await swapCoreAssignmentsFromCanvas({
+      project_id: projectId,
+      a_id: aId,
+      b_id: bId,
+    })
+    setBusy(false)
+    if (!result.ok) {
+      toast.error(result.error)
+      return
+    }
+    toast.success(`코어 ${aCore} ↔ ${bCore} 교체했습니다`)
+    setEditingId(null)
+    onChanged()
+  }
+
   if (!mounted) return null
 
   // document.body portal — 부모 stacking 우회. z-index 100 으로 sonner toast(보통 50~80)보다 높이.
@@ -169,19 +191,44 @@ export default function SpliceMapModal({
                               defaultValue=""
                               onChange={(e) => {
                                 const v = Number.parseInt(e.target.value, 10)
-                                if (Number.isFinite(v) && v >= 1) onMove(a.id, v)
+                                if (!Number.isFinite(v) || v < 1) return
+                                if (v === a.core_range_start) return
+                                const occupant = byCore.get(v)
+                                if (occupant) {
+                                  // 사용 중 코어 → swap (confirm)
+                                  const okSwap = confirm(
+                                    `코어 ${a.core_range_start} (${circuitLabel(
+                                      a.circuit_id,
+                                    )}) ↔ 코어 ${v} (${circuitLabel(
+                                      occupant.circuit_id,
+                                    )}) 를 서로 교체할까요?`,
+                                  )
+                                  if (!okSwap) return
+                                  onSwap(a.id, occupant.id, a.core_range_start, v)
+                                } else {
+                                  // 빈 코어 → 단순 이동
+                                  onMove(a.id, v)
+                                }
                               }}
                               disabled={busy}
-                              className="rounded-md border border-slate-300 px-1.5 py-0.5 text-[11px] bg-white"
+                              className="rounded-md border border-slate-300 px-1.5 py-0.5 text-[11px] bg-white max-w-[180px]"
                             >
                               <option value="" disabled>
-                                빈 코어 선택
+                                옮길 코어 선택
                               </option>
-                              {freeCores.map((n) => (
-                                <option key={n} value={n}>
-                                  코어 {n}
-                                </option>
-                              ))}
+                              {Array.from({ length: coreCount }, (_, i) => {
+                                const n = i + 1
+                                if (n === a.core_range_start) return null
+                                const occ = byCore.get(n)
+                                return (
+                                  <option key={n} value={n}>
+                                    코어 {n}{' '}
+                                    {occ
+                                      ? `· ${circuitLabel(occ.circuit_id)} (교체)`
+                                      : '· 빈'}
+                                  </option>
+                                )
+                              })}
                             </select>
                             <button
                               type="button"
@@ -196,8 +243,8 @@ export default function SpliceMapModal({
                           <button
                             type="button"
                             onClick={() => setEditingId(a.id)}
-                            disabled={busy || freeCores.length === 0}
-                            title={freeCores.length === 0 ? '빈 코어가 없습니다' : '코어 변경'}
+                            disabled={busy || coreCount <= 1}
+                            title="코어 변경 (빈 코어 이동 또는 다른 회선과 교체)"
                             className="inline-flex items-center gap-0.5 rounded-md border border-slate-300 bg-white px-1.5 py-0.5 text-[11px] font-medium text-slate-700 hover:bg-slate-50 disabled:opacity-40 disabled:cursor-not-allowed"
                           >
                             <ArrowRight className="h-3 w-3" />

@@ -500,6 +500,39 @@ export async function bulkAddCoresFromCanvas(input: {
 
 
 /**
+ * 두 코어 배정의 코어 번호를 서로 교체 — 선번장에서 사용 중인 코어와 swap.
+ * exclusion constraint(immediate) 우회를 위해 PL/pgSQL RPC 안에서
+ * 임시값 경유 3단계 update (마이그 0057). 같은 케이블 안에서만 동작.
+ */
+export async function swapCoreAssignmentsFromCanvas(input: {
+  project_id: string
+  a_id: string
+  b_id: string
+}): Promise<{ ok: true } | { ok: false; error: string }> {
+  if (!input.project_id || !input.a_id || !input.b_id) {
+    return { ok: false, error: '코어 배정 정보가 없습니다' }
+  }
+  if (input.a_id === input.b_id) {
+    return { ok: false, error: '같은 행은 교체할 수 없습니다' }
+  }
+
+  const { supabase } = await requireMember()
+
+  const { error } = await supabase.rpc('swap_core_assignments', {
+    _a_id: input.a_id,
+    _b_id: input.b_id,
+  })
+
+  if (error) {
+    return { ok: false, error: '코어 교체 실패: ' + error.message }
+  }
+
+  revalidatePath(`/relocation/${input.project_id}`)
+  return { ok: true }
+}
+
+
+/**
  * 코어 배정의 코어 번호만 변경 — 선번장에서 빈 코어로 옮길 때.
  * cable·circuit·lifecycle·종단은 그대로. 같은 케이블 안에서만 이동.
  */
