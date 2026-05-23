@@ -178,8 +178,7 @@ const FAULT_COLOR    = '#dc2626'  // red-600 (고장점 위치 마커)
 const DRAG_THRESHOLD = 4          // px — 클릭/드래그 구분
 const SNAP_THRESHOLD = 14         // px — 좌클릭 드래그 시 다른 시설과 수직·수평 정렬 스냅 거리
 const LABEL_LEADER_THRESHOLD = 26 // px — 라벨이 이만큼 멀어지면 시설과 연결선 표시
-const CABLE_OFFSET_GAP = 11       // px — 같은 시설 쌍 lens 모양 (양 끝 중심·중간 분산) 의 분산 폭. 인접 라인 ≈ 22px.
-const CABLE_SHIFT_GAP = 26        // px — 다른 시설 쌍 segment overlap 시 평행 이동 폭 (인접 케이블 사이 거리 ≈ 52px). lens 보다 크게 분리해 시각적 구분.
+const CABLE_SHIFT_GAP = 26        // px — segment-level overlap 시 케이블 평행 이동 폭 (인접 케이블 사이 거리 ≈ 52px). same-pair 다중은 라우팅 단계에서 다른 candidate path 로 이미 분리.
 // 시설 라벨 흰색 외곽선 — 지도 모드에서 배경 지도 글자와 구분 (지도 제작사 표준 기법).
 //   두껍다고 느껴지면 줄이고, 잘 안 보이면 올린다.
 //   작은 글자에 3px 은 외곽선이 글자를 잠식해 뭉개 보임 → 2.5 로 (얇고 또렷하게).
@@ -1789,10 +1788,31 @@ export default function TopologyCanvas({
   // 도식·지도 모드 케이블 raw 라우팅 (offset 미적용) — overlap 탐지와 cablePathPoints 둘 다 공유.
   //   사용자 waypoint 가 있으면 그대로. 없으면 candidate (직선/L자/ㄷ자) 점수화 (bends → 시설 가로지름 → 길이).
   //   여기서 한 번 계산하고 segment-level overlap 탐지에 재활용 → cablePathPoints 가 단순해짐.
+  //   (2026-05-24) 같은 시설 쌍 다중 케이블은 lens 대신 「서로 다른 candidate path」 배정 — 첫째는 직선/L자,
+  //   둘째는 ㄷ자 우회 빈공간 쪽. owner: "좌상단 빈공간 대각선" 효과를 자동화. lens 폐기.
   const rawCablePaths = useMemo(() => {
     const result = new Map<string, Waypoint[]>()
     const halfW = NODE_SIZE.width / 2
     const halfH = NODE_SIZE.height / 2
+
+    // 같은 시설 쌍 그룹핑 — 그룹 안의 케이블에 candidate index 0,1,2,... 배정해 서로 다른 path 사용.
+    //   candidate 가 정렬된 후 idx 만 골라 적용 → 첫째 best, 둘째 next-best (자연히 직선 vs ㄷ자 분리).
+    const samePairCandIdx = new Map<string, number>()
+    {
+      const groups = new Map<string, CableEdge[]>()
+      for (const c of cables) {
+        const key = [c.from_facility_id, c.to_facility_id].sort().join('|')
+        const arr = groups.get(key)
+        if (arr) arr.push(c)
+        else groups.set(key, [c])
+      }
+      for (const group of groups.values()) {
+        if (group.length <= 1) continue
+        // id 정렬로 결정적 순서 (재배치 시 같은 케이블 = 같은 idx)
+        const sorted = [...group].sort((a, b) => a.id.localeCompare(b.id))
+        sorted.forEach((c, i) => samePairCandIdx.set(c.id, i))
+      }
+    }
 
     for (const c of cables) {
       const from = effectivePositions[c.from_facility_id]
@@ -1927,7 +1947,11 @@ export default function TopologyCanvas({
             a.bends - b.bends || a.crossings - b.crossings || a.length - b.length,
         )
         if (candidates.length > 0) {
-          midPoints = candidates[0].waypoints
+          // 같은 시설 쌍 다중 케이블 → 케이블별 candidate idx 사용 (각자 다른 path).
+          //   candidate 부족 시 마지막 인덱스로 clamp — 후속 shift segment-level 탐지가 묶음.
+          const wantIdx = samePairCandIdx.get(c.id) ?? 0
+          const useIdx = Math.min(wantIdx, candidates.length - 1)
+          midPoints = candidates[useIdx].waypoints
         }
       }
 
@@ -1937,41 +1961,19 @@ export default function TopologyCanvas({
     return result
   }, [cables, effectivePositions, effectiveWaypoints, cableAnchors, mode, kakaoMap])
 
-  // 케이블 offset + kind — 두 가지 처리:
-  //   (1) 같은 시설 쌍 2+ 조 → 'lens' (양 끝 중심 유지, 중간 분산)
-  //   (2) 다른 시설 쌍 polyline segment 부분 overlap → 'shift' (전체 path perpendicular 평행 이동)
-  //       segment-level 탐지 (2026-05-24) — L-shape / ㄷ-shape 우회 후 실제 segment 가 평행·근접·겹침일 때만 묶음.
-  //       이전 (~2026-05-23) 은 straight from→to 만 보고 분류해 L자/ㄷ자 우회로 생긴 공유 segment 를 놓침.
+  // 케이블 offset — 'shift' 한 가지만 처리 (2026-05-24 이후):
+  //   같은 시설 쌍 다중 케이블은 rawCablePaths 가 「서로 다른 candidate path」 를 배정해 이미 분리.
+  //   path 가 분리 못 된 잔여 case + 다른 시설 쌍의 polyline segment 부분 overlap → 'shift' 평행 이동.
+  //   segment-level 탐지 — L-shape / ㄷ-shape 우회 후 실제 segment 가 평행·근접·겹침일 때만 묶음.
   const cableOffsetInfo = useMemo(() => {
     const offsets = new Map<string, number>()
-    const kinds = new Map<string, 'lens' | 'shift'>()
 
-    // 1. 같은 시설 쌍 → lens
-    const samePairGroups = new Map<string, string[]>()
-    for (const c of cables) {
-      const key = [c.from_facility_id, c.to_facility_id].sort().join('|')
-      const arr = samePairGroups.get(key)
-      if (arr) arr.push(c.id)
-      else samePairGroups.set(key, [c.id])
-    }
-    const samePairAssigned = new Set<string>()
-    for (const ids of samePairGroups.values()) {
-      if (ids.length <= 1) continue
-      const k = ids.length
-      ids.forEach((id, i) => {
-        offsets.set(id, (i - (k - 1) / 2) * CABLE_OFFSET_GAP * 2)
-        kinds.set(id, 'lens')
-        samePairAssigned.add(id)
-      })
-    }
-
-    // 2. segment-level overlap → shift.
+    // segment-level overlap → shift.
     //   각 케이블의 raw polyline 을 H/V segment 리스트로 분해. 짧은 stub 은 무시.
     type Seg = { dir: 'H' | 'V'; perp: number; start: number; end: number }
     const cableSegs = new Map<string, Seg[]>()
     const SEG_MIN_LEN = 30 // 30px 미만 segment 는 무시 (시설 anchor 변두리)
     for (const c of cables) {
-      if (samePairAssigned.has(c.id)) continue
       const path = rawCablePaths.get(c.id)
       if (!path || path.length < 2) continue
       const segs: Seg[] = []
@@ -2057,18 +2059,16 @@ export default function TopologyCanvas({
       const sorted = [...grp].sort()
       sorted.forEach((id, i) => {
         offsets.set(id, (i - (sorted.length - 1) / 2) * CABLE_SHIFT_GAP * 2)
-        kinds.set(id, 'shift')
       })
     }
 
-    return { offsets, kinds }
+    return offsets
   }, [cables, rawCablePaths])
 
-  const cableOffsets = cableOffsetInfo.offsets
-  const cableOffsetKinds = cableOffsetInfo.kinds
+  const cableOffsets = cableOffsetInfo
 
-  // cablePathPoints — rawCablePaths 의 base path 를 가져와 offset (lens/shift) 만 적용.
-  //   라우팅 logic 자체는 rawCablePaths useMemo 에서 이미 한 번 계산.
+  // cablePathPoints — rawCablePaths 의 base path 를 가져와 shift offset 만 적용 (전체 평행 이동).
+  //   라우팅 logic 자체는 rawCablePaths useMemo 에서 이미 한 번 계산. lens 폐기 (2026-05-24).
   const cablePathPoints = useCallback(
     (c: CableEdge): Waypoint[] => {
       const path = rawCablePaths.get(c.id)
@@ -2084,35 +2084,10 @@ export default function TopologyCanvas({
       const nx = -overallDy / len
       const ny = overallDx / len
 
-      const kind = cableOffsetKinds.get(c.id)
-      if (kind === 'shift') {
-        // 전체 path perpendicular 평행 이동 — 모든 점 이동
-        return path.map((p) => ({ x: p.x + nx * offset, y: p.y + ny * offset }))
-      }
-
-      // 'lens' (또는 kind 없음 — 안전망) — 끝점 중심 유지, 중간만 분산
-      if (path.length === 2) {
-        const ux = overallDx / len
-        const uy = overallDy / len
-        return [
-          path[0],
-          {
-            x: path[0].x + ux * len * 0.2 + nx * offset,
-            y: path[0].y + uy * len * 0.2 + ny * offset,
-          },
-          {
-            x: path[0].x + ux * len * 0.8 + nx * offset,
-            y: path[0].y + uy * len * 0.8 + ny * offset,
-          },
-          path[1],
-        ]
-      }
-      return path.map((p, i) => {
-        if (i === 0 || i === path.length - 1) return p
-        return { x: p.x + nx * offset, y: p.y + ny * offset }
-      })
+      // shift — 전체 path perpendicular 평행 이동 (모든 점 이동)
+      return path.map((p) => ({ x: p.x + nx * offset, y: p.y + ny * offset }))
     },
-    [rawCablePaths, cableOffsets, cableOffsetKinds],
+    [rawCablePaths, cableOffsets],
   )
 
   // 경로점의 화면 좌표 — 도식: x/y · 지도: lat/lng 투영 (없으면 null)
