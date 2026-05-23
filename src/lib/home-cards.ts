@@ -15,6 +15,7 @@ export type HomeCardId =
   | 'relocation'
   | 'admin'
   | 'reports'
+  | 'help'
 
 // 기본 순서 — prefs 가 비어있을 때 사용. 새 카드는 여기에만 추가하면 자동 폴백.
 export const HOME_CARD_DEFAULT_ORDER: HomeCardId[] = [
@@ -30,6 +31,7 @@ export const HOME_CARD_DEFAULT_ORDER: HomeCardId[] = [
   'relocation',
   'admin',
   'reports',
+  'help',
 ]
 
 export const HOME_CARD_LABEL: Record<HomeCardId, string> = {
@@ -45,6 +47,7 @@ export const HOME_CARD_LABEL: Record<HomeCardId, string> = {
   relocation: '지장이설 설계',
   admin: '관리 메뉴',
   reports: '리포트',
+  help: '사용법',
 }
 
 export const HOME_CARD_DESCRIPTION: Record<HomeCardId, string> = {
@@ -60,6 +63,7 @@ export const HOME_CARD_DESCRIPTION: Record<HomeCardId, string> = {
   relocation: 'LGU+ 광케이블 지장이설 코어구성도·직선도 설계 (데스크톱 권장)',
   admin: '직원·현장·마스터·리포트 관리 (관리자만 노출 대상)',
   reports: '월별 리포트 (팀장 권한자 노출 대상)',
+  help: '직무·권한에 맞는 시나리오 가이드',
 }
 
 export type HomeCardPrefs = {

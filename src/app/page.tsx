@@ -12,6 +12,7 @@ import {
   CalendarDays,
   Package,
   Network,
+  BookOpen,
 } from 'lucide-react'
 import { createClient } from '@/lib/supabase/server'
 import { LEAVE_TYPE_LABEL, formatPeriod, type LeaveType } from '@/lib/leave'
@@ -914,6 +915,24 @@ export default async function Home() {
           </Link>
         </section>
       ) : undefined,
+
+    help: (
+      <section className="rounded-2xl bg-white shadow-sm border border-slate-200 dark:bg-slate-900 dark:border-slate-800 p-6 space-y-3">
+        <h2 className="flex items-center gap-2 text-base font-semibold text-slate-700 tracking-tight dark:text-slate-300">
+          <BookOpen className="h-5 w-5 text-slate-400" />
+          사용법
+        </h2>
+        <p className="text-sm text-slate-500 dark:text-slate-400">
+          직무·권한에 맞는 시나리오별 사용 가이드.
+        </p>
+        <Link
+          href="/help"
+          className="block rounded-lg border border-slate-200 hover:border-slate-900 px-4 py-3 text-base font-medium text-slate-900 dark:border-slate-800 dark:hover:border-slate-100 dark:text-slate-100 text-center"
+        >
+          사용법 보기 →
+        </Link>
+      </section>
+    ),
   }
 
   const visibleCardIds = prefs.order.filter(

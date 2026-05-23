@@ -1156,3 +1156,12 @@ Vercel 환경변수에도 동일 키 등록. 변수 추가 시 양쪽 동기화 
 - **모바일 우선 반응형**: 모든 화면을 320~430px 폭에서 먼저 설계, 데스크톱은 그 다음.
 - **한국어 UI**: 식별자(변수·테이블)는 영어, 사용자에게 보이는 모든 문구는 한국어.
 - **간결한 코드**: 미래 가정용 추상화·feature flag·과도한 에러 처리 금지. 시스템 경계에서만 검증.
+
+## 사용법 시나리오 (Help) 동기화 룰
+- 직원 사용 가이드는 `src/app/help/[slug]/page.tsx` 와 메타 [`src/lib/help-scenarios.ts`](./src/lib/help-scenarios.ts) 의 `SCENARIOS` 배열에 있음. 각 시나리오는 `routes: ["/path"]` 와 `lastReviewed: "YYYY-MM-DD"` 메타를 가짐.
+- **기능 수정 시 영향 받은 시나리오를 같은 커밋에서 같이 수정**. 작업 마무리 단계에서 변경한 라우트가 어느 시나리오의 `routes` 에 포함되는지 확인하고:
+  1. 본문 내용이 화면 변경과 어긋나면 본문 수정
+  2. 본문이 그대로 유효해도 `lastReviewed` 를 오늘 날짜로 갱신 (검토는 했다는 표시)
+  3. 새 라우트가 시나리오 범위로 들어왔다면 해당 시나리오의 `routes` 배열에 추가
+- 1차 7개 시나리오: 출퇴근(`/attendance`) · 휴가·외근(`/requests`·`/my-leaves`) · 차량(`/vehicles`) · 일반 일보·접속일보(`/works`) · 결재함(`/approvals`) · 직원 승인(`/admin/employees`). 새 시나리오 추가는 lib + 페이지 + 같은 라우트 영향 점검을 한 번에.
+- 후속: 베타 사용 2~3주 후 git log 기반 자동 stale 배지 도입 예정 (`routes` 의 최근 코드 수정일 vs `lastReviewed` 비교). frontmatter 는 그대로 읽으면 됨 — 콘텐츠 재작성 불필요.
