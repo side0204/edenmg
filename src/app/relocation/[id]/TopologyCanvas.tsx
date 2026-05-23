@@ -1950,15 +1950,70 @@ export default function TopologyCanvas({
         }
       }
 
-      // Phase 2.5 (2026-05-23) — 직각 라우팅 자동 waypoint.
-      //   사용자/장애물 waypoint 가 없고 anchor 에 카디널 side 가 있으면 Manhattan L/ㄷ자 경로 생성.
-      //   대각선('D') anchor 와 둘 다 중심인 케이블은 helper 가 빈 배열을 반환 → 직선 유지.
+      // Phase 2.5 (2026-05-23) — 직각 라우팅 자동 waypoint (obstacle-aware).
+      //   anchor 있는 경우는 manhattanRoute. 중심-중심 케이블은 L자 두 변형(H-V/V-H) 중
+      //   bend 점이 다른 시설과 안 겹치는 것 선택. 둘 다 겹치면 ㄷ자 우회.
       if (midPoints.length === 0 && mode !== 'map') {
         const fromForRoute = anchor?.from ?? fromPt
         const toForRoute = anchor?.to ?? toPt
-        const auto = manhattanRoute(fromForRoute, toForRoute)
-        if (auto.length > 0) {
-          midPoints = auto
+
+        // 양쪽 모두 anchor 없음 (중심-중심) → 장애물 회피 L자
+        if (!anchor?.from?.side && !anchor?.to?.side) {
+          const dx = toForRoute.x - fromForRoute.x
+          const dy = toForRoute.y - fromForRoute.y
+          const adx = Math.abs(dx)
+          const ady = Math.abs(dy)
+          if (adx > 5 && ady > 5) {
+            const halfW = NODE_SIZE.width / 2
+            const halfH = NODE_SIZE.height / 2
+            const variant1 = { x: toForRoute.x, y: fromForRoute.y } // H-V
+            const variant2 = { x: fromForRoute.x, y: toForRoute.y } // V-H
+            const BEND_BLOCK_DIST = Math.max(halfW, halfH) * 0.8
+
+            let v1Blocked = false
+            let v2Blocked = false
+            for (const [oid, opos] of Object.entries(effectivePositions)) {
+              if (oid === c.from_facility_id || oid === c.to_facility_id) continue
+              const ocx = opos.x + halfW
+              const ocy = opos.y + halfH - 10
+              if (!v1Blocked && Math.hypot(ocx - variant1.x, ocy - variant1.y) < BEND_BLOCK_DIST) v1Blocked = true
+              if (!v2Blocked && Math.hypot(ocx - variant2.x, ocy - variant2.y) < BEND_BLOCK_DIST) v2Blocked = true
+              if (v1Blocked && v2Blocked) break
+            }
+
+            if (!v1Blocked && !v2Blocked) {
+              // 둘 다 OK — 긴 축 먼저
+              midPoints = adx >= ady ? [variant1] : [variant2]
+            } else if (!v1Blocked) {
+              midPoints = [variant1]
+            } else if (!v2Blocked) {
+              midPoints = [variant2]
+            } else {
+              // 둘 다 막힘 → ㄷ자 우회 (수직 또는 수평 방향으로 멀리)
+              const DETOUR = halfH + 60
+              if (adx >= ady) {
+                // 주로 수평 — 위/아래로 우회
+                // 위쪽으로 detour (보통 row 사이 공간)
+                const detourY = Math.min(fromForRoute.y, toForRoute.y) - DETOUR
+                midPoints = [
+                  { x: fromForRoute.x, y: detourY },
+                  { x: toForRoute.x, y: detourY },
+                ]
+              } else {
+                const detourX = Math.min(fromForRoute.x, toForRoute.x) - DETOUR
+                midPoints = [
+                  { x: detourX, y: fromForRoute.y },
+                  { x: detourX, y: toForRoute.y },
+                ]
+              }
+            }
+          }
+        } else {
+          // anchor 있는 경우는 기존 manhattanRoute
+          const auto = manhattanRoute(fromForRoute, toForRoute)
+          if (auto.length > 0) {
+            midPoints = auto
+          }
         }
       }
 
