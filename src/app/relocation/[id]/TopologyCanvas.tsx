@@ -1942,77 +1942,110 @@ export default function TopologyCanvas({
         midPoints = wps.map((w) => ({ x: w.x, y: w.y }))
       }
 
-      // Phase 3 — 사용자 waypoint 가 없는데 다른 시설을 가로지르면 자동 사각 우회 (2 waypoints)
-      if (midPoints.length === 0 && obstacleWaypointsByCable) {
-        const auto = obstacleWaypointsByCable.get(c.id)
-        if (auto && auto.length > 0) {
-          midPoints = auto
-        }
-      }
-
-      // Phase 2.5 (2026-05-23) — 직각 라우팅 자동 waypoint (obstacle-aware).
-      //   anchor 있는 경우는 manhattanRoute. 중심-중심 케이블은 L자 두 변형(H-V/V-H) 중
-      //   bend 점이 다른 시설과 안 겹치는 것 선택. 둘 다 겹치면 ㄷ자 우회.
+      // Comprehensive obstacle-aware routing (2026-05-23) — Phase 3 + Phase 2.5 통합.
+      //   여러 라우팅 후보 (직선, L자 H-V, L자 V-H, ㄷ자 위/아래/좌/우 우회) 를 시도하고
+      //   각 후보 폴리라인의 모든 세그먼트가 다른 시설을 가로지르지 않는 것을 선택.
+      //   조건 통과하는 것이 여러 개면 가장 짧고 꺾임 적은 것 선택.
       if (midPoints.length === 0 && mode !== 'map') {
         const fromForRoute = anchor?.from ?? fromPt
         const toForRoute = anchor?.to ?? toPt
+        const halfW = NODE_SIZE.width / 2
+        const halfH = NODE_SIZE.height / 2
 
-        // 양쪽 모두 anchor 없음 (중심-중심) → 장애물 회피 L자
-        if (!anchor?.from?.side && !anchor?.to?.side) {
-          const dx = toForRoute.x - fromForRoute.x
-          const dy = toForRoute.y - fromForRoute.y
-          const adx = Math.abs(dx)
-          const ady = Math.abs(dy)
-          if (adx > 5 && ady > 5) {
-            const halfW = NODE_SIZE.width / 2
-            const halfH = NODE_SIZE.height / 2
-            const variant1 = { x: toForRoute.x, y: fromForRoute.y } // H-V
-            const variant2 = { x: fromForRoute.x, y: toForRoute.y } // V-H
-            const BEND_BLOCK_DIST = Math.max(halfW, halfH) * 0.8
+        // 모든 다른 시설의 중심 (장애물)
+        const obstacles: { cx: number; cy: number }[] = []
+        for (const [oid, opos] of Object.entries(effectivePositions)) {
+          if (oid === c.from_facility_id || oid === c.to_facility_id) continue
+          obstacles.push({
+            cx: opos.x + halfW,
+            cy: opos.y + halfH - 10,
+          })
+        }
 
-            let v1Blocked = false
-            let v2Blocked = false
-            for (const [oid, opos] of Object.entries(effectivePositions)) {
-              if (oid === c.from_facility_id || oid === c.to_facility_id) continue
-              const ocx = opos.x + halfW
-              const ocy = opos.y + halfH - 10
-              if (!v1Blocked && Math.hypot(ocx - variant1.x, ocy - variant1.y) < BEND_BLOCK_DIST) v1Blocked = true
-              if (!v2Blocked && Math.hypot(ocx - variant2.x, ocy - variant2.y) < BEND_BLOCK_DIST) v2Blocked = true
-              if (v1Blocked && v2Blocked) break
-            }
+        const CROSS_CLEAR = 50 // 시설 중심에서 케이블 세그먼트 까지 최소 거리
+        const distPointToSeg = (
+          p: { x: number; y: number },
+          a: { x: number; y: number },
+          b: { x: number; y: number },
+        ): { dist: number; t: number } => {
+          const sdx = b.x - a.x
+          const sdy = b.y - a.y
+          const len2 = sdx * sdx + sdy * sdy
+          if (len2 < 0.01) return { dist: Math.hypot(p.x - a.x, p.y - a.y), t: 0 }
+          let t = ((p.x - a.x) * sdx + (p.y - a.y) * sdy) / len2
+          t = Math.max(0, Math.min(1, t))
+          const cx = a.x + t * sdx
+          const cy = a.y + t * sdy
+          return { dist: Math.hypot(p.x - cx, p.y - cy), t }
+        }
 
-            if (!v1Blocked && !v2Blocked) {
-              // 둘 다 OK — 긴 축 먼저
-              midPoints = adx >= ady ? [variant1] : [variant2]
-            } else if (!v1Blocked) {
-              midPoints = [variant1]
-            } else if (!v2Blocked) {
-              midPoints = [variant2]
-            } else {
-              // 둘 다 막힘 → ㄷ자 우회 (수직 또는 수평 방향으로 멀리)
-              const DETOUR = halfH + 60
-              if (adx >= ady) {
-                // 주로 수평 — 위/아래로 우회
-                // 위쪽으로 detour (보통 row 사이 공간)
-                const detourY = Math.min(fromForRoute.y, toForRoute.y) - DETOUR
-                midPoints = [
-                  { x: fromForRoute.x, y: detourY },
-                  { x: toForRoute.x, y: detourY },
-                ]
-              } else {
-                const detourX = Math.min(fromForRoute.x, toForRoute.x) - DETOUR
-                midPoints = [
-                  { x: detourX, y: fromForRoute.y },
-                  { x: detourX, y: toForRoute.y },
-                ]
-              }
+        // 폴리라인의 모든 세그먼트가 obstacle 통과 안 하는지 체크
+        const polylineClear = (pts: { x: number; y: number }[]): boolean => {
+          for (let i = 0; i < pts.length - 1; i++) {
+            for (const o of obstacles) {
+              const { dist, t } = distPointToSeg({ x: o.cx, y: o.cy }, pts[i], pts[i + 1])
+              if (t > 0.05 && t < 0.95 && dist < CROSS_CLEAR) return false
             }
           }
+          return true
+        }
+
+        const dx = toForRoute.x - fromForRoute.x
+        const dy = toForRoute.y - fromForRoute.y
+        const adx = Math.abs(dx)
+        const ady = Math.abs(dy)
+
+        type Cand = { waypoints: { x: number; y: number }[]; bends: number; length: number }
+        const candidates: Cand[] = []
+        const pushIfClear = (wps: { x: number; y: number }[]) => {
+          const full = [fromForRoute, ...wps, toForRoute]
+          if (!polylineClear(full)) return
+          let len = 0
+          for (let i = 0; i < full.length - 1; i++) {
+            len += Math.hypot(full[i + 1].x - full[i].x, full[i + 1].y - full[i].y)
+          }
+          candidates.push({ waypoints: wps, bends: wps.length, length: len })
+        }
+
+        // 1. 직선 (V/H 정렬됐을 때만 의미)
+        if (adx <= 5 || ady <= 5) {
+          pushIfClear([])
+        }
+
+        // 2. L자 두 변형 (대각선 케이블)
+        if (adx > 5 && ady > 5) {
+          pushIfClear([{ x: toForRoute.x, y: fromForRoute.y }]) // H-V
+          pushIfClear([{ x: fromForRoute.x, y: toForRoute.y }]) // V-H
+        }
+
+        // 3. ㄷ자 우회 — 수직/수평 4 방향
+        const VDETOUR = halfH + 80
+        const HDETOUR = halfW + 80
+        for (const offY of [-VDETOUR, VDETOUR]) {
+          const detourY = (fromForRoute.y + toForRoute.y) / 2 + offY
+          pushIfClear([
+            { x: fromForRoute.x, y: detourY },
+            { x: toForRoute.x, y: detourY },
+          ])
+        }
+        for (const offX of [-HDETOUR, HDETOUR]) {
+          const detourX = (fromForRoute.x + toForRoute.x) / 2 + offX
+          pushIfClear([
+            { x: detourX, y: fromForRoute.y },
+            { x: detourX, y: toForRoute.y },
+          ])
+        }
+
+        if (candidates.length > 0) {
+          // 꺾임 적은 것 우선, 동률 시 길이 짧은 것
+          candidates.sort((a, b) => a.bends - b.bends || a.length - b.length)
+          midPoints = candidates[0].waypoints
         } else {
-          // anchor 있는 경우는 기존 manhattanRoute
-          const auto = manhattanRoute(fromForRoute, toForRoute)
-          if (auto.length > 0) {
-            midPoints = auto
+          // 모든 후보 막힘 — 기본 L자 (꺾임 1 회) 라도 사용
+          if (adx > 5 && ady > 5) {
+            midPoints = adx >= ady
+              ? [{ x: toForRoute.x, y: fromForRoute.y }]
+              : [{ x: fromForRoute.x, y: toForRoute.y }]
           }
         }
       }
