@@ -4,10 +4,15 @@ import { useEffect, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
 import { toast } from 'sonner'
 import { X, ArrowRight, Flag } from 'lucide-react'
-import { CORE_LIFECYCLE_LABEL, type CoreLifecycle } from '@/lib/relocation'
+import {
+  CORE_LIFECYCLE_LABEL,
+  CORE_LIFECYCLE_VALUES,
+  type CoreLifecycle,
+} from '@/lib/relocation'
 import {
   moveCoreAssignmentFromCanvas,
   swapCoreAssignmentsFromCanvas,
+  updateCoreLifecycleFromCanvas,
 } from './core-actions'
 import type { CablePanelCircuit, CablePanelAssignment } from './CableInfoPanel'
 
@@ -144,6 +149,24 @@ export default function SpliceMapModal({
     onChanged()
   }
 
+  // 구분(lifecycle) 인라인 변경 — select onChange 즉시 server action.
+  async function onLifecycleChange(assignmentId: string, next: CoreLifecycle) {
+    if (busy) return
+    setBusy(true)
+    const result = await updateCoreLifecycleFromCanvas({
+      project_id: projectId,
+      assignment_id: assignmentId,
+      lifecycle: next,
+    })
+    setBusy(false)
+    if (!result.ok) {
+      toast.error(result.error)
+      return
+    }
+    toast.success(`${CORE_LIFECYCLE_LABEL[next]} 로 변경했습니다`)
+    onChanged()
+  }
+
   // 사용 중 코어와 swap — 두 회선의 코어 번호를 서로 교체.
   async function onSwap(aId: string, bId: string, aCore: number, bCore: number) {
     if (busy) return
@@ -246,8 +269,26 @@ export default function SpliceMapModal({
                         <span className="text-slate-300 italic">(빈)</span>
                       )}
                     </td>
-                    <td className="px-3 py-2 text-slate-500 truncate">
-                      {a ? CORE_LIFECYCLE_LABEL[a.lifecycle as CoreLifecycle] : '—'}
+                    <td className="px-3 py-2 truncate">
+                      {a ? (
+                        <select
+                          value={a.lifecycle}
+                          onChange={(e) =>
+                            onLifecycleChange(a.id, e.target.value as CoreLifecycle)
+                          }
+                          disabled={busy}
+                          title="구분 변경"
+                          className="w-full rounded border border-slate-300 bg-white px-1 py-0.5 text-[11px] text-slate-700 disabled:opacity-50"
+                        >
+                          {CORE_LIFECYCLE_VALUES.map((l) => (
+                            <option key={l} value={l}>
+                              {CORE_LIFECYCLE_LABEL[l]}
+                            </option>
+                          ))}
+                        </select>
+                      ) : (
+                        <span className="text-slate-300">—</span>
+                      )}
                     </td>
                     <td className="px-3 py-2">
                       {a?.is_terminal ? (

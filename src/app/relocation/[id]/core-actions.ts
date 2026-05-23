@@ -533,6 +533,40 @@ export async function swapCoreAssignmentsFromCanvas(input: {
 
 
 /**
+ * 코어 배정의 lifecycle 만 변경 — 선번장에서 신설/기설/이설 즉시 변경.
+ * cable·circuit·코어 번호·종단은 그대로.
+ */
+export async function updateCoreLifecycleFromCanvas(input: {
+  project_id: string
+  assignment_id: string
+  lifecycle: string
+}): Promise<{ ok: true } | { ok: false; error: string }> {
+  if (!input.project_id || !input.assignment_id) {
+    return { ok: false, error: '코어 배정 정보가 없습니다' }
+  }
+  if (!isCoreLifecycle(input.lifecycle)) {
+    return { ok: false, error: '코어 lifecycle 값이 올바르지 않습니다' }
+  }
+
+  const { supabase } = await requireMember()
+
+  const { error } = await supabase
+    .from('relocation_core_assignments')
+    .update({
+      lifecycle: input.lifecycle,
+      is_auto_assigned: false, // 사람이 손댄 row 표시
+    })
+    .eq('id', input.assignment_id)
+    .eq('project_id', input.project_id) // RLS 보강
+
+  if (error) return { ok: false, error: '구분 변경 실패: ' + error.message }
+
+  revalidatePath(`/relocation/${input.project_id}`)
+  return { ok: true }
+}
+
+
+/**
  * 코어 배정의 코어 번호만 변경 — 선번장에서 빈 코어로 옮길 때.
  * cable·circuit·lifecycle·종단은 그대로. 같은 케이블 안에서만 이동.
  */
