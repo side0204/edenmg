@@ -2141,62 +2141,113 @@ export default function TopologyCanvas({
             </button>
           )}
 
-          {/* 자동 캡처 — 지도 모드. 화면 공유로 지도를 자동 캡처·합성 */}
+          {/* 캡처 메뉴 — 지도 모드. 자동/분할 두 가지 방식을 드롭다운에서 선택.
+              진행 중이면 버튼이 해당 색으로 강조 + 「취소」 항목 노출. */}
           {mode === 'map' && mapStatus === 'ready' && (
-            <button
-              type="button"
-              onClick={() => {
-                if (autoCaptureActive) {
-                  setAutoCaptureActive(false)
-                  return
+            <details className="relative mr-1">
+              <summary
+                className={
+                  'inline-flex items-center gap-1 rounded-md border px-2 h-7 text-[11px] font-medium cursor-pointer list-none [&::-webkit-details-marker]:hidden ' +
+                  (autoCaptureActive
+                    ? 'bg-emerald-600 text-white border-emerald-600'
+                    : captureActive
+                      ? 'bg-amber-500 text-white border-amber-500'
+                      : 'text-slate-700 border-slate-300 hover:bg-slate-50')
                 }
-                setCaptureActive(false)
-                setSelectedId(null)
-                setSelectedCableId(null)
-                setFaultSearchOpen(false)
-                fitMapToFacilities()
-                setAutoCaptureActive(true)
-              }}
-              className={
-                'mr-1 inline-flex items-center gap-1 rounded-md border px-2 h-7 text-[11px] font-medium ' +
-                (autoCaptureActive
-                  ? 'bg-emerald-600 text-white border-emerald-600'
-                  : 'text-slate-700 border-slate-300 hover:bg-slate-50')
-              }
-              title="화면 공유로 지도를 자동 캡처해 한 장으로 합칩니다"
-            >
-              <ImageDown className="h-3 w-3" />
-              자동 캡처
-            </button>
-          )}
-
-          {/* 분할 캡처 — 지도 모드. 시설 영역을 격자로 나눠 스크린샷 가이드 */}
-          {mode === 'map' && mapStatus === 'ready' && (
-            <button
-              type="button"
-              onClick={() => {
-                if (captureActive) {
-                  setCaptureActive(false)
-                  return
-                }
-                setAutoCaptureActive(false)
-                setSelectedId(null)
-                setSelectedCableId(null)
-                setFaultSearchOpen(false)
-                fitMapToFacilities()
-                setCaptureActive(true)
-              }}
-              className={
-                'mr-1 inline-flex items-center gap-1 rounded-md border px-2 h-7 text-[11px] font-medium ' +
-                (captureActive
-                  ? 'bg-amber-500 text-white border-amber-500'
-                  : 'text-slate-700 border-slate-300 hover:bg-slate-50')
-              }
-              title="시설 영역을 격자로 나눠 캡처 (지도 이미지 내보내기)"
-            >
-              <Camera className="h-3 w-3" />
-              분할 캡처
-            </button>
+                title="캡처 방식 선택 (자동 / 분할)"
+              >
+                <Camera className="h-3 w-3" />
+                캡처
+                {(autoCaptureActive || captureActive) && (
+                  <span className="ml-0.5 text-[9px] opacity-90">
+                    ({autoCaptureActive ? '자동' : '분할'})
+                  </span>
+                )}
+              </summary>
+              <div
+                className="absolute right-0 top-8 z-30 w-52 rounded-lg border border-slate-200 bg-white p-1.5 shadow-lg"
+                onClick={(e) => {
+                  // 항목 클릭 후 드롭다운 자동 닫힘
+                  const det = e.currentTarget.parentElement as HTMLDetailsElement | null
+                  if (det && det.open) {
+                    requestAnimationFrame(() => {
+                      det.open = false
+                    })
+                  }
+                }}
+              >
+                <button
+                  type="button"
+                  onClick={() => {
+                    if (autoCaptureActive) {
+                      setAutoCaptureActive(false)
+                      return
+                    }
+                    setCaptureActive(false)
+                    setSelectedId(null)
+                    setSelectedCableId(null)
+                    setFaultSearchOpen(false)
+                    fitMapToFacilities()
+                    setAutoCaptureActive(true)
+                  }}
+                  className={
+                    'w-full text-left rounded-md px-2 py-1.5 text-[11px] font-medium flex items-start gap-2 ' +
+                    (autoCaptureActive
+                      ? 'bg-emerald-50 text-emerald-800'
+                      : 'text-slate-700 hover:bg-slate-50')
+                  }
+                >
+                  <ImageDown className="h-3.5 w-3.5 mt-0.5 shrink-0" />
+                  <span className="flex-1">
+                    <span className="block font-semibold">자동 캡처</span>
+                    <span className="block text-[10px] text-slate-500 mt-0.5">
+                      화면 공유로 지도 자동 캡처·합성
+                    </span>
+                  </span>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    if (captureActive) {
+                      setCaptureActive(false)
+                      return
+                    }
+                    setAutoCaptureActive(false)
+                    setSelectedId(null)
+                    setSelectedCableId(null)
+                    setFaultSearchOpen(false)
+                    fitMapToFacilities()
+                    setCaptureActive(true)
+                  }}
+                  className={
+                    'mt-0.5 w-full text-left rounded-md px-2 py-1.5 text-[11px] font-medium flex items-start gap-2 ' +
+                    (captureActive
+                      ? 'bg-amber-50 text-amber-800'
+                      : 'text-slate-700 hover:bg-slate-50')
+                  }
+                >
+                  <Camera className="h-3.5 w-3.5 mt-0.5 shrink-0" />
+                  <span className="flex-1">
+                    <span className="block font-semibold">분할 캡처</span>
+                    <span className="block text-[10px] text-slate-500 mt-0.5">
+                      시설 영역을 격자로 나눠 가이드
+                    </span>
+                  </span>
+                </button>
+                {(autoCaptureActive || captureActive) && (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setAutoCaptureActive(false)
+                      setCaptureActive(false)
+                    }}
+                    className="mt-1 w-full text-left rounded-md px-2 py-1.5 text-[11px] font-medium text-rose-700 hover:bg-rose-50 border-t border-slate-100"
+                  >
+                    캡처 취소
+                  </button>
+                )}
+              </div>
+            </details>
           )}
 
           {/* 도식 내보내기 — 도식 모드. 캔버스를 PNG 이미지 파일로 저장 */}
@@ -2702,9 +2753,11 @@ export default function TopologyCanvas({
               zIndex: 0,
               transform: extraZoomActive ? `scale(${extraZoom})` : undefined,
               transformOrigin: '50% 50%',
+              // 회색조 + 밝기↑(>1) + 대비↓ — 어두워지지 않고 밝게 바랜 회색.
+              // dimLevel=70 기본: grayscale 0.7 · brightness 1.07 · contrast 0.755
               filter:
                 dimLevel > 0
-                  ? `grayscale(${dimLevel / 100}) brightness(${(1 - (dimLevel / 100) * 0.15).toFixed(3)}) contrast(${(1 - (dimLevel / 100) * 0.2).toFixed(3)})`
+                  ? `grayscale(${dimLevel / 100}) brightness(${(1 + (dimLevel / 100) * 0.1).toFixed(3)}) contrast(${(1 - (dimLevel / 100) * 0.35).toFixed(3)})`
                   : undefined,
             }}
           />
