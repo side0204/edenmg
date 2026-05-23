@@ -38,15 +38,15 @@ const CARDINAL_DIRS = [0, Math.PI / 2, Math.PI, -Math.PI / 2]
 // 대각선 4 방위
 const DIAGONAL_DIRS = [Math.PI / 4, (3 * Math.PI) / 4, -(3 * Math.PI) / 4, -Math.PI / 4]
 // V/H 우선 — 자연 각도가 카디널에서 이 임계 이내면 V/H 후보 우선.
-//   35° ≈ π × 35 / 180. owner 요청: 1 조·3 조 케이블 모두 V/H 우선.
-const CARDINAL_PREF_THRESHOLD = (Math.PI * 35) / 180
-const MIN_DISTANCE = 130 // BFS 자식 시설 기본 배치 거리
+//   40° ≈ π × 40 / 180. owner 요청: V/H 가 가능하면 무조건 우선, 대각선은 진짜 45° 가까울 때만.
+const CARDINAL_PREF_THRESHOLD = (Math.PI * 40) / 180
+const MIN_DISTANCE = 110 // 자식 시설 최소 거리 (자연 거리가 너무 작을 때 폴백)
 const MIN_FACILITY_GAP = 120 // 시설끼리 최소 간격 (이보다 가까우면 겹침)
 const CABLE_CROSS_CLEARANCE = 55 // 케이블이 다른 시설 중심에서 이만큼 이내면 가로지름
 const MAX_DISTANCE_MULT = 3.0 // 모든 방위 막히면 거리를 이 배까지 늘려가며 시도
 const DISTANCE_GROWTH = 1.3 // 거리 증가 비율
-const REFINE_ITERATIONS = 30
-const REFINE_FORCE = 0.15
+const REFINE_ITERATIONS = 20
+const REFINE_FORCE = 0.08 // 약한 force — tree edge 가 잘 흐트러지지 않게
 const ALIGN_TOLERANCE = 0.02
 
 // 두 각도 사이 원형 거리 (0 ~ π)
@@ -190,12 +190,17 @@ export function snapPositionsToCableDirections(
         if (visited.has(nbrId)) continue
         const nbrInitial = initialPositions.get(nbrId)
         if (!nbrInitial) continue
+        const parentInitial = initialPositions.get(currId)
+        if (!parentInitial) continue
 
-        const dx = nbrInitial.x - currPos.x
-        const dy = nbrInitial.y - currPos.y
+        // 자연 각도/거리는 「초기 위치 기준」 으로 계산 — 부모가 BFS 중 이동했어도
+        //   사용자의 원래 의도(상대 방향)는 유지. 「가장 가까운 경로」 = 자연 거리 그대로.
+        const dx = nbrInitial.x - parentInitial.x
+        const dy = nbrInitial.y - parentInitial.y
         const naturalAngle = Math.atan2(dy, dx)
-        const initialDist = Math.hypot(dx, dy) || MIN_DISTANCE
-        const baseDistance = Math.max(MIN_DISTANCE, initialDist)
+        const initialDist = Math.hypot(dx, dy)
+        // 자연 거리가 너무 작으면 (시설 겹쳐 그려진 초기) 최소 거리 폴백
+        const baseDistance = initialDist > MIN_DISTANCE ? initialDist : MIN_DISTANCE
 
         // 방위 후보 순서 결정 (V/H 우선)
         const dirOrder = preferredDirectionOrder(naturalAngle)
