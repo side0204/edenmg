@@ -3335,26 +3335,32 @@ export default function TopologyCanvas({
                   strokeWidth={1.5}
                   strokeLinejoin="round"
                 />
-                {/* 「절단 절체」 글자 — 폭발 마크 바로 아래 빨강 알약 */}
-                <rect
-                  x={m.x - 31}
-                  y={m.y + 13}
-                  width={62}
-                  height={15}
-                  rx={7.5}
-                  fill="#dc2626"
-                  stroke="white"
-                  strokeWidth={1.5}
-                />
-                <text
-                  x={m.x}
-                  y={m.y + 23.7}
-                  textAnchor="middle"
-                  fill="white"
-                  style={{ fontSize: 9, fontFamily: LABEL_FONT, fontWeight: 700 }}
-                >
-                  절단 절체
-                </text>
+                {/* 「절단 절체」 글자 알약 — 도식 모드에만 표시.
+                    지도 모드는 시설이 빽빽이 놓여 글자가 다른 시설을 가려서 숨김.
+                    폭발 마크만으로도 식별 가능. */}
+                {mode !== 'map' && (
+                  <>
+                    <rect
+                      x={m.x - 31}
+                      y={m.y + 13}
+                      width={62}
+                      height={15}
+                      rx={7.5}
+                      fill="#dc2626"
+                      stroke="white"
+                      strokeWidth={1.5}
+                    />
+                    <text
+                      x={m.x}
+                      y={m.y + 23.7}
+                      textAnchor="middle"
+                      fill="white"
+                      style={{ fontSize: 9, fontFamily: LABEL_FONT, fontWeight: 700 }}
+                    >
+                      절단 절체
+                    </text>
+                  </>
+                )}
               </g>
             ))
           })}
