@@ -7,6 +7,7 @@ import {
   Warning,
   FaqItem,
 } from '../ScenarioFrame'
+import { Screenshot } from '../Screenshot'
 
 export default function Page() {
   const scenario = findScenario('vehicle')!
@@ -22,6 +23,11 @@ export default function Page() {
       <div className="space-y-4">
         <Step n={1}>
           <p>홈 「업무용 차량」 카드 또는 BottomNav 「사무 → 차량」 진입.</p>
+          <Screenshot
+            file="vehicle-01-home-card.png"
+            caption="홈 「업무용 차량」 카드 — 사용 중 차량과 대기 차량이 동시에 보이는 모습"
+            priority="must"
+          />
         </Step>
         <Step n={2}>
           <p>
@@ -34,6 +40,11 @@ export default function Page() {
             출발 km (선택)·목적(선택) 입력. 이전 반납 km 가 placeholder 로 표시되니
             참고하세요. 「출고」 누르면 끝.
           </p>
+          <Screenshot
+            file="vehicle-02-checkout-form.png"
+            caption="출고 폼 — 출발 km placeholder 가 회색으로 보이는 모습 (이전 반납 km)"
+            priority="optional"
+          />
         </Step>
       </div>
 
@@ -48,6 +59,11 @@ export default function Page() {
             체크박스를 안 켜면 금액 무시. 반납 위치는 선택이지만 다음 운전자가
             참고합니다.
           </p>
+          <Screenshot
+            file="vehicle-03-return-form.png"
+            caption="반납 폼 — 도착 km, 주유 체크 + 금액, 메모, 반납 위치 입력 칸"
+            priority="must"
+          />
         </Step>
         <Step n={3}>
           <p>「반납」 누르면 운행 기록이 저장되고 차량이 「대기」 로 돌아갑니다.</p>

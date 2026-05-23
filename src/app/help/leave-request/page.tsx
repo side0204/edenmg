@@ -7,6 +7,7 @@ import {
   Warning,
   FaqItem,
 } from '../ScenarioFrame'
+import { Screenshot } from '../Screenshot'
 
 export default function Page() {
   const scenario = findScenario('leave-request')!
@@ -41,6 +42,11 @@ export default function Page() {
             <li>병가·공가 — 시작/종료일 + 증빙 첨부 (선택)</li>
             <li>외근 — 시작/종료 시각, 사유, 장소</li>
           </ul>
+          <Screenshot
+            file="leave-request-01-form.png"
+            caption="신청 폼 전체 — 종류 select 펼친 모습 (6가지 종류와 동적 분기 칸)"
+            priority="must"
+          />
         </Step>
         <Step n={3}>
           <p>
@@ -53,6 +59,11 @@ export default function Page() {
             <b>대무자</b> 선택 — 풀스크린 검색 모달이 열립니다. 이름·직급·팀·분야로
             검색 가능. 본인은 선택 못 합니다. 모든 휴가에 대무자가 필수입니다.
           </p>
+          <Screenshot
+            file="leave-request-02-substitute-modal.png"
+            caption="대무자 풀스크린 검색 모달 — 검색창 + 결과 리스트 보이는 상태"
+            priority="must"
+          />
         </Step>
         <Step n={5}>
           <p>「제출」 누르면 결재함으로 전달되고 본인에겐 「대기 중」 표시.</p>
@@ -68,6 +79,16 @@ export default function Page() {
         <li>관리자가 「전결」 로 단독 승인 가능 (긴급 시)</li>
         <li>반려 시 사유가 표시됨 → 정정해 다시 신청</li>
       </ul>
+      <Screenshot
+        file="leave-request-03-detail.png"
+        caption="신청 상세 — 결재 진행 흐름이 보이는 상태 (대기 → 팀장 승인 → 관리자 승인)"
+        priority="must"
+      />
+      <Screenshot
+        file="leave-request-04-my-leaves.png"
+        caption="/my-leaves — 본인 연차 잔여 큰 카드 + 다음 회차 미리보기"
+        priority="optional"
+      />
 
       <SectionTitle>본인 취소</SectionTitle>
       <p>

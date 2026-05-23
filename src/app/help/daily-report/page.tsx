@@ -7,6 +7,7 @@ import {
   Warning,
   FaqItem,
 } from '../ScenarioFrame'
+import { Screenshot } from '../Screenshot'
 
 export default function Page() {
   const scenario = findScenario('daily-report')!
@@ -25,6 +26,11 @@ export default function Page() {
         체크인은 의사결정 기록용이라 일보 작성과는 분리되어 있습니다 (체크 없이도 일보
         작성 가능).
       </p>
+      <Screenshot
+        file="daily-report-01-today-checkin.png"
+        caption="홈 「오늘 작업」 카드 — 미시작 작업 체크박스 다중 선택 + 「시작하기」 버튼"
+        priority="must"
+      />
 
       <SectionTitle>일보 작성 단계별 흐름</SectionTitle>
       <div className="space-y-4">
@@ -56,6 +62,16 @@ export default function Page() {
             <li>회사 자재 마스터 → 취득 사유 입력 (현장구매·이전잔여·임시차용·기타)</li>
             <li>직접 입력 (마스터에 없는 비규격) → 취득 사유 입력</li>
           </ul>
+          <Screenshot
+            file="daily-report-02-report-form.png"
+            caption="일보 작성 폼 — 사용 자재 섹션 펼침 (3가지 모드 토글 보이는 상태)"
+            priority="must"
+          />
+          <Screenshot
+            file="daily-report-03-holding-picker.png"
+            caption="HoldingPicker 풀스크린 모달 — 본인 보유 자재 검색·선택 화면"
+            priority="must"
+          />
         </Step>
         <Step n={5}>
           <p>
@@ -71,6 +87,11 @@ export default function Page() {
         이어서」 로 라디오 선택 후 「마감하기」. 의사결정이 기록되어 다음날 누가 어디서
         이어받을지 확인 가능.
       </p>
+      <Screenshot
+        file="daily-report-04-today-close.png"
+        caption="오늘 마감 라디오 — 「본인 분 완료」 / 「내일 이어서」 토글 + 마감 버튼"
+        priority="optional"
+      />
 
       <Tip>
         한 작업·한 날에 본인 일보 1장이 원칙. 다른 작업자도 같은 작업·같은 날에 본인

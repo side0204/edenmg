@@ -7,6 +7,7 @@ import {
   Warning,
   FaqItem,
 } from '../ScenarioFrame'
+import { Screenshot } from '../Screenshot'
 
 export default function Page() {
   const scenario = findScenario('connection-report')!
@@ -45,6 +46,11 @@ export default function Page() {
             케이블·접속 코어를 입력합니다. 작업구간 자체 추가/수정은 담당자·관리자만
             가능. 작업자는 등록된 구간에서만 작업.
           </p>
+          <Screenshot
+            file="connection-report-01-chain-tree.png"
+            caption="작업구간(chain) 트리 — 상위국 → 함체들 → 하위국 들여쓰기 트리"
+            priority="must"
+          />
         </Step>
         <Step n={3}>
           <p>
@@ -53,6 +59,16 @@ export default function Page() {
             "1-6", "1,3,5", "1-6,12-18" 같은 자유 텍스트 — 입력 즉시 접속 코어수가 라이브로
             계산됩니다. 같은 케이블 안에서 중복·역순·음수는 빨강 경고.
           </p>
+          <Screenshot
+            file="connection-report-02-unified-form.png"
+            caption="접속일보 통합 작성 폼 — 케이블·노드·공종·자재 한 화면 입력"
+            priority="must"
+          />
+          <Screenshot
+            file="connection-report-03-live-cores.png"
+            caption="사용선번 입력 즉시 접속 코어수가 라이브로 표시되는 화면"
+            priority="must"
+          />
         </Step>
         <Step n={4}>
           <p>
@@ -74,8 +90,15 @@ export default function Page() {
       <SectionTitle>사진 첨부</SectionTitle>
       <p>
         일보 상세 페이지 갤러리 섹션 → 「📷 사진 추가」 → 여러 장 한 번에 선택. 자동으로
-        촬영시각·GPS 가 EXIF 에서 추출됩니다. 형식: JPG·PNG·WEBP·HEIC, 10MB/장.
+        촬영시각·GPS 가 EXIF 에서 추출됩니다. EXIF 는 사진에 자동으로 함께 저장되는
+        부가 정보(촬영시각·위치·기종 등)로, 시스템이 이를 읽어 갤러리에 자동
+        표시합니다. 형식: JPG·PNG·WEBP·HEIC, 10MB/장.
       </p>
+      <Screenshot
+        file="connection-report-04-gallery.png"
+        caption="일보 상세 갤러리 — 사진별 촬영시각·GPS map 링크가 보이는 모양"
+        priority="optional"
+      />
 
       <Tip>
         다른 작업자가 작업구간(chain)을 만들지 않은 상태라면 작업 진행이 안 됩니다.

@@ -7,6 +7,7 @@ import {
   Warning,
   FaqItem,
 } from '../ScenarioFrame'
+import { Screenshot } from '../Screenshot'
 
 export default function Page() {
   const scenario = findScenario('admin-onboarding')!
@@ -44,6 +45,11 @@ export default function Page() {
             <li>통계조회(blue) — /works/stats 등 전사 통계</li>
             <li>자재관리(violet) — /stock 입출고·승인</li>
           </ul>
+          <Screenshot
+            file="admin-01-signup-pending.png"
+            caption="「가입 승인 대기」 섹션 — 신청자 카드 (권한 select + 토글 4종 펼친 상태)"
+            priority="must"
+          />
         </Step>
         <Step n={4}>
           <p>
@@ -67,12 +73,22 @@ export default function Page() {
         <li>차량번호 (접속팀·외선팀 만 노출, 접속팀은 필수)</li>
         <li>입사일 (연차 자동 부여 기준)</li>
       </ul>
+      <Screenshot
+        file="admin-02-active-employee-card.png"
+        caption="활성 직원 카드 — 권한·직급·팀·분야 드롭다운 + 토글 4종 위치"
+        priority="must"
+      />
 
       <SectionTitle>퇴사 처리</SectionTitle>
       <p>
         활성 직원 카드 푸터의 「퇴사 처리」 details 메뉴 펼침 → 퇴사일(기본 오늘) 입력 →
         「퇴사 처리」. 본인 카드에서는 안 보입니다 (락아웃 방지).
       </p>
+      <Screenshot
+        file="admin-03-resign.png"
+        caption="퇴사 처리 details 메뉴 펼침 — 퇴사일 input + 「퇴사 처리」 rose 버튼"
+        priority="optional"
+      />
       <ul className="list-disc pl-5 space-y-1 text-slate-700">
         <li>퇴사 처리 = is_active=false + resigned_at 기록 + 로그인 차단</li>
         <li>모든 일보·근태·작업·휴가 이력은 그대로 보존 (산안법 5년)</li>

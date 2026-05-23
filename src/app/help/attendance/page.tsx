@@ -7,6 +7,7 @@ import {
   Warning,
   FaqItem,
 } from '../ScenarioFrame'
+import { Screenshot } from '../Screenshot'
 
 export default function Page() {
   const scenario = findScenario('attendance')!
@@ -32,6 +33,11 @@ export default function Page() {
             홈에서 초록색 <b>「출근하기 →」</b> 버튼을 누릅니다. (이미 출근했다면 검정색
             「퇴근하기 →」 가 보입니다.)
           </p>
+          <Screenshot
+            file="attendance-01-home-card.png"
+            caption="홈 「오늘 근태」 카드 — 출근 전 초록 「출근하기 →」 버튼이 보이는 상태"
+            priority="must"
+          />
         </Step>
         <Step n={2}>
           <p>
@@ -42,12 +48,22 @@ export default function Page() {
             <li>반경 안 → 「출근」 버튼을 누르면 끝</li>
             <li>반경 밖 → 「반경 밖 사유」 입력란이 자동으로 열림</li>
           </ul>
+          <Screenshot
+            file="attendance-02-matched.png"
+            caption="출퇴근 페이지 — 현재 위치로 가장 가까운 현장이 자동 매칭된 화면"
+            priority="optional"
+          />
         </Step>
         <Step n={3}>
           <p>
             반경 밖이면 사유(예: <i>"발주처 회의 이동 중"</i>)를 적고 「출근」 누르면
             기록됩니다.
           </p>
+          <Screenshot
+            file="attendance-03-out-of-radius.png"
+            caption="반경 밖일 때 — 「반경 밖 사유」 입력란이 자동으로 열린 상태"
+            priority="must"
+          />
         </Step>
       </div>
 

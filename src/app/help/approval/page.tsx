@@ -7,6 +7,7 @@ import {
   Warning,
   FaqItem,
 } from '../ScenarioFrame'
+import { Screenshot } from '../Screenshot'
 
 export default function Page() {
   const scenario = findScenario('approval')!
@@ -23,6 +24,11 @@ export default function Page() {
         홈 「결재」 카드의 빨간 배지 = 본인 처리 대기 건수. 카드 또는 BottomNav 「사무 →
         결재」 진입. 휴가·일보가 한 화면에 카드로 나열되고, 긴급 표시된 신청이 위로 정렬.
       </p>
+      <Screenshot
+        file="approval-01-inbox.png"
+        caption="결재함 목록 — 긴급 우선 정렬 + 노란/빨간 배지가 보이는 상태"
+        priority="must"
+      />
 
       <SectionTitle>휴가·외근 결재 흐름</SectionTitle>
       <div className="space-y-4">
@@ -49,6 +55,11 @@ export default function Page() {
             관리자 권한자는 결재선 단계 무관 <b>「전결」</b> 로 단독 승인 가능 (긴급
             상황용). 전결 시 인디고 색으로 표시됩니다.
           </p>
+          <Screenshot
+            file="approval-02-leave-detail.png"
+            caption="휴가 결재 상세 — 「승인」 / 「반려」 / 「전결」 3개 버튼 (인디고색 전결 식별)"
+            priority="must"
+          />
         </Step>
       </div>
 
@@ -62,6 +73,11 @@ export default function Page() {
         <li>반려 시 작성자가 정정 후 다시 제출</li>
         <li>승인 후엔 담당자만 수정 가능 (재승인 흐름)</li>
       </ul>
+      <Screenshot
+        file="approval-03-report-detail.png"
+        caption="일보 결재 상세 — 사용 자재 + 승인/반려 흐름이 보이는 화면"
+        priority="optional"
+      />
 
       <Tip>
         결재 의견은 신청자·작성자가 신청 상세 페이지에서 그대로 보게 됩니다. 사실
