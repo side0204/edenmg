@@ -651,59 +651,13 @@ export default function TopologyCanvas({
     setCableWaypoints({})
   }, [mode])
 
-  // 케이블 offset — 두 가지 그룹 (모두 union-find 로 합쳐 같은 offset 그룹으로 처리):
-  //   (1) 같은 시설 쌍 2 조 이상 — 양 끝 한 점에 모이고 중간 벌어지는 렌즈 모양
-  //   (2) 다른 시설 쌍이지만 path 가 실제로 「겹치는」 case
-  //       - 같은 방향 (H 또는 V) + perpendicular 좌표 30px 이내 + range overlap
-  //       - end-to-end 체인 (예: A→B, B→C) 은 range 가 점만 공유하므로 안 묶임
+  // 케이블 offset — 「같은 시설 쌍」 2 조 이상에만 lens 모양 적용.
+  //   path 겹침 detection 은 over-aggressive (단일 cable 도 lens 적용됨) 이라 제거.
+  //   다른 시설 쌍이지만 path 공유하는 경우는 단일 cable 처럼 직선으로 두고
+  //   다른 cable 의 routing 변경 (장애물 회피) 으로 자연스럽게 분리되도록 함.
   const cableOffsets = useMemo(() => {
     const result = new Map<string, number>()
 
-    // 케이블 분류 — 명확히 V/H 인 경우만 (대각선/짧은 케이블 제외)
-    type CableInfo = { dir: 'H' | 'V'; start: number; end: number; perp: number }
-    const cableInfo = new Map<string, CableInfo>()
-    for (const c of cables) {
-      const fromPos = effectivePositions[c.from_facility_id]
-      const toPos = effectivePositions[c.to_facility_id]
-      if (!fromPos || !toPos) continue
-      const dx = toPos.x - fromPos.x
-      const dy = toPos.y - fromPos.y
-      const adx = Math.abs(dx)
-      const ady = Math.abs(dy)
-      if (ady < 30 && adx > 50) {
-        cableInfo.set(c.id, {
-          dir: 'H',
-          start: Math.min(fromPos.x, toPos.x),
-          end: Math.max(fromPos.x, toPos.x),
-          perp: (fromPos.y + toPos.y) / 2,
-        })
-      } else if (adx < 30 && ady > 50) {
-        cableInfo.set(c.id, {
-          dir: 'V',
-          start: Math.min(fromPos.y, toPos.y),
-          end: Math.max(fromPos.y, toPos.y),
-          perp: (fromPos.x + toPos.x) / 2,
-        })
-      }
-    }
-
-    // union-find
-    const parent = new Map<string, string>()
-    for (const c of cables) parent.set(c.id, c.id)
-    const find = (x: string): string => {
-      const px = parent.get(x)
-      if (!px || px === x) return x
-      const root = find(px)
-      parent.set(x, root)
-      return root
-    }
-    const union = (x: string, y: string) => {
-      const rx = find(x)
-      const ry = find(y)
-      if (rx !== ry) parent.set(rx, ry)
-    }
-
-    // 같은 시설 쌍 union
     const samePairGroups = new Map<string, string[]>()
     for (const c of cables) {
       const key = [c.from_facility_id, c.to_facility_id].sort().join('|')
@@ -712,43 +666,15 @@ export default function TopologyCanvas({
       else samePairGroups.set(key, [c.id])
     }
     for (const ids of samePairGroups.values()) {
-      for (let i = 1; i < ids.length; i++) union(ids[0], ids[i])
-    }
-
-    // path 겹침 union — 같은 방향 + perp 좌표 가까움 + range overlap
-    const cableIds = [...cableInfo.keys()]
-    const BUCKET_TOLERANCE = 30
-    const RANGE_OVERLAP_MIN = 20 // 최소 20px 이상 겹쳐야 묶음 (점 공유 케이블 배제)
-    for (let i = 0; i < cableIds.length; i++) {
-      for (let j = i + 1; j < cableIds.length; j++) {
-        const a = cableInfo.get(cableIds[i])!
-        const b = cableInfo.get(cableIds[j])!
-        if (a.dir !== b.dir) continue
-        if (Math.abs(a.perp - b.perp) > BUCKET_TOLERANCE) continue
-        const overlap = Math.min(a.end, b.end) - Math.max(a.start, b.start)
-        if (overlap < RANGE_OVERLAP_MIN) continue
-        union(cableIds[i], cableIds[j])
-      }
-    }
-
-    // 그룹별 offset 부여 — 같은 root 의 cable 끼리 perpendicular 분산
-    const groups = new Map<string, string[]>()
-    for (const c of cables) {
-      const root = find(c.id)
-      const arr = groups.get(root)
-      if (arr) arr.push(c.id)
-      else groups.set(root, [c.id])
-    }
-    for (const grp of groups.values()) {
-      if (grp.length <= 1) continue
-      const sorted = [...grp].sort()
-      sorted.forEach((id, i) =>
-        result.set(id, (i - (sorted.length - 1) / 2) * CABLE_OFFSET_GAP * 2),
+      if (ids.length <= 1) continue
+      const k = ids.length
+      ids.forEach((id, i) =>
+        result.set(id, (i - (k - 1) / 2) * CABLE_OFFSET_GAP * 2),
       )
     }
 
     return result
-  }, [cables, effectivePositions])
+  }, [cables])
 
   // 시설별 연결된 케이블 수 (노드 배지 — 동일 시설 연결 직관 확인)
   const facilityCableCount = useMemo(() => {
