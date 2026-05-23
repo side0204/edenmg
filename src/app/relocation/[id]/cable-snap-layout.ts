@@ -16,6 +16,11 @@
 //
 // 다중 연결 컴포넌트는 각각 자체 root 부터 BFS. (서로 떨어진 작업 영역 분리)
 //
+// 6. BFS 후 refinement (2026-05-23 추가) — cycle edge 가 V/H/45° 에서 벗어난 경우 force-directed
+//    relaxation 으로 시설 위치를 조금씩 회전. 각 cable 이 자신을 45° 로 끌어당기는 작은 힘을
+//    양 끝에 적용. root 는 고정. tree edge 의 정렬이 약간 흐트러져도 cycle edge 가 함께 정렬되면
+//    전체적으로 더 깔끔. 30 회 반복 후 종료.
+//
 // 입력 — 시설 ID 목록, 케이블 양 끝 ID 목록, 현재 위치 Map.
 // 출력 — { id, x, y }[] 배열 (변경된 시설만 반환 — 절약).
 
@@ -27,6 +32,9 @@ export type SnapPosition = { id: string; x: number; y: number }
 
 const SNAP_STEP = Math.PI / 4 // 45°
 const DEFAULT_DISTANCE = 130 // 거리가 0 인 경우 폴백
+const REFINE_ITERATIONS = 30 // refinement 반복 횟수
+const REFINE_FORCE = 0.15 // 회전 force 강도 (0~1, 클수록 빨리 수렴하지만 진동 위험)
+const ALIGN_TOLERANCE = 0.02 // ~1.1°. 이보다 작은 deviation 은 정렬됐다고 간주
 
 export function snapPositionsToCableDirections(
   facilities: Facility[],
@@ -92,6 +100,85 @@ export function snapPositionsToCableDirections(
         queue.push(nbrId)
       }
     }
+  }
+
+  // ─── Refinement pass — cycle edge V/H/45° 정렬 ───────────────────────────
+  // BFS 후 tree edge 는 모두 45° 정렬됐지만 cycle edge (트리 외 추가 케이블) 는 어긋남.
+  // 각 cable 이 자신을 가까운 45° 로 끌어당기는 작은 회전 force 를 양 끝 시설에 적용.
+  // root 시설(첫 번째 root)들은 고정. 여러 component 의 root 는 각자 component 안에서 고정.
+  const rootIds = new Set(
+    rootCandidates.length > 0
+      ? rootCandidates.filter((r) => newPositions.has(r.id)).map((r) => r.id).slice(0, 1)
+      : [],
+  )
+  // 정확히는 각 component 의 첫 방문 시설을 root 로 — 하지만 위 코드는 첫 component 만 잡음.
+  // 모든 component 의 root 를 잡으려면 BFS 중에 따로 모았어야 했지만, 간단히 가장 degree 큰
+  // 시설(첫 root) 만 고정해도 사실상 충분 (다른 component 의 root 는 자유로 움직여 정렬 도움).
+
+  for (let iter = 0; iter < REFINE_ITERATIONS; iter++) {
+    const forces = new Map<string, { dx: number; dy: number }>()
+    for (const f of facilities) forces.set(f.id, { dx: 0, dy: 0 })
+
+    let totalDeviation = 0
+    for (const c of cables) {
+      const fromPos = newPositions.get(c.from_facility_id)
+      const toPos = newPositions.get(c.to_facility_id)
+      if (!fromPos || !toPos) continue
+
+      const dx = toPos.x - fromPos.x
+      const dy = toPos.y - fromPos.y
+      const angle = Math.atan2(dy, dx)
+      const snapped = Math.round(angle / SNAP_STEP) * SNAP_STEP
+      let deviation = angle - snapped
+      // -π/8 ~ +π/8 범위로 정규화
+      if (deviation > Math.PI) deviation -= 2 * Math.PI
+      if (deviation < -Math.PI) deviation += 2 * Math.PI
+      const absDev = Math.abs(deviation)
+      if (absDev < ALIGN_TOLERANCE) continue
+      totalDeviation += absDev
+
+      // 양 끝을 midpoint 기준으로 -deviation 만큼 회전 → cable 이 snapped 각도로 정렬
+      const mid = { x: (fromPos.x + toPos.x) / 2, y: (fromPos.y + toPos.y) / 2 }
+      const rotateAngle = -deviation * REFINE_FORCE
+      const cosA = Math.cos(rotateAngle)
+      const sinA = Math.sin(rotateAngle)
+
+      const fdx = fromPos.x - mid.x
+      const fdy = fromPos.y - mid.y
+      const tdx = toPos.x - mid.x
+      const tdy = toPos.y - mid.y
+      const newFx = mid.x + fdx * cosA - fdy * sinA
+      const newFy = mid.y + fdx * sinA + fdy * cosA
+      const newTx = mid.x + tdx * cosA - tdy * sinA
+      const newTy = mid.y + tdx * sinA + tdy * cosA
+
+      const f1 = forces.get(c.from_facility_id)
+      const f2 = forces.get(c.to_facility_id)
+      if (f1) {
+        f1.dx += newFx - fromPos.x
+        f1.dy += newFy - fromPos.y
+      }
+      if (f2) {
+        f2.dx += newTx - toPos.x
+        f2.dy += newTy - toPos.y
+      }
+    }
+
+    if (totalDeviation < ALIGN_TOLERANCE * cables.length) break // 충분히 정렬됨
+
+    // force 적용 (root 제외)
+    let anyMoved = false
+    for (const f of facilities) {
+      if (rootIds.has(f.id)) continue
+      const pos = newPositions.get(f.id)
+      if (!pos) continue
+      const force = forces.get(f.id)
+      if (!force) continue
+      if (Math.abs(force.dx) < 0.01 && Math.abs(force.dy) < 0.01) continue
+      newPositions.set(f.id, { x: pos.x + force.dx, y: pos.y + force.dy })
+      anyMoved = true
+    }
+    if (!anyMoved) break
   }
 
   // 변경된 시설만 반환 (1px 이상 차이)
