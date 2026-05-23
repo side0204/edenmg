@@ -401,9 +401,10 @@ export default function TopologyCanvas({
   //   새 시설 배치·드래그 좌표는 따로 scale 보정. 카카오 내부 pan 속도는 그대로라 사용감만 다름.
   const [extraZoom, setExtraZoom] = useState(1)
   const extraZoomActive = extraZoom > 1
-  // 배경 흐린 회색조 토글 — 지도/위성 두 모드 공통. 시설·케이블 오버레이가 두드러져
-  //   설계 검토에 유리. 기본 ON. CSS filter 는 카카오 지도 div 에만 적용 (SVG 색은 그대로).
-  const [dimMap, setDimMap] = useState(true)
+  // 배경 흐림 강도 — 지도/위성 두 모드 공통. 0 = 원본 / 100 = 회색조 최대.
+  //   슬라이더로 드래그 조정. grayscale·brightness·contrast 세 값을 같은 비율로 보간해
+  //   하나의 직관 컨트롤로 묶음. 기본 70 (이전 always-on 과 유사한 강도).
+  const [dimLevel, setDimLevel] = useState(70)
   // 지도 모드 분할 캡처 가이드 활성 여부
   const [captureActive, setCaptureActive] = useState(false)
   // 분할 캡처 컨트롤 바를 portal 로 렌더할 캔버스 아래 영역 (지도를 안 가리게)
@@ -1991,22 +1992,35 @@ export default function TopologyCanvas({
             </button>
           )}
 
-          {/* 흐린 배경 토글 — 지도/위성 두 모드 공통. 배경을 회색조+살짝 어둡게 해
-              시설·케이블 오버레이가 두드러진다. 기본 ON. */}
+          {/* 배경 흐림 슬라이더 — 0(원본) ~ 100(회색조 최대) 드래그 조정.
+              지도/위성 두 모드 공통. 더블클릭으로 0(끄기) ↔ 70(기본) 토글. */}
           {mode === 'map' && (
-            <button
-              type="button"
-              onClick={() => setDimMap((v) => !v)}
-              className={
-                'mr-1 inline-flex items-center gap-1 rounded-md border px-2 h-7 text-[11px] font-medium ' +
-                (dimMap
-                  ? 'bg-slate-700 text-white border-slate-800'
-                  : 'text-slate-700 border-slate-300 hover:bg-slate-50')
-              }
-              title={dimMap ? '배경을 선명하게' : '배경을 흐리게 (회색조)'}
+            <div
+              className="mr-1 inline-flex items-center gap-1.5 rounded-md border border-slate-300 px-2 h-7"
+              title={dimLevel === 0 ? '배경 흐림: 끔' : `배경 흐림: ${dimLevel}%`}
             >
-              {dimMap ? '흐린 배경' : '선명 배경'}
-            </button>
+              <button
+                type="button"
+                onClick={() => setDimLevel((v) => (v === 0 ? 70 : 0))}
+                className="text-[10px] font-medium text-slate-600 whitespace-nowrap hover:text-slate-900"
+                title="원본 ↔ 기본(70%) 토글"
+              >
+                흐림
+              </button>
+              <input
+                type="range"
+                min={0}
+                max={100}
+                step={5}
+                value={dimLevel}
+                onChange={(e) => setDimLevel(Number(e.target.value))}
+                className="w-16 h-3 accent-slate-700 cursor-pointer"
+                aria-label="배경 흐림 강도"
+              />
+              <span className="text-[10px] font-mono text-slate-500 min-w-[2.25rem] text-right">
+                {dimLevel}%
+              </span>
+            </div>
           )}
 
           {/* 추가 확대 — 지도 모드 한정. 카카오 SDK 의 level 1 한계를 CSS scale 로 우회.
@@ -2679,7 +2693,7 @@ export default function TopologyCanvas({
 
           {/* 카카오맵 배경 — 항상 mount, 지도 모드에서만 표시. SVG 가 위에 투명 오버레이.
               추가 확대(extraZoom) 적용 시 SVG 와 동일한 transform 으로 정렬 유지.
-              dimMap=ON: 회색조 + 살짝 어둡게 → 시설·케이블 오버레이가 두드러진다. */}
+              dimLevel(0~100) 비율로 회색조·어둡게·대비 보간해 시설·케이블이 두드러진다. */}
           <div
             ref={mapSetContainer}
             className="absolute inset-0"
@@ -2688,9 +2702,10 @@ export default function TopologyCanvas({
               zIndex: 0,
               transform: extraZoomActive ? `scale(${extraZoom})` : undefined,
               transformOrigin: '50% 50%',
-              filter: dimMap
-                ? 'grayscale(1) brightness(0.92) contrast(0.88)'
-                : undefined,
+              filter:
+                dimLevel > 0
+                  ? `grayscale(${dimLevel / 100}) brightness(${(1 - (dimLevel / 100) * 0.15).toFixed(3)}) contrast(${(1 - (dimLevel / 100) * 0.2).toFixed(3)})`
+                  : undefined,
             }}
           />
           {/* 지도 로딩 / 에러 오버레이 */}
