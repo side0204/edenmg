@@ -651,122 +651,8 @@ export default function TopologyCanvas({
     setCableWaypoints({})
   }, [mode])
 
-  // 케이블 offset + kind — 두 가지 처리:
-  //   (1) 같은 시설 쌍 2+ 조 → 'lens' (양 끝 중심 유지, 중간 분산)
-  //   (2) 다른 시설 쌍 path 부분 overlap → 'shift' (전체 path perpendicular 평행 이동)
-  //       - 같은 방향 + perpendicular ≤ 30px + 짧은 cable 길이의 30% 이상 overlap
-  //       - end-to-end 체인 (점만 공유) 은 안 묶임
-  const cableOffsetInfo = useMemo(() => {
-    const offsets = new Map<string, number>()
-    const kinds = new Map<string, 'lens' | 'shift'>()
-
-    // 1. 같은 시설 쌍 → lens
-    const samePairGroups = new Map<string, string[]>()
-    for (const c of cables) {
-      const key = [c.from_facility_id, c.to_facility_id].sort().join('|')
-      const arr = samePairGroups.get(key)
-      if (arr) arr.push(c.id)
-      else samePairGroups.set(key, [c.id])
-    }
-    const samePairAssigned = new Set<string>()
-    for (const ids of samePairGroups.values()) {
-      if (ids.length <= 1) continue
-      const k = ids.length
-      ids.forEach((id, i) => {
-        offsets.set(id, (i - (k - 1) / 2) * CABLE_OFFSET_GAP * 2)
-        kinds.set(id, 'lens')
-        samePairAssigned.add(id)
-      })
-    }
-
-    // 2. 다른 시설 쌍 path overlap → shift
-    //   strict V/H 뿐 아니라 「dominant 축」 (adx > 2×ady 또는 그 반대) 인 대각선 케이블도 분류.
-    //   대각선 cable 의 L-shape route 가 V/H cable 과 segment 공유하는 경우도 탐지.
-    type CableInfo = { dir: 'H' | 'V'; start: number; end: number; perp: number; length: number }
-    const cableInfo = new Map<string, CableInfo>()
-    for (const c of cables) {
-      if (samePairAssigned.has(c.id)) continue
-      const fromPos = effectivePositions[c.from_facility_id]
-      const toPos = effectivePositions[c.to_facility_id]
-      if (!fromPos || !toPos) continue
-      const dx = toPos.x - fromPos.x
-      const dy = toPos.y - fromPos.y
-      const adx = Math.abs(dx)
-      const ady = Math.abs(dy)
-      // dominant 축 분류 — adx 가 ady 보다 1.5 배 이상 크면 H
-      if (adx > 50 && adx > ady * 1.5) {
-        cableInfo.set(c.id, {
-          dir: 'H',
-          start: Math.min(fromPos.x, toPos.x),
-          end: Math.max(fromPos.x, toPos.x),
-          perp: (fromPos.y + toPos.y) / 2,
-          length: adx,
-        })
-      } else if (ady > 50 && ady > adx * 1.5) {
-        cableInfo.set(c.id, {
-          dir: 'V',
-          start: Math.min(fromPos.y, toPos.y),
-          end: Math.max(fromPos.y, toPos.y),
-          perp: (fromPos.x + toPos.x) / 2,
-          length: ady,
-        })
-      }
-    }
-
-    // union-find
-    const parent = new Map<string, string>()
-    for (const id of cableInfo.keys()) parent.set(id, id)
-    const find = (x: string): string => {
-      const px = parent.get(x)
-      if (!px || px === x) return x
-      const root = find(px)
-      parent.set(x, root)
-      return root
-    }
-    const union = (x: string, y: string) => {
-      const rx = find(x)
-      const ry = find(y)
-      if (rx !== ry) parent.set(rx, ry)
-    }
-
-    const cableIds = [...cableInfo.keys()]
-    const PERP_TOL = 50 // perpendicular 허용 (이전 30 → 50)
-    const OVERLAP_RATIO = 0.2 // 짧은 cable 의 20% 이상 overlap 시 묶음 (이전 30% → 20%)
-    for (let i = 0; i < cableIds.length; i++) {
-      for (let j = i + 1; j < cableIds.length; j++) {
-        const a = cableInfo.get(cableIds[i])!
-        const b = cableInfo.get(cableIds[j])!
-        if (a.dir !== b.dir) continue
-        if (Math.abs(a.perp - b.perp) > PERP_TOL) continue
-        const overlap = Math.min(a.end, b.end) - Math.max(a.start, b.start)
-        if (overlap <= 0) continue
-        const minLen = Math.min(a.length, b.length)
-        if (overlap / minLen < OVERLAP_RATIO) continue
-        union(cableIds[i], cableIds[j])
-      }
-    }
-
-    const groups = new Map<string, string[]>()
-    for (const id of cableIds) {
-      const root = find(id)
-      const arr = groups.get(root)
-      if (arr) arr.push(id)
-      else groups.set(root, [id])
-    }
-    for (const grp of groups.values()) {
-      if (grp.length <= 1) continue
-      const sorted = [...grp].sort()
-      sorted.forEach((id, i) => {
-        offsets.set(id, (i - (sorted.length - 1) / 2) * CABLE_OFFSET_GAP * 2)
-        kinds.set(id, 'shift')
-      })
-    }
-
-    return { offsets, kinds }
-  }, [cables, effectivePositions])
-
-  const cableOffsets = cableOffsetInfo.offsets
-  const cableOffsetKinds = cableOffsetInfo.kinds
+  // cableOffsetInfo (segment-level overlap 기반) 은 라우팅 후 (rawCablePaths 정의 후) 계산.
+  //   여기에선 useMemo 직접 접근만. 정의는 cableAnchors 다음 (line ~1900) 으로 이동.
 
   // 시설별 연결된 케이블 수 (노드 배지 — 동일 시설 연결 직관 확인)
   const facilityCableCount = useMemo(() => {
@@ -1899,122 +1785,31 @@ export default function TopologyCanvas({
     return result
   }, [cables, effectivePositions, mode])
 
-  // Phase 3 (2026-05-23) — 도식 모드 케이블이 다른 시설 위를 가로지를 때 자동 회피 waypoint.
-  //   사용자 waypoint 가 있으면 건드리지 않음 (수동 우선).
-  //   직선이 어느 시설 도형 안을 지나면 중점을 수직 방향으로 deflect.
-  //   완벽한 라우팅이 아닌 「명백한 가로지름 제거」 수준.
-  const obstacleWaypointsByCable = useMemo(() => {
-    if (mode === 'map') return null
-    const result = new Map<string, { x: number; y: number }[]>()
+  // 도식·지도 모드 케이블 raw 라우팅 (offset 미적용) — overlap 탐지와 cablePathPoints 둘 다 공유.
+  //   사용자 waypoint 가 있으면 그대로. 없으면 candidate (직선/L자/ㄷ자) 점수화 (bends → 시설 가로지름 → 길이).
+  //   여기서 한 번 계산하고 segment-level overlap 탐지에 재활용 → cablePathPoints 가 단순해짐.
+  const rawCablePaths = useMemo(() => {
+    const result = new Map<string, Waypoint[]>()
     const halfW = NODE_SIZE.width / 2
     const halfH = NODE_SIZE.height / 2
-    const CLEAR = 50 // 시설 중심에서 케이블이 이 거리보다 가깝게 지나가면 가로지름으로 간주
-
-    // 모든 시설의 중심 사전 계산
-    const centers = new Map<string, { x: number; y: number }>()
-    for (const [id, p] of Object.entries(effectivePositions)) {
-      centers.set(id, { x: p.x + halfW, y: p.y + halfH - 10 })
-    }
-
-    function distPointToSegment(
-      p: { x: number; y: number },
-      a: { x: number; y: number },
-      b: { x: number; y: number },
-    ): { dist: number; t: number } {
-      const dx = b.x - a.x
-      const dy = b.y - a.y
-      const len2 = dx * dx + dy * dy
-      if (len2 < 0.01) return { dist: Math.hypot(p.x - a.x, p.y - a.y), t: 0 }
-      let t = ((p.x - a.x) * dx + (p.y - a.y) * dy) / len2
-      t = Math.max(0, Math.min(1, t))
-      const cx = a.x + t * dx
-      const cy = a.y + t * dy
-      return { dist: Math.hypot(p.x - cx, p.y - cy), t }
-    }
 
     for (const c of cables) {
-      // 사용자 waypoint 있으면 자동 회피 안 함
-      if (effectiveWaypoints(c.id).length > 0) continue
-
-      const anchor = cableAnchors?.get(c.id)
-      const fromPos = effectivePositions[c.from_facility_id]
-      const toPos = effectivePositions[c.to_facility_id]
-      if (!fromPos || !toPos) continue
-      const from = anchor?.from ?? {
-        x: fromPos.x + halfW,
-        y: fromPos.y + halfH - 10,
-      }
-      const to = anchor?.to ?? { x: toPos.x + halfW, y: toPos.y + halfH - 10 }
-
-      // 다른 시설 중 케이블 선분에 가까운(가로지름) 것 모음
-      let worstObstacle: { p: { x: number; y: number }; dist: number } | null = null
-      for (const [otherId, otherCenter] of centers.entries()) {
-        if (otherId === c.from_facility_id || otherId === c.to_facility_id) continue
-        const { dist, t } = distPointToSegment(otherCenter, from, to)
-        // 선분의 양 끝 가까이는 제외 (anchor 부근은 무시) — t 가 0.15 ~ 0.85 사이일 때만
-        if (t < 0.15 || t > 0.85) continue
-        if (dist < CLEAR && (worstObstacle == null || dist < worstObstacle.dist)) {
-          worstObstacle = { p: otherCenter, dist }
-        }
-      }
-      if (!worstObstacle) continue
-
-      // 장애물 우회 — 순수 V/H 세그먼트만 사용 (2 waypoints, ㄷ자 또는 ㄴ자).
-      //   waypoint 를 (from.x, detourY) · (to.x, detourY) 로 잡으면:
-      //     from → wp1: 수직 (from.x 같음) ·  wp1 → wp2: 수평 (detourY 같음) ·  wp2 → to: 수직 (to.x 같음)
-      //   모든 segment 가 V/H. 케이블의 「제멋대로 꺾인선」 제거.
-      const dx = to.x - from.x
-      const dy = to.y - from.y
-      const adx = Math.abs(dx)
-      const ady = Math.abs(dy)
-      const DETOUR_GAP = halfH + 40 // 시설 세로 반지름 + 여유 (좀 더 멀리 우회)
-
-      const obs = worstObstacle.p
-      if (adx >= ady) {
-        // 주로 수평 — 위/아래로 우회
-        const avgY = (from.y + to.y) / 2
-        const sign = avgY <= obs.y ? -1 : 1
-        const detourY = obs.y + sign * DETOUR_GAP
-        result.set(c.id, [
-          { x: from.x, y: detourY },
-          { x: to.x, y: detourY },
-        ])
-      } else {
-        // 주로 수직 — 왼쪽/오른쪽으로 우회
-        const avgX = (from.x + to.x) / 2
-        const sign = avgX <= obs.x ? -1 : 1
-        const detourX = obs.x + sign * (halfW + 40)
-        result.set(c.id, [
-          { x: detourX, y: from.y },
-          { x: detourX, y: to.y },
-        ])
-      }
-    }
-
-    return result
-  }, [cables, effectivePositions, mode, effectiveWaypoints, cableAnchors])
-
-  const cablePathPoints = useCallback(
-    (c: CableEdge): Waypoint[] => {
       const from = effectivePositions[c.from_facility_id]
       const to = effectivePositions[c.to_facility_id]
-      if (!from || !to) return []
-      // 시설 중심 — anchor 없을 때 폴백
+      if (!from || !to) continue
       const fromCenter = {
-        x: from.x + NODE_SIZE.width / 2,
-        y: from.y + NODE_SIZE.height / 2 - 10,
+        x: from.x + halfW,
+        y: from.y + halfH - 10,
       }
       const toCenter = {
-        x: to.x + NODE_SIZE.width / 2,
-        y: to.y + NODE_SIZE.height / 2 - 10,
+        x: to.x + halfW,
+        y: to.y + halfH - 10,
       }
-      // Phase 2 anchor 적용 (도식 모드만). 지도 모드는 cableAnchors=null → 중심 사용.
       const anchor = cableAnchors?.get(c.id)
       const fromPt = anchor?.from ?? fromCenter
       const toPt = anchor?.to ?? toCenter
       const wps = effectiveWaypoints(c.id)
 
-      // 중간 경로점을 화면 좌표로 변환
       let midPoints: { x: number; y: number }[]
       if (mode === 'map') {
         midPoints = []
@@ -2034,17 +1829,11 @@ export default function TopologyCanvas({
         midPoints = wps.map((w) => ({ x: w.x, y: w.y }))
       }
 
-      // Comprehensive obstacle-aware routing (2026-05-23) — Phase 3 + Phase 2.5 통합.
-      //   여러 라우팅 후보 (직선, L자 H-V, L자 V-H, ㄷ자 위/아래/좌/우 우회) 를 시도하고
-      //   각 후보 폴리라인의 모든 세그먼트가 다른 시설을 가로지르지 않는 것을 선택.
-      //   조건 통과하는 것이 여러 개면 가장 짧고 꺾임 적은 것 선택.
+      // 도식 모드 + 사용자 waypoint 없음 → 자동 라우팅
       if (midPoints.length === 0 && mode !== 'map') {
         const fromForRoute = anchor?.from ?? fromPt
         const toForRoute = anchor?.to ?? toPt
-        const halfW = NODE_SIZE.width / 2
-        const halfH = NODE_SIZE.height / 2
 
-        // 모든 다른 시설의 중심 (장애물)
         const obstacles: { cx: number; cy: number }[] = []
         for (const [oid, opos] of Object.entries(effectivePositions)) {
           if (oid === c.from_facility_id || oid === c.to_facility_id) continue
@@ -2054,7 +1843,7 @@ export default function TopologyCanvas({
           })
         }
 
-        const CROSS_CLEAR = 50 // 시설 중심에서 케이블 세그먼트 까지 최소 거리
+        const CROSS_CLEAR = 50
         const distPointToSeg = (
           p: { x: number; y: number },
           a: { x: number; y: number },
@@ -2070,8 +1859,6 @@ export default function TopologyCanvas({
           const cy = a.y + t * sdy
           return { dist: Math.hypot(p.x - cx, p.y - cy), t }
         }
-
-        // 폴리라인의 모든 세그먼트가 obstacle 가로지르는 횟수 계산
         const countCrossings = (pts: { x: number; y: number }[]): number => {
           let count = 0
           for (let i = 0; i < pts.length - 1; i++) {
@@ -2095,28 +1882,28 @@ export default function TopologyCanvas({
           crossings: number
         }
         const candidates: Cand[] = []
-        const addCand = (wps: { x: number; y: number }[]) => {
-          const full = [fromForRoute, ...wps, toForRoute]
+        const addCand = (wpsLocal: { x: number; y: number }[]) => {
+          const full = [fromForRoute, ...wpsLocal, toForRoute]
           const crossings = countCrossings(full)
           let len = 0
           for (let i = 0; i < full.length - 1; i++) {
             len += Math.hypot(full[i + 1].x - full[i].x, full[i + 1].y - full[i].y)
           }
-          candidates.push({ waypoints: wps, bends: wps.length, length: len, crossings })
+          candidates.push({
+            waypoints: wpsLocal,
+            bends: wpsLocal.length,
+            length: len,
+            crossings,
+          })
         }
 
-        // 1. 직선 (V/H 정렬됐을 때만 의미)
         if (adx <= 5 || ady <= 5) {
           addCand([])
         }
-
-        // 2. L자 두 변형 (대각선 케이블)
         if (adx > 5 && ady > 5) {
-          addCand([{ x: toForRoute.x, y: fromForRoute.y }]) // H-V
-          addCand([{ x: fromForRoute.x, y: toForRoute.y }]) // V-H
+          addCand([{ x: toForRoute.x, y: fromForRoute.y }])
+          addCand([{ x: fromForRoute.x, y: toForRoute.y }])
         }
-
-        // 3. ㄷ자 우회 — 수직/수평 양방향, 여러 거리 단계 (1x, 2x, 3x)
         const VDETOUR = halfH + 80
         const HDETOUR = halfW + 80
         for (const stepMult of [1, 2, 3]) {
@@ -2134,9 +1921,6 @@ export default function TopologyCanvas({
           }
         }
 
-        // 후보 점수화 — bends 적은 것 우선 (긴 detour 회피).
-        //   같은 bends 안에서는 crossings 적은 것, 그 다음 length 짧은 것.
-        //   시설 가로지름 보다 「긴 detour 가 다른 cable 과 path 공유」 가 더 큰 시각 문제.
         candidates.sort(
           (a, b) =>
             a.bends - b.bends || a.crossings - b.crossings || a.length - b.length,
@@ -2146,16 +1930,152 @@ export default function TopologyCanvas({
         }
       }
 
-      // 케이블 offset — 두 kind:
-      //   'lens': 같은 시설 쌍 — 끝점 중심 유지, 중간만 분산 (양 끝 모이고 중간 벌어지는 oval)
-      //   'shift': 다른 시설 쌍 path overlap — 전체 path perpendicular 평행 이동
-      const offset = cableOffsets.get(c.id) ?? 0
-      const kind = cableOffsetKinds.get(c.id)
-      const buildPath = (): Waypoint[] => {
-        if (midPoints.length > 0) return [fromPt, ...midPoints, toPt]
-        return [fromPt, toPt]
+      result.set(c.id, [fromPt, ...midPoints, toPt])
+    }
+
+    return result
+  }, [cables, effectivePositions, effectiveWaypoints, cableAnchors, mode, kakaoMap])
+
+  // 케이블 offset + kind — 두 가지 처리:
+  //   (1) 같은 시설 쌍 2+ 조 → 'lens' (양 끝 중심 유지, 중간 분산)
+  //   (2) 다른 시설 쌍 polyline segment 부분 overlap → 'shift' (전체 path perpendicular 평행 이동)
+  //       segment-level 탐지 (2026-05-24) — L-shape / ㄷ-shape 우회 후 실제 segment 가 평행·근접·겹침일 때만 묶음.
+  //       이전 (~2026-05-23) 은 straight from→to 만 보고 분류해 L자/ㄷ자 우회로 생긴 공유 segment 를 놓침.
+  const cableOffsetInfo = useMemo(() => {
+    const offsets = new Map<string, number>()
+    const kinds = new Map<string, 'lens' | 'shift'>()
+
+    // 1. 같은 시설 쌍 → lens
+    const samePairGroups = new Map<string, string[]>()
+    for (const c of cables) {
+      const key = [c.from_facility_id, c.to_facility_id].sort().join('|')
+      const arr = samePairGroups.get(key)
+      if (arr) arr.push(c.id)
+      else samePairGroups.set(key, [c.id])
+    }
+    const samePairAssigned = new Set<string>()
+    for (const ids of samePairGroups.values()) {
+      if (ids.length <= 1) continue
+      const k = ids.length
+      ids.forEach((id, i) => {
+        offsets.set(id, (i - (k - 1) / 2) * CABLE_OFFSET_GAP * 2)
+        kinds.set(id, 'lens')
+        samePairAssigned.add(id)
+      })
+    }
+
+    // 2. segment-level overlap → shift.
+    //   각 케이블의 raw polyline 을 H/V segment 리스트로 분해. 짧은 stub 은 무시.
+    type Seg = { dir: 'H' | 'V'; perp: number; start: number; end: number }
+    const cableSegs = new Map<string, Seg[]>()
+    const SEG_MIN_LEN = 30 // 30px 미만 segment 는 무시 (시설 anchor 변두리)
+    for (const c of cables) {
+      if (samePairAssigned.has(c.id)) continue
+      const path = rawCablePaths.get(c.id)
+      if (!path || path.length < 2) continue
+      const segs: Seg[] = []
+      for (let i = 0; i < path.length - 1; i++) {
+        const a = path[i]
+        const b = path[i + 1]
+        const dx = b.x - a.x
+        const dy = b.y - a.y
+        const adx = Math.abs(dx)
+        const ady = Math.abs(dy)
+        const segLen = Math.hypot(adx, ady)
+        if (segLen < SEG_MIN_LEN) continue
+        // H (수평) — 거의 수평 (대각선 케이블 자연 라우팅 포함, ady < 15)
+        if (ady < 15) {
+          segs.push({
+            dir: 'H',
+            perp: (a.y + b.y) / 2,
+            start: Math.min(a.x, b.x),
+            end: Math.max(a.x, b.x),
+          })
+        } else if (adx < 15) {
+          segs.push({
+            dir: 'V',
+            perp: (a.x + b.x) / 2,
+            start: Math.min(a.y, b.y),
+            end: Math.max(a.y, b.y),
+          })
+        }
+        // 대각선 segment (둘 다 큰 경우) — overlap 판정 어려워 일단 skip
       }
-      const path = buildPath()
+      if (segs.length > 0) cableSegs.set(c.id, segs)
+    }
+
+    // union-find — segment 가 겹치는 케이블끼리 묶음
+    const parent = new Map<string, string>()
+    for (const id of cableSegs.keys()) parent.set(id, id)
+    const find = (x: string): string => {
+      const px = parent.get(x)
+      if (!px || px === x) return x
+      const root = find(px)
+      parent.set(x, root)
+      return root
+    }
+    const union = (x: string, y: string) => {
+      const rx = find(x)
+      const ry = find(y)
+      if (rx !== ry) parent.set(rx, ry)
+    }
+
+    const PERP_TOL = 20 // 수직 거리 — 시각적으로 겹쳐 보이는 임계
+    const OVERLAP_MIN = 40 // segment 사이 겹친 길이 (px). 작은 stub 끼리 우연 만남 제외
+    const cableIds = [...cableSegs.keys()]
+    for (let i = 0; i < cableIds.length; i++) {
+      for (let j = i + 1; j < cableIds.length; j++) {
+        const segsA = cableSegs.get(cableIds[i])!
+        const segsB = cableSegs.get(cableIds[j])!
+        let overlaps = false
+        for (const sa of segsA) {
+          for (const sb of segsB) {
+            if (sa.dir !== sb.dir) continue
+            if (Math.abs(sa.perp - sb.perp) > PERP_TOL) continue
+            const ov = Math.min(sa.end, sb.end) - Math.max(sa.start, sb.start)
+            if (ov >= OVERLAP_MIN) {
+              overlaps = true
+              break
+            }
+          }
+          if (overlaps) break
+        }
+        if (overlaps) union(cableIds[i], cableIds[j])
+      }
+    }
+
+    const groups = new Map<string, string[]>()
+    for (const id of cableIds) {
+      const root = find(id)
+      const arr = groups.get(root)
+      if (arr) arr.push(id)
+      else groups.set(root, [id])
+    }
+    for (const grp of groups.values()) {
+      if (grp.length <= 1) continue
+      const sorted = [...grp].sort()
+      sorted.forEach((id, i) => {
+        offsets.set(id, (i - (sorted.length - 1) / 2) * CABLE_OFFSET_GAP * 2)
+        kinds.set(id, 'shift')
+      })
+    }
+
+    return { offsets, kinds }
+  }, [cables, rawCablePaths])
+
+  const cableOffsets = cableOffsetInfo.offsets
+  const cableOffsetKinds = cableOffsetInfo.kinds
+
+  // cablePathPoints — rawCablePaths 의 base path 를 가져와 offset (lens/shift) 만 적용.
+  //   라우팅 logic 자체는 rawCablePaths useMemo 에서 이미 한 번 계산.
+  const cablePathPoints = useCallback(
+    (c: CableEdge): Waypoint[] => {
+      const path = rawCablePaths.get(c.id)
+      if (!path || path.length < 2) return []
+      const fromPt = path[0]
+      const toPt = path[path.length - 1]
+
+      const offset = cableOffsets.get(c.id) ?? 0
       if (offset === 0) return path
       const overallDx = toPt.x - fromPt.x
       const overallDy = toPt.y - fromPt.y
@@ -2163,6 +2083,7 @@ export default function TopologyCanvas({
       const nx = -overallDy / len
       const ny = overallDx / len
 
+      const kind = cableOffsetKinds.get(c.id)
       if (kind === 'shift') {
         // 전체 path perpendicular 평행 이동 — 모든 점 이동
         return path.map((p) => ({ x: p.x + nx * offset, y: p.y + ny * offset }))
@@ -2190,16 +2111,7 @@ export default function TopologyCanvas({
         return { x: p.x + nx * offset, y: p.y + ny * offset }
       })
     },
-    [
-      effectivePositions,
-      effectiveWaypoints,
-      cableOffsets,
-      cableOffsetKinds,
-      mode,
-      kakaoMap,
-      cableAnchors,
-      obstacleWaypointsByCable,
-    ],
+    [rawCablePaths, cableOffsets, cableOffsetKinds],
   )
 
   // 경로점의 화면 좌표 — 도식: x/y · 지도: lat/lng 투영 (없으면 null)
