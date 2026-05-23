@@ -1979,15 +1979,16 @@ export default function TopologyCanvas({
           return { dist: Math.hypot(p.x - cx, p.y - cy), t }
         }
 
-        // 폴리라인의 모든 세그먼트가 obstacle 통과 안 하는지 체크
-        const polylineClear = (pts: { x: number; y: number }[]): boolean => {
+        // 폴리라인의 모든 세그먼트가 obstacle 가로지르는 횟수 계산
+        const countCrossings = (pts: { x: number; y: number }[]): number => {
+          let count = 0
           for (let i = 0; i < pts.length - 1; i++) {
             for (const o of obstacles) {
               const { dist, t } = distPointToSeg({ x: o.cx, y: o.cy }, pts[i], pts[i + 1])
-              if (t > 0.05 && t < 0.95 && dist < CROSS_CLEAR) return false
+              if (t > 0.05 && t < 0.95 && dist < CROSS_CLEAR) count++
             }
           }
-          return true
+          return count
         }
 
         const dx = toForRoute.x - fromForRoute.x
@@ -1995,58 +1996,59 @@ export default function TopologyCanvas({
         const adx = Math.abs(dx)
         const ady = Math.abs(dy)
 
-        type Cand = { waypoints: { x: number; y: number }[]; bends: number; length: number }
+        type Cand = {
+          waypoints: { x: number; y: number }[]
+          bends: number
+          length: number
+          crossings: number
+        }
         const candidates: Cand[] = []
-        const pushIfClear = (wps: { x: number; y: number }[]) => {
+        const addCand = (wps: { x: number; y: number }[]) => {
           const full = [fromForRoute, ...wps, toForRoute]
-          if (!polylineClear(full)) return
+          const crossings = countCrossings(full)
           let len = 0
           for (let i = 0; i < full.length - 1; i++) {
             len += Math.hypot(full[i + 1].x - full[i].x, full[i + 1].y - full[i].y)
           }
-          candidates.push({ waypoints: wps, bends: wps.length, length: len })
+          candidates.push({ waypoints: wps, bends: wps.length, length: len, crossings })
         }
 
         // 1. 직선 (V/H 정렬됐을 때만 의미)
         if (adx <= 5 || ady <= 5) {
-          pushIfClear([])
+          addCand([])
         }
 
         // 2. L자 두 변형 (대각선 케이블)
         if (adx > 5 && ady > 5) {
-          pushIfClear([{ x: toForRoute.x, y: fromForRoute.y }]) // H-V
-          pushIfClear([{ x: fromForRoute.x, y: toForRoute.y }]) // V-H
+          addCand([{ x: toForRoute.x, y: fromForRoute.y }]) // H-V
+          addCand([{ x: fromForRoute.x, y: toForRoute.y }]) // V-H
         }
 
-        // 3. ㄷ자 우회 — 수직/수평 4 방향
+        // 3. ㄷ자 우회 — 수직/수평 양방향, 여러 거리 단계 (1x, 2x, 3x)
         const VDETOUR = halfH + 80
         const HDETOUR = halfW + 80
-        for (const offY of [-VDETOUR, VDETOUR]) {
-          const detourY = (fromForRoute.y + toForRoute.y) / 2 + offY
-          pushIfClear([
-            { x: fromForRoute.x, y: detourY },
-            { x: toForRoute.x, y: detourY },
-          ])
-        }
-        for (const offX of [-HDETOUR, HDETOUR]) {
-          const detourX = (fromForRoute.x + toForRoute.x) / 2 + offX
-          pushIfClear([
-            { x: detourX, y: fromForRoute.y },
-            { x: detourX, y: toForRoute.y },
-          ])
+        for (const stepMult of [1, 2, 3]) {
+          for (const sign of [-1, 1]) {
+            const detourY = (fromForRoute.y + toForRoute.y) / 2 + sign * VDETOUR * stepMult
+            addCand([
+              { x: fromForRoute.x, y: detourY },
+              { x: toForRoute.x, y: detourY },
+            ])
+            const detourX = (fromForRoute.x + toForRoute.x) / 2 + sign * HDETOUR * stepMult
+            addCand([
+              { x: detourX, y: fromForRoute.y },
+              { x: detourX, y: toForRoute.y },
+            ])
+          }
         }
 
+        // 모든 후보 점수화: crossings 우선, bends, length 순으로 정렬해 가장 좋은 후보 선택
+        candidates.sort(
+          (a, b) =>
+            a.crossings - b.crossings || a.bends - b.bends || a.length - b.length,
+        )
         if (candidates.length > 0) {
-          // 꺾임 적은 것 우선, 동률 시 길이 짧은 것
-          candidates.sort((a, b) => a.bends - b.bends || a.length - b.length)
           midPoints = candidates[0].waypoints
-        } else {
-          // 모든 후보 막힘 — 기본 L자 (꺾임 1 회) 라도 사용
-          if (adx > 5 && ady > 5) {
-            midPoints = adx >= ady
-              ? [{ x: toForRoute.x, y: fromForRoute.y }]
-              : [{ x: fromForRoute.x, y: toForRoute.y }]
-          }
         }
       }
 
