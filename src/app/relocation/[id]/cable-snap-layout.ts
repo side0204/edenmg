@@ -1,48 +1,66 @@
-// 지장이설 — 케이블 우선 정렬 알고리즘 (sibling-aware tree layout).
+// 지장이설 — 케이블 우선 정렬 알고리즘 (grid-based orthogonal layout).
 //
-// owner 요청 (2026-05-23):
-//   "가장 가까운 경로(거리·꺾임 최소)로 탐색, 시설물 출발/도착을 V/H/45° 로 하고
-//    다른 시설물과 케이블이 교차하면 도착 시설물(나중 그려진)을 이동."
+// owner 요청 (2026-05-23, 첨부된 LGU+ 표준 결과물 참조):
+//   "케이블이 거의 V/H 만 보이고 시설이 그리드 셀에 정렬돼 있는 형태로."
 //
-// 핵심 아이디어 (이전 시도들에서 학습):
-//   - 자연 각도 그대로 snap 하면 같은 부모의 자식들이 같은 방위로 몰려 cable 겹침.
-//   - Refinement(force-directed) 는 tree edge 까지 흔들어 V/H 정렬을 깸.
-//   → 부모의 자식들에 8 방위를 「겹치지 않게」 배정. 한 자식 = 한 방위.
+// 이전 시도들의 한계:
+//   - 자연 각도/거리를 추종 → 시설마다 위치 다르고 케이블도 미세하게 V/H 아님
+//   - 8 방위 자유 배치 → 같은 부모의 자식이 같은 방위로 몰리거나 거리 불일치
+//   - Refinement(force) → tree edge 까지 흔들어 정렬 깨짐
 //
-// 알고리즘 (sibling-aware BFS):
-//   1. 케이블 그래프 구성. degree 가장 높은 시설을 root (위치 유지).
-//   2. BFS. 각 부모 노드에서:
-//      a. 자식 후보 = 미방문 인접 시설들
-//      b. 「부모 → 자기 방향」(incoming) 의 반대 방향은 후보에서 제외 (자식이 부모쪽으로 가는 것 방지)
-//      c. 자식 N 명에게 8 방위 중 N 개 선택 — 헝가리안식 매칭 (cost = V/H 우선 + 자연각도 근접)
-//      d. 각 자식: 부모 위치에서 선택된 방위로 거리(자연 거리 또는 MIN_DISTANCE)만큼 이동
-//      e. 충돌 시 거리 늘려가며 재시도
-//   3. 동일 사이클 안의 「뒤로 가는 edge」 는 BFS tree 외 (cycle edge). 위치 조정 없음 —
-//      TopologyCanvas 의 Manhattan 라우팅(Phase 2.5)과 장애물 우회(Phase 3) 가 시각 처리.
+// 새 접근: 「순수 그리드 레이아웃」
+//   - 모든 시설을 (row, col) 정수 그리드 셀에 배치 (셀 크기 CELL_W × CELL_H)
+//   - 시설 사이 거리는 그리드 셀 단위 — 자연 거리 무시 (셀 수만 결정)
+//   - 카디널 셀(N/S/E/W) 만 사용하면 모든 tree edge 가 자동 V/H
+//   - 카디널이 모두 막힐 때만 대각선 셀(NE/SE/SW/NW) 사용
 //
-// Refinement(force-directed) 단계는 제거 — tree edge V/H 정렬 보장이 더 중요.
+// 알고리즘 (BFS):
+//   1. degree 가장 높은 시설 = root. 그리드 (0, 0).
+//   2. BFS. 각 부모 노드에서 자식들을 「8 셀」 중 하나에 배치.
+//      a. 부모로 돌아가는 셀 방향 제외.
+//      b. 카디널(N/S/E/W) 우선 — 자식 모두 카디널에 배치 가능하면 모두 V/H.
+//      c. 자식 수가 4 초과 시 대각선 셀 사용.
+//      d. 자연 각도에 가까운 셀이 우선 (자식이 「대략 동쪽」에 있었으면 E 셀로).
+//      e. 셀이 이미 점유돼 있으면 같은 방향으로 1 칸 더 (2/3/4 mult 까지 시도).
+//      f. 중간 통과 셀이 점유돼 있으면 케이블이 시설 가로지름 → 다른 방향.
+//   3. 그리드 셀 → 픽셀 좌표 변환. root 의 원래 위치를 그리드 원점으로 둠.
 //
-// 입력 — 시설 ID 목록, 케이블 양 끝 ID 목록, 현재 위치 Map.
+// 결과:
+//   - tree edge 100% V/H (또는 일부 45° 대각선).
+//   - 시설끼리 같은 셀 안 겹침.
+//   - 케이블이 다른 시설 가로지르지 않음 (셀 점유 검사로).
+//   - cycle edge 는 두 시설의 셀 위치에 따라 V/H 또는 비스듬할 수 있음 (TopologyCanvas
+//     의 Manhattan 라우팅이 시각 처리).
+//
+// 입력 — 시설 ID 목록, 케이블 양 끝 ID 목록, 초기 위치 Map.
 // 출력 — { id, x, y }[] (변경된 시설만).
 
 type Position = { x: number; y: number }
 type Facility = { id: string }
 type Cable = { from_facility_id: string; to_facility_id: string }
+type GridCell = { r: number; c: number }
+type CellDelta = { dr: number; dc: number; angle: number; isCardinal: boolean }
 
 export type SnapPosition = { id: string; x: number; y: number }
 
-// 8 방위 — V/H 4 + 대각선 4
-const CARDINAL_DIRS = [0, Math.PI / 2, Math.PI, -Math.PI / 2]
-const DIAGONAL_DIRS = [Math.PI / 4, (3 * Math.PI) / 4, -(3 * Math.PI) / 4, -Math.PI / 4]
-const ALL_DIRS = [...CARDINAL_DIRS, ...DIAGONAL_DIRS]
+const CELL_W = 220 // 그리드 셀 가로 (시설 너비 110 + 여백)
+const CELL_H = 160 // 그리드 셀 세로 (시설 높이 90 + 라벨 + 여백)
+const MAX_CELL_MULT = 6 // 한 방향으로 멀리 갈 수 있는 최대 셀 수
 
-const MIN_DISTANCE = 150 // 기본 자식 배치 거리 (자연 거리가 더 크면 자연 거리 사용)
-const MIN_FACILITY_GAP = 120 // 시설끼리 최소 간격
-const CABLE_CROSS_CLEARANCE = 55 // 케이블이 다른 시설 중심에서 이 거리 안이면 가로지름
-const MAX_DISTANCE_MULT = 2.5 // 충돌 시 거리 늘리는 한계
-const DISTANCE_GROWTH = 1.3
-// V/H 선호도 (비용 식에서 카디널 가산점) — 자연각도와 무관하게 카디널이 우선됨
-const CARDINAL_BONUS = 0.45
+// 8 방위 셀 델타. angle 은 atan2(dr, dc) 결과 — 화면 좌표 (y 아래 + 라서 dr 양수=남쪽).
+const CARDINAL_DELTAS: CellDelta[] = [
+  { dr: -1, dc: 0, angle: -Math.PI / 2, isCardinal: true }, // N (북)
+  { dr: 0, dc: 1, angle: 0, isCardinal: true },             // E (동)
+  { dr: 1, dc: 0, angle: Math.PI / 2, isCardinal: true },   // S (남)
+  { dr: 0, dc: -1, angle: Math.PI, isCardinal: true },      // W (서)
+]
+const DIAGONAL_DELTAS: CellDelta[] = [
+  { dr: -1, dc: 1, angle: -Math.PI / 4, isCardinal: false },        // NE
+  { dr: 1, dc: 1, angle: Math.PI / 4, isCardinal: false },          // SE
+  { dr: 1, dc: -1, angle: (3 * Math.PI) / 4, isCardinal: false },   // SW
+  { dr: -1, dc: -1, angle: -(3 * Math.PI) / 4, isCardinal: false }, // NW
+]
+const ALL_DELTAS: CellDelta[] = [...CARDINAL_DELTAS, ...DIAGONAL_DELTAS]
 
 function angleDist(a: number, b: number): number {
   let d = Math.abs(a - b)
@@ -50,111 +68,37 @@ function angleDist(a: number, b: number): number {
   return d
 }
 
-function wrapAngle(a: number): number {
-  while (a > Math.PI) a -= 2 * Math.PI
-  while (a < -Math.PI) a += 2 * Math.PI
-  return a
-}
-
-function isCardinal(dir: number): boolean {
-  return CARDINAL_DIRS.some((c) => Math.abs(wrapAngle(c - dir)) < 0.01)
-}
-
-// 한 방위에 자식을 배치할 때의 비용 — 자연각도에서 떨어진 정도. 카디널(V/H) 은 보너스로 비용 감소.
-function dirCost(dir: number, naturalAngle: number): number {
-  const dist = angleDist(dir, naturalAngle)
-  const bonus = isCardinal(dir) ? -CARDINAL_BONUS : 0
-  return dist + bonus
-}
-
-// 헝가리안 (greedy 근사) — N 자식을 8 방위 중 N 개에 배정. 전체 cost 최소화.
-//   완벽한 헝가리안 알고리즘 대신 greedy: 가장 cost 낮은 (자식,방위) 짝을 차례로 확정.
-//   8 방위, 자식 수 N≤8 가정 (큰 경우 자연각도 따라 일부 중복 허용).
-function assignChildrenToDirections(
-  children: { id: string; naturalAngle: number }[],
-  availableDirs: number[],
-): Map<string, number> {
-  const result = new Map<string, number>()
-  const remainingChildren = new Set(children.map((c) => c.id))
-  const remainingDirs = new Set(availableDirs)
-  const childNatural = new Map(children.map((c) => [c.id, c.naturalAngle]))
-
-  // 모든 (자식, 방위) 쌍의 cost 계산
-  while (remainingChildren.size > 0 && remainingDirs.size > 0) {
-    let bestPair: { cId: string; dir: number; cost: number } | null = null
-    for (const cId of remainingChildren) {
-      const nat = childNatural.get(cId)!
-      for (const dir of remainingDirs) {
-        const cost = dirCost(dir, nat)
-        if (!bestPair || cost < bestPair.cost) {
-          bestPair = { cId, dir, cost }
+// 자식 1 명을 부모 currCell 기준으로 1 개 셀에 배치 시도.
+//   tryOrder = 우선순위 정렬된 방향 후보들. 각 방향 ×mult (1~MAX) 로 셀 탐색.
+//   점유돼 있거나 중간 통과 셀이 점유돼 있으면 다음 후보로.
+//   배치 가능한 첫 (mult, delta) 반환. 없으면 null.
+function findFreeCell(
+  currCell: GridCell,
+  tryOrder: CellDelta[],
+  cellMap: Map<string, string>,
+): { cell: GridCell; delta: CellDelta } | null {
+  for (const delta of tryOrder) {
+    for (let mult = 1; mult <= MAX_CELL_MULT; mult++) {
+      const newCell = {
+        r: currCell.r + delta.dr * mult,
+        c: currCell.c + delta.dc * mult,
+      }
+      const key = `${newCell.r},${newCell.c}`
+      if (cellMap.has(key)) continue
+      // 중간 통과 셀이 점유돼 있는지 (cable 이 다른 시설 가로지름)
+      let blocked = false
+      for (let i = 1; i < mult; i++) {
+        const passKey = `${currCell.r + delta.dr * i},${currCell.c + delta.dc * i}`
+        if (cellMap.has(passKey)) {
+          blocked = true
+          break
         }
       }
+      if (blocked) continue
+      return { cell: newCell, delta }
     }
-    if (!bestPair) break
-    result.set(bestPair.cId, bestPair.dir)
-    remainingChildren.delete(bestPair.cId)
-    remainingDirs.delete(bestPair.dir)
   }
-
-  // 자식이 8 명 초과해서 방위가 모자라는 경우 — 자연각도 가장 가까운 방위로 배정 (중복 허용)
-  for (const cId of remainingChildren) {
-    const nat = childNatural.get(cId)!
-    let bestDir = ALL_DIRS[0]
-    let bestCost = Infinity
-    for (const dir of ALL_DIRS) {
-      const cost = dirCost(dir, nat)
-      if (cost < bestCost) {
-        bestCost = cost
-        bestDir = dir
-      }
-    }
-    result.set(cId, bestDir)
-  }
-
-  return result
-}
-
-function distPointToSegment(
-  p: Position,
-  a: Position,
-  b: Position,
-): { dist: number; t: number } {
-  const dx = b.x - a.x
-  const dy = b.y - a.y
-  const len2 = dx * dx + dy * dy
-  if (len2 < 0.01) return { dist: Math.hypot(p.x - a.x, p.y - a.y), t: 0 }
-  let t = ((p.x - a.x) * dx + (p.y - a.y) * dy) / len2
-  t = Math.max(0, Math.min(1, t))
-  const cx = a.x + t * dx
-  const cy = a.y + t * dy
-  return { dist: Math.hypot(p.x - cx, p.y - cy), t }
-}
-
-function isPositionOccupied(
-  pos: Position,
-  others: { id: string; pos: Position }[],
-  excludeIds: Set<string>,
-): boolean {
-  for (const { id, pos: p } of others) {
-    if (excludeIds.has(id)) continue
-    if (Math.hypot(pos.x - p.x, pos.y - p.y) < MIN_FACILITY_GAP) return true
-  }
-  return false
-}
-
-function lineCrossesFacility(
-  from: Position,
-  to: Position,
-  others: { id: string; pos: Position }[],
-  excludeIds: Set<string>,
-): boolean {
-  for (const { id, pos } of others) {
-    if (excludeIds.has(id)) continue
-    const { dist, t } = distPointToSegment(pos, from, to)
-    if (t > 0.1 && t < 0.9 && dist < CABLE_CROSS_CLEARANCE) return true
-  }
-  return false
+  return null
 }
 
 export function snapPositionsToCableDirections(
@@ -172,114 +116,129 @@ export function snapPositionsToCableDirections(
     adj.get(c.to_facility_id)!.add(c.from_facility_id)
   }
 
-  // degree 내림차순으로 root 후보
+  // degree 내림차순 root 후보
   const rootCandidates = facilities
     .filter((f) => initialPositions.has(f.id))
     .map((f) => ({ id: f.id, deg: adj.get(f.id)?.size ?? 0 }))
     .sort((a, b) => b.deg - a.deg)
 
-  const newPositions = new Map<string, Position>()
+  const grid = new Map<string, GridCell>()
+  const cellMap = new Map<string, string>() // "r,c" -> facility id
   const visited = new Set<string>()
-  const incomingDir = new Map<string, number>() // 부모→자기 방향
+  const incomingDelta = new Map<string, CellDelta>()
 
+  // 컴포넌트별 root → BFS
+  let componentRootCount = 0
   for (const root of rootCandidates) {
     if (visited.has(root.id)) continue
-    const rootPos = initialPositions.get(root.id)
-    if (!rootPos) continue
 
-    newPositions.set(root.id, rootPos)
+    // 다른 컴포넌트라면 그리드 원점에서 떨어진 곳 (충돌 방지). 첫 컴포넌트는 (0,0).
+    const componentOriginR = componentRootCount * 20 // 충분히 떨어진 row
+    const startCell = { r: componentOriginR, c: 0 }
+    componentRootCount += 1
+
+    grid.set(root.id, startCell)
+    cellMap.set(`${startCell.r},${startCell.c}`, root.id)
     visited.add(root.id)
     const queue: string[] = [root.id]
 
     while (queue.length > 0) {
       const currId = queue.shift()!
-      const currPos = newPositions.get(currId)!
+      const currCell = grid.get(currId)!
+      const incoming = incomingDelta.get(currId)
       const parentInitial = initialPositions.get(currId)
       if (!parentInitial) continue
 
-      // 자식 후보 — 미방문 인접 시설
-      const childIds = [...(adj.get(currId) ?? new Set())].filter((c) => !visited.has(c))
+      const childIds = [...(adj.get(currId) ?? new Set())].filter(
+        (c) => !visited.has(c),
+      )
       if (childIds.length === 0) continue
 
-      // 부모로 돌아가는 방향 제외
-      const incoming = incomingDir.get(currId)
-      let availableDirs = [...ALL_DIRS]
-      if (incoming !== undefined) {
-        const backDir = wrapAngle(incoming + Math.PI)
-        availableDirs = availableDirs.filter((d) => angleDist(d, backDir) > 0.1)
+      // 부모로 돌아가는 셀 방향 제외 (자식이 부모쪽으로 가는 것 방지)
+      let availableCardinals = [...CARDINAL_DELTAS]
+      let availableDiagonals = [...DIAGONAL_DELTAS]
+      if (incoming) {
+        const backFilter = (d: CellDelta) =>
+          !(d.dr === -incoming.dr && d.dc === -incoming.dc)
+        availableCardinals = availableCardinals.filter(backFilter)
+        availableDiagonals = availableDiagonals.filter(backFilter)
       }
 
-      // 자식들 자연각도 계산 — 초기 위치 기준 (사용자 원래 의도 유지)
-      const childrenWithAngles = childIds
+      // 자식들을 자연 각도 순으로 정렬 — 같은 부모의 자식들이 자연 위치 순서대로 배치되게
+      const childrenSorted = childIds
         .map((cId) => {
           const cInit = initialPositions.get(cId)
           if (!cInit) return null
           const dx = cInit.x - parentInitial.x
           const dy = cInit.y - parentInitial.y
           const naturalAngle = Math.atan2(dy, dx)
-          const initialDist = Math.hypot(dx, dy)
-          return { id: cId, naturalAngle, initialDist }
+          return { id: cId, naturalAngle }
         })
-        .filter((c): c is { id: string; naturalAngle: number; initialDist: number } => c !== null)
+        .filter((c): c is { id: string; naturalAngle: number } => c !== null)
 
-      // 헝가리안 (greedy 근사) 으로 자식 → 방위 배정
-      const dirAssign = assignChildrenToDirections(
-        childrenWithAngles.map((c) => ({ id: c.id, naturalAngle: c.naturalAngle })),
-        availableDirs,
-      )
+      // 각 자식에 대해 가장 좋은 셀 찾기
+      for (const child of childrenSorted) {
+        // 카디널 후보 자연각도 가까운 순. 카디널이 모두 막힐 때만 대각선.
+        const cardinalsSorted = [...availableCardinals].sort(
+          (a, b) =>
+            angleDist(a.angle, child.naturalAngle) -
+            angleDist(b.angle, child.naturalAngle),
+        )
+        const diagonalsSorted = [...availableDiagonals].sort(
+          (a, b) =>
+            angleDist(a.angle, child.naturalAngle) -
+            angleDist(b.angle, child.naturalAngle),
+        )
+        const tryOrder = [...cardinalsSorted, ...diagonalsSorted]
 
-      // 각 자식을 배정된 방위에 배치
-      const placedEntries: { id: string; pos: Position }[] = [...newPositions.entries()].map(
-        ([id, pos]) => ({ id, pos }),
-      )
-
-      for (const child of childrenWithAngles) {
-        const dir = dirAssign.get(child.id)
-        if (dir === undefined) continue
-
-        // 거리 — 자연 거리 우선, 최소 MIN_DISTANCE
-        const baseDist = Math.max(MIN_DISTANCE, child.initialDist || MIN_DISTANCE)
-        const excludeIds = new Set([currId, child.id])
-
-        let placed: Position | null = null
-        for (
-          let distMult = 1.0;
-          distMult <= MAX_DISTANCE_MULT;
-          distMult *= DISTANCE_GROWTH
-        ) {
-          const candidate = {
-            x: currPos.x + Math.cos(dir) * baseDist * distMult,
-            y: currPos.y + Math.sin(dir) * baseDist * distMult,
+        const placement = findFreeCell(currCell, tryOrder, cellMap)
+        if (!placement) {
+          // 8 방위 다 막힘 — 자연 각도 가장 가까운 카디널로 강제 배치 (overlap 허용)
+          const fallback = cardinalsSorted[0] ?? CARDINAL_DELTAS[0]
+          const fallbackCell = {
+            r: currCell.r + fallback.dr * 1,
+            c: currCell.c + fallback.dc * 1,
           }
-          if (isPositionOccupied(candidate, placedEntries, excludeIds)) continue
-          if (lineCrossesFacility(currPos, candidate, placedEntries, excludeIds)) continue
-          placed = candidate
-          break
-        }
-        if (!placed) {
-          // 폴백 — 거리 최대로 배치
-          placed = {
-            x: currPos.x + Math.cos(dir) * baseDist * MAX_DISTANCE_MULT,
-            y: currPos.y + Math.sin(dir) * baseDist * MAX_DISTANCE_MULT,
-          }
+          grid.set(child.id, fallbackCell)
+          // 점유 표시는 안 함 (이미 점유돼 있을 수 있음)
+          incomingDelta.set(child.id, fallback)
+          visited.add(child.id)
+          queue.push(child.id)
+          continue
         }
 
-        newPositions.set(child.id, placed)
-        placedEntries.push({ id: child.id, pos: placed })
-        incomingDir.set(child.id, dir)
+        grid.set(child.id, placement.cell)
+        cellMap.set(`${placement.cell.r},${placement.cell.c}`, child.id)
+        // 이 방향은 형제가 못 쓰게 제거
+        if (placement.delta.isCardinal) {
+          availableCardinals = availableCardinals.filter((d) => d !== placement.delta)
+        } else {
+          availableDiagonals = availableDiagonals.filter((d) => d !== placement.delta)
+        }
+        incomingDelta.set(child.id, placement.delta)
         visited.add(child.id)
         queue.push(child.id)
       }
     }
   }
 
-  // 변경된 시설만 반환 (1px 이상 차이)
+  // 그리드 셀 → 픽셀 좌표 변환. root 시설은 원래 위치를 유지.
+  // 첫 번째 root 의 grid (0,0) 위치를 root 의 initial position 에 맞춤.
+  const firstRoot = rootCandidates.find((r) => visited.has(r.id))
+  const rootInitialPos = firstRoot
+    ? initialPositions.get(firstRoot.id) ?? { x: 500, y: 300 }
+    : { x: 500, y: 300 }
+
   const changes: SnapPosition[] = []
-  for (const [id, pos] of newPositions.entries()) {
+  for (const [id, cell] of grid.entries()) {
+    const newPos = {
+      x: rootInitialPos.x + cell.c * CELL_W,
+      y: rootInitialPos.y + cell.r * CELL_H,
+    }
     const initial = initialPositions.get(id)
     if (!initial) continue
-    if (Math.abs(pos.x - initial.x) > 1 || Math.abs(pos.y - initial.y) > 1) {
-      changes.push({ id, x: pos.x, y: pos.y })
+    if (Math.abs(newPos.x - initial.x) > 1 || Math.abs(newPos.y - initial.y) > 1) {
+      changes.push({ id, x: newPos.x, y: newPos.y })
     }
   }
   return changes
