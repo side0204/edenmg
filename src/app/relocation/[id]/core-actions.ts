@@ -623,6 +623,37 @@ export async function swapCoreAssignmentsFromCanvas(input: {
 
 
 /**
+ * 코어 배정의 종단(is_terminal) 만 변경 — 선번장에서 회선의 끝 표시 즉시 토글.
+ * cable·circuit·코어 번호·lifecycle 은 그대로.
+ */
+export async function updateCoreTerminalFromCanvas(input: {
+  project_id: string
+  assignment_id: string
+  is_terminal: boolean
+}): Promise<{ ok: true } | { ok: false; error: string }> {
+  if (!input.project_id || !input.assignment_id) {
+    return { ok: false, error: '코어 배정 정보가 없습니다' }
+  }
+
+  const { supabase } = await requireMember()
+
+  const { error } = await supabase
+    .from('relocation_core_assignments')
+    .update({
+      is_terminal: input.is_terminal,
+      is_auto_assigned: false, // 사람이 손댄 row 표시
+    })
+    .eq('id', input.assignment_id)
+    .eq('project_id', input.project_id) // RLS 보강
+
+  if (error) return { ok: false, error: '종단 변경 실패: ' + error.message }
+
+  revalidatePath(`/relocation/${input.project_id}`)
+  return { ok: true }
+}
+
+
+/**
  * 코어 배정의 lifecycle 만 변경 — 선번장에서 신설/기설/이설 즉시 변경.
  * cable·circuit·코어 번호·종단은 그대로.
  */

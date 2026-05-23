@@ -887,8 +887,10 @@ function CoreAssignSection({
       {/* 추가 폼 */}
       {adding && (
         <div className="mt-2 rounded-lg border border-slate-200 bg-slate-50 p-2 space-y-2">
-          {/* 모드 토글 — 단일 / 일괄. 모드별 lifecycle 기본값 자동 분기:
-              단일 = 신설(new) · 일괄 = 기설(preexisting). 변경은 그대로 가능. */}
+          {/* 모드 토글 — 단일 / 일괄. lifecycle 기본값은 케이블 상태에 따라 분기:
+              · 신설 케이블 → 단일·일괄 모두 신설(new) 기본
+              · 그 외 케이블 → 단일=신설(new) · 일괄=기설(preexisting) 기본
+              사용자가 select 로 그대로 변경 가능. */}
           <div className="flex items-center gap-1 rounded-md bg-slate-200/60 p-0.5">
             <button
               type="button"
@@ -909,7 +911,7 @@ function CoreAssignSection({
               type="button"
               onClick={() => {
                 setMode('bulk')
-                setLifecycle('preexisting')
+                setLifecycle(cable.status === 'new' ? 'new' : 'preexisting')
               }}
               className={
                 'flex-1 rounded px-2 py-0.5 text-[10px] font-medium ' +

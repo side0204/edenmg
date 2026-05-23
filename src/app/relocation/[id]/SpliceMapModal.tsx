@@ -14,6 +14,7 @@ import {
   swapCoreAssignmentsFromCanvas,
   shiftInsertCoreFromCanvas,
   updateCoreLifecycleFromCanvas,
+  updateCoreTerminalFromCanvas,
 } from './core-actions'
 import type { CablePanelCircuit, CablePanelAssignment } from './CableInfoPanel'
 
@@ -66,6 +67,46 @@ export default function SpliceMapModal({
   const dragRef = useRef<{ key: ColKey; startX: number; startW: number } | null>(
     null,
   )
+  // 모달 위치 — 화면 가운데 기준 오프셋(px). 헤더 드래그로 변경.
+  const [offset, setOffset] = useState<{ x: number; y: number }>({ x: 0, y: 0 })
+  const dragModalRef = useRef<
+    | {
+        startX: number
+        startY: number
+        startOffsetX: number
+        startOffsetY: number
+      }
+    | null
+  >(null)
+
+  // 모달 드래그 — 헤더 onPointerDown → window pointermove · pointerup.
+  // 헤더 안 닫기 버튼·기타 인터랙티브 요소는 closest 검사로 제외.
+  function onHeaderPointerDown(e: React.PointerEvent) {
+    const t = e.target as HTMLElement
+    if (t.closest('button, input, select, a, [data-no-drag]')) return
+    e.preventDefault()
+    dragModalRef.current = {
+      startX: e.clientX,
+      startY: e.clientY,
+      startOffsetX: offset.x,
+      startOffsetY: offset.y,
+    }
+    const onMove = (ev: PointerEvent) => {
+      const d = dragModalRef.current
+      if (!d) return
+      setOffset({
+        x: d.startOffsetX + ev.clientX - d.startX,
+        y: d.startOffsetY + ev.clientY - d.startY,
+      })
+    }
+    const onUp = () => {
+      dragModalRef.current = null
+      window.removeEventListener('pointermove', onMove)
+      window.removeEventListener('pointerup', onUp)
+    }
+    window.addEventListener('pointermove', onMove)
+    window.addEventListener('pointerup', onUp)
+  }
 
   // 컬럼 폭 드래그 — th 우측 핸들 onPointerDown → window pointermove · pointerup.
   function onResizeStart(e: React.PointerEvent, key: ColKey) {
@@ -150,6 +191,24 @@ export default function SpliceMapModal({
     onChanged()
   }
 
+  // 종단(is_terminal) 인라인 토글 — checkbox onChange 즉시 server action.
+  async function onTerminalChange(assignmentId: string, next: boolean) {
+    if (busy) return
+    setBusy(true)
+    const result = await updateCoreTerminalFromCanvas({
+      project_id: projectId,
+      assignment_id: assignmentId,
+      is_terminal: next,
+    })
+    setBusy(false)
+    if (!result.ok) {
+      toast.error(result.error)
+      return
+    }
+    toast.success(next ? '종단으로 표시했습니다' : '종단 표시를 해제했습니다')
+    onChanged()
+  }
+
   // 구분(lifecycle) 인라인 변경 — select onChange 즉시 server action.
   async function onLifecycleChange(assignmentId: string, next: CoreLifecycle) {
     if (busy) return
@@ -217,11 +276,16 @@ export default function SpliceMapModal({
     >
       <div
         className="relative w-full max-w-2xl max-h-[85vh] bg-white rounded-xl shadow-xl flex flex-col overflow-hidden"
+        style={{ transform: `translate(${offset.x}px, ${offset.y}px)` }}
         onClick={(e) => e.stopPropagation()}
       >
-        {/* 헤더 */}
-        <div className="sticky top-0 z-10 flex items-center justify-between border-b border-slate-200 bg-white px-4 py-3">
-          <div>
+        {/* 헤더 — 빈 영역 드래그로 모달 이동 (cursor-move 로 안내) */}
+        <div
+          onPointerDown={onHeaderPointerDown}
+          className="sticky top-0 z-10 flex items-center justify-between border-b border-slate-200 bg-white px-4 py-3 cursor-move select-none"
+          title="드래그하여 이동"
+        >
+          <div data-no-drag-children>
             <h2 className="text-base font-bold text-slate-900">선번장</h2>
             <p className="text-xs text-slate-500 font-mono">
               {cableCode} · 총 {coreCount} 코어 · 사용 {used.size} · 빈 {freeCores.length}
@@ -312,10 +376,20 @@ export default function SpliceMapModal({
                       )}
                     </td>
                     <td className="px-3 py-2">
-                      {a?.is_terminal ? (
-                        <span className="inline-flex items-center gap-0.5 text-blue-700">
-                          <Flag className="h-3 w-3" />
-                        </span>
+                      {a ? (
+                        <label
+                          className="inline-flex items-center gap-1 cursor-pointer"
+                          title={a.is_terminal ? '종단 해제' : '종단으로 표시'}
+                        >
+                          <input
+                            type="checkbox"
+                            checked={a.is_terminal}
+                            onChange={(e) => onTerminalChange(a.id, e.target.checked)}
+                            disabled={busy}
+                            className="h-3.5 w-3.5 rounded border-slate-300 text-blue-600 disabled:opacity-50"
+                          />
+                          {a.is_terminal && <Flag className="h-3 w-3 text-blue-700" />}
+                        </label>
                       ) : (
                         <span className="text-slate-300">—</span>
                       )}
@@ -426,9 +500,21 @@ export default function SpliceMapModal({
         </div>
 
         {/* 푸터 */}
-        <div className="border-t border-slate-200 bg-slate-50 px-4 py-2 text-[11px] text-slate-500">
-          코어 변경은 같은 케이블 안에서만 가능합니다. 다른 케이블로 이동하려면 기존
-          배정을 삭제 후 새로 추가하세요.
+        <div className="flex items-center justify-between gap-2 border-t border-slate-200 bg-slate-50 px-4 py-2 text-[11px] text-slate-500">
+          <span>
+            코어 변경은 같은 케이블 안에서만 가능합니다. 다른 케이블로 이동하려면 기존
+            배정을 삭제 후 새로 추가하세요.
+          </span>
+          {(offset.x !== 0 || offset.y !== 0) && (
+            <button
+              type="button"
+              onClick={() => setOffset({ x: 0, y: 0 })}
+              className="shrink-0 rounded-md border border-slate-300 bg-white px-2 py-0.5 text-[11px] font-medium text-slate-600 hover:bg-slate-100"
+              title="모달 위치를 화면 가운데로 되돌립니다"
+            >
+              위치 초기화
+            </button>
+          )}
         </div>
       </div>
     </div>,
