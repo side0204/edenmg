@@ -63,6 +63,18 @@ const ORIGIN_Y = 30
 
 const ORIENTATION_RATIO_THRESHOLD = 1.2 // EW/NS 비가 이 이상이면 LR
 
+// Phase 4 (2026-05-23) — 한 카테고리 시설이 많을 때 줄바꿈.
+//   TB: 한 행에 MAX_PER_ROW 초과하면 sub-row 로 내려감.
+//   LR: 한 열에 MAX_PER_COL 초과하면 sub-column 으로 옆 이동.
+const MAX_PER_ROW = 12 // TB 한 행 최대 시설 수
+const MAX_PER_COL = 8 // LR 한 열 최대 시설 수
+const SUBROW_HEIGHT = ROW_HEIGHT // sub-row 도 같은 높이 유지 (시설 사이 띄움)
+const SUBCOL_WIDTH = LR_COL_WIDTH // sub-column 도 같은 폭
+
+// rank(카테고리 인덱스) 의 범위 — rowForType 이 반환하는 값들
+const RANK_MIN = 0
+const RANK_MAX = 6
+
 /**
  * 시설들의 GPS 분포로 도식 방향 결정.
  *   - EW(동서) 거리가 NS(남북) 의 1.2배 이상이면 LR
@@ -127,19 +139,39 @@ export function autoLayoutPositions(
     buckets.get(rank)!.push(n)
   }
 
-  // 각 카테고리에서 seq_no 정렬
+  // Phase 4 — 각 카테고리가 사용하는 sub-row 수를 먼저 계산해, 다음 카테고리의 시작
+  //   좌표를 누적해서 잡는다. 한 카테고리가 줄바꿈 후에도 다음 카테고리와 안 겹침.
+  const subCountByRank = new Map<number, number>()
+  for (const [rank, items] of buckets.entries()) {
+    const max = dir === 'TB' ? MAX_PER_ROW : MAX_PER_COL
+    subCountByRank.set(rank, Math.max(1, Math.ceil(items.length / max)))
+  }
+  // 누적 오프셋 — RANK_MIN 부터 순서대로
+  const offsetByRank = new Map<number, number>()
+  let cumulative = 0
+  for (let r = RANK_MIN; r <= RANK_MAX; r++) {
+    offsetByRank.set(r, cumulative)
+    cumulative += subCountByRank.get(r) ?? 1
+  }
+
+  // 각 카테고리에서 seq_no 정렬 후 줄바꿈 적용
   for (const [rank, items] of buckets.entries()) {
     items.sort((a, b) => a.seq_no - b.seq_no)
+    const rankOffset = offsetByRank.get(rank) ?? 0
     items.forEach((n, i) => {
       if (dir === 'TB') {
-        // 카테고리 = 행(y), seq_no = 열(x)
-        const x = ORIGIN_X + i * (NODE_WIDTH + COL_GAP)
-        const y = ORIGIN_Y + rank * ROW_HEIGHT
+        // 카테고리 = 행(y) · seq_no = 열(x) · 12개 초과 시 sub-row 로 내려감
+        const col = i % MAX_PER_ROW
+        const subRow = Math.floor(i / MAX_PER_ROW)
+        const x = ORIGIN_X + col * (NODE_WIDTH + COL_GAP)
+        const y = ORIGIN_Y + (rankOffset + subRow) * SUBROW_HEIGHT
         result.set(n.id, { id: n.id, x, y })
       } else {
-        // LR: 카테고리 = 열(x), seq_no = 행(y)
-        const x = ORIGIN_X + rank * LR_COL_WIDTH
-        const y = ORIGIN_Y + i * LR_ROW_HEIGHT
+        // LR: 카테고리 = 열(x) · seq_no = 행(y) · 8개 초과 시 sub-column 으로 옆 이동
+        const row = i % MAX_PER_COL
+        const subCol = Math.floor(i / MAX_PER_COL)
+        const x = ORIGIN_X + (rankOffset + subCol) * SUBCOL_WIDTH
+        const y = ORIGIN_Y + row * LR_ROW_HEIGHT
         result.set(n.id, { id: n.id, x, y })
       }
     })
