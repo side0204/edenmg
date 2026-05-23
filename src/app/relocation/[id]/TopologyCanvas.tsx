@@ -204,6 +204,86 @@ const MAP_NODE_SCALE_STEP = 0.82       // 1 단계당 시설 배율
 const MAP_NODE_BASE_SCALE_STEPS = 2    // 기준 줌에서의 기본 축소 단계
 const MAP_NODE_SCALE_MAX_STEPS = 2     // 줌 축소를 따라가는 추가 단계 상한
 
+// Phase 2.5 (2026-05-23) — Manhattan(직각) 라우팅 helper.
+//   양 끝 anchor 의 side 정보로 케이블 경로점을 자동 생성.
+//   - 카디널(N/S/E/W) anchor: 그 변에 수직 출구 (E/W → 수평, N/S → 수직) 유지하며 직각 꺾기.
+//   - 'D' (대각선) anchor: Manhattan 적용 안 함 (직선 라우팅) → 빈 배열 반환.
+//   - 둘 다 카디널: L자 (1 점) 또는 ㄷ자/ㅗ자 (2 점) 라우팅.
+//   - 한쪽만 카디널: L자 (1 점) — 중심 쪽은 자유로 진입.
+//   - 둘 다 중심: 빈 배열 (직선).
+type ManhattanSide = 'N' | 'S' | 'E' | 'W' | 'D'
+function manhattanRoute(
+  from: { x: number; y: number; side?: ManhattanSide },
+  to: { x: number; y: number; side?: ManhattanSide },
+): { x: number; y: number }[] {
+  // 대각선 anchor 면 직선
+  if (from.side === 'D' || to.side === 'D') return []
+  const fs = from.side
+  const ts = to.side
+  // 둘 다 중심 → 직선
+  if (!fs && !ts) return []
+
+  const fromH = fs === 'E' || fs === 'W'
+  const fromV = fs === 'N' || fs === 'S'
+  const toH = ts === 'E' || ts === 'W'
+  const toV = ts === 'N' || ts === 'S'
+
+  // 한쪽만 카디널, 다른 쪽은 중심
+  if (fs && !ts) {
+    if (fromH) return [{ x: to.x, y: from.y }]
+    return [{ x: from.x, y: to.y }]
+  }
+  if (!fs && ts) {
+    if (toH) return [{ x: from.x, y: to.y }]
+    return [{ x: to.x, y: from.y }]
+  }
+
+  // 둘 다 카디널
+  if (fromH && toH) {
+    // 둘 다 수평 출구
+    if (fs === ts) {
+      // 같은 변 (E-E or W-W): U-turn 라우팅
+      const STUB = 40
+      const farX =
+        fs === 'E' ? Math.max(from.x, to.x) + STUB : Math.min(from.x, to.x) - STUB
+      return [
+        { x: farX, y: from.y },
+        { x: farX, y: to.y },
+      ]
+    }
+    // 반대 변 (E-W or W-E): H-V-H 중점 꺾기
+    const midX = (from.x + to.x) / 2
+    return [
+      { x: midX, y: from.y },
+      { x: midX, y: to.y },
+    ]
+  }
+  if (fromV && toV) {
+    // 둘 다 수직 출구
+    if (fs === ts) {
+      const STUB = 40
+      const farY =
+        fs === 'S' ? Math.max(from.y, to.y) + STUB : Math.min(from.y, to.y) - STUB
+      return [
+        { x: from.x, y: farY },
+        { x: to.x, y: farY },
+      ]
+    }
+    const midY = (from.y + to.y) / 2
+    return [
+      { x: from.x, y: midY },
+      { x: to.x, y: midY },
+    ]
+  }
+  // 한쪽 H, 한쪽 V (수직 출구) → L자 1 waypoint
+  if (fromH) {
+    // from 수평, to 수직 — 엘보 (to.x, from.y)
+    return [{ x: to.x, y: from.y }]
+  }
+  // from 수직, to 수평 — 엘보 (from.x, to.y)
+  return [{ x: from.x, y: to.y }]
+}
+
 // polyline 의 arc-length 비율(0~1) 위치 점 — 고장점 마커용
 function pointAlongPolyline(
   pts: { x: number; y: number }[],
@@ -1513,13 +1593,16 @@ export default function TopologyCanvas({
   // Phase 2 (2026-05-23) — 도식 모드의 시설 anchor 사전 계산.
   //   각 케이블을 자연 각도로 4 방위 (N/S/E/W) 에 quantize.
   //   같은 방위에 1 조뿐이면 anchor 안 함 (중심 사용 — 「이격된」 느낌 방지).
-  //   같은 방위에 2+ 조 → 그 변에 수직 평행 분산 (E/W 면은 위아래, N/S 면은 좌우).
+  //   같은 방위에 2~4 조 → 그 변에 수직 평행 분산 (E/W 면은 위아래, N/S 면은 좌우).
+  //   같은 방위에 5+ 조 → 90° 부채꼴 arc 로 분산 (코너 anchor 까지 사용 — 대각선 라우팅).
   //   지도 모드는 시설이 GPS 로 분산되어 자연 anchor 불필요 → null.
+  // side 필드: 'N'/'S'/'E'/'W' = 카디널(직각 라우팅), 'D' = 대각선(직선), undefined = 중심.
   const cableAnchors = useMemo(() => {
     if (mode === 'map') return null
+    type AnchorEnd = { x: number; y: number; side?: 'N' | 'S' | 'E' | 'W' | 'D' }
     const result = new Map<
       string,
-      { from?: { x: number; y: number }; to?: { x: number; y: number } }
+      { from?: AnchorEnd; to?: AnchorEnd }
     >()
 
     // 시설별로 연결된 케이블 모음
@@ -1600,28 +1683,61 @@ export default function TopologyCanvas({
         })
 
         const N = group.length
-        group.forEach((item, i) => {
-          const offset = (i - (N - 1) / 2) * PERPENDICULAR_STEP
-          let ax: number, ay: number
-          if (dir === 'E') {
-            ax = cx + halfW
-            ay = cy + offset
-          } else if (dir === 'W') {
-            ax = cx - halfW
-            ay = cy + offset
-          } else if (dir === 'N') {
-            ax = cx + offset
-            ay = cy - halfH
-          } else {
-            // S
-            ax = cx + offset
-            ay = cy + halfH
-          }
-          const entry = result.get(item.cableId) ?? {}
-          if (item.isFromSide) entry.from = { x: ax, y: ay }
-          else entry.to = { x: ax, y: ay }
-          result.set(item.cableId, entry)
-        })
+        if (N <= 4) {
+          // 2~4 조: 카디널 변에 수직 평행 분산 → 직각 라우팅으로 시설 V/H 출발
+          group.forEach((item, i) => {
+            const offset = (i - (N - 1) / 2) * PERPENDICULAR_STEP
+            let ax: number, ay: number
+            let side: 'N' | 'S' | 'E' | 'W'
+            if (dir === 'E') {
+              ax = cx + halfW
+              ay = cy + offset
+              side = 'E'
+            } else if (dir === 'W') {
+              ax = cx - halfW
+              ay = cy + offset
+              side = 'W'
+            } else if (dir === 'N') {
+              ax = cx + offset
+              ay = cy - halfH
+              side = 'N'
+            } else {
+              ax = cx + offset
+              ay = cy + halfH
+              side = 'S'
+            }
+            const entry = result.get(item.cableId) ?? {}
+            if (item.isFromSide) entry.from = { x: ax, y: ay, side }
+            else entry.to = { x: ax, y: ay, side }
+            result.set(item.cableId, entry)
+          })
+        } else {
+          // 5+ 조: 90° 부채꼴 arc 로 분산. 코너 anchor 까지 사용 → 대각선 라우팅.
+          //   E 방향이면 -45°(NE 코너) ~ +45°(SE 코너) 범위에 N 등분.
+          //   anchor 점은 시설 사각형 둘레로 projection (정사각형 가정 — 슬롯 110×90 이지만 거의).
+          const dirAngle = dir === 'E' ? 0 : dir === 'S' ? Math.PI / 2 : dir === 'W' ? Math.PI : -Math.PI / 2
+          const arcHalf = Math.PI / 4 // ±45°
+          group.forEach((item, i) => {
+            const t = N === 1 ? 0 : i / (N - 1) // 0 ~ 1
+            const a = dirAngle - arcHalf + t * arcHalf * 2
+            // 시설 변 둘레 anchor — 정사각 근사 (max(|dx|,|dy|) = halfW 또는 halfH)
+            const cosA = Math.cos(a)
+            const sinA = Math.sin(a)
+            const tx = halfW / Math.max(0.001, Math.abs(cosA))
+            const ty = halfH / Math.max(0.001, Math.abs(sinA))
+            const r = Math.min(tx, ty)
+            const ax = cx + cosA * r
+            const ay = cy + sinA * r
+            const entry = result.get(item.cableId) ?? {}
+            // 중간 ±10° 이내는 카디널 변에 가까움 → 직각 라우팅 side 부여, 그 외는 대각선 'D'
+            const offFromCardinal = Math.abs(a - dirAngle)
+            const isCardinal = offFromCardinal < (Math.PI / 18) // 10°
+            const side: 'N' | 'S' | 'E' | 'W' | 'D' = isCardinal ? dir : 'D'
+            if (item.isFromSide) entry.from = { x: ax, y: ay, side }
+            else entry.to = { x: ax, y: ay, side }
+            result.set(item.cableId, entry)
+          })
+        }
       }
     }
     return result
@@ -1755,6 +1871,18 @@ export default function TopologyCanvas({
         const auto = obstacleWaypointsByCable.get(c.id)
         if (auto) {
           midPoints = [auto]
+        }
+      }
+
+      // Phase 2.5 (2026-05-23) — 직각 라우팅 자동 waypoint.
+      //   사용자/장애물 waypoint 가 없고 anchor 에 카디널 side 가 있으면 Manhattan L/ㄷ자 경로 생성.
+      //   대각선('D') anchor 와 둘 다 중심인 케이블은 helper 가 빈 배열을 반환 → 직선 유지.
+      if (midPoints.length === 0 && mode !== 'map') {
+        const fromForRoute = anchor?.from ?? fromPt
+        const toForRoute = anchor?.to ?? toPt
+        const auto = manhattanRoute(fromForRoute, toForRoute)
+        if (auto.length > 0) {
+          midPoints = auto
         }
       }
 
