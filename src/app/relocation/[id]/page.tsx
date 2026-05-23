@@ -30,6 +30,7 @@ import { seedTestData } from './seed-actions'
 import TopologyCanvas from './TopologyCanvas'
 import CollapsibleLayout from './CollapsibleLayout'
 import ProgressStepBar, { type ProgressStep } from './ProgressStepBar'
+import RealtimeSync from './RealtimeSync'
 import { loadRelocationCanvasData } from './canvas-data'
 import VerifyTab from './VerifyTab'
 import { runVerification } from '@/lib/relocation-verify'
@@ -105,10 +106,12 @@ export default async function RelocationProjectPage({
 
   const { data: meRow } = await supabase
     .from('employees')
-    .select('id, company_id, is_active')
+    .select('id, company_id, name, is_active')
     .eq('auth_user_id', user.id)
     .maybeSingle()
-  const me = meRow as { id: string; company_id: string; is_active: boolean } | null
+  const me = meRow as
+    | { id: string; company_id: string; name: string; is_active: boolean }
+    | null
   if (!me || !me.is_active) {
     redirect('/?err=' + encodeURIComponent('계정이 활성 상태가 아닙니다'))
   }
@@ -751,6 +754,7 @@ export default async function RelocationProjectPage({
   return (
     <main className="min-h-screen pb-6">
       <HighlightProvider>
+        <RealtimeSync projectId={id} selfEmployeeId={me.id} selfName={me.name} />
         <div className="mx-auto max-w-6xl px-4 pt-3 sm:px-6">
           <ProgressStepBar projectId={id} steps={steps} currentTab={tab} />
         </div>

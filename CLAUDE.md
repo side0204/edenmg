@@ -1068,6 +1068,7 @@ owner 요구: "어느 메뉴를 많이 쓰는지" 페이지 단위 분석. 접�
   - [`0046_facility_work_window.sql`](./supabase/migrations/0046_facility_work_window.sql) — 지장이설 시설 작업 가능 시간대: `relocation_facilities.work_window_start`/`end` (owner 실행 완료)
   - [`0047_activity_log.sql`](./supabase/migrations/0047_activity_log.sql) — 베타 모니터링: `employees.last_seen_at` + `activity_logs`(로그인·로그아웃, append-only) + RLS
   - [`0048_page_views.sql`](./supabase/migrations/0048_page_views.sql) — 베타 모니터링: `page_views`(페이지 방문, append-only) + `page_view_summary` 집계 RPC + RLS
+  - [`0059_relocation_realtime.sql`](./supabase/migrations/0059_relocation_realtime.sql) — 지장이설 프로젝트 동시 작업: `supabase_realtime` publication 에 relocation_* 테이블 11개 등록 (Realtime 구독 활성화)
 - **외선일보 별도 entity (v2)** — 접속일보와 동일 패턴으로 외선팀 전용 모듈. 외선 작업 특성(케이블 포설구간·전주번호 등)에 맞는 구조 별도 설계.
 - **접속일보 후속 (v2)** — segment-level 작업자 태그, 사진 첨부 + EXIF, 국사·함체 마스터 테이블화, 재접속 이력 조회, 지도 시각화
 - **M3 Phase 2 후속** — 사진 첨부 + EXIF·워터마크 (PRD M3-06), 일보 결재함 통합 (현재는 작업 상세에서 진입), 일반 일보 월별 CSV 리포트
