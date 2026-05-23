@@ -221,8 +221,21 @@ function manhattanRoute(
   if (from.side === 'D' || to.side === 'D') return []
   const fs = from.side
   const ts = to.side
-  // 둘 다 중심 → 직선
-  if (!fs && !ts) return []
+  // 둘 다 중심 (anchor 없음) — V/H 정렬이면 직선, 아니면 L자 (1 waypoint).
+  //   owner 요청 (2026-05-23): 모든 케이블이 V/H 만 보여야 함. 그리드 셀끼리 정렬되지 않은
+  //   사이클 edge 도 L자로 꺾어 V/H 만 사용.
+  if (!fs && !ts) {
+    const dx = to.x - from.x
+    const dy = to.y - from.y
+    const adx = Math.abs(dx)
+    const ady = Math.abs(dy)
+    if (adx < 5 || ady < 5) return [] // 거의 정렬 → 직선 OK
+    // L자: 거리 긴 축을 먼저, 짧은 축을 나중에 (꺾임 1 번)
+    if (adx >= ady) {
+      return [{ x: to.x, y: from.y }] // H 먼저, 그 다음 V
+    }
+    return [{ x: from.x, y: to.y }] // V 먼저, 그 다음 H
+  }
 
   const fromH = fs === 'E' || fs === 'W'
   const fromV = fs === 'N' || fs === 'S'
@@ -1751,27 +1764,32 @@ export default function TopologyCanvas({
             result.set(item.cableId, entry)
           })
         } else {
-          // 5+ 조: 90° 부채꼴 arc 로 분산. 코너 anchor 까지 사용 → 대각선 라우팅.
-          //   E 방향이면 -45°(NE 코너) ~ +45°(SE 코너) 범위에 N 등분.
-          //   anchor 점은 시설 사각형 둘레로 projection (정사각형 가정 — 슬롯 110×90 이지만 거의).
-          const dirAngle = dir === 'E' ? 0 : dir === 'S' ? Math.PI / 2 : dir === 'W' ? Math.PI : -Math.PI / 2
-          const arcHalf = Math.PI / 4 // ±45°
+          // 5+ 조 같은 방향: 카디널 변에 좁은 간격으로 분산 (대각선 사용 안 함).
+          //   owner 요청 (2026-05-23): 모든 케이블이 V/H. 5+ 조도 같은 변에 평행 분산해
+          //   모두 V/H 출발. 변 길이가 부족하면 간격 좁힘.
+          const tightStep = Math.min(PERPENDICULAR_STEP, 80 / N) // N 이 클수록 간격 좁힘
           group.forEach((item, i) => {
-            const t = N === 1 ? 0 : i / (N - 1) // 0 ~ 1
-            const a = dirAngle - arcHalf + t * arcHalf * 2
-            // 시설 변 둘레 anchor — 정사각 근사 (max(|dx|,|dy|) = halfW 또는 halfH)
-            const cosA = Math.cos(a)
-            const sinA = Math.sin(a)
-            const tx = halfW / Math.max(0.001, Math.abs(cosA))
-            const ty = halfH / Math.max(0.001, Math.abs(sinA))
-            const r = Math.min(tx, ty)
-            const ax = cx + cosA * r
-            const ay = cy + sinA * r
+            const offset = (i - (N - 1) / 2) * tightStep
+            let ax: number, ay: number
+            let side: 'N' | 'S' | 'E' | 'W'
+            if (dir === 'E') {
+              ax = cx + halfW
+              ay = cy + offset
+              side = 'E'
+            } else if (dir === 'W') {
+              ax = cx - halfW
+              ay = cy + offset
+              side = 'W'
+            } else if (dir === 'N') {
+              ax = cx + offset
+              ay = cy - halfH
+              side = 'N'
+            } else {
+              ax = cx + offset
+              ay = cy + halfH
+              side = 'S'
+            }
             const entry = result.get(item.cableId) ?? {}
-            // 중간 ±10° 이내는 카디널 변에 가까움 → 직각 라우팅 side 부여, 그 외는 대각선 'D'
-            const offFromCardinal = Math.abs(a - dirAngle)
-            const isCardinal = offFromCardinal < (Math.PI / 18) // 10°
-            const side: 'N' | 'S' | 'E' | 'W' | 'D' = isCardinal ? dir : 'D'
             if (item.isFromSide) entry.from = { x: ax, y: ay, side }
             else entry.to = { x: ax, y: ay, side }
             result.set(item.cableId, entry)
