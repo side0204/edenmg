@@ -1514,6 +1514,8 @@ export default function TopologyCanvas({
   //   각 함체에 4 조 이하 케이블이면 N/S/E/W 4 방위, 5 조부터 NSEW + 대각선 8 방위에 배정.
   //   같은 방위 충돌은 greedy 로 차순위 방위 배치 — 결정성 위해 cable id 정렬 기준.
   //   지도 모드는 시설이 GPS 로 분산되어 자연스럽게 다른 방향 — anchor 없이 중심 사용.
+  // 2026-05-23 보정 — 1~2 조 케이블만 있는 시설은 anchor 안 함 (그냥 중심에 붙임).
+  //   사용자 피드백: 1-2 조 케이블인 시설도 둘레로 분산되어 「이격된」 느낌이 강함.
   const cableAnchors = useMemo(() => {
     if (mode === 'map') return null
     const result = new Map<
@@ -1565,6 +1567,8 @@ export default function TopologyCanvas({
         })
       }
       if (items.length === 0) continue
+      // 1~2 조면 anchor 안 함 — 중심에 그대로 붙임 (시각적 이격 방지)
+      if (items.length <= 2) continue
 
       // 4 조 이하 = 4 방위, 5+ = 8 방위
       const useEight = items.length > 4
