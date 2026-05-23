@@ -127,20 +127,21 @@ export function snapPositionsToCableDirections(
   const visited = new Set<string>()
   const incomingDelta = new Map<string, CellDelta>()
 
-  // 컴포넌트별 root → BFS
-  let componentRootCount = 0
+  // 컴포넌트별 root → BFS. 컴포넌트 사이는 직전 컴포넌트의 최대 row 다음에 작은 gap 만.
+  //   너무 멀리 떨어져 빈 공간이 크게 보이는 것 방지.
+  let nextComponentStartR = 0
+  const COMPONENT_GAP_ROWS = 2 // 컴포넌트 사이 row gap
   for (const root of rootCandidates) {
     if (visited.has(root.id)) continue
 
-    // 다른 컴포넌트라면 그리드 원점에서 떨어진 곳 (충돌 방지). 첫 컴포넌트는 (0,0).
-    const componentOriginR = componentRootCount * 20 // 충분히 떨어진 row
-    const startCell = { r: componentOriginR, c: 0 }
-    componentRootCount += 1
-
+    const startCell = { r: nextComponentStartR, c: 0 }
     grid.set(root.id, startCell)
     cellMap.set(`${startCell.r},${startCell.c}`, root.id)
     visited.add(root.id)
     const queue: string[] = [root.id]
+
+    // 이 컴포넌트에 속한 시설들의 row 추적용 — BFS 끝나면 max row 갱신
+    const componentFacilityIds: string[] = [root.id]
 
     while (queue.length > 0) {
       const currId = queue.shift()!
@@ -204,6 +205,7 @@ export function snapPositionsToCableDirections(
           incomingDelta.set(child.id, fallback)
           visited.add(child.id)
           queue.push(child.id)
+          componentFacilityIds.push(child.id)
           continue
         }
 
@@ -218,8 +220,17 @@ export function snapPositionsToCableDirections(
         incomingDelta.set(child.id, placement.delta)
         visited.add(child.id)
         queue.push(child.id)
+        componentFacilityIds.push(child.id)
       }
     }
+
+    // 이 컴포넌트 BFS 종료 — max row 갱신해 다음 컴포넌트 시작 row 결정
+    let maxRow = nextComponentStartR
+    for (const id of componentFacilityIds) {
+      const cell = grid.get(id)
+      if (cell && cell.r > maxRow) maxRow = cell.r
+    }
+    nextComponentStartR = maxRow + 1 + COMPONENT_GAP_ROWS
   }
 
   // 그리드 셀 → 픽셀 좌표 변환. root 시설은 원래 위치를 유지.
