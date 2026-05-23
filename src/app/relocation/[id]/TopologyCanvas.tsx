@@ -1606,6 +1606,89 @@ export default function TopologyCanvas({
     return result
   }, [cables, effectivePositions, mode])
 
+  // Phase 3 (2026-05-23) — 도식 모드 케이블이 다른 시설 위를 가로지를 때 자동 회피 waypoint.
+  //   사용자 waypoint 가 있으면 건드리지 않음 (수동 우선).
+  //   직선이 어느 시설 도형 안을 지나면 중점을 수직 방향으로 deflect.
+  //   완벽한 라우팅이 아닌 「명백한 가로지름 제거」 수준.
+  const obstacleWaypointsByCable = useMemo(() => {
+    if (mode === 'map') return null
+    const result = new Map<string, { x: number; y: number }>()
+    const halfW = NODE_SIZE.width / 2
+    const halfH = NODE_SIZE.height / 2
+    const CLEAR = 50 // 시설 중심에서 케이블이 이 거리보다 가깝게 지나가면 가로지름으로 간주
+
+    // 모든 시설의 중심 사전 계산
+    const centers = new Map<string, { x: number; y: number }>()
+    for (const [id, p] of Object.entries(effectivePositions)) {
+      centers.set(id, { x: p.x + halfW, y: p.y + halfH - 10 })
+    }
+
+    function distPointToSegment(
+      p: { x: number; y: number },
+      a: { x: number; y: number },
+      b: { x: number; y: number },
+    ): { dist: number; t: number } {
+      const dx = b.x - a.x
+      const dy = b.y - a.y
+      const len2 = dx * dx + dy * dy
+      if (len2 < 0.01) return { dist: Math.hypot(p.x - a.x, p.y - a.y), t: 0 }
+      let t = ((p.x - a.x) * dx + (p.y - a.y) * dy) / len2
+      t = Math.max(0, Math.min(1, t))
+      const cx = a.x + t * dx
+      const cy = a.y + t * dy
+      return { dist: Math.hypot(p.x - cx, p.y - cy), t }
+    }
+
+    for (const c of cables) {
+      // 사용자 waypoint 있으면 자동 회피 안 함
+      if (effectiveWaypoints(c.id).length > 0) continue
+
+      const anchor = cableAnchors?.get(c.id)
+      const fromPos = effectivePositions[c.from_facility_id]
+      const toPos = effectivePositions[c.to_facility_id]
+      if (!fromPos || !toPos) continue
+      const from = anchor?.from ?? {
+        x: fromPos.x + halfW,
+        y: fromPos.y + halfH - 10,
+      }
+      const to = anchor?.to ?? { x: toPos.x + halfW, y: toPos.y + halfH - 10 }
+
+      // 다른 시설 중 케이블 선분에 가까운(가로지름) 것 모음
+      let worstObstacle: { p: { x: number; y: number }; dist: number } | null = null
+      for (const [otherId, otherCenter] of centers.entries()) {
+        if (otherId === c.from_facility_id || otherId === c.to_facility_id) continue
+        const { dist, t } = distPointToSegment(otherCenter, from, to)
+        // 선분의 양 끝 가까이는 제외 (anchor 부근은 무시) — t 가 0.15 ~ 0.85 사이일 때만
+        if (t < 0.15 || t > 0.85) continue
+        if (dist < CLEAR && (worstObstacle == null || dist < worstObstacle.dist)) {
+          worstObstacle = { p: otherCenter, dist }
+        }
+      }
+      if (!worstObstacle) continue
+
+      // 중점 + 수직 deflect — 장애물 반대쪽으로
+      const mid = { x: (from.x + to.x) / 2, y: (from.y + to.y) / 2 }
+      const dx = to.x - from.x
+      const dy = to.y - from.y
+      const len = Math.hypot(dx, dy) || 1
+      // 진행 방향에 수직인 단위 벡터
+      const px = -dy / len
+      const py = dx / len
+      // 장애물 → 중점 의 perpendicular 성분 부호로 회피 방향 결정
+      const dpx = mid.x - worstObstacle.p.x
+      const dpy = mid.y - worstObstacle.p.y
+      const sign = dpx * px + dpy * py >= 0 ? 1 : -1
+      // deflect 거리 — 시설 반지름 + clearance
+      const DEFLECT = halfW + 20
+      result.set(c.id, {
+        x: mid.x + px * DEFLECT * sign,
+        y: mid.y + py * DEFLECT * sign,
+      })
+    }
+
+    return result
+  }, [cables, effectivePositions, mode, effectiveWaypoints, cableAnchors])
+
   const cablePathPoints = useCallback(
     (c: CableEdge): Waypoint[] => {
       const from = effectivePositions[c.from_facility_id]
@@ -1646,6 +1729,14 @@ export default function TopologyCanvas({
         midPoints = wps.map((w) => ({ x: w.x, y: w.y }))
       }
 
+      // Phase 3 — 사용자 waypoint 가 없는데 다른 시설을 가로지르면 자동 deflect waypoint
+      if (midPoints.length === 0 && obstacleWaypointsByCable) {
+        const auto = obstacleWaypointsByCable.get(c.id)
+        if (auto) {
+          midPoints = [auto]
+        }
+      }
+
       if (midPoints.length > 0) {
         return [fromPt, ...midPoints, toPt]
       }
@@ -1662,7 +1753,15 @@ export default function TopologyCanvas({
         { x: toPt.x + nx * offset, y: toPt.y + ny * offset },
       ]
     },
-    [effectivePositions, effectiveWaypoints, cableOffsets, mode, kakaoMap, cableAnchors],
+    [
+      effectivePositions,
+      effectiveWaypoints,
+      cableOffsets,
+      mode,
+      kakaoMap,
+      cableAnchors,
+      obstacleWaypointsByCable,
+    ],
   )
 
   // 경로점의 화면 좌표 — 도식: x/y · 지도: lat/lng 투영 (없으면 null)
