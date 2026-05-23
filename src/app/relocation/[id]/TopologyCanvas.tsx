@@ -680,10 +680,12 @@ export default function TopologyCanvas({
     }
 
     // 2. 다른 시설 쌍 path overlap → shift
+    //   strict V/H 뿐 아니라 「dominant 축」 (adx > 2×ady 또는 그 반대) 인 대각선 케이블도 분류.
+    //   대각선 cable 의 L-shape route 가 V/H cable 과 segment 공유하는 경우도 탐지.
     type CableInfo = { dir: 'H' | 'V'; start: number; end: number; perp: number; length: number }
     const cableInfo = new Map<string, CableInfo>()
     for (const c of cables) {
-      if (samePairAssigned.has(c.id)) continue // 이미 lens 처리
+      if (samePairAssigned.has(c.id)) continue
       const fromPos = effectivePositions[c.from_facility_id]
       const toPos = effectivePositions[c.to_facility_id]
       if (!fromPos || !toPos) continue
@@ -691,7 +693,8 @@ export default function TopologyCanvas({
       const dy = toPos.y - fromPos.y
       const adx = Math.abs(dx)
       const ady = Math.abs(dy)
-      if (ady < 30 && adx > 50) {
+      // dominant 축 분류 — adx 가 ady 보다 1.5 배 이상 크면 H
+      if (adx > 50 && adx > ady * 1.5) {
         cableInfo.set(c.id, {
           dir: 'H',
           start: Math.min(fromPos.x, toPos.x),
@@ -699,7 +702,7 @@ export default function TopologyCanvas({
           perp: (fromPos.y + toPos.y) / 2,
           length: adx,
         })
-      } else if (adx < 30 && ady > 50) {
+      } else if (ady > 50 && ady > adx * 1.5) {
         cableInfo.set(c.id, {
           dir: 'V',
           start: Math.min(fromPos.y, toPos.y),
@@ -727,8 +730,8 @@ export default function TopologyCanvas({
     }
 
     const cableIds = [...cableInfo.keys()]
-    const PERP_TOL = 30
-    const OVERLAP_RATIO = 0.3 // 짧은 cable 의 30% 이상 overlap 시 묶음
+    const PERP_TOL = 50 // perpendicular 허용 (이전 30 → 50)
+    const OVERLAP_RATIO = 0.2 // 짧은 cable 의 20% 이상 overlap 시 묶음 (이전 30% → 20%)
     for (let i = 0; i < cableIds.length; i++) {
       for (let j = i + 1; j < cableIds.length; j++) {
         const a = cableInfo.get(cableIds[i])!
