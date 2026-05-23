@@ -500,6 +500,49 @@ export async function bulkAddCoresFromCanvas(input: {
 
 
 /**
+ * 코어 끼워넣기(shift insert) — A 를 새 코어 N 으로 옮기면서,
+ * N 부터 연속 사용 중인 row 들을 한 칸씩 뒤로 밀어 첫 빈 코어까지 shift.
+ * 마이그 0058 의 PL/pgSQL 함수가 임시값 경유 ordered update 로 처리.
+ */
+export async function shiftInsertCoreFromCanvas(input: {
+  project_id: string
+  assignment_id: string
+  new_core_no: number
+  cable_core_count: number
+}): Promise<{ ok: true } | { ok: false; error: string }> {
+  if (!input.project_id || !input.assignment_id) {
+    return { ok: false, error: '코어 배정 정보가 없습니다' }
+  }
+  const core = Math.trunc(input.new_core_no)
+  if (!Number.isFinite(core) || core < 1) {
+    return { ok: false, error: '코어 번호는 1 이상의 정수여야 합니다' }
+  }
+  const total = Math.trunc(input.cable_core_count)
+  if (!Number.isFinite(total) || total < 1) {
+    return { ok: false, error: '케이블 코어 한도가 올바르지 않습니다' }
+  }
+  if (core > total) {
+    return { ok: false, error: `코어 번호는 1 ~ ${total} 범위여야 합니다` }
+  }
+
+  const { supabase } = await requireMember()
+
+  const { error } = await supabase.rpc('shift_insert_core_assignment', {
+    _a_id: input.assignment_id,
+    _new_core: core,
+    _cable_core_count: total,
+  })
+
+  if (error) {
+    return { ok: false, error: '끼워넣기 실패: ' + error.message }
+  }
+
+  revalidatePath(`/relocation/${input.project_id}`)
+  return { ok: true }
+}
+
+
+/**
  * 두 코어 배정의 코어 번호를 서로 교체 — 선번장에서 사용 중인 코어와 swap.
  * exclusion constraint(immediate) 우회를 위해 PL/pgSQL RPC 안에서
  * 임시값 경유 3단계 update (마이그 0057). 같은 케이블 안에서만 동작.

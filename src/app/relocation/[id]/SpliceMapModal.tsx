@@ -12,6 +12,7 @@ import {
 import {
   moveCoreAssignmentFromCanvas,
   swapCoreAssignmentsFromCanvas,
+  shiftInsertCoreFromCanvas,
   updateCoreLifecycleFromCanvas,
 } from './core-actions'
 import type { CablePanelCircuit, CablePanelAssignment } from './CableInfoPanel'
@@ -186,6 +187,26 @@ export default function SpliceMapModal({
     onChanged()
   }
 
+  // 코어 끼워넣기(shift) — A 를 N 으로 옮기고, N 부터 연속 사용 중 row 들을 한 칸씩 뒤로.
+  async function onShiftInsert(aId: string, aCore: number, newCore: number) {
+    if (busy) return
+    setBusy(true)
+    const result = await shiftInsertCoreFromCanvas({
+      project_id: projectId,
+      assignment_id: aId,
+      new_core_no: newCore,
+      cable_core_count: coreCount,
+    })
+    setBusy(false)
+    if (!result.ok) {
+      toast.error(result.error)
+      return
+    }
+    toast.success(`코어 ${aCore} → ${newCore} 끼워넣었습니다`)
+    setEditingId(null)
+    onChanged()
+  }
+
   if (!mounted) return null
 
   // document.body portal — 부모 stacking 우회. z-index 100 으로 sonner toast(보통 50~80)보다 높이.
@@ -307,12 +328,20 @@ export default function SpliceMapModal({
                               autoFocus
                               defaultValue=""
                               onChange={(e) => {
-                                const v = Number.parseInt(e.target.value, 10)
+                                const raw = e.target.value
+                                if (!raw) return
+                                // value 형식: "<core>:<action>" — action = move | swap | shift
+                                const [coreStr, action] = raw.split(':')
+                                const v = Number.parseInt(coreStr, 10)
                                 if (!Number.isFinite(v) || v < 1) return
                                 if (v === a.core_range_start) return
+                                if (action === 'move') {
+                                  onMove(a.id, v)
+                                  return
+                                }
                                 const occupant = byCore.get(v)
-                                if (occupant) {
-                                  // 사용 중 코어 → swap (confirm)
+                                if (!occupant) return
+                                if (action === 'swap') {
                                   const okSwap = confirm(
                                     `코어 ${a.core_range_start} (${circuitLabel(
                                       a.circuit_id,
@@ -322,13 +351,20 @@ export default function SpliceMapModal({
                                   )
                                   if (!okSwap) return
                                   onSwap(a.id, occupant.id, a.core_range_start, v)
-                                } else {
-                                  // 빈 코어 → 단순 이동
-                                  onMove(a.id, v)
+                                  return
+                                }
+                                if (action === 'shift') {
+                                  const okShift = confirm(
+                                    `코어 ${a.core_range_start} 을 코어 ${v} 자리로 끼워넣을까요?\n` +
+                                      `코어 ${v} 부터 연속 사용 중인 회선들이 한 칸씩 뒤로 밀립니다.`,
+                                  )
+                                  if (!okShift) return
+                                  onShiftInsert(a.id, a.core_range_start, v)
+                                  return
                                 }
                               }}
                               disabled={busy}
-                              className="rounded-md border border-slate-300 px-1.5 py-0.5 text-[11px] bg-white max-w-[180px]"
+                              className="rounded-md border border-slate-300 px-1.5 py-0.5 text-[11px] bg-white max-w-[220px]"
                             >
                               <option value="" disabled>
                                 옮길 코어 선택
@@ -337,13 +373,23 @@ export default function SpliceMapModal({
                                 const n = i + 1
                                 if (n === a.core_range_start) return null
                                 const occ = byCore.get(n)
+                                if (!occ) {
+                                  return (
+                                    <option key={`${n}:move`} value={`${n}:move`}>
+                                      코어 {n} · 빈 (이동)
+                                    </option>
+                                  )
+                                }
+                                // 사용 중 코어 → 교체 / 끼워넣기 두 옵션 모두 노출
+                                const label = circuitLabel(occ.circuit_id)
                                 return (
-                                  <option key={n} value={n}>
-                                    코어 {n}{' '}
-                                    {occ
-                                      ? `· ${circuitLabel(occ.circuit_id)} (교체)`
-                                      : '· 빈'}
-                                  </option>
+                                  <optgroup
+                                    key={`g${n}`}
+                                    label={`코어 ${n} · ${label}`}
+                                  >
+                                    <option value={`${n}:swap`}>↔ 교체</option>
+                                    <option value={`${n}:shift`}>→ 끼워넣기</option>
+                                  </optgroup>
                                 )
                               })}
                             </select>
