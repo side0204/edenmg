@@ -50,13 +50,14 @@ function rankForType(t: ClosureType): number {
   }
 }
 
-// 노드 슬롯 = 정사각형 90x90. 도형(원·사각)은 슬롯 중앙에 그리고, 라벨은 아래.
-const NODE_WIDTH = 90
+// 노드 슬롯 = 정사각형 110x90. 도형(원·사각)은 슬롯 중앙에 그리고, 라벨은 아래.
+// (Phase 5 fix A, 2026-05-23) — 시설명 라벨이 길어 90px 슬롯에서 옆 노드와 겹쳐, 폭/간격 확대.
+const NODE_WIDTH = 110
 const NODE_HEIGHT = 90
-const COL_GAP = 20
+const COL_GAP = 40
 const ROW_HEIGHT = 130
 // LR 방향에서 세로 간격은 NODE_HEIGHT + 간격 (라벨이 노드 아래로 빠지므로 여유).
-const LR_COL_WIDTH = 170 // 카테고리 열 사이 거리
+const LR_COL_WIDTH = 190 // 카테고리 열 사이 거리
 const LR_ROW_HEIGHT = 110 // seq_no 행 사이 거리
 const ORIGIN_X = 50
 const ORIGIN_Y = 30
@@ -139,12 +140,37 @@ export function autoLayoutPositions(
     buckets.get(rank)!.push(n)
   }
 
+  // Phase 5 fix B (2026-05-23) — 같은 카테고리(rank) 안에서도 closure_type 이 다르면
+  //   사이에 1슬롯 간격을 두고 시각적으로 구분. 예: 접속함체 rank 안의
+  //   함체_가공형 그룹 / 함체_관로형 그룹 / 중간접속형 그룹이 한 덩어리로 안 보이도록.
+  const sortedBuckets = new Map<number, { node: Node; positionIdx: number }[]>()
+  for (const [rank, items] of buckets.entries()) {
+    items.sort((a, b) => {
+      if (a.closure_type !== b.closure_type)
+        return a.closure_type.localeCompare(b.closure_type)
+      return a.seq_no - b.seq_no
+    })
+    const positioned: { node: Node; positionIdx: number }[] = []
+    let prevType: ClosureType | null = null
+    let idx = 0
+    for (const item of items) {
+      if (prevType !== null && prevType !== item.closure_type) idx += 1 // 그룹 사이 1슬롯 gap
+      positioned.push({ node: item, positionIdx: idx })
+      prevType = item.closure_type
+      idx += 1
+    }
+    sortedBuckets.set(rank, positioned)
+  }
+
   // Phase 4 — 각 카테고리가 사용하는 sub-row 수를 먼저 계산해, 다음 카테고리의 시작
   //   좌표를 누적해서 잡는다. 한 카테고리가 줄바꿈 후에도 다음 카테고리와 안 겹침.
+  //   fix B 의 group gap 도 positionIdx 에 이미 반영돼 있어 maxIdx 기준으로 계산.
   const subCountByRank = new Map<number, number>()
-  for (const [rank, items] of buckets.entries()) {
+  for (const [rank, positioned] of sortedBuckets.entries()) {
     const max = dir === 'TB' ? MAX_PER_ROW : MAX_PER_COL
-    subCountByRank.set(rank, Math.max(1, Math.ceil(items.length / max)))
+    const maxIdx =
+      positioned.length > 0 ? positioned[positioned.length - 1].positionIdx : 0
+    subCountByRank.set(rank, Math.max(1, Math.ceil((maxIdx + 1) / max)))
   }
   // 누적 오프셋 — RANK_MIN 부터 순서대로
   const offsetByRank = new Map<number, number>()
@@ -154,11 +180,10 @@ export function autoLayoutPositions(
     cumulative += subCountByRank.get(r) ?? 1
   }
 
-  // 각 카테고리에서 seq_no 정렬 후 줄바꿈 적용
-  for (const [rank, items] of buckets.entries()) {
-    items.sort((a, b) => a.seq_no - b.seq_no)
+  // 각 카테고리에서 (closure_type+seq_no) 정렬 + 그룹 gap 반영된 positionIdx 로 배치
+  for (const [rank, positioned] of sortedBuckets.entries()) {
     const rankOffset = offsetByRank.get(rank) ?? 0
-    items.forEach((n, i) => {
+    for (const { node: n, positionIdx: i } of positioned) {
       if (dir === 'TB') {
         // 카테고리 = 행(y) · seq_no = 열(x) · 12개 초과 시 sub-row 로 내려감
         const col = i % MAX_PER_ROW
@@ -174,7 +199,7 @@ export function autoLayoutPositions(
         const y = ORIGIN_Y + row * LR_ROW_HEIGHT
         result.set(n.id, { id: n.id, x, y })
       }
-    })
+    }
   }
 
   return result

@@ -226,7 +226,7 @@ export async function seedTestFacilities(formData: FormData): Promise<void> {
         to_facility_id: cp.to,
         spec: cp.spec,
         status: 'new',
-        cable_code: `TEST-${Math.random().toString(36).slice(2, 8).toUpperCase()}`,
+        cable_code: `T-${Math.random().toString(36).slice(2, 6).toUpperCase()}`,
         installation_type: '가공',
         notes: `${TEST_MARKER} 테스트 자동 생성`,
       })
