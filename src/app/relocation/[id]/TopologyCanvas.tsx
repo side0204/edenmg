@@ -1511,11 +1511,10 @@ export default function TopologyCanvas({
   //   - 지도 모드: 경로점 lat/lng 를 화면 픽셀로 투영 (Phase 4)
   //   - 경로점 없으면 같은 경로 다른 케이블과 겹치지 않게 수직 offset 적용
   // Phase 2 (2026-05-23) — 도식 모드의 시설 anchor 사전 계산.
-  //   각 함체에 4 조 이하 케이블이면 N/S/E/W 4 방위, 5 조부터 NSEW + 대각선 8 방위에 배정.
-  //   같은 방위 충돌은 greedy 로 차순위 방위 배치 — 결정성 위해 cable id 정렬 기준.
-  //   지도 모드는 시설이 GPS 로 분산되어 자연스럽게 다른 방향 — anchor 없이 중심 사용.
-  // 2026-05-23 보정 — 1~2 조 케이블만 있는 시설은 anchor 안 함 (그냥 중심에 붙임).
-  //   사용자 피드백: 1-2 조 케이블인 시설도 둘레로 분산되어 「이격된」 느낌이 강함.
+  //   각 케이블을 자연 각도로 4 방위 (N/S/E/W) 에 quantize.
+  //   같은 방위에 1 조뿐이면 anchor 안 함 (중심 사용 — 「이격된」 느낌 방지).
+  //   같은 방위에 2+ 조 → 그 변에 수직 평행 분산 (E/W 면은 위아래, N/S 면은 좌우).
+  //   지도 모드는 시설이 GPS 로 분산되어 자연 anchor 불필요 → null.
   const cableAnchors = useMemo(() => {
     if (mode === 'map') return null
     const result = new Map<
@@ -1536,78 +1535,93 @@ export default function TopologyCanvas({
       cablesByFacility.get(c.to_facility_id)!.push(c)
     }
 
-    const radius = NODE_SIZE.width / 2
-    const radiusDiag = (NODE_SIZE.width / 2) * (Math.SQRT2 / 2)
+    const halfW = NODE_SIZE.width / 2
+    const halfH = NODE_SIZE.height / 2
+    const PERPENDICULAR_STEP = 20 // 같은 변에 분산할 케이블 사이 간격(px)
 
-    function angleDist(a: number, b: number): number {
-      let d = Math.abs(a - b)
-      if (d > Math.PI) d = 2 * Math.PI - d
-      return d
+    // atan2 결과 (-π~π) → 4 방위 'E'/'S'/'W'/'N'.
+    //   ±45° 기준으로 경계 — 동쪽 ±45° 안이면 E, 그 다음 시계방향으로 S, W, N.
+    function cardinalOf(angle: number): 'E' | 'S' | 'W' | 'N' {
+      const a = (angle + Math.PI / 4 + 2 * Math.PI) % (2 * Math.PI)
+      if (a < Math.PI / 2) return 'E'
+      if (a < Math.PI) return 'S'
+      if (a < (3 * Math.PI) / 2) return 'W'
+      return 'N'
     }
 
     for (const [facilityId, connCables] of cablesByFacility.entries()) {
       const pos = effectivePositions[facilityId]
       if (!pos) continue
-      const cx = pos.x + NODE_SIZE.width / 2
-      const cy = pos.y + NODE_SIZE.height / 2 - 10
+      const cx = pos.x + halfW
+      const cy = pos.y + halfH - 10
 
-      // 각 케이블의 상대 endpoint 방향각 계산
-      const items: { cableId: string; isFromSide: boolean; angle: number }[] = []
+      // 각 케이블의 상대 endpoint 방향각 + 방위 quantize
+      type Item = {
+        cableId: string
+        isFromSide: boolean
+        angle: number
+        dir: 'E' | 'S' | 'W' | 'N'
+      }
+      const items: Item[] = []
       for (const c of connCables) {
         const isFromSide = c.from_facility_id === facilityId
         const otherId = isFromSide ? c.to_facility_id : c.from_facility_id
         const otherPos = effectivePositions[otherId]
         if (!otherPos) continue
-        const otherCx = otherPos.x + NODE_SIZE.width / 2
-        const otherCy = otherPos.y + NODE_SIZE.height / 2 - 10
+        const otherCx = otherPos.x + halfW
+        const otherCy = otherPos.y + halfH - 10
+        const angle = Math.atan2(otherCy - cy, otherCx - cx)
         items.push({
           cableId: c.id,
           isFromSide,
-          angle: Math.atan2(otherCy - cy, otherCx - cx),
+          angle,
+          dir: cardinalOf(angle),
         })
       }
       if (items.length === 0) continue
-      // 1~2 조면 anchor 안 함 — 중심에 그대로 붙임 (시각적 이격 방지)
-      if (items.length <= 2) continue
 
-      // 4 조 이하 = 4 방위, 5+ = 8 방위
-      const useEight = items.length > 4
-      const anchorAngles = useEight
-        ? [0, Math.PI / 4, Math.PI / 2, (3 * Math.PI) / 4, Math.PI, -(3 * Math.PI) / 4, -Math.PI / 2, -Math.PI / 4]
-        : [0, Math.PI / 2, Math.PI, -Math.PI / 2]
-
-      // greedy 배정 — cable id 정렬로 결정성 보장
-      items.sort((a, b) => a.cableId.localeCompare(b.cableId))
-      const used = new Set<number>()
+      // 방위별 그룹핑
+      const byDir = new Map<'E' | 'S' | 'W' | 'N', Item[]>()
       for (const item of items) {
-        let bestIdx = -1
-        let bestDist = Infinity
-        for (let i = 0; i < anchorAngles.length; i++) {
-          if (used.has(i)) continue
-          const d = angleDist(item.angle, anchorAngles[i])
-          if (d < bestDist) {
-            bestDist = d
-            bestIdx = i
+        if (!byDir.has(item.dir)) byDir.set(item.dir, [])
+        byDir.get(item.dir)!.push(item)
+      }
+
+      // 그룹에 2 조 이상일 때만 그 변에 수직 분산. 1 조뿐이면 anchor 안 함 (중심 사용).
+      for (const [dir, group] of byDir.entries()) {
+        if (group.length < 2) continue
+
+        // 같은 변 안에서 자연 각도 순으로 정렬해 인접 케이블이 안 꼬이게.
+        //   E/W: 위→아래 (sin(angle) 오름차순)
+        //   N/S: 좌→우 (cos(angle) 오름차순)
+        group.sort((a, b) => {
+          if (dir === 'E' || dir === 'W') return Math.sin(a.angle) - Math.sin(b.angle)
+          return Math.cos(a.angle) - Math.cos(b.angle)
+        })
+
+        const N = group.length
+        group.forEach((item, i) => {
+          const offset = (i - (N - 1) / 2) * PERPENDICULAR_STEP
+          let ax: number, ay: number
+          if (dir === 'E') {
+            ax = cx + halfW
+            ay = cy + offset
+          } else if (dir === 'W') {
+            ax = cx - halfW
+            ay = cy + offset
+          } else if (dir === 'N') {
+            ax = cx + offset
+            ay = cy - halfH
+          } else {
+            // S
+            ax = cx + offset
+            ay = cy + halfH
           }
-        }
-        let ax: number, ay: number
-        if (bestIdx >= 0) {
-          used.add(bestIdx)
-          const a = anchorAngles[bestIdx]
-          // 8 방위에서 대각선(인덱스 1,3,5,7) 은 radiusDiag, 그 외 cardinal 은 radius
-          const isDiag = useEight && bestIdx % 2 === 1
-          const r = isDiag ? radiusDiag : radius
-          ax = cx + Math.cos(a) * r
-          ay = cy + Math.sin(a) * r
-        } else {
-          // 모든 anchor 가 차면 (이론상 4+ 조 동시 같은 anchor) — 선호 각도 그대로
-          ax = cx + Math.cos(item.angle) * radius
-          ay = cy + Math.sin(item.angle) * radius
-        }
-        const entry = result.get(item.cableId) ?? {}
-        if (item.isFromSide) entry.from = { x: ax, y: ay }
-        else entry.to = { x: ax, y: ay }
-        result.set(item.cableId, entry)
+          const entry = result.get(item.cableId) ?? {}
+          if (item.isFromSide) entry.from = { x: ax, y: ay }
+          else entry.to = { x: ax, y: ay }
+          result.set(item.cableId, entry)
+        })
       }
     }
     return result
