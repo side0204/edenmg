@@ -401,6 +401,9 @@ export default function TopologyCanvas({
   //   새 시설 배치·드래그 좌표는 따로 scale 보정. 카카오 내부 pan 속도는 그대로라 사용감만 다름.
   const [extraZoom, setExtraZoom] = useState(1)
   const extraZoomActive = extraZoom > 1
+  // 배경 흐린 회색조 토글 — 지도/위성 두 모드 공통. 시설·케이블 오버레이가 두드러져
+  //   설계 검토에 유리. 기본 ON. CSS filter 는 카카오 지도 div 에만 적용 (SVG 색은 그대로).
+  const [dimMap, setDimMap] = useState(true)
   // 지도 모드 분할 캡처 가이드 활성 여부
   const [captureActive, setCaptureActive] = useState(false)
   // 분할 캡처 컨트롤 바를 portal 로 렌더할 캔버스 아래 영역 (지도를 안 가리게)
@@ -1988,6 +1991,24 @@ export default function TopologyCanvas({
             </button>
           )}
 
+          {/* 흐린 배경 토글 — 지도/위성 두 모드 공통. 배경을 회색조+살짝 어둡게 해
+              시설·케이블 오버레이가 두드러진다. 기본 ON. */}
+          {mode === 'map' && (
+            <button
+              type="button"
+              onClick={() => setDimMap((v) => !v)}
+              className={
+                'mr-1 inline-flex items-center gap-1 rounded-md border px-2 h-7 text-[11px] font-medium ' +
+                (dimMap
+                  ? 'bg-slate-700 text-white border-slate-800'
+                  : 'text-slate-700 border-slate-300 hover:bg-slate-50')
+              }
+              title={dimMap ? '배경을 선명하게' : '배경을 흐리게 (회색조)'}
+            >
+              {dimMap ? '흐린 배경' : '선명 배경'}
+            </button>
+          )}
+
           {/* 추가 확대 — 지도 모드 한정. 카카오 SDK 의 level 1 한계를 CSS scale 로 우회.
               편집 가능하지만 좌표가 미세하게 어긋날 수 있음 (보정 코드 적용). */}
           {mode === 'map' && (
@@ -2657,7 +2678,8 @@ export default function TopologyCanvas({
           )}
 
           {/* 카카오맵 배경 — 항상 mount, 지도 모드에서만 표시. SVG 가 위에 투명 오버레이.
-              추가 확대(extraZoom) 적용 시 SVG 와 동일한 transform 으로 정렬 유지. */}
+              추가 확대(extraZoom) 적용 시 SVG 와 동일한 transform 으로 정렬 유지.
+              dimMap=ON: 회색조 + 살짝 어둡게 → 시설·케이블 오버레이가 두드러진다. */}
           <div
             ref={mapSetContainer}
             className="absolute inset-0"
@@ -2666,6 +2688,9 @@ export default function TopologyCanvas({
               zIndex: 0,
               transform: extraZoomActive ? `scale(${extraZoom})` : undefined,
               transformOrigin: '50% 50%',
+              filter: dimMap
+                ? 'grayscale(1) brightness(0.92) contrast(0.88)'
+                : undefined,
             }}
           />
           {/* 지도 로딩 / 에러 오버레이 */}
