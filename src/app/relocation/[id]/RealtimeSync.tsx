@@ -62,9 +62,15 @@ export default function RealtimeSync({
     const supabase = createClient()
     let refreshTimer: ReturnType<typeof setTimeout> | null = null
 
-    const scheduleRefresh = () => {
+    const scheduleRefresh = (eventInfo?: { table: string; type: string }) => {
+      if (eventInfo) {
+        // eslint-disable-next-line no-console
+        console.log('[RealtimeSync] event', eventInfo)
+      }
       if (refreshTimer) clearTimeout(refreshTimer)
       refreshTimer = setTimeout(() => {
+        // eslint-disable-next-line no-console
+        console.log('[RealtimeSync] router.refresh()')
         router.refresh()
         refreshTimer = null
       }, 200)
@@ -85,7 +91,13 @@ export default function RealtimeSync({
       channel.on(
         'postgres_changes',
         { event: '*', schema: 'public', table, filter },
-        scheduleRefresh,
+        (payload) => {
+          const p = payload as { table?: string; eventType?: string }
+          scheduleRefresh({
+            table: p.table ?? table,
+            type: p.eventType ?? '?',
+          })
+        },
       )
     }
 
@@ -101,8 +113,16 @@ export default function RealtimeSync({
       setOthers(list)
     })
 
-    channel.subscribe(async (status) => {
+    channel.subscribe(async (status, err) => {
+      // eslint-disable-next-line no-console
+      console.log('[RealtimeSync] subscribe status:', status, err ?? '')
       if (status === 'SUBSCRIBED') {
+        // eslint-disable-next-line no-console
+        console.log(
+          '[RealtimeSync] subscribed channel: relocation:' + projectId,
+          'tables:',
+          RELOCATION_TABLES.length,
+        )
         await channel.track({
           employee_id: selfEmployeeId,
           name: selfName,
