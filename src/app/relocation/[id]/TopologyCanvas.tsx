@@ -178,7 +178,8 @@ const FAULT_COLOR    = '#dc2626'  // red-600 (고장점 위치 마커)
 const DRAG_THRESHOLD = 4          // px — 클릭/드래그 구분
 const SNAP_THRESHOLD = 14         // px — 좌클릭 드래그 시 다른 시설과 수직·수평 정렬 스냅 거리
 const LABEL_LEADER_THRESHOLD = 26 // px — 라벨이 이만큼 멀어지면 시설과 연결선 표시
-const CABLE_OFFSET_GAP = 7        // px — 같은 경로 여러 케이블 평행 간격
+const CABLE_OFFSET_GAP = 7        // px — 같은 시설 쌍 lens 모양 (양 끝 중심·중간 분산) 의 분산 폭
+const CABLE_SHIFT_GAP = 18        // px — 다른 시설 쌍 segment overlap 시 평행 이동 폭 (인접 케이블 사이 거리 ≈ 36px). lens 보다 크게 분리해 시각적 구분.
 // 시설 라벨 흰색 외곽선 — 지도 모드에서 배경 지도 글자와 구분 (지도 제작사 표준 기법).
 //   두껍다고 느껴지면 줄이고, 잘 안 보이면 올린다.
 //   작은 글자에 3px 은 외곽선이 글자를 잠식해 뭉개 보임 → 2.5 로 (얇고 또렷하게).
@@ -2055,7 +2056,7 @@ export default function TopologyCanvas({
       if (grp.length <= 1) continue
       const sorted = [...grp].sort()
       sorted.forEach((id, i) => {
-        offsets.set(id, (i - (sorted.length - 1) / 2) * CABLE_OFFSET_GAP * 2)
+        offsets.set(id, (i - (sorted.length - 1) / 2) * CABLE_SHIFT_GAP * 2)
         kinds.set(id, 'shift')
       })
     }
