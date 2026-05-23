@@ -58,6 +58,7 @@ import {
 } from '@/lib/relocation'
 import { CABLE_STATUS_LABEL, CABLE_STATUS_VALUES } from '@/lib/relocation'
 import { autoLayoutPositions, NODE_SIZE } from './auto-layout'
+import { snapPositionsToCableDirections } from './cable-snap-layout'
 import { saveNodePositions, saveCableWaypoints } from './position-actions'
 import { createCableFromCanvas } from './cable-actions'
 import { seedTestFacilities, clearTestFacilities } from './test-actions'
@@ -1224,6 +1225,42 @@ export default function TopologyCanvas({
     x: number
     y: number
   } | null>(null)
+
+  const [snapping, setSnapping] = useState(false)
+  // 「케이블 정렬」 — 케이블 V/H/대각선(45°) 각도에 맞춰 시설 위치 자동 재배치.
+  //   BFS-snap (cable-snap-layout.ts). 가장 연결 많은 시설(국사·허브) 을 root 로
+  //   원래 위치 유지, 그로부터 인접 시설을 부모→자식 방향각에 가장 가까운 45° 로
+  //   snap. 결과를 saveNodePositions 로 DB 에 일괄 저장.
+  const onCableSnap = async () => {
+    if (snapping) return
+    if (!confirm('케이블 각도(수직/수평/45°)에 맞춰 시설 위치를 자동 재배치합니다. 계속하시겠습니까?')) return
+    setSnapping(true)
+    try {
+      // 현재 표시 위치 → Map. 드래그 오프셋(localPositions) 도 반영된 effectivePositions 사용.
+      const posMap = new Map<string, { x: number; y: number }>()
+      for (const f of facilities) {
+        const p = effectivePositions[f.id]
+        if (p) posMap.set(f.id, { x: p.x, y: p.y })
+      }
+      const changes = snapPositionsToCableDirections(facilities, cables, posMap)
+      if (changes.length === 0) {
+        toast.info('이미 모든 케이블이 V/H/45° 로 정렬되어 있습니다')
+        return
+      }
+      const res = await saveNodePositions(
+        projectId,
+        changes.map((c) => ({ id: c.id, x: c.x, y: c.y })),
+      )
+      if (!res.ok) {
+        toast.error(res.error ?? '정렬 저장에 실패했습니다')
+        return
+      }
+      toast.success(`시설 ${changes.length}개 재배치 완료 — 케이블 정렬`)
+      router.refresh()
+    } finally {
+      setSnapping(false)
+    }
+  }
 
   const onExportSchematic = async () => {
     const svg = svgRef.current
@@ -2500,6 +2537,20 @@ export default function TopologyCanvas({
                   {cableTool}
                 </span>
               )}
+            </button>
+          )}
+
+          {/* 케이블 정렬 — 케이블 V/H/45° 각도에 맞춰 시설 위치 자동 재배치 (도식 모드 전용) */}
+          {editable && mode === 'schematic' && (
+            <button
+              type="button"
+              onClick={onCableSnap}
+              disabled={snapping}
+              className="mr-1 inline-flex items-center gap-1 rounded-md border border-slate-300 bg-white px-2 h-7 text-[11px] font-medium text-slate-700 hover:bg-slate-50 disabled:opacity-60"
+              title="케이블이 수직/수평/45° 대각선으로 보이도록 시설 위치를 자동 재배치"
+            >
+              <Sparkles className="h-3 w-3" />
+              {snapping ? '정렬 중…' : '케이블 정렬'}
             </button>
           )}
 
