@@ -1,28 +1,31 @@
-// 지장이설 — 케이블 우선 정렬 알고리즘.
+// 지장이설 — 케이블 우선 정렬 알고리즘 (obstacle-aware).
 //
 // 도식 모드에서 「케이블이 V/H/대각선(45°)으로 깔끔하게」 보이도록 시설 위치를
 // 케이블 각도에 맞춰 재배치. owner 요청 (2026-05-23):
 //   "각 케이블이 수직,수평,대각으로 출발/진행/도착하고
 //    수직,수평이 맞지 않을 경우 도착 시설물을 케이블에 맞게 이동하여 배치"
+// 후속 요청:
+//   "지도모드의 각도는 고려사항에서 제외해주고 방향만 고려해서 수직,수평,대각으로
+//    임의 결정하고 다른 시설물(접속함체,케이블,설치장소 등)을 회피하는 구조로 해줘"
 //
-// 알고리즘 (BFS-snap):
+// 알고리즘 (obstacle-aware BFS):
 //   1. 케이블 그래프 구성. degree(연결 케이블 수) 순으로 정렬.
 //   2. degree 가 가장 높은 시설을 root 로 선택 (가장 「중심적」 시설 — 국사·허브함체).
 //      root 위치는 그대로 유지.
-//   3. BFS 로 root 에서 인접 시설을 차례로 방문 — 부모 → 자식 방향각을 가장 가까운 45° 단위로 snap.
-//      거리는 원래 거리 유지. 자식의 새 위치 = 부모 위치 + (snapped_angle, distance) 극좌표.
-//   4. 케이블 그래프의 spanning tree edge 는 모두 V/H/대각선 (8 방위 ±0°). 사이클 edge 는 일부 어긋남.
-//   5. 케이블이 없는 고립 시설은 원래 위치 유지.
-//
-// 다중 연결 컴포넌트는 각각 자체 root 부터 BFS. (서로 떨어진 작업 영역 분리)
-//
-// 6. BFS 후 refinement (2026-05-23 추가) — cycle edge 가 V/H/45° 에서 벗어난 경우 force-directed
-//    relaxation 으로 시설 위치를 조금씩 회전. 각 cable 이 자신을 45° 로 끌어당기는 작은 힘을
-//    양 끝에 적용. root 는 고정. tree edge 의 정렬이 약간 흐트러져도 cycle edge 가 함께 정렬되면
-//    전체적으로 더 깔끔. 30 회 반복 후 종료.
+//   3. BFS 로 root 에서 인접 시설을 차례로 방문. 각 자식 시설마다:
+//      a. 부모→자식 자연 각도를 8 방위 (V/H 4 + 대각선 4) 중 후보 순서 결정
+//         (V/H 가 자연각도에 가까우면 V/H 먼저, 그 다음 대각선)
+//      b. 각 방위에 거리 적용해 후보 위치 계산
+//      c. 그 위치가 기존 시설과 겹치는지 (반경 MIN_GAP) 체크
+//      d. 부모→후보 직선이 다른 시설을 가로지르는지 체크
+//      e. 두 체크 모두 통과한 첫 후보 위치에 시설 배치
+//      f. 모든 방위가 막히면 거리를 늘려 다시 시도. 그래도 막히면 자연 각도로 폴백.
+//   4. cycle edge (BFS tree 외 edge) 는 BFS 만으로는 정렬 안 됨 — refinement pass 추가.
+//   5. Refinement: 각 cable 이 자신을 가장 가까운 V/H/45° 로 끌어당기는 회전 force.
+//      30 회 반복. root 는 고정. 다른 시설과 너무 가까워지는 이동은 거부 (충돌 회피).
 //
 // 입력 — 시설 ID 목록, 케이블 양 끝 ID 목록, 현재 위치 Map.
-// 출력 — { id, x, y }[] 배열 (변경된 시설만 반환 — 절약).
+// 출력 — { id, x, y }[] 배열 (변경된 시설만 반환).
 
 type Position = { x: number; y: number }
 type Facility = { id: string }
@@ -30,27 +33,108 @@ type Cable = { from_facility_id: string; to_facility_id: string }
 
 export type SnapPosition = { id: string; x: number; y: number }
 
-const SNAP_STEP = Math.PI / 4 // 45° (대각선 포함 8 방위)
-const CARDINAL_STEP = Math.PI / 2 // 90° (수직/수평 V/H 4 방위)
-// V/H 우선 임계 — 자연 각도가 카디널(V/H)에서 이 각도 이내면 V/H 로 snap.
-//   35° = π × 35/180 ≈ 0.611 rad. owner 요청 (2026-05-23):
-//   "1 조 케이블은 V/H 가 우선, 3+ 조도 V/H 우선 적용" — 균등 45° snap 대비 V/H 비중 확대.
+// V/H 4 방위 (수평/수직)
+const CARDINAL_DIRS = [0, Math.PI / 2, Math.PI, -Math.PI / 2]
+// 대각선 4 방위
+const DIAGONAL_DIRS = [Math.PI / 4, (3 * Math.PI) / 4, -(3 * Math.PI) / 4, -Math.PI / 4]
+// V/H 우선 — 자연 각도가 카디널에서 이 임계 이내면 V/H 후보 우선.
+//   35° ≈ π × 35 / 180. owner 요청: 1 조·3 조 케이블 모두 V/H 우선.
 const CARDINAL_PREF_THRESHOLD = (Math.PI * 35) / 180
-const DEFAULT_DISTANCE = 130 // 거리가 0 인 경우 폴백
-const REFINE_ITERATIONS = 30 // refinement 반복 횟수
-const REFINE_FORCE = 0.15 // 회전 force 강도 (0~1, 클수록 빨리 수렴하지만 진동 위험)
-const ALIGN_TOLERANCE = 0.02 // ~1.1°. 이보다 작은 deviation 은 정렬됐다고 간주
+const MIN_DISTANCE = 130 // BFS 자식 시설 기본 배치 거리
+const MIN_FACILITY_GAP = 120 // 시설끼리 최소 간격 (이보다 가까우면 겹침)
+const CABLE_CROSS_CLEARANCE = 55 // 케이블이 다른 시설 중심에서 이만큼 이내면 가로지름
+const MAX_DISTANCE_MULT = 3.0 // 모든 방위 막히면 거리를 이 배까지 늘려가며 시도
+const DISTANCE_GROWTH = 1.3 // 거리 증가 비율
+const REFINE_ITERATIONS = 30
+const REFINE_FORCE = 0.15
+const ALIGN_TOLERANCE = 0.02
 
-// 자연 각도를 가장 적합한 8 방위로 snap — V/H(카디널) 우선.
-//   자연 각도가 카디널에서 35° 이내면 V/H 로, 그 외는 대각선으로 snap.
-function snapAngle(angle: number): number {
-  const cardinalSnapped = Math.round(angle / CARDINAL_STEP) * CARDINAL_STEP
-  let cardinalDev = angle - cardinalSnapped
-  // 정규화 (-π ~ π)
-  while (cardinalDev > Math.PI) cardinalDev -= 2 * Math.PI
-  while (cardinalDev < -Math.PI) cardinalDev += 2 * Math.PI
-  if (Math.abs(cardinalDev) <= CARDINAL_PREF_THRESHOLD) return cardinalSnapped
-  return Math.round(angle / SNAP_STEP) * SNAP_STEP
+// 두 각도 사이 원형 거리 (0 ~ π)
+function angleDist(a: number, b: number): number {
+  let d = Math.abs(a - b)
+  if (d > Math.PI) d = 2 * Math.PI - d
+  return d
+}
+
+// 8 방위를 자연 각도와 가까운 순으로 정렬 — V/H 우선 (자연각도가 35° 이내 카디널이면 카디널 먼저)
+function preferredDirectionOrder(naturalAngle: number): number[] {
+  const sortedCardinals = [...CARDINAL_DIRS].sort(
+    (a, b) => angleDist(a, naturalAngle) - angleDist(b, naturalAngle),
+  )
+  const sortedDiagonals = [...DIAGONAL_DIRS].sort(
+    (a, b) => angleDist(a, naturalAngle) - angleDist(b, naturalAngle),
+  )
+  // 가장 가까운 카디널 거리가 임계 이내면 카디널 우선, 아니면 가장 가까운 방위 (대각선 포함) 우선
+  const closestCardinalDist = angleDist(sortedCardinals[0], naturalAngle)
+  if (closestCardinalDist <= CARDINAL_PREF_THRESHOLD) {
+    return [...sortedCardinals, ...sortedDiagonals]
+  }
+  // 자연 각도가 진짜 대각선 (35°~55°) 이면 그 대각선 우선, V/H 는 폴백
+  return [...sortedDiagonals, ...sortedCardinals]
+}
+
+// 점이 기존 시설들과 충돌하는지 (반경 MIN_FACILITY_GAP 이내)
+function isPositionOccupied(
+  pos: Position,
+  others: Position[],
+  excludeIds?: Set<string>,
+  positionIdMap?: Map<string, Position>,
+): boolean {
+  for (const other of others) {
+    if (excludeIds && positionIdMap) {
+      // Skip excluded positions (compare by reference)
+      let skip = false
+      for (const id of excludeIds) {
+        if (positionIdMap.get(id) === other) {
+          skip = true
+          break
+        }
+      }
+      if (skip) continue
+    }
+    if (Math.hypot(pos.x - other.x, pos.y - other.y) < MIN_FACILITY_GAP) return true
+  }
+  return false
+}
+
+// 점 → 선분 의 거리 + 선분 위 비율 t
+function distPointToSegment(
+  p: Position,
+  a: Position,
+  b: Position,
+): { dist: number; t: number } {
+  const dx = b.x - a.x
+  const dy = b.y - a.y
+  const len2 = dx * dx + dy * dy
+  if (len2 < 0.01) return { dist: Math.hypot(p.x - a.x, p.y - a.y), t: 0 }
+  let t = ((p.x - a.x) * dx + (p.y - a.y) * dy) / len2
+  t = Math.max(0, Math.min(1, t))
+  const cx = a.x + t * dx
+  const cy = a.y + t * dy
+  return { dist: Math.hypot(p.x - cx, p.y - cy), t }
+}
+
+// 부모→자식 직선이 다른 시설을 가로지르는가
+function lineCrossesFacility(
+  from: Position,
+  to: Position,
+  others: Position[],
+  excludeIds: Set<string>,
+  positionIdMap: Map<string, Position>,
+): boolean {
+  for (const other of others) {
+    let skip = false
+    for (const id of excludeIds) {
+      if (positionIdMap.get(id) === other) {
+        skip = true
+        break
+      }
+    }
+    if (skip) continue
+    const { dist, t } = distPointToSegment(other, from, to)
+    if (t > 0.1 && t < 0.9 && dist < CABLE_CROSS_CLEARANCE) return true
+  }
+  return false
 }
 
 export function snapPositionsToCableDirections(
@@ -58,10 +142,10 @@ export function snapPositionsToCableDirections(
   cables: Cable[],
   initialPositions: Map<string, Position>,
 ): SnapPosition[] {
-  // 인접 그래프 + degree
+  // 인접 그래프
   const adj = new Map<string, Set<string>>()
   for (const c of cables) {
-    if (c.from_facility_id === c.to_facility_id) continue // self-loop 무시
+    if (c.from_facility_id === c.to_facility_id) continue
     if (!adj.has(c.from_facility_id)) adj.set(c.from_facility_id, new Set())
     if (!adj.has(c.to_facility_id)) adj.set(c.to_facility_id, new Set())
     adj.get(c.from_facility_id)!.add(c.to_facility_id)
@@ -76,43 +160,79 @@ export function snapPositionsToCableDirections(
 
   const newPositions = new Map<string, Position>()
   const visited = new Set<string>()
+  const rootIds = new Set<string>()
 
   for (const root of rootCandidates) {
     if (visited.has(root.id)) continue
     const rootPos = initialPositions.get(root.id)
     if (!rootPos) continue
 
-    // root 는 원래 위치 그대로
     newPositions.set(root.id, rootPos)
     visited.add(root.id)
+    rootIds.add(root.id)
     const queue: string[] = [root.id]
 
     while (queue.length > 0) {
       const currId = queue.shift()!
       const currPos = newPositions.get(currId)!
-      const neighbors = adj.get(currId) ?? new Set()
+      const neighbors = [...(adj.get(currId) ?? new Set())]
+
+      // 같은 부모의 자식들을 「자연 각도」 순으로 처리해 같은 방위에 몰리는 걸 분산
+      neighbors.sort((a, b) => {
+        const pa = initialPositions.get(a)
+        const pb = initialPositions.get(b)
+        if (!pa || !pb) return 0
+        return Math.atan2(pa.y - currPos.y, pa.x - currPos.x) -
+          Math.atan2(pb.y - currPos.y, pb.x - currPos.x)
+      })
 
       for (const nbrId of neighbors) {
         if (visited.has(nbrId)) continue
         const nbrInitial = initialPositions.get(nbrId)
         if (!nbrInitial) continue
 
-        // 부모→자식 자연 각도 — 자식의 「현재」 위치 기준이 아니라 「초기」 위치 기준으로 계산
-        //   (BFS 중 부모가 이미 snap 됐어도, 자식의 의도된 방향은 초기 배치에서 파생)
         const dx = nbrInitial.x - currPos.x
         const dy = nbrInitial.y - currPos.y
-        const angle = Math.atan2(dy, dx)
+        const naturalAngle = Math.atan2(dy, dx)
+        const initialDist = Math.hypot(dx, dy) || MIN_DISTANCE
+        const baseDistance = Math.max(MIN_DISTANCE, initialDist)
 
-        // V/H 우선 snap (카디널 35° 이내면 V/H, 그 외 대각선)
-        const snappedAngle = snapAngle(angle)
+        // 방위 후보 순서 결정 (V/H 우선)
+        const dirOrder = preferredDirectionOrder(naturalAngle)
 
-        // 거리는 원래 거리 유지 (시설 사이 간격 보존)
-        const distance = Math.hypot(dx, dy) || DEFAULT_DISTANCE
+        // 후보 방위×거리 조합으로 충돌·가로지름 없는 위치 탐색
+        const allPositions = [...newPositions.values()]
+        const excludeFromCheck = new Set([currId, nbrId])
+        let placed: Position | null = null
 
-        newPositions.set(nbrId, {
-          x: currPos.x + Math.cos(snappedAngle) * distance,
-          y: currPos.y + Math.sin(snappedAngle) * distance,
-        })
+        outer: for (
+          let distMult = 1.0;
+          distMult <= MAX_DISTANCE_MULT;
+          distMult *= DISTANCE_GROWTH
+        ) {
+          for (const dir of dirOrder) {
+            const candidate = {
+              x: currPos.x + Math.cos(dir) * baseDistance * distMult,
+              y: currPos.y + Math.sin(dir) * baseDistance * distMult,
+            }
+            // 충돌 체크
+            if (isPositionOccupied(candidate, allPositions, excludeFromCheck, newPositions)) continue
+            // 케이블 가로지름 체크
+            if (lineCrossesFacility(currPos, candidate, allPositions, excludeFromCheck, newPositions)) continue
+            placed = candidate
+            break outer
+          }
+        }
+
+        if (!placed) {
+          // 모든 방위 막힘 — 자연 각도로 폴백 (최소한 거리는 멀게)
+          placed = {
+            x: currPos.x + Math.cos(naturalAngle) * baseDistance * MAX_DISTANCE_MULT,
+            y: currPos.y + Math.sin(naturalAngle) * baseDistance * MAX_DISTANCE_MULT,
+          }
+        }
+
+        newPositions.set(nbrId, placed)
         visited.add(nbrId)
         queue.push(nbrId)
       }
@@ -120,18 +240,6 @@ export function snapPositionsToCableDirections(
   }
 
   // ─── Refinement pass — cycle edge V/H/45° 정렬 ───────────────────────────
-  // BFS 후 tree edge 는 모두 45° 정렬됐지만 cycle edge (트리 외 추가 케이블) 는 어긋남.
-  // 각 cable 이 자신을 가까운 45° 로 끌어당기는 작은 회전 force 를 양 끝 시설에 적용.
-  // root 시설(첫 번째 root)들은 고정. 여러 component 의 root 는 각자 component 안에서 고정.
-  const rootIds = new Set(
-    rootCandidates.length > 0
-      ? rootCandidates.filter((r) => newPositions.has(r.id)).map((r) => r.id).slice(0, 1)
-      : [],
-  )
-  // 정확히는 각 component 의 첫 방문 시설을 root 로 — 하지만 위 코드는 첫 component 만 잡음.
-  // 모든 component 의 root 를 잡으려면 BFS 중에 따로 모았어야 했지만, 간단히 가장 degree 큰
-  // 시설(첫 root) 만 고정해도 사실상 충분 (다른 component 의 root 는 자유로 움직여 정렬 도움).
-
   for (let iter = 0; iter < REFINE_ITERATIONS; iter++) {
     const forces = new Map<string, { dx: number; dy: number }>()
     for (const f of facilities) forces.set(f.id, { dx: 0, dy: 0 })
@@ -145,16 +253,15 @@ export function snapPositionsToCableDirections(
       const dx = toPos.x - fromPos.x
       const dy = toPos.y - fromPos.y
       const angle = Math.atan2(dy, dx)
-      const snapped = snapAngle(angle)
+      // refinement 도 V/H 우선 — preferredDirectionOrder 의 첫 후보로 snap
+      const snapped = preferredDirectionOrder(angle)[0]
       let deviation = angle - snapped
-      // -π/8 ~ +π/8 범위로 정규화
-      if (deviation > Math.PI) deviation -= 2 * Math.PI
-      if (deviation < -Math.PI) deviation += 2 * Math.PI
+      while (deviation > Math.PI) deviation -= 2 * Math.PI
+      while (deviation < -Math.PI) deviation += 2 * Math.PI
       const absDev = Math.abs(deviation)
       if (absDev < ALIGN_TOLERANCE) continue
       totalDeviation += absDev
 
-      // 양 끝을 midpoint 기준으로 -deviation 만큼 회전 → cable 이 snapped 각도로 정렬
       const mid = { x: (fromPos.x + toPos.x) / 2, y: (fromPos.y + toPos.y) / 2 }
       const rotateAngle = -deviation * REFINE_FORCE
       const cosA = Math.cos(rotateAngle)
@@ -181,9 +288,9 @@ export function snapPositionsToCableDirections(
       }
     }
 
-    if (totalDeviation < ALIGN_TOLERANCE * cables.length) break // 충분히 정렬됨
+    if (totalDeviation < ALIGN_TOLERANCE * cables.length) break
 
-    // force 적용 (root 제외)
+    // 충돌이 생기는 이동은 거부 — 다른 시설과 너무 가까워지면 그 만큼 이동 줄임
     let anyMoved = false
     for (const f of facilities) {
       if (rootIds.has(f.id)) continue
@@ -192,7 +299,18 @@ export function snapPositionsToCableDirections(
       const force = forces.get(f.id)
       if (!force) continue
       if (Math.abs(force.dx) < 0.01 && Math.abs(force.dy) < 0.01) continue
-      newPositions.set(f.id, { x: pos.x + force.dx, y: pos.y + force.dy })
+      const newPos = { x: pos.x + force.dx, y: pos.y + force.dy }
+      // 다른 시설과 충돌 체크
+      let collides = false
+      for (const [otherId, otherPos] of newPositions.entries()) {
+        if (otherId === f.id) continue
+        if (Math.hypot(newPos.x - otherPos.x, newPos.y - otherPos.y) < MIN_FACILITY_GAP * 0.7) {
+          collides = true
+          break
+        }
+      }
+      if (collides) continue
+      newPositions.set(f.id, newPos)
       anyMoved = true
     }
     if (!anyMoved) break
