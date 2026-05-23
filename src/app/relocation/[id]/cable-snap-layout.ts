@@ -30,11 +30,28 @@ type Cable = { from_facility_id: string; to_facility_id: string }
 
 export type SnapPosition = { id: string; x: number; y: number }
 
-const SNAP_STEP = Math.PI / 4 // 45°
+const SNAP_STEP = Math.PI / 4 // 45° (대각선 포함 8 방위)
+const CARDINAL_STEP = Math.PI / 2 // 90° (수직/수평 V/H 4 방위)
+// V/H 우선 임계 — 자연 각도가 카디널(V/H)에서 이 각도 이내면 V/H 로 snap.
+//   35° = π × 35/180 ≈ 0.611 rad. owner 요청 (2026-05-23):
+//   "1 조 케이블은 V/H 가 우선, 3+ 조도 V/H 우선 적용" — 균등 45° snap 대비 V/H 비중 확대.
+const CARDINAL_PREF_THRESHOLD = (Math.PI * 35) / 180
 const DEFAULT_DISTANCE = 130 // 거리가 0 인 경우 폴백
 const REFINE_ITERATIONS = 30 // refinement 반복 횟수
 const REFINE_FORCE = 0.15 // 회전 force 강도 (0~1, 클수록 빨리 수렴하지만 진동 위험)
 const ALIGN_TOLERANCE = 0.02 // ~1.1°. 이보다 작은 deviation 은 정렬됐다고 간주
+
+// 자연 각도를 가장 적합한 8 방위로 snap — V/H(카디널) 우선.
+//   자연 각도가 카디널에서 35° 이내면 V/H 로, 그 외는 대각선으로 snap.
+function snapAngle(angle: number): number {
+  const cardinalSnapped = Math.round(angle / CARDINAL_STEP) * CARDINAL_STEP
+  let cardinalDev = angle - cardinalSnapped
+  // 정규화 (-π ~ π)
+  while (cardinalDev > Math.PI) cardinalDev -= 2 * Math.PI
+  while (cardinalDev < -Math.PI) cardinalDev += 2 * Math.PI
+  if (Math.abs(cardinalDev) <= CARDINAL_PREF_THRESHOLD) return cardinalSnapped
+  return Math.round(angle / SNAP_STEP) * SNAP_STEP
+}
 
 export function snapPositionsToCableDirections(
   facilities: Facility[],
@@ -86,8 +103,8 @@ export function snapPositionsToCableDirections(
         const dy = nbrInitial.y - currPos.y
         const angle = Math.atan2(dy, dx)
 
-        // 가장 가까운 45° 로 snap
-        const snappedAngle = Math.round(angle / SNAP_STEP) * SNAP_STEP
+        // V/H 우선 snap (카디널 35° 이내면 V/H, 그 외 대각선)
+        const snappedAngle = snapAngle(angle)
 
         // 거리는 원래 거리 유지 (시설 사이 간격 보존)
         const distance = Math.hypot(dx, dy) || DEFAULT_DISTANCE
@@ -128,7 +145,7 @@ export function snapPositionsToCableDirections(
       const dx = toPos.x - fromPos.x
       const dy = toPos.y - fromPos.y
       const angle = Math.atan2(dy, dx)
-      const snapped = Math.round(angle / SNAP_STEP) * SNAP_STEP
+      const snapped = snapAngle(angle)
       let deviation = angle - snapped
       // -π/8 ~ +π/8 범위로 정규화
       if (deviation > Math.PI) deviation -= 2 * Math.PI
