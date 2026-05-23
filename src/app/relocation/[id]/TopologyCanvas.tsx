@@ -1670,10 +1670,9 @@ export default function TopologyCanvas({
         byDir.get(item.dir)!.push(item)
       }
 
-      // 그룹에 2 조 이상일 때만 그 변에 수직 분산. 1 조뿐이면 anchor 안 함 (중심 사용).
+      // 모든 케이블에 카디널 anchor 부여 → V/H 출발 + 직각 라우팅 보장 (LGU+ 표준).
+      //   1 조 = 변 중앙 · 2~4 조 = 변에 평행 분산 · 5+ 조 = 90° 부채꼴 arc (코너 포함).
       for (const [dir, group] of byDir.entries()) {
-        if (group.length < 2) continue
-
         // 같은 변 안에서 자연 각도 순으로 정렬해 인접 케이블이 안 꼬이게.
         //   E/W: 위→아래 (sin(angle) 오름차순)
         //   N/S: 좌→우 (cos(angle) 오름차순)
@@ -1684,9 +1683,9 @@ export default function TopologyCanvas({
 
         const N = group.length
         if (N <= 4) {
-          // 2~4 조: 카디널 변에 수직 평행 분산 → 직각 라우팅으로 시설 V/H 출발
+          // 1~4 조: 카디널 변에 수직 평행 분산 (1 조면 정중앙)
           group.forEach((item, i) => {
-            const offset = (i - (N - 1) / 2) * PERPENDICULAR_STEP
+            const offset = N === 1 ? 0 : (i - (N - 1) / 2) * PERPENDICULAR_STEP
             let ax: number, ay: number
             let side: 'N' | 'S' | 'E' | 'W'
             if (dir === 'E') {
