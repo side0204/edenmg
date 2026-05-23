@@ -1799,10 +1799,11 @@ export default function TopologyCanvas({
     // 같은 시설 쌍 그룹핑 — 그룹 안의 케이블에 candidate index 0,1,2,... 배정해 서로 다른 path 사용.
     //   candidate 가 정렬된 후 idx 만 골라 적용 → idx 0 = best (직선/L자), idx 1+ = ㄷ자 우회.
     //   우선순위 (산업 관행 + owner "12C 좌상단 우회" 코멘트 반영, 2026-05-24):
-    //     1. status 우선: existing(기설 보존) → relocating → new → removing.
-    //        기설은 가능한 한 직선으로 유지 (코어 매핑 보존 + 안정성). 신설이 빈공간으로 우회.
-    //     2. 같은 status 안에서는 코어 수 작은 것이 idx 작음 → 큰 케이블이 우회.
-    //        owner 어제 commit msg "12C 를 좌상단 빈공간으로 대각선 우회" 와 일치.
+    //     1. 코어 수 큰 케이블이 idx 작음 → 큰 케이블이 직선, 작은 케이블이 우회.
+    //        산업 관행: 큰 백본은 직선 유지, 작은 분기는 우회 가능. owner 어제 commit msg
+    //        "B-029↔C-048 빨강 12C(작은) 를 좌상단 빈공간으로 대각선 우회" 와 일치.
+    //     2. 같은 코어 수 안에서 status: existing(기설 보존) → relocating → new → removing.
+    //        같은 spec 의 기설/신설 혼합 시 기설이 직선 차지 (코어 매핑 안정성).
     //     3. 결정적 tie breaker: cable.id.
     const samePairCandIdx = new Map<string, number>()
     {
@@ -1822,12 +1823,12 @@ export default function TopologyCanvas({
       for (const group of groups.values()) {
         if (group.length <= 1) continue
         const sorted = [...group].sort((a, b) => {
+          const ca = cableSpecCoreCount(a.spec as CableSpec)
+          const cb = cableSpecCoreCount(b.spec as CableSpec)
+          if (ca !== cb) return cb - ca
           const sa = statusRank[a.status] ?? 9
           const sb = statusRank[b.status] ?? 9
           if (sa !== sb) return sa - sb
-          const ca = cableSpecCoreCount(a.spec as CableSpec)
-          const cb = cableSpecCoreCount(b.spec as CableSpec)
-          if (ca !== cb) return ca - cb
           return a.id.localeCompare(b.id)
         })
         sorted.forEach((c, i) => samePairCandIdx.set(c.id, i))
