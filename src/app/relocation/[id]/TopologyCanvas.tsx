@@ -651,13 +651,16 @@ export default function TopologyCanvas({
     setCableWaypoints({})
   }, [mode])
 
-  // 케이블 offset — 「같은 시설 쌍」 2 조 이상에만 lens 모양 적용.
-  //   path 겹침 detection 은 over-aggressive (단일 cable 도 lens 적용됨) 이라 제거.
-  //   다른 시설 쌍이지만 path 공유하는 경우는 단일 cable 처럼 직선으로 두고
-  //   다른 cable 의 routing 변경 (장애물 회피) 으로 자연스럽게 분리되도록 함.
-  const cableOffsets = useMemo(() => {
-    const result = new Map<string, number>()
+  // 케이블 offset + kind — 두 가지 처리:
+  //   (1) 같은 시설 쌍 2+ 조 → 'lens' (양 끝 중심 유지, 중간 분산)
+  //   (2) 다른 시설 쌍 path 부분 overlap → 'shift' (전체 path perpendicular 평행 이동)
+  //       - 같은 방향 + perpendicular ≤ 30px + 짧은 cable 길이의 30% 이상 overlap
+  //       - end-to-end 체인 (점만 공유) 은 안 묶임
+  const cableOffsetInfo = useMemo(() => {
+    const offsets = new Map<string, number>()
+    const kinds = new Map<string, 'lens' | 'shift'>()
 
+    // 1. 같은 시설 쌍 → lens
     const samePairGroups = new Map<string, string[]>()
     for (const c of cables) {
       const key = [c.from_facility_id, c.to_facility_id].sort().join('|')
@@ -665,16 +668,102 @@ export default function TopologyCanvas({
       if (arr) arr.push(c.id)
       else samePairGroups.set(key, [c.id])
     }
+    const samePairAssigned = new Set<string>()
     for (const ids of samePairGroups.values()) {
       if (ids.length <= 1) continue
       const k = ids.length
-      ids.forEach((id, i) =>
-        result.set(id, (i - (k - 1) / 2) * CABLE_OFFSET_GAP * 2),
-      )
+      ids.forEach((id, i) => {
+        offsets.set(id, (i - (k - 1) / 2) * CABLE_OFFSET_GAP * 2)
+        kinds.set(id, 'lens')
+        samePairAssigned.add(id)
+      })
     }
 
-    return result
-  }, [cables])
+    // 2. 다른 시설 쌍 path overlap → shift
+    type CableInfo = { dir: 'H' | 'V'; start: number; end: number; perp: number; length: number }
+    const cableInfo = new Map<string, CableInfo>()
+    for (const c of cables) {
+      if (samePairAssigned.has(c.id)) continue // 이미 lens 처리
+      const fromPos = effectivePositions[c.from_facility_id]
+      const toPos = effectivePositions[c.to_facility_id]
+      if (!fromPos || !toPos) continue
+      const dx = toPos.x - fromPos.x
+      const dy = toPos.y - fromPos.y
+      const adx = Math.abs(dx)
+      const ady = Math.abs(dy)
+      if (ady < 30 && adx > 50) {
+        cableInfo.set(c.id, {
+          dir: 'H',
+          start: Math.min(fromPos.x, toPos.x),
+          end: Math.max(fromPos.x, toPos.x),
+          perp: (fromPos.y + toPos.y) / 2,
+          length: adx,
+        })
+      } else if (adx < 30 && ady > 50) {
+        cableInfo.set(c.id, {
+          dir: 'V',
+          start: Math.min(fromPos.y, toPos.y),
+          end: Math.max(fromPos.y, toPos.y),
+          perp: (fromPos.x + toPos.x) / 2,
+          length: ady,
+        })
+      }
+    }
+
+    // union-find
+    const parent = new Map<string, string>()
+    for (const id of cableInfo.keys()) parent.set(id, id)
+    const find = (x: string): string => {
+      const px = parent.get(x)
+      if (!px || px === x) return x
+      const root = find(px)
+      parent.set(x, root)
+      return root
+    }
+    const union = (x: string, y: string) => {
+      const rx = find(x)
+      const ry = find(y)
+      if (rx !== ry) parent.set(rx, ry)
+    }
+
+    const cableIds = [...cableInfo.keys()]
+    const PERP_TOL = 30
+    const OVERLAP_RATIO = 0.3 // 짧은 cable 의 30% 이상 overlap 시 묶음
+    for (let i = 0; i < cableIds.length; i++) {
+      for (let j = i + 1; j < cableIds.length; j++) {
+        const a = cableInfo.get(cableIds[i])!
+        const b = cableInfo.get(cableIds[j])!
+        if (a.dir !== b.dir) continue
+        if (Math.abs(a.perp - b.perp) > PERP_TOL) continue
+        const overlap = Math.min(a.end, b.end) - Math.max(a.start, b.start)
+        if (overlap <= 0) continue
+        const minLen = Math.min(a.length, b.length)
+        if (overlap / minLen < OVERLAP_RATIO) continue
+        union(cableIds[i], cableIds[j])
+      }
+    }
+
+    const groups = new Map<string, string[]>()
+    for (const id of cableIds) {
+      const root = find(id)
+      const arr = groups.get(root)
+      if (arr) arr.push(id)
+      else groups.set(root, [id])
+    }
+    for (const grp of groups.values()) {
+      if (grp.length <= 1) continue
+      const sorted = [...grp].sort()
+      sorted.forEach((id, i) => {
+        offsets.set(id, (i - (sorted.length - 1) / 2) * CABLE_OFFSET_GAP * 2)
+        kinds.set(id, 'shift')
+      })
+    }
+
+    return { offsets, kinds }
+  }, [cables, effectivePositions])
+
+  const cableOffsets = cableOffsetInfo.offsets
+  const cableOffsetKinds = cableOffsetInfo.kinds
 
   // 시설별 연결된 케이블 수 (노드 배지 — 동일 시설 연결 직관 확인)
   const facilityCableCount = useMemo(() => {
@@ -2052,10 +2141,11 @@ export default function TopologyCanvas({
         }
       }
 
-      // 케이블 offset — 「렌즈 모양」 으로 적용 (owner 요청 2026-05-23).
-      //   끝점은 시설 중심 유지, 중간만 perpendicular 분산 → 두 시설 사이 2+ 조 케이블이
-      //   양 끝은 한 점에서 모이고 중간만 벌어지는 모양.
+      // 케이블 offset — 두 kind:
+      //   'lens': 같은 시설 쌍 — 끝점 중심 유지, 중간만 분산 (양 끝 모이고 중간 벌어지는 oval)
+      //   'shift': 다른 시설 쌍 path overlap — 전체 path perpendicular 평행 이동
       const offset = cableOffsets.get(c.id) ?? 0
+      const kind = cableOffsetKinds.get(c.id)
       const buildPath = (): Waypoint[] => {
         if (midPoints.length > 0) return [fromPt, ...midPoints, toPt]
         return [fromPt, toPt]
@@ -2065,15 +2155,20 @@ export default function TopologyCanvas({
       const overallDx = toPt.x - fromPt.x
       const overallDy = toPt.y - fromPt.y
       const len = Math.hypot(overallDx, overallDy) || 1
-      const nx = -overallDy / len // 진행 방향에 수직인 단위벡터
+      const nx = -overallDy / len
       const ny = overallDx / len
 
+      if (kind === 'shift') {
+        // 전체 path perpendicular 평행 이동 — 모든 점 이동
+        return path.map((p) => ({ x: p.x + nx * offset, y: p.y + ny * offset }))
+      }
+
+      // 'lens' (또는 kind 없음 — 안전망) — 끝점 중심 유지, 중간만 분산
       if (path.length === 2) {
-        // 직선 케이블 — 20%/80% 위치에 waypoint 추가해 렌즈 모양 만들기
         const ux = overallDx / len
         const uy = overallDy / len
         return [
-          path[0], // 끝점 1 = 시설 중심
+          path[0],
           {
             x: path[0].x + ux * len * 0.2 + nx * offset,
             y: path[0].y + uy * len * 0.2 + ny * offset,
@@ -2082,11 +2177,9 @@ export default function TopologyCanvas({
             x: path[0].x + ux * len * 0.8 + nx * offset,
             y: path[0].y + uy * len * 0.8 + ny * offset,
           },
-          path[1], // 끝점 2 = 시설 중심
+          path[1],
         ]
       }
-
-      // Polyline (L자/ㄷ자/사용자 waypoint) — 내부 waypoint 만 shift, 끝점은 그대로
       return path.map((p, i) => {
         if (i === 0 || i === path.length - 1) return p
         return { x: p.x + nx * offset, y: p.y + ny * offset }
@@ -2096,6 +2189,7 @@ export default function TopologyCanvas({
       effectivePositions,
       effectiveWaypoints,
       cableOffsets,
+      cableOffsetKinds,
       mode,
       kakaoMap,
       cableAnchors,
