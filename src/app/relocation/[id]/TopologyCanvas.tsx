@@ -651,12 +651,12 @@ export default function TopologyCanvas({
     setCableWaypoints({})
   }, [mode])
 
-  // 케이블 평행 offset — 두 가지 그룹 (1) 같은 두 시설 사이 (2) 다른 시설이지만 비슷한 경로
-  //   양쪽 모두 perpendicular offset 으로 분리해 시각적 겹침 방지.
+  // 케이블 offset — 「같은 시설 쌍」 2 조 이상에만 적용 (owner 요청 2026-05-23).
+  //   다른 시설 쌍이지만 같은 row/col 인 end-to-end 체인 케이블은 그룹 안 함 (lens 적용 X).
+  //   결과적으로 단일 케이블은 직선, 같은 시설 쌍 2+ 조만 렌즈 모양으로 양 끝 모이고 중간 분산.
   const cableOffsets = useMemo(() => {
     const result = new Map<string, number>()
 
-    // (1) 같은 두 시설 사이 여러 케이블
     const samePairGroups = new Map<string, string[]>()
     for (const c of cables) {
       const key = [c.from_facility_id, c.to_facility_id].sort().join('|')
@@ -665,55 +665,16 @@ export default function TopologyCanvas({
       else samePairGroups.set(key, [c.id])
     }
     for (const ids of samePairGroups.values()) {
+      if (ids.length <= 1) continue // 1 조면 offset 안 함
       const k = ids.length
-      ids.forEach((id, i) => result.set(id, (i - (k - 1) / 2) * CABLE_OFFSET_GAP))
-    }
-
-    // (2) 다른 시설이지만 비슷한 경로 — 도식 모드 전용 (지도 모드는 GPS 로 자연 분산)
-    //   주로 수평인 케이블끼리 Y 버킷이 같으면 평행. 주로 수직은 X 버킷.
-    if (mode === 'schematic') {
-      const pathGroups = new Map<string, string[]>()
-      const BUCKET = 30 // 좌표 정밀도 — 30px 이내면 같은 경로로 간주
-      for (const c of cables) {
-        const fromPos = effectivePositions[c.from_facility_id]
-        const toPos = effectivePositions[c.to_facility_id]
-        if (!fromPos || !toPos) continue
-        const dx = toPos.x - fromPos.x
-        const dy = toPos.y - fromPos.y
-        const adx = Math.abs(dx)
-        const ady = Math.abs(dy)
-        let key = ''
-        if (adx >= 3 * ady && adx > 50) {
-          // 주로 수평 — Y 버킷으로 그룹
-          const avgY = (fromPos.y + toPos.y) / 2
-          key = `H_${Math.round(avgY / BUCKET)}`
-        } else if (ady >= 3 * adx && ady > 50) {
-          // 주로 수직 — X 버킷으로 그룹
-          const avgX = (fromPos.x + toPos.x) / 2
-          key = `V_${Math.round(avgX / BUCKET)}`
-        } else continue // 대각선/짧은 케이블은 그룹 안 함
-        const arr = pathGroups.get(key)
-        if (arr) arr.push(c.id)
-        else pathGroups.set(key, [c.id])
-      }
-      // 같은 path 그룹에 cable 2 개 이상이면 perpendicular 분산 (기존 offset 에 더해 누적)
-      for (const ids of pathGroups.values()) {
-        if (ids.length <= 1) continue
-        // 결정성 보장 — id 정렬
-        const sorted = [...ids].sort()
-        sorted.forEach((id, i) => {
-          const existing = result.get(id) ?? 0
-          // 좀 더 큰 간격 (CABLE_OFFSET_GAP × 1.8) 으로 분산해 시각 구분
-          result.set(
-            id,
-            existing + (i - (sorted.length - 1) / 2) * CABLE_OFFSET_GAP * 1.8,
-          )
-        })
-      }
+      // 조 사이 간격을 약간 크게 (CABLE_OFFSET_GAP × 2) 해 시각 구분
+      ids.forEach((id, i) =>
+        result.set(id, (i - (k - 1) / 2) * CABLE_OFFSET_GAP * 2),
+      )
     }
 
     return result
-  }, [cables, effectivePositions, mode])
+  }, [cables])
 
   // 시설별 연결된 케이블 수 (노드 배지 — 동일 시설 연결 직관 확인)
   const facilityCableCount = useMemo(() => {
