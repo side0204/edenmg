@@ -2061,24 +2061,6 @@ export default function TopologyCanvas({
             </div>
           )}
 
-          {/* 탭 메뉴 보임/숨김 — 시설·케이블·회선·... 탭을 캔버스 위 오버레이로 */}
-          {tabPanel && (
-            <button
-              type="button"
-              onClick={() => setTabPanelOpen((v) => !v)}
-              className={
-                'mr-1 inline-flex items-center gap-1 rounded-md border px-2 h-7 text-[11px] font-medium ' +
-                (tabPanelOpen
-                  ? 'bg-slate-900 text-white border-slate-900'
-                  : 'text-slate-700 border-slate-300 hover:bg-slate-50')
-              }
-              title={tabPanelOpen ? '탭 메뉴 닫기' : '탭 메뉴 열기 (시설·케이블·회선·...)'}
-            >
-              <PanelTop className="h-3 w-3" />
-              탭 메뉴
-            </button>
-          )}
-
           {/* 시설 목록 보임/숨김 — 좌측 사이드바 토글 (도식·지도 공통) */}
           <button
             type="button"
@@ -2095,7 +2077,7 @@ export default function TopologyCanvas({
             시설 목록
           </button>
 
-          {/* 시설·케이블 추가 보임/숨김 — 좌측 사이드바 토글 (도식·지도 공통) */}
+          {/* 시설 추가 보임/숨김 — 좌측 사이드바 토글 (도식·지도 공통) */}
           {editable && (
             <button
               type="button"
@@ -2106,10 +2088,10 @@ export default function TopologyCanvas({
                   ? 'bg-slate-900 text-white border-slate-900'
                   : 'text-slate-700 border-slate-300 hover:bg-slate-50')
               }
-              title={toolsCollapsed ? '시설·케이블 추가 패널 열기' : '닫기'}
+              title={toolsCollapsed ? '시설 추가 패널 열기' : '닫기'}
             >
               <Plus className="h-3 w-3" />
-              시설·케이블 추가
+              시설 추가
               {addTool && (
                 <span className="ml-0.5 rounded bg-blue-500 px-1 text-[9px] font-semibold text-white">
                   {CLOSURE_TYPE_LABEL[addTool]}
@@ -2300,16 +2282,7 @@ export default function TopologyCanvas({
             </>
           )}
 
-          <button
-            type="button"
-            onClick={() => setLegendOpen(true)}
-            className="ml-2 inline-flex items-center gap-1 rounded-md border border-slate-300 px-2 h-7 text-[11px] font-medium text-slate-700 hover:bg-slate-50"
-          >
-            <BookOpen className="h-3 w-3" />
-            표준 범례
-          </button>
-
-          {/* 더보기 — 자주 안 쓰는 컨트롤(캔버스 표시 크기 등)을 묶어 툴바를 정리 */}
+          {/* 더보기 — 자주 안 쓰는 컨트롤(표준 범례·탭 메뉴·캔버스 표시 크기)을 묶어 툴바 정리 */}
           <details className="relative ml-1">
             <summary
               className="inline-flex h-7 w-7 cursor-pointer list-none items-center justify-center rounded-md border border-slate-300 text-slate-700 hover:bg-slate-50 [&::-webkit-details-marker]:hidden"
@@ -2317,32 +2290,72 @@ export default function TopologyCanvas({
             >
               <MoreHorizontal className="h-3.5 w-3.5" />
             </summary>
-            <div className="absolute right-0 top-8 z-30 w-48 rounded-lg border border-slate-200 bg-white p-2.5 shadow-lg">
-              <p className="px-0.5 pb-1 text-[10px] font-semibold uppercase tracking-wide text-slate-400">
-                캔버스 표시 크기
-              </p>
-              <div className="inline-flex w-full items-center overflow-hidden rounded-md border border-slate-300">
+            <div
+              className="absolute right-0 top-8 z-30 w-52 rounded-lg border border-slate-200 bg-white p-2 shadow-lg space-y-1"
+              onClick={(e) => {
+                // 항목 클릭 후 드롭다운 자동 닫힘
+                const det = e.currentTarget.parentElement as HTMLDetailsElement | null
+                if (det && det.open) {
+                  requestAnimationFrame(() => {
+                    det.open = false
+                  })
+                }
+              }}
+            >
+              <button
+                type="button"
+                onClick={() => setLegendOpen(true)}
+                className="w-full text-left rounded-md px-2 py-1.5 text-[11px] font-medium text-slate-700 hover:bg-slate-50 inline-flex items-center gap-2"
+              >
+                <BookOpen className="h-3.5 w-3.5 shrink-0" />
+                표준 범례
+              </button>
+              {tabPanel && (
                 <button
                   type="button"
-                  onClick={shrinkCanvas}
-                  disabled={canvasSize === 'compact'}
-                  className="inline-flex h-7 flex-1 items-center justify-center text-slate-700 hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-30"
-                  title="캔버스 축소"
+                  onClick={() => setTabPanelOpen((v) => !v)}
+                  className={
+                    'w-full text-left rounded-md px-2 py-1.5 text-[11px] font-medium inline-flex items-center gap-2 ' +
+                    (tabPanelOpen
+                      ? 'bg-slate-900 text-white'
+                      : 'text-slate-700 hover:bg-slate-50')
+                  }
+                  title="시설·케이블·회선·... 탭 메뉴 토글"
                 >
-                  <Shrink className="h-3.5 w-3.5" />
+                  <PanelTop className="h-3.5 w-3.5 shrink-0" />
+                  탭 메뉴 {tabPanelOpen ? '숨기기' : '보이기'}
                 </button>
-                <span className="inline-flex h-7 min-w-[3rem] items-center justify-center border-x border-slate-200 px-2 text-[11px] font-medium text-slate-600">
-                  {CANVAS_SIZE_LABEL[canvasSize]}
-                </span>
-                <button
-                  type="button"
-                  onClick={expandCanvas}
-                  disabled={canvasSize === 'fullscreen'}
-                  className="inline-flex h-7 flex-1 items-center justify-center text-slate-700 hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-30"
-                  title="캔버스 확장"
+              )}
+              <div className="pt-1 border-t border-slate-100">
+                <p className="px-0.5 py-1 text-[10px] font-semibold uppercase tracking-wide text-slate-400">
+                  캔버스 표시 크기
+                </p>
+                <div
+                  className="inline-flex w-full items-center overflow-hidden rounded-md border border-slate-300"
+                  onClick={(e) => e.stopPropagation()}
                 >
-                  <Expand className="h-3.5 w-3.5" />
-                </button>
+                  <button
+                    type="button"
+                    onClick={shrinkCanvas}
+                    disabled={canvasSize === 'compact'}
+                    className="inline-flex h-7 flex-1 items-center justify-center text-slate-700 hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-30"
+                    title="캔버스 축소"
+                  >
+                    <Shrink className="h-3.5 w-3.5" />
+                  </button>
+                  <span className="inline-flex h-7 min-w-[3rem] items-center justify-center border-x border-slate-200 px-2 text-[11px] font-medium text-slate-600">
+                    {CANVAS_SIZE_LABEL[canvasSize]}
+                  </span>
+                  <button
+                    type="button"
+                    onClick={expandCanvas}
+                    disabled={canvasSize === 'fullscreen'}
+                    className="inline-flex h-7 flex-1 items-center justify-center text-slate-700 hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-30"
+                    title="캔버스 확장"
+                  >
+                    <Expand className="h-3.5 w-3.5" />
+                  </button>
+                </div>
               </div>
             </div>
           </details>
@@ -2498,13 +2511,14 @@ export default function TopologyCanvas({
           </aside>
         )}
 
-        {/* 시설·케이블 추가 사이드바 — 툴바 토글로 보임/숨김. 도식·지도 공통.
-            chip 선택 시 자동 접힘 (그리기 작업 시 화면 최대화 — owner 요청). */}
+        {/* 시설 추가 사이드바 — 툴바 토글로 보임/숨김. 도식·지도 공통.
+            chip 선택 시 자동 접힘 (그리기 작업 시 화면 최대화 — owner 요청).
+            라벨은 「시설 추가」 로 통일했지만 내부에 케이블 추가도 포함 (광케이블 카테고리). */}
         {editable && !toolsCollapsed && (
           <aside className="w-60 shrink-0 border-r border-slate-200 bg-slate-50 overflow-y-auto">
             <div className="sticky top-0 z-10 bg-slate-50 px-3 py-2 border-b border-slate-200 flex items-center justify-between">
               <span className="text-[11px] font-semibold text-slate-600">
-                시설·케이블 추가
+                시설 추가
               </span>
               <button
                 type="button"
