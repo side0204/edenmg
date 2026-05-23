@@ -1476,11 +1476,111 @@ export default function TopologyCanvas({
   //   - 도식 모드: 경로점 x/y 그대로
   //   - 지도 모드: 경로점 lat/lng 를 화면 픽셀로 투영 (Phase 4)
   //   - 경로점 없으면 같은 경로 다른 케이블과 겹치지 않게 수직 offset 적용
+  // Phase 2 (2026-05-23) — 도식 모드의 시설 anchor 사전 계산.
+  //   각 함체에 4 조 이하 케이블이면 N/S/E/W 4 방위, 5 조부터 NSEW + 대각선 8 방위에 배정.
+  //   같은 방위 충돌은 greedy 로 차순위 방위 배치 — 결정성 위해 cable id 정렬 기준.
+  //   지도 모드는 시설이 GPS 로 분산되어 자연스럽게 다른 방향 — anchor 없이 중심 사용.
+  const cableAnchors = useMemo(() => {
+    if (mode === 'map') return null
+    const result = new Map<
+      string,
+      { from?: { x: number; y: number }; to?: { x: number; y: number } }
+    >()
+
+    // 시설별로 연결된 케이블 모음
+    const cablesByFacility = new Map<string, CableEdge[]>()
+    for (const c of cables) {
+      if (!cablesByFacility.has(c.from_facility_id)) {
+        cablesByFacility.set(c.from_facility_id, [])
+      }
+      cablesByFacility.get(c.from_facility_id)!.push(c)
+      if (!cablesByFacility.has(c.to_facility_id)) {
+        cablesByFacility.set(c.to_facility_id, [])
+      }
+      cablesByFacility.get(c.to_facility_id)!.push(c)
+    }
+
+    const radius = NODE_SIZE.width / 2
+    const radiusDiag = (NODE_SIZE.width / 2) * (Math.SQRT2 / 2)
+
+    function angleDist(a: number, b: number): number {
+      let d = Math.abs(a - b)
+      if (d > Math.PI) d = 2 * Math.PI - d
+      return d
+    }
+
+    for (const [facilityId, connCables] of cablesByFacility.entries()) {
+      const pos = effectivePositions[facilityId]
+      if (!pos) continue
+      const cx = pos.x + NODE_SIZE.width / 2
+      const cy = pos.y + NODE_SIZE.height / 2 - 10
+
+      // 각 케이블의 상대 endpoint 방향각 계산
+      const items: { cableId: string; isFromSide: boolean; angle: number }[] = []
+      for (const c of connCables) {
+        const isFromSide = c.from_facility_id === facilityId
+        const otherId = isFromSide ? c.to_facility_id : c.from_facility_id
+        const otherPos = effectivePositions[otherId]
+        if (!otherPos) continue
+        const otherCx = otherPos.x + NODE_SIZE.width / 2
+        const otherCy = otherPos.y + NODE_SIZE.height / 2 - 10
+        items.push({
+          cableId: c.id,
+          isFromSide,
+          angle: Math.atan2(otherCy - cy, otherCx - cx),
+        })
+      }
+      if (items.length === 0) continue
+
+      // 4 조 이하 = 4 방위, 5+ = 8 방위
+      const useEight = items.length > 4
+      const anchorAngles = useEight
+        ? [0, Math.PI / 4, Math.PI / 2, (3 * Math.PI) / 4, Math.PI, -(3 * Math.PI) / 4, -Math.PI / 2, -Math.PI / 4]
+        : [0, Math.PI / 2, Math.PI, -Math.PI / 2]
+
+      // greedy 배정 — cable id 정렬로 결정성 보장
+      items.sort((a, b) => a.cableId.localeCompare(b.cableId))
+      const used = new Set<number>()
+      for (const item of items) {
+        let bestIdx = -1
+        let bestDist = Infinity
+        for (let i = 0; i < anchorAngles.length; i++) {
+          if (used.has(i)) continue
+          const d = angleDist(item.angle, anchorAngles[i])
+          if (d < bestDist) {
+            bestDist = d
+            bestIdx = i
+          }
+        }
+        let ax: number, ay: number
+        if (bestIdx >= 0) {
+          used.add(bestIdx)
+          const a = anchorAngles[bestIdx]
+          // 8 방위에서 대각선(인덱스 1,3,5,7) 은 radiusDiag, 그 외 cardinal 은 radius
+          const isDiag = useEight && bestIdx % 2 === 1
+          const r = isDiag ? radiusDiag : radius
+          ax = cx + Math.cos(a) * r
+          ay = cy + Math.sin(a) * r
+        } else {
+          // 모든 anchor 가 차면 (이론상 4+ 조 동시 같은 anchor) — 선호 각도 그대로
+          ax = cx + Math.cos(item.angle) * radius
+          ay = cy + Math.sin(item.angle) * radius
+        }
+        const entry = result.get(item.cableId) ?? {}
+        if (item.isFromSide) entry.from = { x: ax, y: ay }
+        else entry.to = { x: ax, y: ay }
+        result.set(item.cableId, entry)
+      }
+    }
+    return result
+  }, [cables, effectivePositions, mode])
+
   const cablePathPoints = useCallback(
     (c: CableEdge): Waypoint[] => {
       const from = effectivePositions[c.from_facility_id]
       const to = effectivePositions[c.to_facility_id]
       if (!from || !to) return []
+      // 시설 중심 — anchor 없을 때 폴백
       const fromCenter = {
         x: from.x + NODE_SIZE.width / 2,
         y: from.y + NODE_SIZE.height / 2 - 10,
@@ -1489,6 +1589,10 @@ export default function TopologyCanvas({
         x: to.x + NODE_SIZE.width / 2,
         y: to.y + NODE_SIZE.height / 2 - 10,
       }
+      // Phase 2 anchor 적용 (도식 모드만). 지도 모드는 cableAnchors=null → 중심 사용.
+      const anchor = cableAnchors?.get(c.id)
+      const fromPt = anchor?.from ?? fromCenter
+      const toPt = anchor?.to ?? toCenter
       const wps = effectiveWaypoints(c.id)
 
       // 중간 경로점을 화면 좌표로 변환
@@ -1512,22 +1616,22 @@ export default function TopologyCanvas({
       }
 
       if (midPoints.length > 0) {
-        return [fromCenter, ...midPoints, toCenter]
+        return [fromPt, ...midPoints, toPt]
       }
-      // 직선 케이블 — 같은 경로 여러 조면 수직 offset
+      // 직선 케이블 — 같은 경로 여러 조면 수직 offset (anchor 적용 시 자연스럽게 분리되어 효과 적음)
       const offset = cableOffsets.get(c.id) ?? 0
-      if (offset === 0) return [fromCenter, toCenter]
-      const dx = toCenter.x - fromCenter.x
-      const dy = toCenter.y - fromCenter.y
+      if (offset === 0) return [fromPt, toPt]
+      const dx = toPt.x - fromPt.x
+      const dy = toPt.y - fromPt.y
       const len = Math.hypot(dx, dy) || 1
       const nx = -dy / len // 진행 방향에 수직인 단위벡터
       const ny = dx / len
       return [
-        { x: fromCenter.x + nx * offset, y: fromCenter.y + ny * offset },
-        { x: toCenter.x + nx * offset, y: toCenter.y + ny * offset },
+        { x: fromPt.x + nx * offset, y: fromPt.y + ny * offset },
+        { x: toPt.x + nx * offset, y: toPt.y + ny * offset },
       ]
     },
-    [effectivePositions, effectiveWaypoints, cableOffsets, mode, kakaoMap],
+    [effectivePositions, effectiveWaypoints, cableOffsets, mode, kakaoMap, cableAnchors],
   )
 
   // 경로점의 화면 좌표 — 도식: x/y · 지도: lat/lng 투영 (없으면 null)
