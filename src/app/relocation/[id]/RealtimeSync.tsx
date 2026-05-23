@@ -61,6 +61,8 @@ export default function RealtimeSync({
   useEffect(() => {
     const supabase = createClient()
     let refreshTimer: ReturnType<typeof setTimeout> | null = null
+    let cancelled = false
+    let channelRef: ReturnType<typeof supabase.channel> | null = null
 
     const scheduleRefresh = (eventInfo?: { table: string; type: string }) => {
       if (eventInfo) {
@@ -76,64 +78,85 @@ export default function RealtimeSync({
       }, 200)
     }
 
-    // 채널 이름은 프로젝트 단위 — 다른 프로젝트의 변경·presence 와 격리.
-    const channel = supabase.channel(`relocation:${projectId}`, {
-      config: { presence: { key: selfEmployeeId } },
-    })
-
-    // 1) DB 변경 구독 — relocation_* 테이블 중 project_id 필드가 있는 것 전부.
-    //    relocation_projects 는 id 가 project_id 역할 → 별도 필터.
-    for (const table of RELOCATION_TABLES) {
-      const filter =
-        table === 'relocation_projects'
-          ? `id=eq.${projectId}`
-          : `project_id=eq.${projectId}`
-      channel.on(
-        'postgres_changes',
-        { event: '*', schema: 'public', table, filter },
-        (payload) => {
-          const p = payload as { table?: string; eventType?: string }
-          scheduleRefresh({
-            table: p.table ?? table,
-            type: p.eventType ?? '?',
-          })
-        },
-      )
-    }
-
-    // 2) Presence — 같은 채널 접속 직원 추적.
-    channel.on('presence', { event: 'sync' }, () => {
-      const state = channel.presenceState<PresencePayload>()
-      const list: PresencePayload[] = []
-      for (const key of Object.keys(state)) {
-        if (key === selfEmployeeId) continue // 본인 제외
-        const rows = state[key]
-        if (rows && rows.length > 0) list.push(rows[0])
-      }
-      setOthers(list)
-    })
-
-    channel.subscribe(async (status, err) => {
+    ;(async () => {
+      // Realtime 웹소켓이 RLS 필터링을 적용하려면 사용자 JWT 가 필요.
+      // @supabase/ssr 의 browserClient 가 auto-attach 해야 하지만,
+      // 채널을 만들기 전에 명시적으로 setAuth 호출해 anonymous 접속 가능성 차단.
+      const { data: sessionRes } = await supabase.auth.getSession()
+      const token = sessionRes.session?.access_token
       // eslint-disable-next-line no-console
-      console.log('[RealtimeSync] subscribe status:', status, err ?? '')
-      if (status === 'SUBSCRIBED') {
-        // eslint-disable-next-line no-console
-        console.log(
-          '[RealtimeSync] subscribed channel: relocation:' + projectId,
-          'tables:',
-          RELOCATION_TABLES.length,
-        )
-        await channel.track({
-          employee_id: selfEmployeeId,
-          name: selfName,
-          online_at: new Date().toISOString(),
-        })
+      console.log('[RealtimeSync] session token present:', !!token)
+      if (token) {
+        try {
+          await supabase.realtime.setAuth(token)
+        } catch (e) {
+          // eslint-disable-next-line no-console
+          console.warn('[RealtimeSync] setAuth failed', e)
+        }
       }
-    })
+      if (cancelled) return
+
+      // 채널 이름은 프로젝트 단위 — 다른 프로젝트의 변경·presence 와 격리.
+      const channel = supabase.channel(`relocation:${projectId}`, {
+        config: { presence: { key: selfEmployeeId } },
+      })
+      channelRef = channel
+
+      // 1) DB 변경 구독 — relocation_* 테이블 중 project_id 필드가 있는 것 전부.
+      //    relocation_projects 는 id 가 project_id 역할 → 별도 필터.
+      for (const table of RELOCATION_TABLES) {
+        const filter =
+          table === 'relocation_projects'
+            ? `id=eq.${projectId}`
+            : `project_id=eq.${projectId}`
+        channel.on(
+          'postgres_changes',
+          { event: '*', schema: 'public', table, filter },
+          (payload) => {
+            const p = payload as { table?: string; eventType?: string }
+            scheduleRefresh({
+              table: p.table ?? table,
+              type: p.eventType ?? '?',
+            })
+          },
+        )
+      }
+
+      // 2) Presence — 같은 채널 접속 직원 추적.
+      channel.on('presence', { event: 'sync' }, () => {
+        const state = channel.presenceState<PresencePayload>()
+        const list: PresencePayload[] = []
+        for (const key of Object.keys(state)) {
+          if (key === selfEmployeeId) continue // 본인 제외
+          const rows = state[key]
+          if (rows && rows.length > 0) list.push(rows[0])
+        }
+        setOthers(list)
+      })
+
+      channel.subscribe(async (status, err) => {
+        // eslint-disable-next-line no-console
+        console.log('[RealtimeSync] subscribe status:', status, err ?? '')
+        if (status === 'SUBSCRIBED') {
+          // eslint-disable-next-line no-console
+          console.log(
+            '[RealtimeSync] subscribed channel: relocation:' + projectId,
+            'tables:',
+            RELOCATION_TABLES.length,
+          )
+          await channel.track({
+            employee_id: selfEmployeeId,
+            name: selfName,
+            online_at: new Date().toISOString(),
+          })
+        }
+      })
+    })()
 
     return () => {
+      cancelled = true
       if (refreshTimer) clearTimeout(refreshTimer)
-      supabase.removeChannel(channel)
+      if (channelRef) supabase.removeChannel(channelRef)
     }
   }, [projectId, selfEmployeeId, selfName, router])
 
