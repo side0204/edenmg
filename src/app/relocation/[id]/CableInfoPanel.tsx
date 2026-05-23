@@ -592,6 +592,8 @@ function CoreAssignSection({
   const coreCount = cableSpecCoreCount(cable.spec)
   const [adding, setAdding] = useState(false)
   const [showSpliceMap, setShowSpliceMap] = useState(false)
+  // 배정 목록 펼침/접힘 — 기본 접힘 (목록이 길어 다른 입력 시 스크롤 부담)
+  const [listExpanded, setListExpanded] = useState(false)
   const [mode, setMode] = useState<'single' | 'bulk'>('single')
   // 단일 모드
   const [circuitMode, setCircuitMode] = useState('') // '' 미지정 | 'NEW' 새 회선 | circuit id
@@ -603,7 +605,7 @@ function CoreAssignSection({
   const [bulkCircuits, setBulkCircuits] = useState('')
   const [bulkKind, setBulkKind] = useState<CircuitKind>('1코어')
   const [bulkLocation, setBulkLocation] = useState('')
-  // 공통 옵션
+  // 공통 옵션 (lifecycle 은 모드 전환 시 자동 분기 — single='new' · bulk='preexisting')
   const [lifecycle, setLifecycle] = useState<CoreLifecycle>('new')
   const [segmentIdx, setSegmentIdx] = useState('0')
   const [isTerminal, setIsTerminal] = useState(true)
@@ -769,42 +771,64 @@ function CoreAssignSection({
         </div>
       </div>
 
-      {/* 기존 배정 목록 */}
+      {/* 기존 배정 목록 — 기본 접힘. 헤더 클릭으로 펼침/접힘 토글.
+          코어 변경·이동은 「선번장」 버튼으로 별도 처리하므로 평소 목록은 가려도 안전. */}
       {assignments.length > 0 ? (
-        <ul className="mt-1.5 space-y-1">
-          {assignments.map((a) => (
-            <li
-              key={a.id}
-              className="flex items-start justify-between gap-1.5 rounded-md border border-slate-200 px-2 py-1"
-            >
-              <div className="min-w-0">
-                <p className="text-[11px] font-mono text-slate-800 flex items-center gap-1 flex-wrap">
-                  코어 {a.core_range_start}
-                  {a.core_range_end !== a.core_range_start ? `~${a.core_range_end}` : ''}
-                  {a.is_terminal && (
-                    <span className="inline-flex items-center gap-0.5 rounded border border-blue-300 bg-blue-50 px-1 text-[9px] font-medium text-blue-700">
-                      <Flag className="h-2 w-2" />
-                      종단
-                    </span>
-                  )}
-                </p>
-                <p className="text-[10px] text-slate-500 truncate">
-                  {circuitLabel(a.circuit_id)} · {CORE_LIFECYCLE_LABEL[a.lifecycle]}
-                  {a.segment_idx > 0 ? ` · 세그 ${a.segment_idx}` : ''}
-                </p>
-              </div>
-              <button
-                type="button"
-                onClick={() => onRemove(a.id)}
-                disabled={busy}
-                title="배정 삭제"
-                className="shrink-0 text-slate-400 hover:text-rose-600 disabled:opacity-50"
-              >
-                <X className="h-3.5 w-3.5" />
-              </button>
-            </li>
-          ))}
-        </ul>
+        <div className="mt-1.5">
+          <button
+            type="button"
+            onClick={() => setListExpanded((v) => !v)}
+            className="w-full flex items-center justify-between gap-1 rounded-md border border-slate-200 bg-white/50 px-2 py-1 text-[11px] text-slate-700 hover:bg-white"
+          >
+            <span className="font-medium">
+              배정된 {assignments.length}건 {listExpanded ? '접기' : '펼치기'}
+            </span>
+            <ChevronRight
+              className={
+                'h-3 w-3 transition-transform ' +
+                (listExpanded ? 'rotate-90' : '')
+              }
+            />
+          </button>
+          {listExpanded && (
+            <ul className="mt-1 space-y-1">
+              {assignments.map((a) => (
+                <li
+                  key={a.id}
+                  className="flex items-start justify-between gap-1.5 rounded-md border border-slate-200 px-2 py-1"
+                >
+                  <div className="min-w-0">
+                    <p className="text-[11px] font-mono text-slate-800 flex items-center gap-1 flex-wrap">
+                      코어 {a.core_range_start}
+                      {a.core_range_end !== a.core_range_start
+                        ? `~${a.core_range_end}`
+                        : ''}
+                      {a.is_terminal && (
+                        <span className="inline-flex items-center gap-0.5 rounded border border-blue-300 bg-blue-50 px-1 text-[9px] font-medium text-blue-700">
+                          <Flag className="h-2 w-2" />
+                          종단
+                        </span>
+                      )}
+                    </p>
+                    <p className="text-[10px] text-slate-500 truncate">
+                      {circuitLabel(a.circuit_id)} · {CORE_LIFECYCLE_LABEL[a.lifecycle]}
+                      {a.segment_idx > 0 ? ` · 세그 ${a.segment_idx}` : ''}
+                    </p>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => onRemove(a.id)}
+                    disabled={busy}
+                    title="배정 삭제"
+                    className="shrink-0 text-slate-400 hover:text-rose-600 disabled:opacity-50"
+                  >
+                    <X className="h-3.5 w-3.5" />
+                  </button>
+                </li>
+              ))}
+            </ul>
+          )}
+        </div>
       ) : (
         !adding && (
           <p className="mt-1.5 text-[10px] text-slate-400 italic">
@@ -816,11 +840,15 @@ function CoreAssignSection({
       {/* 추가 폼 */}
       {adding && (
         <div className="mt-2 rounded-lg border border-slate-200 bg-slate-50 p-2 space-y-2">
-          {/* 모드 토글 — 단일 / 일괄 */}
+          {/* 모드 토글 — 단일 / 일괄. 모드별 lifecycle 기본값 자동 분기:
+              단일 = 신설(new) · 일괄 = 기설(preexisting). 변경은 그대로 가능. */}
           <div className="flex items-center gap-1 rounded-md bg-slate-200/60 p-0.5">
             <button
               type="button"
-              onClick={() => setMode('single')}
+              onClick={() => {
+                setMode('single')
+                setLifecycle('new')
+              }}
               className={
                 'flex-1 rounded px-2 py-0.5 text-[10px] font-medium ' +
                 (mode === 'single'
@@ -832,7 +860,10 @@ function CoreAssignSection({
             </button>
             <button
               type="button"
-              onClick={() => setMode('bulk')}
+              onClick={() => {
+                setMode('bulk')
+                setLifecycle('preexisting')
+              }}
               className={
                 'flex-1 rounded px-2 py-0.5 text-[10px] font-medium ' +
                 (mode === 'bulk'

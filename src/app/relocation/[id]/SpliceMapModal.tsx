@@ -1,6 +1,6 @@
 'use client'
 
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
 import { toast } from 'sonner'
 import { X, ArrowRight, Flag } from 'lucide-react'
@@ -10,6 +10,25 @@ import {
   swapCoreAssignmentsFromCanvas,
 } from './core-actions'
 import type { CablePanelCircuit, CablePanelAssignment } from './CableInfoPanel'
+
+type ColKey = 'core' | 'circuit' | 'lifecycle' | 'terminal' | 'action'
+
+// 컬럼 폭 기본값 (px). 사용자가 드래그로 변경 가능.
+const COL_DEFAULTS: Record<ColKey, number> = {
+  core: 56,
+  circuit: 220,
+  lifecycle: 80,
+  terminal: 56,
+  action: 200,
+}
+
+const COL_MIN: Record<ColKey, number> = {
+  core: 40,
+  circuit: 80,
+  lifecycle: 50,
+  terminal: 40,
+  action: 140,
+}
 
 // 선번장 — 케이블의 전체 코어(1~N)를 표로 보여주고, 각 회선의 코어 번호를
 // 빈 코어로 옮길 수 있게 한다. 다른 케이블로의 이동은 미지원 (같은 케이블 안만).
@@ -36,6 +55,36 @@ export default function SpliceMapModal({
   const [editingId, setEditingId] = useState<string | null>(null)
   const [busy, setBusy] = useState(false)
   const [mounted, setMounted] = useState(false)
+  const [colWidths, setColWidths] = useState<Record<ColKey, number>>(COL_DEFAULTS)
+  // 드래그 상태: 시작 X 좌표·시작 폭·대상 컬럼
+  const dragRef = useRef<{ key: ColKey; startX: number; startW: number } | null>(
+    null,
+  )
+
+  // 컬럼 폭 드래그 — th 우측 핸들 onPointerDown → window pointermove · pointerup.
+  function onResizeStart(e: React.PointerEvent, key: ColKey) {
+    e.preventDefault()
+    e.stopPropagation()
+    dragRef.current = {
+      key,
+      startX: e.clientX,
+      startW: colWidths[key],
+    }
+    const onMove = (ev: PointerEvent) => {
+      const d = dragRef.current
+      if (!d) return
+      const dx = ev.clientX - d.startX
+      const next = Math.max(COL_MIN[d.key], d.startW + dx)
+      setColWidths((prev) => ({ ...prev, [d.key]: next }))
+    }
+    const onUp = () => {
+      dragRef.current = null
+      window.removeEventListener('pointermove', onMove)
+      window.removeEventListener('pointerup', onUp)
+    }
+    window.addEventListener('pointermove', onMove)
+    window.addEventListener('pointerup', onUp)
+  }
 
   // 부모(CableInfoPanel) 가 overflow-y-auto · 캔버스 fullscreen z-40 안에 있어,
   // 같은 트리에 모달을 두면 stacking context 에 갇혀 안 보일 수 있다.
@@ -143,16 +192,39 @@ export default function SpliceMapModal({
           </button>
         </div>
 
-        {/* 코어 목록 */}
-        <div className="flex-1 overflow-y-auto">
-          <table className="w-full text-xs">
+        {/* 코어 목록 — 가로 스크롤 허용 (사용자가 컬럼 폭을 넓게 늘릴 수 있게) */}
+        <div className="flex-1 overflow-auto">
+          <table
+            className="text-xs table-fixed"
+            style={{
+              width:
+                colWidths.core +
+                colWidths.circuit +
+                colWidths.lifecycle +
+                colWidths.terminal +
+                colWidths.action,
+            }}
+          >
+            <colgroup>
+              <col style={{ width: colWidths.core }} />
+              <col style={{ width: colWidths.circuit }} />
+              <col style={{ width: colWidths.lifecycle }} />
+              <col style={{ width: colWidths.terminal }} />
+              <col style={{ width: colWidths.action }} />
+            </colgroup>
             <thead className="sticky top-0 bg-slate-50 border-b border-slate-200">
               <tr className="text-left text-slate-600">
-                <th className="px-3 py-2 font-medium w-14">코어</th>
-                <th className="px-3 py-2 font-medium">회선</th>
-                <th className="px-3 py-2 font-medium w-20">구분</th>
-                <th className="px-3 py-2 font-medium w-14">종단</th>
-                <th className="px-3 py-2 font-medium w-32 text-right">코어 변경</th>
+                <ResizableTh label="코어" colKey="core" onResizeStart={onResizeStart} />
+                <ResizableTh label="회선" colKey="circuit" onResizeStart={onResizeStart} />
+                <ResizableTh label="구분" colKey="lifecycle" onResizeStart={onResizeStart} />
+                <ResizableTh label="종단" colKey="terminal" onResizeStart={onResizeStart} />
+                <ResizableTh
+                  label="코어 변경"
+                  colKey="action"
+                  onResizeStart={onResizeStart}
+                  align="right"
+                  noHandle
+                />
               </tr>
             </thead>
             <tbody>
@@ -162,15 +234,19 @@ export default function SpliceMapModal({
                 const isEditing = a && editingId === a.id
                 return (
                   <tr key={coreNo} className="border-b border-slate-100">
-                    <td className="px-3 py-2 font-mono text-slate-700">{coreNo}</td>
-                    <td className="px-3 py-2">
+                    <td className="px-3 py-2 font-mono text-slate-700 truncate">
+                      {coreNo}
+                    </td>
+                    <td className="px-3 py-2 truncate">
                       {a ? (
-                        <span className="text-slate-800">{circuitLabel(a.circuit_id)}</span>
+                        <span className="text-slate-800" title={circuitLabel(a.circuit_id)}>
+                          {circuitLabel(a.circuit_id)}
+                        </span>
                       ) : (
                         <span className="text-slate-300 italic">(빈)</span>
                       )}
                     </td>
-                    <td className="px-3 py-2 text-slate-500">
+                    <td className="px-3 py-2 text-slate-500 truncate">
                       {a ? CORE_LIFECYCLE_LABEL[a.lifecycle as CoreLifecycle] : '—'}
                     </td>
                     <td className="px-3 py-2">
@@ -270,5 +346,40 @@ export default function SpliceMapModal({
       </div>
     </div>,
     document.body,
+  )
+}
+
+
+// 컬럼 헤더 + 우측 드래그 핸들. noHandle 이면 핸들 미렌더 (마지막 컬럼).
+function ResizableTh({
+  label,
+  colKey,
+  onResizeStart,
+  align,
+  noHandle,
+}: {
+  label: string
+  colKey: ColKey
+  onResizeStart: (e: React.PointerEvent, key: ColKey) => void
+  align?: 'left' | 'right'
+  noHandle?: boolean
+}) {
+  return (
+    <th
+      className={
+        'relative px-3 py-2 font-medium select-none ' +
+        (align === 'right' ? 'text-right' : 'text-left')
+      }
+    >
+      <span className="block truncate">{label}</span>
+      {!noHandle && (
+        <span
+          onPointerDown={(e) => onResizeStart(e, colKey)}
+          title="드래그하여 폭 조절"
+          className="absolute top-0 right-0 h-full w-1.5 cursor-col-resize hover:bg-slate-300/70 active:bg-slate-400/70"
+          style={{ touchAction: 'none' }}
+        />
+      )}
+    </th>
   )
 }
