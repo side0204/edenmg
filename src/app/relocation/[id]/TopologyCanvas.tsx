@@ -647,6 +647,37 @@ export default function TopologyCanvas({
     return m
   }, [coreAssignments])
 
+  // Phase 5 (2026-05-23) — 케이블별 사용 코어 라벨 문자열.
+  //   "1~24" (연속) · "5,8,15,17" (불연속) · "1~6,12~18" (혼합) 자동 포맷.
+  //   접속함체 결선도 표현용. 도식 모드에서 케이블 anchor 근처에 표시.
+  const coresByCable = useMemo(() => {
+    const collect = new Map<string, number[]>()
+    for (const a of coreAssignments ?? []) {
+      if (!collect.has(a.cable_id)) collect.set(a.cable_id, [])
+      collect.get(a.cable_id)!.push(a.core_range_start)
+    }
+    const result = new Map<string, string>()
+    for (const [cableId, cores] of collect.entries()) {
+      const sorted = [...new Set(cores)].sort((a, b) => a - b)
+      if (sorted.length === 0) continue
+      const parts: string[] = []
+      let runStart = sorted[0]
+      let runEnd = sorted[0]
+      for (let i = 1; i < sorted.length; i++) {
+        if (sorted[i] === runEnd + 1) {
+          runEnd = sorted[i]
+        } else {
+          parts.push(runStart === runEnd ? `${runStart}` : `${runStart}~${runEnd}`)
+          runStart = sorted[i]
+          runEnd = sorted[i]
+        }
+      }
+      parts.push(runStart === runEnd ? `${runStart}` : `${runStart}~${runEnd}`)
+      result.set(cableId, parts.join(','))
+    }
+    return result
+  }, [coreAssignments])
+
   const [selectedId, setSelectedId] = useState<string | null>(null)
   const [pendingConnection, setPendingConnection] = useState<
     { fromId: string; toId: string } | null
@@ -3232,6 +3263,59 @@ export default function TopologyCanvas({
                         style={{ fontSize: 7.5, fontWeight: 700, fontFamily: 'system-ui' }}
                       >
                         회선 {cnt}
+                      </text>
+                    </g>
+                  )
+                })()}
+                {/* Phase 5 — 사용 코어 라벨. 도식 모드에서만, 케이블의 from-anchor 쪽에 빨강. */}
+                {(() => {
+                  if (mode === 'map') return null
+                  const coreLabel = coresByCable.get(c.id)
+                  if (!coreLabel) return null
+                  // pts[0] = from anchor, pts[1] = 다음 점 (waypoint 또는 to anchor)
+                  if (pts.length < 2) return null
+                  const fromPt = pts[0]
+                  const nextPt = pts[1]
+                  const dx = nextPt.x - fromPt.x
+                  const dy = nextPt.y - fromPt.y
+                  const len = Math.hypot(dx, dy) || 1
+                  const ux = dx / len
+                  const uy = dy / len
+                  // 케이블 따라 35px 들어간 위치 + 수직 12px 오프셋 (선 위에 안 겹치게)
+                  const ALONG = 35
+                  const PERP = 12
+                  const lx = fromPt.x + ux * ALONG - uy * PERP
+                  const ly = fromPt.y + uy * ALONG + ux * PERP
+                  // 글자 폭 추정해 박스 크기 결정
+                  const fontSize = 9
+                  const padX = 4
+                  const padY = 2
+                  const w = estimateTextWidth(coreLabel, fontSize) + padX * 2
+                  const h = fontSize + padY * 2
+                  return (
+                    <g pointerEvents="none">
+                      <rect
+                        x={lx - w / 2}
+                        y={ly - h / 2}
+                        width={w}
+                        height={h}
+                        rx={2}
+                        fill="white"
+                        stroke="#dc2626"
+                        strokeWidth={1}
+                      />
+                      <text
+                        x={lx}
+                        y={ly + fontSize * 0.35}
+                        textAnchor="middle"
+                        fill="#dc2626"
+                        style={{
+                          fontSize,
+                          fontWeight: 600,
+                          fontFamily: LABEL_FONT,
+                        }}
+                      >
+                        {coreLabel}
                       </text>
                     </g>
                   )
