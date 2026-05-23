@@ -1686,12 +1686,10 @@ export default function TopologyCanvas({
   //   - 지도 모드: 경로점 lat/lng 를 화면 픽셀로 투영 (Phase 4)
   //   - 경로점 없으면 같은 경로 다른 케이블과 겹치지 않게 수직 offset 적용
   // Phase 2 (2026-05-23) — 도식 모드의 시설 anchor 사전 계산.
-  //   각 케이블을 자연 각도로 4 방위 (N/S/E/W) 에 quantize.
-  //   같은 방위에 1 조뿐이면 anchor 안 함 (중심 사용 — 「이격된」 느낌 방지).
-  //   같은 방위에 2~4 조 → 그 변에 수직 평행 분산 (E/W 면은 위아래, N/S 면은 좌우).
-  //   같은 방위에 5+ 조 → 90° 부채꼴 arc 로 분산 (코너 anchor 까지 사용 — 대각선 라우팅).
-  //   지도 모드는 시설이 GPS 로 분산되어 자연 anchor 불필요 → null.
-  // side 필드: 'N'/'S'/'E'/'W' = 카디널(직각 라우팅), 'D' = 대각선(직선), undefined = 중심.
+  //   2026-05-23 owner 요청: "기본으로 접속함체나 시설물 중간에 출발/도착".
+  //   사이드 anchor 비활성 — 모든 케이블이 시설 중심에서 출발/도착.
+  //   같은 경로 2 조 이상의 시각 분리는 cableOffsets 의 「렌즈 모양」 으로 처리 (끝점 중심 유지).
+  //   지도 모드는 cableAnchors=null.
   const cableAnchors = useMemo(() => {
     if (mode === 'map') return null
     type AnchorEnd = { x: number; y: number; side?: 'N' | 'S' | 'E' | 'W' | 'D' }
@@ -1699,6 +1697,9 @@ export default function TopologyCanvas({
       string,
       { from?: AnchorEnd; to?: AnchorEnd }
     >()
+    // 사이드 anchor 로직 비활성 — 항상 빈 Map 반환 → 모든 케이블이 시설 중심 사용.
+    return result
+    // eslint-disable-next-line no-unreachable
 
     // 시설별로 연결된 케이블 모음
     const cablesByFacility = new Map<string, CableEdge[]>()
@@ -2000,8 +2001,9 @@ export default function TopologyCanvas({
         }
       }
 
-      // 케이블 평행 offset — 모든 path (직선/L자/ㄷ자/사용자 waypoint) 에 perpendicular 평행 이동
-      //   from→to 의 「전체 방향」 에 수직인 벡터로 모든 점 이동 → 평행 케이블 분리
+      // 케이블 offset — 「렌즈 모양」 으로 적용 (owner 요청 2026-05-23).
+      //   끝점은 시설 중심 유지, 중간만 perpendicular 분산 → 두 시설 사이 2+ 조 케이블이
+      //   양 끝은 한 점에서 모이고 중간만 벌어지는 모양.
       const offset = cableOffsets.get(c.id) ?? 0
       const buildPath = (): Waypoint[] => {
         if (midPoints.length > 0) return [fromPt, ...midPoints, toPt]
@@ -2014,7 +2016,30 @@ export default function TopologyCanvas({
       const len = Math.hypot(overallDx, overallDy) || 1
       const nx = -overallDy / len // 진행 방향에 수직인 단위벡터
       const ny = overallDx / len
-      return path.map((p) => ({ x: p.x + nx * offset, y: p.y + ny * offset }))
+
+      if (path.length === 2) {
+        // 직선 케이블 — 20%/80% 위치에 waypoint 추가해 렌즈 모양 만들기
+        const ux = overallDx / len
+        const uy = overallDy / len
+        return [
+          path[0], // 끝점 1 = 시설 중심
+          {
+            x: path[0].x + ux * len * 0.2 + nx * offset,
+            y: path[0].y + uy * len * 0.2 + ny * offset,
+          },
+          {
+            x: path[0].x + ux * len * 0.8 + nx * offset,
+            y: path[0].y + uy * len * 0.8 + ny * offset,
+          },
+          path[1], // 끝점 2 = 시설 중심
+        ]
+      }
+
+      // Polyline (L자/ㄷ자/사용자 waypoint) — 내부 waypoint 만 shift, 끝점은 그대로
+      return path.map((p, i) => {
+        if (i === 0 || i === path.length - 1) return p
+        return { x: p.x + nx * offset, y: p.y + ny * offset }
+      })
     },
     [
       effectivePositions,
