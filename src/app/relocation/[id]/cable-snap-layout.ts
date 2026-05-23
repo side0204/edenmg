@@ -43,8 +43,8 @@ type CellDelta = { dr: number; dc: number; angle: number; isCardinal: boolean }
 
 export type SnapPosition = { id: string; x: number; y: number }
 
-const CELL_W = 220 // 그리드 셀 가로 (시설 너비 110 + 여백)
-const CELL_H = 160 // 그리드 셀 세로 (시설 높이 90 + 라벨 + 여백)
+const CELL_W = 280 // 그리드 셀 가로 (시설 너비 110 + 케이블 라벨 + 여백)
+const CELL_H = 200 // 그리드 셀 세로 (시설 높이 90 + 라벨 + 여백)
 const MAX_CELL_MULT = 6 // 한 방향으로 멀리 갈 수 있는 최대 셀 수
 
 // 8 방위 셀 델타. angle 은 atan2(dr, dc) 결과 — 화면 좌표 (y 아래 + 라서 dr 양수=남쪽).

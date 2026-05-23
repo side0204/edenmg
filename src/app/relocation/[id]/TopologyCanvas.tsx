@@ -1860,33 +1860,34 @@ export default function TopologyCanvas({
       }
       if (!worstObstacle) continue
 
-      // 장애물 우회 — 케이블 방향에 따라 직각 사각 우회 (2 waypoints).
-      //   대각선 케이블도 회피 후 다시 자연 진행하도록.
+      // 장애물 우회 — 순수 V/H 세그먼트만 사용 (2 waypoints, ㄷ자 또는 ㄴ자).
+      //   waypoint 를 (from.x, detourY) · (to.x, detourY) 로 잡으면:
+      //     from → wp1: 수직 (from.x 같음) ·  wp1 → wp2: 수평 (detourY 같음) ·  wp2 → to: 수직 (to.x 같음)
+      //   모든 segment 가 V/H. 케이블의 「제멋대로 꺾인선」 제거.
       const dx = to.x - from.x
       const dy = to.y - from.y
       const adx = Math.abs(dx)
       const ady = Math.abs(dy)
-      const DETOUR_GAP = halfW + 25 // 시설 반지름 + 여유
+      const DETOUR_GAP = halfH + 40 // 시설 세로 반지름 + 여유 (좀 더 멀리 우회)
 
       const obs = worstObstacle.p
       if (adx >= ady) {
         // 주로 수평 — 위/아래로 우회
-        // 회피 방향 = 케이블 양 끝의 평균 y 보다 위/아래 중 obstacle 반대쪽
         const avgY = (from.y + to.y) / 2
-        const sign = avgY <= obs.y ? -1 : 1 // 평균이 위면 위로 우회, 아래면 아래로
+        const sign = avgY <= obs.y ? -1 : 1
         const detourY = obs.y + sign * DETOUR_GAP
         result.set(c.id, [
-          { x: obs.x - DETOUR_GAP, y: detourY },
-          { x: obs.x + DETOUR_GAP, y: detourY },
+          { x: from.x, y: detourY },
+          { x: to.x, y: detourY },
         ])
       } else {
         // 주로 수직 — 왼쪽/오른쪽으로 우회
         const avgX = (from.x + to.x) / 2
         const sign = avgX <= obs.x ? -1 : 1
-        const detourX = obs.x + sign * DETOUR_GAP
+        const detourX = obs.x + sign * (halfW + 40)
         result.set(c.id, [
-          { x: detourX, y: obs.y - DETOUR_GAP },
-          { x: detourX, y: obs.y + DETOUR_GAP },
+          { x: detourX, y: from.y },
+          { x: detourX, y: to.y },
         ])
       }
     }
