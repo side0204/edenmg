@@ -2651,7 +2651,7 @@ export default function TopologyCanvas({
           </aside>
         )}
 
-        <div ref={canvasAreaRef} className="flex-1 min-w-0 relative">
+        <div ref={canvasAreaRef} className="flex-1 min-w-0 relative overflow-hidden">
 
           {/* 지도 모드 검색창 — 캔버스 중앙 최상단 floating.
               별도 바 대신 지도 위에 띄워 캔버스를 더 넓게 쓴다. SDK 준비 후에만 노출.
