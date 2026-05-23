@@ -651,24 +651,69 @@ export default function TopologyCanvas({
     setCableWaypoints({})
   }, [mode])
 
-  // 같은 두 시설 사이 여러 케이블 — 수직 offset 으로 평행하게 분리 (겹침 방지)
+  // 케이블 평행 offset — 두 가지 그룹 (1) 같은 두 시설 사이 (2) 다른 시설이지만 비슷한 경로
+  //   양쪽 모두 perpendicular offset 으로 분리해 시각적 겹침 방지.
   const cableOffsets = useMemo(() => {
-    const groups = new Map<string, string[]>()
-    for (const c of cables) {
-      // 방향 무관 그룹 키 (A→B 와 B→A 같은 경로로 취급)
-      const key = [c.from_facility_id, c.to_facility_id].sort().join('|')
-      const arr = groups.get(key)
-      if (arr) arr.push(c.id)
-      else groups.set(key, [c.id])
-    }
     const result = new Map<string, number>()
-    for (const ids of groups.values()) {
+
+    // (1) 같은 두 시설 사이 여러 케이블
+    const samePairGroups = new Map<string, string[]>()
+    for (const c of cables) {
+      const key = [c.from_facility_id, c.to_facility_id].sort().join('|')
+      const arr = samePairGroups.get(key)
+      if (arr) arr.push(c.id)
+      else samePairGroups.set(key, [c.id])
+    }
+    for (const ids of samePairGroups.values()) {
       const k = ids.length
-      // 중앙 기준 분산: 1조면 0, 2조면 -3.5/+3.5, 3조면 -7/0/+7 ...
       ids.forEach((id, i) => result.set(id, (i - (k - 1) / 2) * CABLE_OFFSET_GAP))
     }
+
+    // (2) 다른 시설이지만 비슷한 경로 — 도식 모드 전용 (지도 모드는 GPS 로 자연 분산)
+    //   주로 수평인 케이블끼리 Y 버킷이 같으면 평행. 주로 수직은 X 버킷.
+    if (mode === 'schematic') {
+      const pathGroups = new Map<string, string[]>()
+      const BUCKET = 30 // 좌표 정밀도 — 30px 이내면 같은 경로로 간주
+      for (const c of cables) {
+        const fromPos = effectivePositions[c.from_facility_id]
+        const toPos = effectivePositions[c.to_facility_id]
+        if (!fromPos || !toPos) continue
+        const dx = toPos.x - fromPos.x
+        const dy = toPos.y - fromPos.y
+        const adx = Math.abs(dx)
+        const ady = Math.abs(dy)
+        let key = ''
+        if (adx >= 3 * ady && adx > 50) {
+          // 주로 수평 — Y 버킷으로 그룹
+          const avgY = (fromPos.y + toPos.y) / 2
+          key = `H_${Math.round(avgY / BUCKET)}`
+        } else if (ady >= 3 * adx && ady > 50) {
+          // 주로 수직 — X 버킷으로 그룹
+          const avgX = (fromPos.x + toPos.x) / 2
+          key = `V_${Math.round(avgX / BUCKET)}`
+        } else continue // 대각선/짧은 케이블은 그룹 안 함
+        const arr = pathGroups.get(key)
+        if (arr) arr.push(c.id)
+        else pathGroups.set(key, [c.id])
+      }
+      // 같은 path 그룹에 cable 2 개 이상이면 perpendicular 분산 (기존 offset 에 더해 누적)
+      for (const ids of pathGroups.values()) {
+        if (ids.length <= 1) continue
+        // 결정성 보장 — id 정렬
+        const sorted = [...ids].sort()
+        sorted.forEach((id, i) => {
+          const existing = result.get(id) ?? 0
+          // 좀 더 큰 간격 (CABLE_OFFSET_GAP × 1.8) 으로 분산해 시각 구분
+          result.set(
+            id,
+            existing + (i - (sorted.length - 1) / 2) * CABLE_OFFSET_GAP * 1.8,
+          )
+        })
+      }
+    }
+
     return result
-  }, [cables])
+  }, [cables, effectivePositions, mode])
 
   // 시설별 연결된 케이블 수 (노드 배지 — 동일 시설 연결 직관 확인)
   const facilityCableCount = useMemo(() => {
@@ -1955,21 +2000,21 @@ export default function TopologyCanvas({
         }
       }
 
-      if (midPoints.length > 0) {
-        return [fromPt, ...midPoints, toPt]
-      }
-      // 직선 케이블 — 같은 경로 여러 조면 수직 offset (anchor 적용 시 자연스럽게 분리되어 효과 적음)
+      // 케이블 평행 offset — 모든 path (직선/L자/ㄷ자/사용자 waypoint) 에 perpendicular 평행 이동
+      //   from→to 의 「전체 방향」 에 수직인 벡터로 모든 점 이동 → 평행 케이블 분리
       const offset = cableOffsets.get(c.id) ?? 0
-      if (offset === 0) return [fromPt, toPt]
-      const dx = toPt.x - fromPt.x
-      const dy = toPt.y - fromPt.y
-      const len = Math.hypot(dx, dy) || 1
-      const nx = -dy / len // 진행 방향에 수직인 단위벡터
-      const ny = dx / len
-      return [
-        { x: fromPt.x + nx * offset, y: fromPt.y + ny * offset },
-        { x: toPt.x + nx * offset, y: toPt.y + ny * offset },
-      ]
+      const buildPath = (): Waypoint[] => {
+        if (midPoints.length > 0) return [fromPt, ...midPoints, toPt]
+        return [fromPt, toPt]
+      }
+      const path = buildPath()
+      if (offset === 0) return path
+      const overallDx = toPt.x - fromPt.x
+      const overallDy = toPt.y - fromPt.y
+      const len = Math.hypot(overallDx, overallDy) || 1
+      const nx = -overallDy / len // 진행 방향에 수직인 단위벡터
+      const ny = overallDx / len
+      return path.map((p) => ({ x: p.x + nx * offset, y: p.y + ny * offset }))
     },
     [
       effectivePositions,
