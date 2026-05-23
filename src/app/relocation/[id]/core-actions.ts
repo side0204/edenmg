@@ -352,19 +352,23 @@ export async function removeCoreAssignmentFromCanvas(
 
 
 /**
- * 회선번호 콤마 일괄 입력 — 같은 케이블에 여러 회선을 한 번에 배정.
- *   - 회선번호별로 1코어씩, 빈 코어 중 가장 작은 번호부터 오름차순 자동 배정
- *   - 같은 project 안 회선번호가 이미 있으면 재사용, 없으면 즉시 생성
- *   - lifecycle·종단·세그먼트·종류·설치장소는 일괄 동일 적용
- *   - 중간 실패 시 best-effort (부분 성공 허용) — 결과 요약 반환
+ * 코어·회선·설치장소 콤마 일괄 입력 — 같은 케이블에 여러 회선을 한 번에 배정.
+ *   - 선번(코어)·회선번호를 콤마로 받아 같은 index 끼리 매칭. 길이 같아야 함.
+ *   - 설치장소명은 콤마로 받되 생략 가능. 길이 0 이면 전부 null,
+ *     길이 1 이면 전체 공통 적용(편의), 그 외엔 회선 길이와 같아야 함.
+ *   - 같은 project 안 회선번호가 이미 있으면 재사용, 없으면 즉시 생성.
+ *     기존 회선 재사용 시 설치장소·종류 입력은 무시 (기존 데이터 보존).
+ *   - lifecycle·종단·세그먼트는 일괄 동일 적용.
+ *   - 빈 코어 자동 채움 X — 사용자가 지정한 코어 번호 그대로 사용.
  */
 export async function bulkAddCoresFromCanvas(input: {
   project_id: string
   cable_id: string
-  cable_core_count: number // 케이블 규격이 허용하는 총 코어 수
-  circuit_numbers: string[] // 콤마로 들어온 회선번호 리스트
-  kind: string // 신규 회선용 종류 (기존 회선이면 무시)
-  subscriber_name: string | null // 신규 회선용 설치장소 (기존 회선이면 무시)
+  cable_core_count: number
+  core_numbers: number[]
+  circuit_numbers: string[]
+  subscriber_names: string[] // 길이 0(생략) · 1(공통) · circuit_numbers.length (개별)
+  kind: string
   lifecycle: string
   is_terminal: boolean
   segment_idx: number
@@ -392,21 +396,67 @@ export async function bulkAddCoresFromCanvas(input: {
   }
   const kind = isCircuitKind(input.kind) ? input.kind : '1코어'
 
-  // 회선번호 정규화 — trim, 빈 값/중복 제거, 길이·문자 검증
-  const raw = Array.from(
-    new Set(input.circuit_numbers.map((s) => s.trim()).filter((s) => s.length > 0)),
-  )
-  if (raw.length === 0) {
+  // 회선번호 정규화 — index 보존(코어와 짝). 빈 값은 입력 오류.
+  const circuits = input.circuit_numbers.map((s) => s.trim())
+  if (circuits.length === 0) {
     return { ok: false, error: '회선번호를 한 개 이상 입력하세요' }
   }
-  const tooLong = raw.find((s) => s.length > 100)
+  const emptyCircuitIdx = circuits.findIndex((s) => s.length === 0)
+  if (emptyCircuitIdx >= 0) {
+    return { ok: false, error: `회선번호 ${emptyCircuitIdx + 1}번째가 비어 있습니다` }
+  }
+  const tooLong = circuits.find((s) => s.length > 100)
   if (tooLong) {
     return { ok: false, error: `회선번호가 너무 깁니다 (100자 이하): "${tooLong.slice(0, 30)}…"` }
+  }
+  // 회선번호 중복도 위치 정보 보존하며 검사
+  const dupCircuit = circuits.find((c, i) => circuits.indexOf(c) !== i)
+  if (dupCircuit) {
+    return { ok: false, error: `회선번호가 중복됐습니다: ${dupCircuit}` }
+  }
+
+  // 선번(코어) — 길이 일치 + 정수 + 범위 + 중복·기존 사용 검사
+  const cores = input.core_numbers.map((n) => Math.trunc(n))
+  if (cores.length !== circuits.length) {
+    return {
+      ok: false,
+      error: `선번 개수(${cores.length})와 회선번호 개수(${circuits.length})가 다릅니다`,
+    }
+  }
+  for (let i = 0; i < cores.length; i++) {
+    const c = cores[i]
+    if (!Number.isFinite(c) || c < 1) {
+      return { ok: false, error: `선번 ${i + 1}번째가 1 이상의 정수가 아닙니다` }
+    }
+    if (c > totalCores) {
+      return { ok: false, error: `선번 ${c}이(가) 케이블 코어 한도(${totalCores})를 초과합니다` }
+    }
+  }
+  const dupCore = cores.find((c, i) => cores.indexOf(c) !== i)
+  if (dupCore !== undefined) {
+    return { ok: false, error: `입력한 선번 안에서 코어 ${dupCore}이(가) 중복됐습니다` }
+  }
+
+  // 설치장소 — 0(전부 null) · 1(공통) · circuits.length(개별) 만 허용
+  const rawLocs = input.subscriber_names.map((s) => s.trim())
+  let locations: (string | null)[]
+  if (rawLocs.length === 0) {
+    locations = circuits.map(() => null)
+  } else if (rawLocs.length === 1) {
+    const v = rawLocs[0] || null
+    locations = circuits.map(() => (v ? v.slice(0, 200) : null))
+  } else if (rawLocs.length === circuits.length) {
+    locations = rawLocs.map((s) => (s ? s.slice(0, 200) : null))
+  } else {
+    return {
+      ok: false,
+      error: `설치장소 개수(${rawLocs.length})는 0(생략) · 1(공통) · ${circuits.length}(개별) 중 하나여야 합니다`,
+    }
   }
 
   const { supabase } = await requireMember()
 
-  // 현재 이 케이블의 사용 중인 코어 번호 모음 — start=end 모델이라 start 만 본다.
+  // 현재 이 케이블의 사용 중인 코어 번호 — 입력 코어와 충돌 검증
   const { data: existingCores, error: cErr } = await supabase
     .from('relocation_core_assignments')
     .select('core_range_start')
@@ -415,25 +465,18 @@ export async function bulkAddCoresFromCanvas(input: {
   const used = new Set<number>(
     (existingCores ?? []).map((r) => (r as { core_range_start: number }).core_range_start),
   )
-
-  // 빈 코어 목록을 작은 번호부터
-  const free: number[] = []
-  for (let i = 1; i <= totalCores; i++) {
-    if (!used.has(i)) free.push(i)
-  }
-  if (free.length < raw.length) {
-    return {
-      ok: false,
-      error: `빈 코어가 부족합니다. 입력 회선 ${raw.length}개 vs 빈 코어 ${free.length}개`,
-    }
+  const conflict = cores.find((c) => used.has(c))
+  if (conflict !== undefined) {
+    return { ok: false, error: `코어 ${conflict}은(는) 이미 다른 회선에 배정되어 있습니다` }
   }
 
-  // 회선 일괄 조회·생성 — project_id + circuit_id(string) UNIQUE 가정 (있으면 재사용)
+  // 회선 일괄 조회·생성 — project_id + circuit_id(string) UNIQUE 가정
+  const uniqueCircuits = Array.from(new Set(circuits))
   const { data: existingCircuits, error: ecErr } = await supabase
     .from('relocation_circuits')
     .select('id, circuit_id')
     .eq('project_id', input.project_id)
-    .in('circuit_id', raw)
+    .in('circuit_id', uniqueCircuits)
   if (ecErr) return { ok: false, error: '회선 조회 실패: ' + ecErr.message }
 
   const idByCircuit = new Map<string, string>()
@@ -441,15 +484,19 @@ export async function bulkAddCoresFromCanvas(input: {
     idByCircuit.set(r.circuit_id, r.id)
   }
 
-  // 누락된 회선 생성 (한 건씩 — 동시성/return id 위해)
-  for (const n of raw) {
+  // 누락된 회선 생성 — 회선별로 그 회선의 설치장소(첫 등장 index) 사용
+  const firstLocByCircuit = new Map<string, string | null>()
+  for (let i = 0; i < circuits.length; i++) {
+    if (!firstLocByCircuit.has(circuits[i])) firstLocByCircuit.set(circuits[i], locations[i])
+  }
+  for (const n of uniqueCircuits) {
     if (idByCircuit.has(n)) continue
     const { data: created, error: insErr } = await supabase
       .from('relocation_circuits')
       .insert({
         project_id: input.project_id,
         circuit_id: n,
-        subscriber_name: input.subscriber_name?.trim().slice(0, 200) || null,
+        subscriber_name: firstLocByCircuit.get(n) ?? null,
         kind,
         status: 'OK',
       })
@@ -461,12 +508,12 @@ export async function bulkAddCoresFromCanvas(input: {
     idByCircuit.set(n, (created as { id: string }).id)
   }
 
-  // 코어 배정 일괄 insert — 회선번호 입력 순서대로, 빈 코어 오름차순.
+  // 코어 배정 일괄 insert — 사용자가 지정한 코어 번호로 그대로.
   const skipped: { circuit: string; reason: string }[] = []
   let created = 0
-  for (let i = 0; i < raw.length; i++) {
-    const circuitNo = raw[i]
-    const coreNo = free[i]
+  for (let i = 0; i < circuits.length; i++) {
+    const circuitNo = circuits[i]
+    const coreNo = cores[i]
     const circuitId = idByCircuit.get(circuitNo)!
     const { error: aErr } = await supabase.from('relocation_core_assignments').insert({
       project_id: input.project_id,

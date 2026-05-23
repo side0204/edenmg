@@ -601,10 +601,11 @@ function CoreAssignSection({
   const [newCircuitKind, setNewCircuitKind] = useState<CircuitKind>('1코어')
   const [newCircuitLocation, setNewCircuitLocation] = useState('')
   const [coreNo, setCoreNo] = useState('')
-  // 일괄 모드 — 회선번호 콤마 구분 + 옵션 한꺼번에
+  // 일괄 모드 — 선번·회선번호·설치장소 콤마 구분 (선번이 회선번호와 같은 인덱스로 매칭)
+  const [bulkCores, setBulkCores] = useState('')
   const [bulkCircuits, setBulkCircuits] = useState('')
+  const [bulkLocations, setBulkLocations] = useState('') // 생략 가능
   const [bulkKind, setBulkKind] = useState<CircuitKind>('1코어')
-  const [bulkLocation, setBulkLocation] = useState('')
   // 공통 옵션 (lifecycle 은 모드 전환 시 자동 분기 — single='new' · bulk='preexisting')
   const [lifecycle, setLifecycle] = useState<CoreLifecycle>('new')
   const [segmentIdx, setSegmentIdx] = useState('0')
@@ -615,16 +616,48 @@ function CoreAssignSection({
   const usedCount = assignments.length
   const freeCount = Math.max(0, coreCount - usedCount)
 
-  // 일괄 모드 미리보기 — 입력값 정제 후 몇 개 회선이 어느 코어에 들어갈지 표시
+  // 일괄 모드 미리보기 — 선번·회선번호·설치장소 콤마 입력을 정제해 매칭·검증.
+  // 길이 불일치·범위 초과·기존 코어 충돌·중복을 모두 빨강으로 표시.
   const bulkPreview = (() => {
     if (mode !== 'bulk') return null
-    const raw = Array.from(
-      new Set(bulkCircuits.split(',').map((s) => s.trim()).filter((s) => s.length > 0)),
-    )
+    const coreRaw = bulkCores.split(',').map((s) => s.trim()).filter((s) => s.length > 0)
+    const circuitRaw = bulkCircuits.split(',').map((s) => s.trim()).filter((s) => s.length > 0)
+    const locRaw = bulkLocations.split(',').map((s) => s.trim())
+    // 설치장소는 공백만 있는 콤마(예: ",,")도 의도된 입력이라 trim 후 length 그대로 유지.
+    // 단 공백 전부면 생략으로 간주.
+    const locsAllEmpty = locRaw.every((s) => s.length === 0)
+    const locsCount = locsAllEmpty ? 0 : locRaw.length
+    const cores = coreRaw.map((s) => Number.parseInt(s, 10))
     const usedSet = new Set(assignments.map((a) => a.core_range_start))
-    const free: number[] = []
-    for (let i = 1; i <= coreCount; i++) if (!usedSet.has(i)) free.push(i)
-    return { raw, free, fits: raw.length <= free.length }
+    const errors: string[] = []
+    if (coreRaw.length === 0) errors.push('선번을 한 개 이상 입력하세요')
+    if (circuitRaw.length === 0) errors.push('회선번호를 한 개 이상 입력하세요')
+    if (coreRaw.length !== circuitRaw.length) {
+      errors.push(`선번 ${coreRaw.length}개 vs 회선번호 ${circuitRaw.length}개 — 개수가 같아야 합니다`)
+    }
+    const badIdx = cores.findIndex((c) => !Number.isFinite(c) || c < 1 || c > coreCount)
+    if (badIdx >= 0) errors.push(`선번 "${coreRaw[badIdx]}" 가 1~${coreCount} 범위가 아닙니다`)
+    const dupCore = cores.find((c, i) => cores.indexOf(c) !== i)
+    if (dupCore !== undefined) errors.push(`입력 선번 중 ${dupCore}이(가) 중복됐습니다`)
+    const conflict = cores.find((c) => usedSet.has(c))
+    if (conflict !== undefined) errors.push(`코어 ${conflict}은(는) 이미 다른 회선에 사용 중입니다`)
+    const dupCircuit = circuitRaw.find((c, i) => circuitRaw.indexOf(c) !== i)
+    if (dupCircuit) errors.push(`회선번호 "${dupCircuit}" 가 중복됐습니다`)
+    if (locsCount > 0 && locsCount !== 1 && locsCount !== circuitRaw.length) {
+      errors.push(`설치장소 ${locsCount}개 — 생략·1개(공통)·${circuitRaw.length}개(개별) 중 하나여야 합니다`)
+    }
+    const ok = errors.length === 0
+    // 매칭 표시 — 모든 검증이 통과해야만 표시
+    const pairs: { core: number; circuit: string; loc: string | null }[] = []
+    if (ok) {
+      for (let i = 0; i < coreRaw.length; i++) {
+        let loc: string | null = null
+        if (locsCount === 1) loc = locRaw[0] || null
+        else if (locsCount === circuitRaw.length) loc = locRaw[i] || null
+        pairs.push({ core: cores[i], circuit: circuitRaw[i], loc })
+      }
+    }
+    return { ok, errors, pairs, count: coreRaw.length, hasInput: coreRaw.length > 0 || circuitRaw.length > 0 }
   })()
 
   function circuitLabel(id: string | null): string {
@@ -641,9 +674,10 @@ function CoreAssignSection({
     setNewCircuitKind('1코어')
     setNewCircuitLocation('')
     setCoreNo('')
+    setBulkCores('')
     setBulkCircuits('')
+    setBulkLocations('')
     setBulkKind('1코어')
-    setBulkLocation('')
     setLifecycle('new')
     setSegmentIdx('0')
     setIsTerminal(true)
@@ -695,8 +729,20 @@ function CoreAssignSection({
 
   async function onAddBulk() {
     if (busy) return
-    const numbers = bulkCircuits.split(',').map((s) => s.trim()).filter((s) => s.length > 0)
-    if (numbers.length === 0) {
+    const coreNums = bulkCores
+      .split(',')
+      .map((s) => s.trim())
+      .filter((s) => s.length > 0)
+      .map((s) => Number.parseInt(s, 10))
+    const circuitNums = bulkCircuits.split(',').map((s) => s.trim()).filter((s) => s.length > 0)
+    const locsRaw = bulkLocations.split(',').map((s) => s.trim())
+    const locsAllEmpty = locsRaw.every((s) => s.length === 0)
+    const subscriber_names = locsAllEmpty ? [] : locsRaw
+    if (coreNums.length === 0) {
+      toast.error('선번을 콤마(,)로 구분해 입력하세요')
+      return
+    }
+    if (circuitNums.length === 0) {
       toast.error('회선번호를 콤마(,)로 구분해 입력하세요')
       return
     }
@@ -705,9 +751,10 @@ function CoreAssignSection({
       project_id: projectId,
       cable_id: cableId,
       cable_core_count: coreCount,
-      circuit_numbers: numbers,
+      core_numbers: coreNums,
+      circuit_numbers: circuitNums,
+      subscriber_names,
       kind: bulkKind,
-      subscriber_name: bulkLocation.trim() || null,
       lifecycle,
       is_terminal: isTerminal,
       segment_idx: Number.parseInt(segmentIdx, 10) || 0,
@@ -963,82 +1010,105 @@ function CoreAssignSection({
             <>
               <div>
                 <label className="block text-[10px] font-medium text-slate-600">
-                  회선번호 (콤마 구분)
+                  ① 선번 (콤마 구분, 1~{coreCount})
+                </label>
+                <textarea
+                  value={bulkCores}
+                  onChange={(e) => setBulkCores(e.target.value)}
+                  placeholder="예: 1,2,5,8,9,10"
+                  rows={2}
+                  className="mt-0.5 w-full rounded-md border border-slate-300 px-2 py-1 text-[11px] font-mono"
+                />
+                <p className="mt-0.5 text-[9px] text-slate-400 leading-tight">
+                  실제 사용할 코어 번호를 그대로 콤마(,)로 구분해 입력 (중간 비는 번호 OK).
+                </p>
+              </div>
+
+              <div>
+                <label className="block text-[10px] font-medium text-slate-600">
+                  ② 회선번호 (콤마 구분, 선번과 같은 순서)
                 </label>
                 <textarea
                   value={bulkCircuits}
                   onChange={(e) => setBulkCircuits(e.target.value)}
                   placeholder="예: 5572607, 5572608, 5572609"
-                  rows={3}
+                  rows={2}
                   className="mt-0.5 w-full rounded-md border border-slate-300 px-2 py-1 text-[11px] font-mono"
                 />
                 <p className="mt-0.5 text-[9px] text-slate-400 leading-tight">
-                  콤마(,)로 구분된 회선번호를 한 번에 입력하세요. 빈 코어 중 작은
-                  번호부터 오름차순 자동 배정됩니다. 이미 있는 회선번호는 재사용.
+                  선번 개수와 같아야 합니다. 같은 index 끼리 매칭(첫 선번 ↔ 첫 회선번호).
+                  기존 회선번호는 재사용.
                 </p>
-                {bulkPreview && bulkPreview.raw.length > 0 && (
-                  <div
-                    className={
-                      'mt-1 rounded-md border px-2 py-1 text-[10px] ' +
-                      (bulkPreview.fits
-                        ? 'border-emerald-300 bg-emerald-50 text-emerald-800'
-                        : 'border-rose-300 bg-rose-50 text-rose-800')
-                    }
-                  >
-                    {bulkPreview.fits ? (
-                      <>
-                        <span className="font-medium">
-                          {bulkPreview.raw.length}개 회선 → 코어{' '}
-                          {bulkPreview.free
-                            .slice(0, bulkPreview.raw.length)
-                            .join(', ')}
-                        </span>
-                      </>
-                    ) : (
-                      <>
-                        빈 코어 부족: 회선 {bulkPreview.raw.length}개 vs 빈 코어{' '}
-                        {bulkPreview.free.length}개
-                      </>
-                    )}
-                  </div>
-                )}
               </div>
 
-              <div className="grid grid-cols-2 gap-1.5">
-                <div>
-                  <label className="block text-[10px] font-medium text-slate-600">
-                    종류 (일괄 적용)
-                  </label>
-                  <select
-                    value={bulkKind}
-                    onChange={(e) => setBulkKind(e.target.value as CircuitKind)}
-                    className="mt-0.5 w-full rounded-md border border-slate-300 px-2 py-1 text-[11px] bg-white"
-                  >
-                    {CIRCUIT_KIND_VALUES.map((k) => (
-                      <option key={k} value={k}>
-                        {CIRCUIT_KIND_LABEL[k]}
-                      </option>
-                    ))}
-                  </select>
-                </div>
-                <div>
-                  <label className="block text-[10px] font-medium text-slate-600">
-                    설치장소 (일괄 · 선택)
-                  </label>
-                  <input
-                    type="text"
-                    value={bulkLocation}
-                    onChange={(e) => setBulkLocation(e.target.value)}
-                    placeholder="공통일 때만 입력"
-                    maxLength={200}
-                    className="mt-0.5 w-full rounded-md border border-slate-300 px-2 py-1 text-[11px]"
-                  />
-                </div>
+              <div>
+                <label className="block text-[10px] font-medium text-slate-600">
+                  ③ 설치장소명 (콤마 구분, 생략 가능)
+                </label>
+                <textarea
+                  value={bulkLocations}
+                  onChange={(e) => setBulkLocations(e.target.value)}
+                  placeholder="생략 가능 · 공통이면 1개 · 개별이면 회선 개수만큼"
+                  rows={2}
+                  className="mt-0.5 w-full rounded-md border border-slate-300 px-2 py-1 text-[11px]"
+                />
+                <p className="mt-0.5 text-[9px] text-slate-400 leading-tight">
+                  비워두면 모두 미입력. 1개만 입력하면 전체 공통. 회선 개수만큼 입력하면 개별 적용.
+                  기존 회선 재사용 시 입력은 무시됩니다.
+                </p>
               </div>
-              <p className="text-[9px] text-slate-400 leading-tight">
-                일괄 입력은 새 회선번호 전용입니다. 기존 회선번호가 섞여 있으면
-                기존 회선은 재사용되고 종류·설치장소 입력은 무시됩니다.
-              </p>
+
+              <div>
+                <label className="block text-[10px] font-medium text-slate-600">
+                  종류 (신규 회선에 일괄 적용)
+                </label>
+                <select
+                  value={bulkKind}
+                  onChange={(e) => setBulkKind(e.target.value as CircuitKind)}
+                  className="mt-0.5 w-full rounded-md border border-slate-300 px-2 py-1 text-[11px] bg-white"
+                >
+                  {CIRCUIT_KIND_VALUES.map((k) => (
+                    <option key={k} value={k}>
+                      {CIRCUIT_KIND_LABEL[k]}
+                    </option>
+                  ))}
+                </select>
+              </div>
+
+              {/* 매칭 미리보기 — 검증 통과 시 선번↔회선번호↔설치장소 짝을 표시 */}
+              {bulkPreview && bulkPreview.hasInput && (
+                <div
+                  className={
+                    'rounded-md border px-2 py-1 text-[10px] ' +
+                    (bulkPreview.ok
+                      ? 'border-emerald-300 bg-emerald-50 text-emerald-800'
+                      : 'border-rose-300 bg-rose-50 text-rose-800')
+                  }
+                >
+                  {bulkPreview.ok ? (
+                    <>
+                      <p className="font-medium">{bulkPreview.count}건 매칭</p>
+                      <ul className="mt-0.5 space-y-0.5 font-mono">
+                        {bulkPreview.pairs.slice(0, 8).map((p, i) => (
+                          <li key={i}>
+                            코어 {p.core} ← {p.circuit}
+                            {p.loc ? ` · ${p.loc}` : ''}
+                          </li>
+                        ))}
+                        {bulkPreview.pairs.length > 8 && (
+                          <li className="text-emerald-600">…외 {bulkPreview.pairs.length - 8}건</li>
+                        )}
+                      </ul>
+                    </>
+                  ) : (
+                    <ul className="space-y-0.5">
+                      {bulkPreview.errors.map((e, i) => (
+                        <li key={i}>· {e}</li>
+                      ))}
+                    </ul>
+                  )}
+                </div>
+              )}
             </>
           )}
 
