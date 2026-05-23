@@ -1670,8 +1670,10 @@ export default function TopologyCanvas({
         byDir.get(item.dir)!.push(item)
       }
 
-      // 모든 케이블에 카디널 anchor 부여 → V/H 출발 + 직각 라우팅 보장 (LGU+ 표준).
-      //   1 조 = 변 중앙 · 2~4 조 = 변에 평행 분산 · 5+ 조 = 90° 부채꼴 arc (코너 포함).
+      // 1~2 조 같은 방향 — anchor 안 함 (중심 사용). 케이블이 시설 중심에서 출발해
+      //   자연 다이아곤(45° 등)으로 갈 수 있도록. Phase 3 의 장애물 회피만 적용.
+      // 3~4 조 같은 방향 — 변에 평행 분산 (조수 식별 + 변 anchor + 직각 라우팅).
+      // 5+ 조 같은 방향 — 90° 부채꼴 arc (코너 anchor 포함, 대각선 라우팅).
       for (const [dir, group] of byDir.entries()) {
         // 같은 변 안에서 자연 각도 순으로 정렬해 인접 케이블이 안 꼬이게.
         //   E/W: 위→아래 (sin(angle) 오름차순)
@@ -1682,10 +1684,11 @@ export default function TopologyCanvas({
         })
 
         const N = group.length
+        if (N < 3) continue // 1~2 조는 중심에서 자연 라우팅
         if (N <= 4) {
-          // 1~4 조: 카디널 변에 수직 평행 분산 (1 조면 정중앙)
+          // 3~4 조: 카디널 변에 수직 평행 분산
           group.forEach((item, i) => {
-            const offset = N === 1 ? 0 : (i - (N - 1) / 2) * PERPENDICULAR_STEP
+            const offset = (i - (N - 1) / 2) * PERPENDICULAR_STEP
             let ax: number, ay: number
             let side: 'N' | 'S' | 'E' | 'W'
             if (dir === 'E') {
@@ -1748,7 +1751,7 @@ export default function TopologyCanvas({
   //   완벽한 라우팅이 아닌 「명백한 가로지름 제거」 수준.
   const obstacleWaypointsByCable = useMemo(() => {
     if (mode === 'map') return null
-    const result = new Map<string, { x: number; y: number }>()
+    const result = new Map<string, { x: number; y: number }[]>()
     const halfW = NODE_SIZE.width / 2
     const halfH = NODE_SIZE.height / 2
     const CLEAR = 50 // 시설 중심에서 케이블이 이 거리보다 가깝게 지나가면 가로지름으로 간주
@@ -1802,24 +1805,35 @@ export default function TopologyCanvas({
       }
       if (!worstObstacle) continue
 
-      // 중점 + 수직 deflect — 장애물 반대쪽으로
-      const mid = { x: (from.x + to.x) / 2, y: (from.y + to.y) / 2 }
+      // 장애물 우회 — 케이블 방향에 따라 직각 사각 우회 (2 waypoints).
+      //   대각선 케이블도 회피 후 다시 자연 진행하도록.
       const dx = to.x - from.x
       const dy = to.y - from.y
-      const len = Math.hypot(dx, dy) || 1
-      // 진행 방향에 수직인 단위 벡터
-      const px = -dy / len
-      const py = dx / len
-      // 장애물 → 중점 의 perpendicular 성분 부호로 회피 방향 결정
-      const dpx = mid.x - worstObstacle.p.x
-      const dpy = mid.y - worstObstacle.p.y
-      const sign = dpx * px + dpy * py >= 0 ? 1 : -1
-      // deflect 거리 — 시설 반지름 + clearance
-      const DEFLECT = halfW + 20
-      result.set(c.id, {
-        x: mid.x + px * DEFLECT * sign,
-        y: mid.y + py * DEFLECT * sign,
-      })
+      const adx = Math.abs(dx)
+      const ady = Math.abs(dy)
+      const DETOUR_GAP = halfW + 25 // 시설 반지름 + 여유
+
+      const obs = worstObstacle.p
+      if (adx >= ady) {
+        // 주로 수평 — 위/아래로 우회
+        // 회피 방향 = 케이블 양 끝의 평균 y 보다 위/아래 중 obstacle 반대쪽
+        const avgY = (from.y + to.y) / 2
+        const sign = avgY <= obs.y ? -1 : 1 // 평균이 위면 위로 우회, 아래면 아래로
+        const detourY = obs.y + sign * DETOUR_GAP
+        result.set(c.id, [
+          { x: obs.x - DETOUR_GAP, y: detourY },
+          { x: obs.x + DETOUR_GAP, y: detourY },
+        ])
+      } else {
+        // 주로 수직 — 왼쪽/오른쪽으로 우회
+        const avgX = (from.x + to.x) / 2
+        const sign = avgX <= obs.x ? -1 : 1
+        const detourX = obs.x + sign * DETOUR_GAP
+        result.set(c.id, [
+          { x: detourX, y: obs.y - DETOUR_GAP },
+          { x: detourX, y: obs.y + DETOUR_GAP },
+        ])
+      }
     }
 
     return result
@@ -1865,11 +1879,11 @@ export default function TopologyCanvas({
         midPoints = wps.map((w) => ({ x: w.x, y: w.y }))
       }
 
-      // Phase 3 — 사용자 waypoint 가 없는데 다른 시설을 가로지르면 자동 deflect waypoint
+      // Phase 3 — 사용자 waypoint 가 없는데 다른 시설을 가로지르면 자동 사각 우회 (2 waypoints)
       if (midPoints.length === 0 && obstacleWaypointsByCable) {
         const auto = obstacleWaypointsByCable.get(c.id)
-        if (auto) {
-          midPoints = [auto]
+        if (auto && auto.length > 0) {
+          midPoints = auto
         }
       }
 
