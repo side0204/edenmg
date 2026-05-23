@@ -36,12 +36,21 @@ declare namespace kakao.maps {
     level?: number
   }
 
+  // 지도 타일 종류 — ROADMAP(기본 도로지도) / SKYVIEW(위성) / HYBRID(위성+도로명)
+  const MapTypeId: {
+    ROADMAP: string
+    SKYVIEW: string
+    HYBRID: string
+  }
+
   class Map {
     constructor(container: HTMLElement, options: MapOptions)
     setCenter(latlng: LatLng): void
     getCenter(): LatLng
     setLevel(level: number): void
     getLevel(): number
+    setMinLevel(level: number): void
+    setMaxLevel(level: number): void
     setBounds(bounds: LatLngBounds): void
     getBounds(): LatLngBounds
     panTo(latlng: LatLng): void
@@ -49,6 +58,7 @@ declare namespace kakao.maps {
     getProjection(): MapProjection
     setDraggable(draggable: boolean): void
     setZoomable(zoomable: boolean): void
+    setMapTypeId(mapTypeId: string): void
   }
 
   interface MarkerOptions {

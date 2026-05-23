@@ -15,6 +15,7 @@ import {
   Crosshair,
   MoreHorizontal,
   Map as MapIcon,
+  Layers,
   Network,
   TriangleAlert,
   MapPin,
@@ -392,6 +393,14 @@ export default function TopologyCanvas({
   const [showUnplaced, setShowUnplaced] = useState(false)
   // 지도 모드 검색창 보임/숨김 — 툴바의 「검색」 토글로 제어
   const [searchVisible, setSearchVisible] = useState(true)
+  // 지도 모드 타일 종류 — 일반 도로지도 / 위성+도로명 라벨 (HYBRID).
+  //   순수 SKYVIEW(도로명 없음) 는 시설 식별이 어려워 미노출. 필요 시 추후 확장.
+  const [mapTypeId, setMapTypeId] = useState<'roadmap' | 'hybrid'>('roadmap')
+  // 캔버스 시각 추가 확대 — 카카오 SDK 의 level 1 클램프 우회 (CSS transform scale).
+  //   1 = 끄기, 1.25/1.5/2.0 단계. 편집은 그대로 가능하되 좌표가 미세하게 어긋날 수 있어
+  //   새 시설 배치·드래그 좌표는 따로 scale 보정. 카카오 내부 pan 속도는 그대로라 사용감만 다름.
+  const [extraZoom, setExtraZoom] = useState(1)
+  const extraZoomActive = extraZoom > 1
   // 지도 모드 분할 캡처 가이드 활성 여부
   const [captureActive, setCaptureActive] = useState(false)
   // 분할 캡처 컨트롤 바를 portal 로 렌더할 캔버스 아래 영역 (지도를 안 가리게)
@@ -951,13 +960,37 @@ export default function TopologyCanvas({
     setMapBaseLevel(m.getLevel())
   }, [kakaoMap, facilities])
 
-  // 지도 첫 준비 시 1회 — 시설 GPS 범위로 자동 fit
+  // 지도 첫 준비 시 1회 — 시설 GPS 범위로 자동 fit + setMinLevel(0) 시도.
+  //   카카오 SDK 가 일부 지역에 level 0 타일을 제공하면 마우스 휠 줌으로 한 단계 더
+  //   확대 가능. 미지원 지역은 silent fail — 기존 level 1 클램프 유지.
   const initialFitDoneRef = useRef(false)
   useEffect(() => {
     if (mapStatus !== 'ready' || initialFitDoneRef.current) return
     initialFitDoneRef.current = true
+    if (kakaoMap) {
+      try {
+        kakaoMap.setMinLevel(0)
+      } catch {
+        // SDK 가 0 을 거부하면 무시 — 기본 최소(1) 유지
+      }
+    }
     fitMapToFacilities()
-  }, [mapStatus, fitMapToFacilities])
+  }, [mapStatus, fitMapToFacilities, kakaoMap])
+
+  // 지도 타일 종류 (roadmap/hybrid) 동기화 — 토글 시 카카오 setMapTypeId.
+  //   첫 ready 시점에도 명시 적용 (기본은 roadmap 이지만 SDK 가 바꾼 적 있을 수 있음).
+  useEffect(() => {
+    if (!kakaoMap || mapStatus !== 'ready') return
+    try {
+      kakaoMap.setMapTypeId(
+        mapTypeId === 'hybrid'
+          ? kakao.maps.MapTypeId.HYBRID
+          : kakao.maps.MapTypeId.ROADMAP,
+      )
+    } catch {
+      // SDK 가 거부하면 무시 — 기본(roadmap) 유지
+    }
+  }, [kakaoMap, mapStatus, mapTypeId])
 
   // GPS 가 없는(지도 미배치) 시설 목록 — 배치 패널에서 사용
   const unplacedFacilities = useMemo(
@@ -1934,6 +1967,65 @@ export default function TopologyCanvas({
             </button>
           </div>
 
+          {/* 위성 토글 — 지도 모드 한정. roadmap ↔ hybrid(위성+도로명) 전환.
+              시설 좌표는 GPS 라 두 모드 모두 동일 위치에 그려진다. */}
+          {mode === 'map' && (
+            <button
+              type="button"
+              onClick={() =>
+                setMapTypeId((t) => (t === 'hybrid' ? 'roadmap' : 'hybrid'))
+              }
+              className={
+                'mr-1 inline-flex items-center gap-1 rounded-md border px-2 h-7 text-[11px] font-medium ' +
+                (mapTypeId === 'hybrid'
+                  ? 'bg-emerald-600 text-white border-emerald-700'
+                  : 'text-slate-700 border-slate-300 hover:bg-slate-50')
+              }
+              title={mapTypeId === 'hybrid' ? '일반 지도로 전환' : '위성 + 도로명으로 전환'}
+            >
+              <Layers className="h-3 w-3" />
+              {mapTypeId === 'hybrid' ? '위성' : '위성'}
+            </button>
+          )}
+
+          {/* 추가 확대 — 지도 모드 한정. 카카오 SDK 의 level 1 한계를 CSS scale 로 우회.
+              편집 가능하지만 좌표가 미세하게 어긋날 수 있음 (보정 코드 적용). */}
+          {mode === 'map' && (
+            <div className="mr-1 inline-flex items-center rounded-md border border-slate-300 overflow-hidden">
+              <button
+                type="button"
+                onClick={() =>
+                  setExtraZoom((z) =>
+                    z >= 2 ? 2 : z >= 1.5 ? 2 : z >= 1.25 ? 1.5 : 1.25,
+                  )
+                }
+                disabled={extraZoom >= 2}
+                className="inline-flex items-center justify-center w-7 h-7 text-slate-700 hover:bg-slate-50 disabled:opacity-40 disabled:cursor-not-allowed"
+                title="추가 확대 (CSS scale)"
+              >
+                <ZoomIn className="h-3.5 w-3.5" />
+              </button>
+              {extraZoomActive && (
+                <span className="px-1.5 text-[10px] font-mono text-emerald-700 border-l border-slate-300">
+                  {extraZoom}x
+                </span>
+              )}
+              <button
+                type="button"
+                onClick={() =>
+                  setExtraZoom((z) =>
+                    z <= 1 ? 1 : z <= 1.25 ? 1 : z <= 1.5 ? 1.25 : 1.5,
+                  )
+                }
+                disabled={extraZoom <= 1}
+                className="inline-flex items-center justify-center w-7 h-7 text-slate-700 hover:bg-slate-50 disabled:opacity-40 disabled:cursor-not-allowed border-l border-slate-300"
+                title="추가 확대 축소"
+              >
+                <ZoomOut className="h-3.5 w-3.5" />
+              </button>
+            </div>
+          )}
+
           {/* 탭 메뉴 보임/숨김 — 시설·케이블·회선·... 탭을 캔버스 위 오버레이로 */}
           {tabPanel && (
             <button
@@ -2564,11 +2656,17 @@ export default function TopologyCanvas({
             </div>
           )}
 
-          {/* 카카오맵 배경 — 항상 mount, 지도 모드에서만 표시. SVG 가 위에 투명 오버레이. */}
+          {/* 카카오맵 배경 — 항상 mount, 지도 모드에서만 표시. SVG 가 위에 투명 오버레이.
+              추가 확대(extraZoom) 적용 시 SVG 와 동일한 transform 으로 정렬 유지. */}
           <div
             ref={mapSetContainer}
             className="absolute inset-0"
-            style={{ display: mode === 'map' ? 'block' : 'none', zIndex: 0 }}
+            style={{
+              display: mode === 'map' ? 'block' : 'none',
+              zIndex: 0,
+              transform: extraZoomActive ? `scale(${extraZoom})` : undefined,
+              transformOrigin: '50% 50%',
+            }}
           />
           {/* 지도 로딩 / 에러 오버레이 */}
           {mode === 'map' && mapStatus === 'loading' && (
@@ -2598,6 +2696,10 @@ export default function TopologyCanvas({
               display: 'block',
               background: mode === 'map' ? 'transparent' : 'white',
               zIndex: 1, // 카카오맵 배경(zIndex:0) 위에 오버레이
+              // 추가 확대 — 지도 div 와 동일한 transform 으로 정렬 유지.
+              transform:
+                mode === 'map' && extraZoomActive ? `scale(${extraZoom})` : undefined,
+              transformOrigin: '50% 50%',
               cursor:
                 mode === 'map'
                   ? 'default'
