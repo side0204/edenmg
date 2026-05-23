@@ -25,6 +25,8 @@ import {
   PanelTop,
   ImageDown,
   Download,
+  Sparkles,
+  Trash2,
 } from 'lucide-react'
 import {
   CABLE_SPEC_VALUES,
@@ -58,6 +60,7 @@ import { CABLE_STATUS_LABEL, CABLE_STATUS_VALUES } from '@/lib/relocation'
 import { autoLayoutPositions, NODE_SIZE } from './auto-layout'
 import { saveNodePositions, saveCableWaypoints } from './position-actions'
 import { createCableFromCanvas } from './cable-actions'
+import { seedTestFacilities, clearTestFacilities } from './test-actions'
 import {
   createFacilityAtPosition,
   createFacilityAtLatLng,
@@ -2593,6 +2596,47 @@ export default function TopologyCanvas({
                   </button>
                 </div>
               </div>
+              {/* 테스트 도구 — 임의 시설/케이블 일괄 생성·삭제 (지장이설 시각 테스트용) */}
+              {editable && (
+                <div className="pt-1 border-t border-slate-100">
+                  <p className="px-0.5 py-1 text-[10px] font-semibold uppercase tracking-wide text-slate-400">
+                    테스트 도구
+                  </p>
+                  <form action={seedTestFacilities}>
+                    <input type="hidden" name="project_id" value={projectId} />
+                    <button
+                      type="submit"
+                      className="w-full text-left rounded-md px-2 py-1.5 text-[11px] font-medium text-slate-700 hover:bg-slate-50 inline-flex items-center gap-2"
+                      title="현재 시설 분포 중심에서 반경 400m 안에 임의 시설·케이블 일괄 생성"
+                    >
+                      <Sparkles className="h-3.5 w-3.5 shrink-0 text-emerald-600" />
+                      테스트 시설 생성
+                    </button>
+                  </form>
+                  <form
+                    action={clearTestFacilities}
+                    onSubmit={(e) => {
+                      if (
+                        !confirm(
+                          '「[TEST]」 표시된 테스트 시설·케이블을 모두 삭제합니다. 진행할까요?',
+                        )
+                      ) {
+                        e.preventDefault()
+                      }
+                    }}
+                  >
+                    <input type="hidden" name="project_id" value={projectId} />
+                    <button
+                      type="submit"
+                      className="w-full text-left rounded-md px-2 py-1.5 text-[11px] font-medium text-rose-700 hover:bg-rose-50 inline-flex items-center gap-2"
+                      title="[TEST] 마커가 붙은 시설·케이블 일괄 삭제"
+                    >
+                      <Trash2 className="h-3.5 w-3.5 shrink-0" />
+                      테스트 시설 일괄 삭제
+                    </button>
+                  </form>
+                </div>
+              )}
             </div>
           </details>
 
