@@ -520,6 +520,7 @@ export default function TopologyCanvas({
   // 지도 모드 시설 노드 배율 — 기본 축소 단계 + 기준 줌보다 축소한 만큼 추가 축소.
   //   도식 모드는 항상 1 (축소 없음). 확대(level 감소)는 추가 축소 없이 기본 배율 유지.
   //   추가 축소는 MAP_NODE_SCALE_MAX_STEPS 단계까지, 이후는 최소 배율로 고정.
+  //   사용자 추가 확대(extraZoom>1) 적용 시 1/extraZoom 역보정 — 시설 도형 시각 크기 고정.
   const mapNodeScale = useMemo(() => {
     if (mode !== 'map') return 1
     let extra = 0
@@ -527,10 +528,11 @@ export default function TopologyCanvas({
       const delta = kakaoMap.getLevel() - mapBaseLevel  // > 0 = 기준보다 축소
       if (delta > 0) extra = Math.min(delta, MAP_NODE_SCALE_MAX_STEPS)
     }
-    return MAP_NODE_SCALE_STEP ** (MAP_NODE_BASE_SCALE_STEPS + extra)
+    const base = MAP_NODE_SCALE_STEP ** (MAP_NODE_BASE_SCALE_STEPS + extra)
+    return base / extraZoom
     // mapEpoch = 지도 줌/이동 카운터. getLevel() 은 가변 상태라 명시 의존성 필요.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [mode, kakaoMap, mapBaseLevel, mapEpoch])
+  }, [mode, kakaoMap, mapBaseLevel, mapEpoch, extraZoom])
 
   const cableById = useMemo(() => new Map(cables.map((c) => [c.id, c])), [cables])
 
@@ -2983,10 +2985,11 @@ export default function TopologyCanvas({
                     x: (pts[midIdx - 1].x + pts[midIdx].x) / 2,
                     y: (pts[midIdx - 1].y + pts[midIdx].y) / 2,
                   }
-            // 라벨 크기 — 도식은 크게·볼드, 지도는 원래 작은 크기 (지도 가독성 우선)
+            // 라벨 크기 — 도식은 크게·볼드, 지도는 원래 작은 크기 (지도 가독성 우선).
+            //   추가 확대(extraZoom>1) 시 지도 모드 폰트만 1/extraZoom 역보정해 시각 크기 고정.
             const labelBig = mode !== 'map'
-            const lblSpecFont = labelBig ? 20 : 9
-            const lblCodeFont = labelBig ? 20 : 8
+            const lblSpecFont = labelBig ? 20 : 9 / extraZoom
+            const lblCodeFont = labelBig ? 20 : 8 / extraZoom
             const lblWeight = labelBig ? 700 : 400
             const lblSpecDy = labelBig ? -13 : -4
             const lblCodeDy = labelBig ? 13 : 8
@@ -3187,8 +3190,10 @@ export default function TopologyCanvas({
             const labelCodeY = nodeCy + shapeScale * (NODE_SIZE.height - 20 - nodeCy)
             // 라벨 크기 — 도식은 크게, 지도는 작게 (지도 가독성 우선).
             //   캡처도 평소 지도 화면 그대로 — 글자를 키우지 않는다 (키우면 상자가 겹침).
-            const facCodeFont = mode === 'map' ? 9 : 15
-            const facNameFont = mode === 'map' ? 10 : 17
+            // 지도 모드는 추가 확대(extraZoom>1) 시 폰트를 1/extraZoom 으로 줄여
+            // 시각 크기를 고정 (SVG transform scale 과 상쇄).
+            const facCodeFont = mode === 'map' ? 9 / extraZoom : 15
+            const facNameFont = mode === 'map' ? 10 / extraZoom : 17
             // 굵기 — 지도 모드는 650, 도식 모드는 큼직하게
             const facCodeWeight = mode === 'map' ? 650 : 700
             const facNameWeight = 600
