@@ -122,6 +122,7 @@ export default function RealtimeSync({
         )
       }
 
+
       // 2) Presence — 같은 채널 접속 직원 추적.
       channel.on('presence', { event: 'sync' }, () => {
         const state = channel.presenceState<PresencePayload>()

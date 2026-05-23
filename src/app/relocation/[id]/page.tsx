@@ -126,19 +126,52 @@ export default async function RelocationProjectPage({
   const project = pRow as ProjectRow | null
   if (!project) notFound()
 
-  // 설계자 이름
-  let designerName: string | null = null
-  if (project.designer_id) {
-    const { data: e } = await supabase
-      .from('employees')
-      .select('id, name')
-      .eq('id', project.designer_id)
-      .maybeSingle()
-    designerName = ((e as EmployeeMini | null)?.name) ?? null
-  }
+  // 설계자 이름 · 캔버스 공통 데이터 · 접속 · 스플리터 · 차수 · (조건부) 이전 이력 일괄 병렬.
+  //   page.tsx 의 router.refresh 체감 속도를 결정 — 직렬이면 합산 4~5초.
+  //   designerId 가 없으면 designer 쿼리는 건너뜀(null 반환). migrations 는 탭에서만 필요.
+  const [
+    designerRow,
+    canvasData,
+    splRes,
+    sptRes,
+    phRes,
+    migRes,
+  ] = await Promise.all([
+    project.designer_id
+      ? supabase
+          .from('employees')
+          .select('id, name')
+          .eq('id', project.designer_id)
+          .maybeSingle()
+      : Promise.resolve({ data: null }),
+    loadRelocationCanvasData(id, me.company_id),
+    supabase
+      .from('relocation_splices')
+      .select(
+        'id, facility_id, in_cable_id, in_core, out_cable_id, out_core, is_continuous',
+      )
+      .eq('project_id', id),
+    supabase
+      .from('relocation_splitters')
+      .select('facility_id, input_a_cable_id, input_b_cable_id')
+      .eq('project_id', id),
+    supabase
+      .from('relocation_phases')
+      .select(
+        'id, phase_no, required_teams, estimated_minutes, status, window_start, window_end',
+      )
+      .eq('project_id', id)
+      .order('phase_no'),
+    tab === 'migrations'
+      ? supabase
+          .from('relocation_migrations')
+          .select('id, from_cable_id, to_cable_id, notes, created_at')
+          .eq('project_id', id)
+          .order('created_at', { ascending: false })
+      : Promise.resolve({ data: null }),
+  ])
 
-  // 캔버스·탭 공통 데이터 (시설·케이블·회선·시설마스터·공종·코어배정).
-  // 전체화면 캔버스 라우트와 동일 — canvas-data.ts 로 일원화.
+  const designerName = ((designerRow.data as EmployeeMini | null)?.name) ?? null
   const {
     facilities,
     cables,
@@ -148,56 +181,16 @@ export default async function RelocationProjectPage({
     facilityTasks,
     facilityMaterials,
     assignments,
-  } = await loadRelocationCanvasData(id, me.company_id)
+  } = canvasData
+  const splices = (splRes.data ?? []) as SpliceRow[]
+  const phases = (phRes.data ?? []) as PhaseRow[]
 
-  // 이전 이력 (migrations 탭 전용)
-  let migrations: MigrationRow[] = []
+  // 이전 이력 자식 (migrations 결과에 따라 의존성 있어 별도 라운드)
+  const migrations = (migRes.data ?? []) as MigrationRow[]
   let migrationCircuits: MigrationCircuitRow[] = []
-  if (tab === 'migrations') {
-    const { data: mRows } = await supabase
-      .from('relocation_migrations')
-      .select('id, from_cable_id, to_cable_id, notes, created_at')
-      .eq('project_id', id)
-      .order('created_at', { ascending: false })
-    migrations = (mRows ?? []) as MigrationRow[]
 
-    if (migrations.length > 0) {
-      const migIds = migrations.map((m) => m.id)
-      const { data: mcRows } = await supabase
-        .from('relocation_migration_circuits')
-        .select('migration_id, circuit_id, segment_idx')
-        .in('migration_id', migIds)
-      migrationCircuits = (mcRows ?? []) as MigrationCircuitRow[]
-    }
-  }
-
-  // ── 항상 조회 — 진행 표시줄·탭 배지·검증을 모든 탭에서 계산하기 위함 ──
-  // 접속 (직선도 탭 콘텐츠 + 검증 룰 C2·U1·U2 입력)
-  const { data: splRows } = await supabase
-    .from('relocation_splices')
-    .select(
-      'id, facility_id, in_cable_id, in_core, out_cable_id, out_core, is_continuous',
-    )
-    .eq('project_id', id)
-  const splices = (splRows ?? []) as SpliceRow[]
-
-  // 스플리터 (검증 룰 R1)
-  const { data: sptRows } = await supabase
-    .from('relocation_splitters')
-    .select('facility_id, input_a_cable_id, input_b_cable_id')
-    .eq('project_id', id)
-
-  // 차수
-  const { data: phRows } = await supabase
-    .from('relocation_phases')
-    .select(
-      'id, phase_no, required_teams, estimated_minutes, status, window_start, window_end',
-    )
-    .eq('project_id', id)
-    .order('phase_no')
-  const phases = (phRows ?? []) as PhaseRow[]
-
-  // 차수별 작업 (차수 탭 콘텐츠 전용)
+  // 차수별 작업 (차수 탭) + migration_circuits (migrations 탭) — 부모 결과 의존이라 2라운드.
+  //   각각 조건부라 추가 라운드 비용은 해당 탭일 때만.
   let phaseTasks: PhaseTaskRow[] = []
   if (tab === 'phases' && phases.length > 0) {
     const { data: ptRows } = await supabase
@@ -210,6 +203,15 @@ export default async function RelocationProjectPage({
         phases.map((p) => p.id),
       )
     phaseTasks = (ptRows ?? []) as PhaseTaskRow[]
+  }
+
+  if (tab === 'migrations' && migrations.length > 0) {
+    const migIds = migrations.map((m) => m.id)
+    const { data: mcRows } = await supabase
+      .from('relocation_migration_circuits')
+      .select('migration_id, circuit_id, segment_idx')
+      .in('migration_id', migIds)
+    migrationCircuits = (mcRows ?? []) as MigrationCircuitRow[]
   }
 
   // 검증 — 모든 탭에서 실행 (진행 표시줄·검증 탭 배지·검증 탭 콘텐츠 공용)
@@ -248,7 +250,7 @@ export default async function RelocationProjectPage({
       out_cable_id: s.out_cable_id,
       out_core: s.out_core,
     })),
-    splitters: (sptRows ?? []) as {
+    splitters: (sptRes.data ?? []) as {
       facility_id: string
       input_a_cable_id: string | null
       input_b_cable_id: string | null
