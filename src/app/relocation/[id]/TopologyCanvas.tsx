@@ -37,6 +37,7 @@ import {
   groupClosureTypesByCategory,
   CLOSURE_TYPE_CATEGORY,
   cableSpecColor,
+  cableSpecCoreCount,
   installationTypeDash,
   CABLE_INSTALLATION_TYPE_VALUES,
   FACILITY_INSTALL_STATUS_VALUES,
@@ -1796,9 +1797,21 @@ export default function TopologyCanvas({
     const halfH = NODE_SIZE.height / 2
 
     // 같은 시설 쌍 그룹핑 — 그룹 안의 케이블에 candidate index 0,1,2,... 배정해 서로 다른 path 사용.
-    //   candidate 가 정렬된 후 idx 만 골라 적용 → 첫째 best, 둘째 next-best (자연히 직선 vs ㄷ자 분리).
+    //   candidate 가 정렬된 후 idx 만 골라 적용 → idx 0 = best (직선/L자), idx 1+ = ㄷ자 우회.
+    //   우선순위 (산업 관행 + owner "12C 좌상단 우회" 코멘트 반영, 2026-05-24):
+    //     1. status 우선: existing(기설 보존) → relocating → new → removing.
+    //        기설은 가능한 한 직선으로 유지 (코어 매핑 보존 + 안정성). 신설이 빈공간으로 우회.
+    //     2. 같은 status 안에서는 코어 수 작은 것이 idx 작음 → 큰 케이블이 우회.
+    //        owner 어제 commit msg "12C 를 좌상단 빈공간으로 대각선 우회" 와 일치.
+    //     3. 결정적 tie breaker: cable.id.
     const samePairCandIdx = new Map<string, number>()
     {
+      const statusRank: Record<CableStatus, number> = {
+        existing: 0,
+        relocating: 1,
+        new: 2,
+        removing: 3,
+      }
       const groups = new Map<string, CableEdge[]>()
       for (const c of cables) {
         const key = [c.from_facility_id, c.to_facility_id].sort().join('|')
@@ -1808,8 +1821,15 @@ export default function TopologyCanvas({
       }
       for (const group of groups.values()) {
         if (group.length <= 1) continue
-        // id 정렬로 결정적 순서 (재배치 시 같은 케이블 = 같은 idx)
-        const sorted = [...group].sort((a, b) => a.id.localeCompare(b.id))
+        const sorted = [...group].sort((a, b) => {
+          const sa = statusRank[a.status] ?? 9
+          const sb = statusRank[b.status] ?? 9
+          if (sa !== sb) return sa - sb
+          const ca = cableSpecCoreCount(a.spec as CableSpec)
+          const cb = cableSpecCoreCount(b.spec as CableSpec)
+          if (ca !== cb) return ca - cb
+          return a.id.localeCompare(b.id)
+        })
         sorted.forEach((c, i) => samePairCandIdx.set(c.id, i))
       }
     }
