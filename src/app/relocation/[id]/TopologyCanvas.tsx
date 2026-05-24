@@ -529,6 +529,12 @@ export default function TopologyCanvas({
   const [labelsHiddenForCapture, setLabelsHiddenForCapture] = useState(false)
   // 캡처할 지도 영역 — 화면 공유 프레임에서 잘라낼 사각형 측정용
   const canvasAreaRef = useRef<HTMLDivElement | null>(null)
+  // SketchOverlay 에 전달용 — ref 와 state 동시 갱신 (state 변화로 SketchOverlay 가 dep 갱신)
+  const [canvasAreaEl, setCanvasAreaEl] = useState<HTMLDivElement | null>(null)
+  const setCanvasAreaRef = useCallback((el: HTMLDivElement | null) => {
+    canvasAreaRef.current = el
+    setCanvasAreaEl(el)
+  }, [])
   // 탭 메뉴(시설·케이블·회선·...) 오버레이 — 툴바 「탭 메뉴」 토글. ?tab= 있으면 기본 열림.
   const [tabPanelOpen, setTabPanelOpen] = useState(tabPanelDefaultOpen ?? false)
 
@@ -4292,7 +4298,7 @@ export default function TopologyCanvas({
           </aside>
         )}
 
-        <div ref={canvasAreaRef} className="flex-1 min-w-0 relative overflow-hidden">
+        <div ref={setCanvasAreaRef} className="flex-1 min-w-0 relative overflow-hidden">
 
           {/* 지도 모드 검색창 — 캔버스 중앙 최상단 floating.
               별도 바 대신 지도 위에 띄워 캔버스를 더 넓게 쓴다. SDK 준비 후에만 노출.
@@ -5544,6 +5550,9 @@ export default function TopologyCanvas({
           mapEpoch={mapEpoch}
           mainSvgEl={mainSvgElState}
           svgViewport={viewport}
+          // 캔버스(지도/SVG) 영역 element — 거리뷰·사이드바 등 영역 밖 그림은 픽셀 anchor.
+          //   GPS/SVG 좌표 계산도 이 영역 기준으로 정확히 변환됨.
+          canvasContainerEl={canvasAreaEl}
         />
 
         {/* 실사 도구 바 — sketchMode ON 시 캔버스 하단 중앙 floating.

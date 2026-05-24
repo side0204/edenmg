@@ -64,6 +64,9 @@ type Props = {
   // 도식 모드용 — 메인 SVG element + 현재 viewport. viewport 변경 시 자동 재투영.
   mainSvgEl?: SVGSVGElement | null
   svgViewport?: { x: number; y: number; width: number; height: number }
+  // 캔버스(지도/SVG) 컨테이너 — 클릭 위치가 이 영역 안인지 판정 + 영역 기준 픽셀 계산용.
+  //   영역 밖(거리뷰·사이드바 등) 그림은 픽셀 고정으로 저장 (지도 pan 영향 X).
+  canvasContainerEl?: HTMLElement | null
 }
 
 let __strokeSeq = 0
@@ -94,6 +97,7 @@ export default function SketchOverlay({
   mapEpoch,
   mainSvgEl,
   svgViewport,
+  canvasContainerEl,
 }: Props) {
   const svgRef = useRef<SVGSVGElement | null>(null)
   const drawingRef = useRef<SketchStroke | null>(null)
@@ -130,14 +134,27 @@ export default function SketchOverlay({
   const pxToPoint = useCallback(
     (px: { x: number; y: number }): SketchPoint | null => {
       if (coords === 'pixel') return { kind: 'pixel', x: px.x, y: px.y }
+      const overlay = svgRef.current
+      if (!overlay) return null
+      const orect = overlay.getBoundingClientRect()
+      // overlay-rel px → client px
+      const clientX = px.x + orect.left
+      const clientY = px.y + orect.top
+      // 캔버스(지도/SVG) 영역 안인지 판정 — 밖이면 픽셀 anchor (거리뷰·사이드바)
+      if (canvasContainerEl) {
+        const crect = canvasContainerEl.getBoundingClientRect()
+        const inside =
+          clientX >= crect.left &&
+          clientX <= crect.right &&
+          clientY >= crect.top &&
+          clientY <= crect.bottom
+        if (!inside) return { kind: 'pixel', x: px.x, y: px.y }
+      }
       if (coords === 'svg' && mainSvgEl) {
-        // overlay-rel px → client px → main SVG content coord (CTM 역행렬)
-        const overlay = svgRef.current
-        if (!overlay) return null
-        const orect = overlay.getBoundingClientRect()
+        // client px → main SVG content coord (CTM 역행렬 — SVG 의 letterbox·viewport 정확 반영)
         const pt = mainSvgEl.createSVGPoint()
-        pt.x = px.x + orect.left
-        pt.y = px.y + orect.top
+        pt.x = clientX
+        pt.y = clientY
         const ctm = mainSvgEl.getScreenCTM()
         if (!ctm) return null
         const r = pt.matrixTransform(ctm.inverse())
@@ -146,25 +163,29 @@ export default function SketchOverlay({
       const m = kakaoMap
       if (!m) return null
       try {
+        // 카카오 projection 은 "지도 컨테이너 기준" 픽셀 요구 → canvasContainer 기준으로 변환
+        const crect = canvasContainerEl?.getBoundingClientRect()
+        const mapX = crect ? clientX - crect.left : px.x
+        const mapY = crect ? clientY - crect.top : px.y
         const ll = m
           .getProjection()
-          .coordsFromContainerPoint(new kakao.maps.Point(px.x, px.y))
+          .coordsFromContainerPoint(new kakao.maps.Point(mapX, mapY))
         return { kind: 'gps', lat: ll.getLat(), lng: ll.getLng() }
       } catch {
         return null
       }
     },
-    [coords, kakaoMap, mainSvgEl],
+    [coords, kakaoMap, mainSvgEl, canvasContainerEl],
   )
 
   const pointToPx = useCallback(
     (p: SketchPoint): { x: number; y: number } | null => {
       if (p.kind === 'pixel') return { x: p.x, y: p.y }
+      const overlay = svgRef.current
+      if (!overlay) return null
+      const orect = overlay.getBoundingClientRect()
       if (p.kind === 'svg' && mainSvgEl) {
         // main SVG content coord → client px (CTM) → overlay-rel px
-        const overlay = svgRef.current
-        if (!overlay) return null
-        const orect = overlay.getBoundingClientRect()
         const pt = mainSvgEl.createSVGPoint()
         pt.x = p.x
         pt.y = p.y
@@ -180,14 +201,18 @@ export default function SketchOverlay({
         const pt = m
           .getProjection()
           .containerPointFromCoords(new kakao.maps.LatLng(p.lat, p.lng))
-        return { x: pt.x, y: pt.y }
+        // pt 는 지도 컨테이너 기준 → client px → overlay-rel px
+        const crect = canvasContainerEl?.getBoundingClientRect()
+        const clientX = crect ? pt.x + crect.left : pt.x
+        const clientY = crect ? pt.y + crect.top : pt.y
+        return { x: clientX - orect.left, y: clientY - orect.top }
       } catch {
         return null
       }
     },
     // svgViewport 변화 = pan/zoom = CTM 변화 → 재투영 필요
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [kakaoMap, mainSvgEl, svgViewport?.x, svgViewport?.y, svgViewport?.width, svgViewport?.height, mapEpoch],
+    [kakaoMap, mainSvgEl, canvasContainerEl, svgViewport?.x, svgViewport?.y, svgViewport?.width, svgViewport?.height, mapEpoch],
   )
 
   useEffect(() => {
