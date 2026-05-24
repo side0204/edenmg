@@ -1158,6 +1158,10 @@ export default function TopologyCanvas({
     rectTop: number
     rectWidth: number
     rectHeight: number
+    // CTM 기반 screen→SVG 비율 (시작 시점의 viewport 기준)
+    //   letterbox 가 적용된 SVG 에서 단순 viewport.width/rect.width 대신 정확한 비율 사용
+    screenToSvgX: number
+    screenToSvgY: number
   } | null>(null)
 
   // 함체 기설/신설 자동 추론
@@ -2824,6 +2828,15 @@ export default function TopologyCanvas({
     }
     const rect = svg.getBoundingClientRect()
     if (rect.width === 0 || rect.height === 0) return
+    // CTM 역행렬로 screen px → SVG unit 정확한 비율 계산.
+    //   SVG 의 preserveAspectRatio 기본값 'xMidYMid meet' 은 viewBox 와 rect 의
+    //   aspect ratio 가 다를 때 letterbox 와 함께 uniform scale 적용한다.
+    //   기존 viewport.width/rect.width 같은 단순 비율은 letterbox 보정 안 되어 한 축이 느리거나 빠름.
+    //   getScreenCTM().inverse().a / .d 가 실제 적용된 scale 이라 정확.
+    const _ctm = svg.getScreenCTM()
+    const _inv = _ctm?.inverse()
+    const screenToSvgX = _inv?.a ?? viewport.width / rect.width
+    const screenToSvgY = _inv?.d ?? viewport.height / rect.height
     // 멀티터치 — touch 만 추적 (마우스는 단일 입력이라 무의미)
     if (e.pointerType === 'touch') {
       activeTouchesRef.current.set(e.pointerId, { x: e.clientX, y: e.clientY })
@@ -2845,6 +2858,9 @@ export default function TopologyCanvas({
           rectTop: rect.top,
           rectWidth: rect.width,
           rectHeight: rect.height,
+          // CTM 기반 screen→SVG 비율 (letterbox 보정)
+          screenToSvgX,
+          screenToSvgY,
         }
         return
       }
@@ -2854,8 +2870,8 @@ export default function TopologyCanvas({
       startClientY: e.clientY,
       startVx: viewport.x,
       startVy: viewport.y,
-      scaleX: viewport.width / rect.width,
-      scaleY: viewport.height / rect.height,
+      scaleX: screenToSvgX,
+      scaleY: screenToSvgY,
       hasMoved: false,
     }
     // SVG element 에 capture — 마우스가 SVG 밖으로 나가도 pointermove 계속 받기
@@ -3030,12 +3046,18 @@ export default function TopologyCanvas({
         const maxW = 12000
         const newW = Math.max(minW, Math.min(maxW, pinch.startVw / scale))
         const newH = Math.max(minW * 0.75, Math.min(maxW * 0.75, pinch.startVh / scale))
-        // 시작 중점에 해당하는 SVG 좌표 = anchor (시작 viewport 기준 한 번만 계산)
-        const sxStart = pinch.startVx + (pinch.startMidX - pinch.rectLeft) * (pinch.startVw / pinch.rectWidth)
-        const syStart = pinch.startVy + (pinch.startMidY - pinch.rectTop) * (pinch.startVh / pinch.rectHeight)
+        // CTM 기반 screen→SVG 비율로 anchor 계산 (letterbox 가 있어도 정확).
+        // 시작 viewport 기준 시작 중점에 해당하는 SVG 좌표 = anchor.
+        const sxStart =
+          pinch.startVx + (pinch.startMidX - pinch.rectLeft) * pinch.screenToSvgX
+        const syStart =
+          pinch.startVy + (pinch.startMidY - pinch.rectTop) * pinch.screenToSvgY
+        // 새 viewport 의 screen→SVG 비율 = scale 변화에 비례 (uniform scale 가정)
+        const newScreenToSvgX = pinch.screenToSvgX * (newW / pinch.startVw)
+        const newScreenToSvgY = pinch.screenToSvgY * (newH / pinch.startVh)
         // 현재 중점이 같은 SVG 좌표를 가리키도록 viewport.x/y 계산 (anchor + 팬)
-        const newVx = sxStart - (midX - pinch.rectLeft) * (newW / pinch.rectWidth)
-        const newVy = syStart - (midY - pinch.rectTop) * (newH / pinch.rectHeight)
+        const newVx = sxStart - (midX - pinch.rectLeft) * newScreenToSvgX
+        const newVy = syStart - (midY - pinch.rectTop) * newScreenToSvgY
         setViewport({ x: newVx, y: newVy, width: newW, height: newH })
         return
       }
@@ -3328,11 +3350,11 @@ export default function TopologyCanvas({
 
   return (
     <div className={wrapperClass}>
-      <div className="px-4 py-2 border-b border-slate-100 flex items-center gap-2">
+      <div className="px-4 py-2 border-b border-slate-100 flex items-center gap-2 overflow-x-auto">
         <p className="shrink-0 text-xs text-slate-600">
           시설 {facilities.length}개 · 케이블 {cables.length}개
         </p>
-        <div className="ml-auto flex items-center gap-1 overflow-x-auto min-w-0">
+        <div className="ml-auto flex items-center gap-1 shrink-0">
           {/* 도식 / 지도 모드 토글 */}
           <div className="mr-1 inline-flex items-center rounded-md border border-slate-300 overflow-hidden">
             <button
