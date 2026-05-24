@@ -2057,7 +2057,10 @@ export default function TopologyCanvas({
         //   같은 식으로 V 케이블 (fromX ≈ toX) 에 V detour 도 degenerate.
         const isHCable = Math.abs(toForRoute.y - fromForRoute.y) < 15
         const isVCable = Math.abs(toForRoute.x - fromForRoute.x) < 15
-        for (const stepMult of [1, 2, 3]) {
+        // (2026-05-24 owner 보고) stepMult 3 제거 — 매우 큰 detour candidate 가
+        //   cores 재배정으로 작은 케이블에 선택되면 path 가 매우 멀리 늘어짐 (T-ACFL).
+        //   stepMult [1, 2] 만 사용 → detour 거리 시설 도형 2 배 안.
+        for (const stepMult of [1, 2]) {
           for (const sign of [-1, 1]) {
             // V detour (위/아래 ㄷ자) — V 케이블에는 degenerate 이므로 skip
             if (!isVCable) {
@@ -2242,7 +2245,9 @@ export default function TopologyCanvas({
         if (i === 0) return // 가장 큰 케이블 = best 유지
         const cands = rawCablePaths.get(c.id)?.candidates ?? []
         if (cands.length <= 1) return // candidate 없음 (waypoint 저장된 케이블 등) → 그대로
-        const useIdx = Math.min(i, cands.length - 1)
+        // (2026-05-24 owner 보고) candidate idx max = 4 — 그 이상은 stepMult 2 의 큰
+        //   detour candidate. 그룹에 5+ 케이블이면 일부 같은 path 사용 (가독성 차선).
+        const useIdx = Math.min(i, 4, cands.length - 1)
         finalPaths.set(c.id, cands[useIdx])
       })
     }
