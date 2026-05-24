@@ -861,40 +861,59 @@ export default function TopologyCanvas({
   // 실사 저장 다이얼로그 — 시설 선택 + 화면 캡처 (getDisplayMedia) → Storage 업로드
   const [saveDialogOpen, setSaveDialogOpen] = useState(false)
 
-  // 「더보기」 dropdown — controlled state + position: fixed (overflow-x-auto 부모에서도 잘리지 않음)
-  const [moreOpen, setMoreOpen] = useState(false)
-  const moreBtnRef = useRef<HTMLButtonElement | null>(null)
-  const [morePos, setMorePos] = useState<{ top: number; right: number } | null>(null)
-  useEffect(() => {
-    if (!moreOpen) return
-    function update() {
-      const r = moreBtnRef.current?.getBoundingClientRect()
-      if (r) {
-        setMorePos({ top: r.bottom + 4, right: window.innerWidth - r.right })
+  // 드롭다운 위치 추적 — 트리거 버튼 아래에 fixed 로 띄우기 위함.
+  //   overflow-x-auto 부모 안 absolute 패널은 잘리므로 fixed 로 우회.
+  //   외부 클릭 시 자동 닫힘 (트리거 + data-panel-id 패널 안 클릭은 제외).
+  function useFixedDropdown(
+    panelId: string,
+  ): {
+    btnRef: React.MutableRefObject<HTMLButtonElement | null>
+    pos: { top: number; right: number } | null
+    open: boolean
+    setOpen: React.Dispatch<React.SetStateAction<boolean>>
+  } {
+    const [open, setOpen] = useState(false)
+    const btnRef = useRef<HTMLButtonElement | null>(null)
+    const [pos, setPos] = useState<{ top: number; right: number } | null>(null)
+    useEffect(() => {
+      if (!open) return
+      function update() {
+        const r = btnRef.current?.getBoundingClientRect()
+        if (r) setPos({ top: r.bottom + 4, right: window.innerWidth - r.right })
       }
-    }
-    update()
-    const onScroll = () => update()
-    const onResize = () => update()
-    window.addEventListener('scroll', onScroll, true)
-    window.addEventListener('resize', onResize)
-    // 외부 클릭 닫기
-    function onDocPointer(e: PointerEvent) {
-      const btn = moreBtnRef.current
-      const target = e.target as Node | null
-      if (btn && target && btn.contains(target)) return
-      // 패널 안 클릭은 통과 (data-more-panel 으로 표시)
-      const panel = (target as Element | null)?.closest?.('[data-more-panel]')
-      if (panel) return
-      setMoreOpen(false)
-    }
-    document.addEventListener('pointerdown', onDocPointer)
-    return () => {
-      window.removeEventListener('scroll', onScroll, true)
-      window.removeEventListener('resize', onResize)
-      document.removeEventListener('pointerdown', onDocPointer)
-    }
-  }, [moreOpen])
+      update()
+      const onScroll = () => update()
+      const onResize = () => update()
+      window.addEventListener('scroll', onScroll, true)
+      window.addEventListener('resize', onResize)
+      function onDocPointer(e: PointerEvent) {
+        const btn = btnRef.current
+        const target = e.target as Node | null
+        if (btn && target && btn.contains(target)) return
+        const panel = (target as Element | null)?.closest?.(`[data-panel-id="${panelId}"]`)
+        if (panel) return
+        setOpen(false)
+      }
+      document.addEventListener('pointerdown', onDocPointer)
+      return () => {
+        window.removeEventListener('scroll', onScroll, true)
+        window.removeEventListener('resize', onResize)
+        document.removeEventListener('pointerdown', onDocPointer)
+      }
+    }, [open, panelId])
+    return { btnRef, pos, open, setOpen }
+  }
+
+  // 「더보기」 dropdown
+  const moreDD = useFixedDropdown('more')
+  const moreBtnRef = moreDD.btnRef
+  const morePos = moreDD.pos
+  const moreOpen = moreDD.open
+  const setMoreOpen = moreDD.setOpen
+  // 「도면정렬」 dropdown (도식 모드)
+  const layoutDD = useFixedDropdown('layout')
+  // 「캡처」 dropdown (지도 모드)
+  const captureDD = useFixedDropdown('capture')
 
   // 실사정보 배치 모드 — sketchMode 안에서 활성. 캔버스 좌클릭 시 그 위치에
   //   '실사정보' 시설 즉시 등록 (이름 자동 「실사{seq}」, 모달 X).
@@ -3576,20 +3595,37 @@ export default function TopologyCanvas({
               케이블 거리 배율은 결과가 너무 틀어져 사용 어려워 비활성 (2026-05-24). */}
           {editable && mode === 'schematic' && (
             <>
-              <details className="relative mr-1">
-                <summary
-                  className="inline-flex items-center gap-1 rounded-md border border-slate-300 bg-white px-2 h-7 text-[11px] font-medium text-slate-700 hover:bg-slate-50 cursor-pointer list-none [&::-webkit-details-marker]:hidden"
-                  title="도면 자동 정렬·재배치 메뉴"
+              <button
+                ref={layoutDD.btnRef}
+                type="button"
+                onClick={() => layoutDD.setOpen((v) => !v)}
+                className={
+                  'mr-1 inline-flex items-center gap-1 rounded-md border px-2 h-7 text-[11px] font-medium ' +
+                  (layoutDD.open
+                    ? 'bg-slate-900 border-slate-900 text-white'
+                    : 'bg-white border-slate-300 text-slate-700 hover:bg-slate-50')
+                }
+                title="도면 자동 정렬·재배치 메뉴"
+                aria-expanded={layoutDD.open}
+              >
+                <Sparkles className="h-3 w-3" />
+                {snapping || graphLayouting ? '처리 중…' : '도면정렬'}
+              </button>
+              {layoutDD.open && layoutDD.pos && (
+                <div
+                  data-panel-id="layout"
+                  className="z-50 w-60 rounded-md border border-slate-200 bg-white shadow-lg p-2 space-y-2 text-[11px]"
+                  style={{
+                    position: 'fixed',
+                    top: layoutDD.pos.top,
+                    right: layoutDD.pos.right,
+                  }}
                 >
-                  <Sparkles className="h-3 w-3" />
-                  {snapping || graphLayouting ? '처리 중…' : '도면정렬'}
-                </summary>
-                <div className="absolute right-0 top-full mt-1 z-30 w-60 rounded-md border border-slate-200 bg-white shadow-lg p-2 space-y-2 text-[11px]">
                   <button
                     type="button"
-                    onClick={(e) => {
+                    onClick={() => {
                       onCableSnap()
-                      ;(e.currentTarget.closest('details') as HTMLDetailsElement | null)?.removeAttribute('open')
+                      layoutDD.setOpen(false)
                     }}
                     disabled={snapping}
                     className="w-full text-left px-2 py-1.5 rounded hover:bg-slate-50 disabled:opacity-60"
@@ -3600,9 +3636,9 @@ export default function TopologyCanvas({
                   </button>
                   <button
                     type="button"
-                    onClick={(e) => {
+                    onClick={() => {
                       onGraphLayout()
-                      ;(e.currentTarget.closest('details') as HTMLDetailsElement | null)?.removeAttribute('open')
+                      layoutDD.setOpen(false)
                     }}
                     disabled={graphLayouting}
                     className="w-full text-left px-2 py-1.5 rounded text-violet-700 bg-violet-50 hover:bg-violet-100 disabled:opacity-60"
@@ -3612,7 +3648,7 @@ export default function TopologyCanvas({
                     <span className="block text-[10px] text-violet-600 mt-0.5">허브 중심 동심원 — 모든 시설 강제 재배치</span>
                   </button>
                 </div>
-              </details>
+              )}
               {/* 되돌리기 — 직전 도면정렬/그래프 자동 배치 결과를 이전 상태로 복원 */}
               {undoSnapshot && (
                 <button
@@ -3714,12 +3750,16 @@ export default function TopologyCanvas({
           )}
 
           {/* 캡처 메뉴 — 지도 모드. 자동/분할 두 가지 방식을 드롭다운에서 선택.
-              진행 중이면 버튼이 해당 색으로 강조 + 「취소」 항목 노출. */}
+              진행 중이면 버튼이 해당 색으로 강조 + 「취소」 항목 노출.
+              controlled state + position:fixed — 부모 overflow-x-auto 에서도 잘리지 않음. */}
           {mode === 'map' && mapStatus === 'ready' && (
-            <details className="relative mr-1">
-              <summary
+            <>
+              <button
+                ref={captureDD.btnRef}
+                type="button"
+                onClick={() => captureDD.setOpen((v) => !v)}
                 className={
-                  'inline-flex items-center gap-1 rounded-md border px-2 h-7 text-[11px] font-medium cursor-pointer list-none [&::-webkit-details-marker]:hidden ' +
+                  'mr-1 inline-flex items-center gap-1 rounded-md border px-2 h-7 text-[11px] font-medium ' +
                   (autoCaptureActive
                     ? 'bg-emerald-600 text-white border-emerald-600'
                     : captureActive
@@ -3727,6 +3767,7 @@ export default function TopologyCanvas({
                       : 'text-slate-700 border-slate-300 hover:bg-slate-50')
                 }
                 title="캡처 방식 선택 (자동 / 분할)"
+                aria-expanded={captureDD.open}
               >
                 <Camera className="h-3 w-3" />
                 캡처
@@ -3735,18 +3776,17 @@ export default function TopologyCanvas({
                     ({autoCaptureActive ? '자동' : '분할'})
                   </span>
                 )}
-              </summary>
+              </button>
+              {captureDD.open && captureDD.pos && (
               <div
-                className="absolute right-0 top-8 z-30 w-52 rounded-lg border border-slate-200 bg-white p-1.5 shadow-lg"
-                onClick={(e) => {
-                  // 항목 클릭 후 드롭다운 자동 닫힘
-                  const det = e.currentTarget.parentElement as HTMLDetailsElement | null
-                  if (det && det.open) {
-                    requestAnimationFrame(() => {
-                      det.open = false
-                    })
-                  }
+                data-panel-id="capture"
+                className="z-50 w-52 rounded-lg border border-slate-200 bg-white p-1.5 shadow-lg"
+                style={{
+                  position: 'fixed',
+                  top: captureDD.pos.top,
+                  right: captureDD.pos.right,
                 }}
+                onClick={() => requestAnimationFrame(() => captureDD.setOpen(false))}
               >
                 <button
                   type="button"
@@ -3819,7 +3859,8 @@ export default function TopologyCanvas({
                   </button>
                 )}
               </div>
-            </details>
+              )}
+            </>
           )}
 
           {/* 도식 내보내기 — 도식 모드. 캔버스를 PNG 이미지 파일로 저장 */}
@@ -3893,7 +3934,7 @@ export default function TopologyCanvas({
           </button>
           {moreOpen && morePos && (
             <div
-              data-more-panel
+              data-panel-id="more"
               className="z-50 w-56 rounded-lg border border-slate-200 bg-white p-2 shadow-lg space-y-1"
               style={{ position: 'fixed', top: morePos.top, right: morePos.right }}
               onClick={() => {
