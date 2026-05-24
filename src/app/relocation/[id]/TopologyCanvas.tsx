@@ -1963,64 +1963,25 @@ export default function TopologyCanvas({
             // V detour (위/아래 ㄷ자) — V 케이블에는 degenerate 이므로 skip
             if (!isVCable) {
               const detourY = (fromForRoute.y + toForRoute.y) / 2 + sign * VDETOUR * stepMult
-              // 기본 V detour (4점, 마지막 V) — 시설 위·아래 면 도착
               addCand([
                 { x: fromForRoute.x, y: detourY },
                 { x: toForRoute.x, y: detourY },
-              ])
-              // V detour 변형 (5점, 마지막 H) — 시설 좌·우 면 자연 도착
-              const midXForV = (fromForRoute.x + toForRoute.x) / 2
-              addCand([
-                { x: fromForRoute.x, y: detourY },
-                { x: midXForV, y: detourY },
-                { x: midXForV, y: toForRoute.y },
               ])
             }
             // H detour (좌/우 ㄷ자) — H 케이블에는 degenerate 이므로 skip
             if (!isHCable) {
               const detourX = (fromForRoute.x + toForRoute.x) / 2 + sign * HDETOUR * stepMult
-              // 기본 H detour (4점, 마지막 H) — 시설 좌·우 면 도착
               addCand([
                 { x: detourX, y: fromForRoute.y },
                 { x: detourX, y: toForRoute.y },
-              ])
-              // H detour 변형 (5점, 마지막 V) — 시설 위·아래 면 자연 도착
-              const midYForH = (fromForRoute.y + toForRoute.y) / 2
-              addCand([
-                { x: detourX, y: fromForRoute.y },
-                { x: detourX, y: midYForH },
-                { x: toForRoute.x, y: midYForH },
               ])
             }
           }
         }
 
-        // 도착면 자연성 가중치 — sort 안전 재시도 (2026-05-24):
-        //   1차 시도가 sort 1순위로 두어 crossings 무시 → 시설 가로지름 폭증 (revert).
-        //   이번엔 crossings 다음 (length 직전) 으로 둠 — bends·crossings (시설 회피) 가
-        //   절대 우선. 같은 bends·crossings 안에서만 자연 도착면 비교.
-        //   결과: 안전성 보장 + 같은 점수의 candidate 중 더 자연스러운 마지막 segment 우선.
-        const naturalDir: 'H' | 'V' | null =
-          adx > ady * 1.3 ? 'H' : ady > adx * 1.3 ? 'V' : null
-        const lastSegDir = (wps: { x: number; y: number }[]): 'H' | 'V' | 'D' => {
-          const last = wps.length > 0 ? wps[wps.length - 1] : fromForRoute
-          const dlx = Math.abs(toForRoute.x - last.x)
-          const dly = Math.abs(toForRoute.y - last.y)
-          if (dly < 5) return 'H'
-          if (dlx < 5) return 'V'
-          return 'D'
-        }
-        const naturalScore = (cand: Cand): number => {
-          if (!naturalDir) return 0
-          return lastSegDir(cand.waypoints) === naturalDir ? 0 : 1
-        }
-
         candidates.sort(
           (a, b) =>
-            a.bends - b.bends ||
-            a.crossings - b.crossings ||
-            naturalScore(a) - naturalScore(b) ||
-            a.length - b.length,
+            a.bends - b.bends || a.crossings - b.crossings || a.length - b.length,
         )
         if (candidates.length > 0) {
           midPoints = candidates[0].waypoints
