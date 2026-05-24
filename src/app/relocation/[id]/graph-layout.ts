@@ -16,11 +16,15 @@ const NODE_W = 110
 const NODE_H = 90
 
 // 시설 사이 최소 호 거리 (NODE_W + 마진). 시설 도형 + 라벨 영역 안 겹치게.
-const MIN_ARC_LEN = 180
+//   (2026-05-24 Phase 3) 220 → 240 — L자 candidate 의 crossings 0 보장.
+const MIN_ARC_LEN = 240
 
-// level 별 기본 ring 거리 (radius 누적)
-const HUB_RING_GAP = 280 // level 0 → 1
-const RING_GAP = 280 // 이후 level 사이
+// level 별 기본 ring 거리 (radius 누적).
+//   (2026-05-24 Phase 3) 280 → 380 — 시설 사이 간격 확대.
+//   owner 보고: ㄷ자 우회 path 의 마지막 V segment 가 시설 위쪽에서 꺾여 부자연.
+//   간격 확대 시 L자 candidate (마지막 H 끝) 가 자연 선택 → 시설 좌·우 면 자연 도착.
+const HUB_RING_GAP = 380 // level 0 → 1
+const RING_GAP = 380 // 이후 level 사이
 
 // 컴포넌트 사이 packing 간격
 const COMPONENT_GAP = 150
