@@ -1963,66 +1963,25 @@ export default function TopologyCanvas({
             // V detour (위/아래 ㄷ자) — V 케이블에는 degenerate 이므로 skip
             if (!isVCable) {
               const detourY = (fromForRoute.y + toForRoute.y) / 2 + sign * VDETOUR * stepMult
-              // 기본 V detour (4점, 마지막 segment V) — 시설 위·아래 면 도착
               addCand([
                 { x: fromForRoute.x, y: detourY },
                 { x: toForRoute.x, y: detourY },
-              ])
-              // V detour 변형 (5점, 마지막 segment H) — 시설 좌·우 면 도착
-              //   (2026-05-24 owner 보고) 수평 케이블에 V detour 시 시설 위쪽에서
-              //   꺾여 도착해 부자연. 마지막 H 변형으로 좌·우 면 자연 도착.
-              const midX = (fromForRoute.x + toForRoute.x) / 2
-              addCand([
-                { x: fromForRoute.x, y: detourY },
-                { x: midX, y: detourY },
-                { x: midX, y: toForRoute.y },
               ])
             }
             // H detour (좌/우 ㄷ자) — H 케이블에는 degenerate 이므로 skip
             if (!isHCable) {
               const detourX = (fromForRoute.x + toForRoute.x) / 2 + sign * HDETOUR * stepMult
-              // 기본 H detour (4점, 마지막 segment H) — 시설 좌·우 면 도착
               addCand([
                 { x: detourX, y: fromForRoute.y },
                 { x: detourX, y: toForRoute.y },
-              ])
-              // H detour 변형 (5점, 마지막 segment V) — 시설 위·아래 면 도착
-              const midY = (fromForRoute.y + toForRoute.y) / 2
-              addCand([
-                { x: detourX, y: fromForRoute.y },
-                { x: detourX, y: midY },
-                { x: toForRoute.x, y: midY },
               ])
             }
           }
         }
 
-        // 도착면 자연성 가중치 (2026-05-24 owner: "마지막 V 꺾임 부자연"):
-        //   케이블 from→to 의 dx·dy 비교로 자연 도착면 결정.
-        //   adx > ady * 1.3 → 수평 케이블 → 마지막 H 자연 (시설 좌·우 면)
-        //   ady > adx * 1.3 → 수직 케이블 → 마지막 V 자연 (시설 위·아래 면)
-        //   adx ≈ ady → 대각선 → 모호 (가중치 안 적용)
-        const naturalDir: 'H' | 'V' | null =
-          adx > ady * 1.3 ? 'H' : ady > adx * 1.3 ? 'V' : null
-        const lastSegDir = (wps: { x: number; y: number }[]): 'H' | 'V' | 'D' => {
-          const last = wps.length > 0 ? wps[wps.length - 1] : fromForRoute
-          const dlx = Math.abs(toForRoute.x - last.x)
-          const dly = Math.abs(toForRoute.y - last.y)
-          if (dly < 5) return 'H'
-          if (dlx < 5) return 'V'
-          return 'D'
-        }
-        const naturalScore = (cand: Cand): number => {
-          if (!naturalDir) return 0
-          return lastSegDir(cand.waypoints) === naturalDir ? 0 : 1
-        }
-
         candidates.sort(
           (a, b) =>
-            naturalScore(a) - naturalScore(b) ||
-            a.bends - b.bends ||
-            a.crossings - b.crossings ||
-            a.length - b.length,
+            a.bends - b.bends || a.crossings - b.crossings || a.length - b.length,
         )
         if (candidates.length > 0) {
           midPoints = candidates[0].waypoints
