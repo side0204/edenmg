@@ -1,7 +1,11 @@
 'use client'
 
 import { useEffect, useRef, useState } from 'react'
-import { X, ChevronRight, ChevronLeft, Camera } from 'lucide-react'
+import { X, ChevronRight, ChevronLeft, Camera, Undo2, Trash2 } from 'lucide-react'
+import SketchOverlay, {
+  type SketchStroke,
+  type SketchPen,
+} from './SketchOverlay'
 
 // 카카오맵 거리뷰(Roadview) 패널 — 캔버스 우측 컬럼. 지도 모드 전용.
 //   - position: { lat, lng } — 표시할 좌표. 가까운 거리뷰 panorama 검색해 표시.
@@ -18,6 +22,11 @@ type Props = {
   onClose: () => void
   collapsed: boolean
   onToggleCollapse: () => void
+  // 실사 그리기 — sketchMode true 면 panorama 위에 펜 캡처. 좌표는 패널 픽셀 고정.
+  sketchMode: boolean
+  sketchPen: SketchPen
+  strokes: SketchStroke[]
+  onStrokesChange: (next: SketchStroke[]) => void
 }
 
 const MIN_W = 280
@@ -30,6 +39,10 @@ export default function RoadviewPanel({
   onClose,
   collapsed,
   onToggleCollapse,
+  sketchMode,
+  sketchPen,
+  strokes,
+  onStrokesChange,
 }: Props) {
   const containerRef = useRef<HTMLDivElement | null>(null)
   const roadviewRef = useRef<kakao.maps.Roadview | null>(null)
@@ -176,6 +189,44 @@ export default function RoadviewPanel({
               <br />
               <span className="text-slate-500">(지도 위 파란 선 위치를 클릭해 보세요)</span>
             </p>
+          </div>
+        )}
+        {/* 실사 그리기 오버레이 — sketchMode 일 때 panorama 위 pointer 캡처.
+            좌표는 패널 픽셀 고정 (panorama 가 움직이면 그림은 그 자리). */}
+        <SketchOverlay
+          enabled={sketchMode}
+          pen={sketchPen}
+          strokes={strokes}
+          onStrokesChange={onStrokesChange}
+          coords="pixel"
+        />
+        {/* 실사 도구 (거리뷰 안 인라인) — 색·굵기는 상위 toolbar 공유. 되돌리기·전체 지우기만 노출. */}
+        {sketchMode && (
+          <div className="absolute bottom-2 left-1/2 -translate-x-1/2 z-50 flex items-center gap-1 rounded-full border border-slate-200 bg-white px-2 py-1 shadow-lg">
+            <button
+              type="button"
+              onClick={() => onStrokesChange(strokes.slice(0, -1))}
+              disabled={strokes.length === 0}
+              className="inline-flex items-center gap-1 rounded-md border border-slate-200 px-2 h-7 text-[11px] font-medium text-slate-700 hover:bg-slate-50 disabled:opacity-40"
+              title="마지막 선 되돌리기"
+            >
+              <Undo2 className="h-3 w-3" />
+              되돌리기
+            </button>
+            <button
+              type="button"
+              onClick={() => {
+                if (strokes.length === 0) return
+                if (!confirm('거리뷰 실사 그림을 모두 지웁니다. 계속하시겠습니까?')) return
+                onStrokesChange([])
+              }}
+              disabled={strokes.length === 0}
+              className="inline-flex items-center gap-1 rounded-md border border-rose-200 px-2 h-7 text-[11px] font-medium text-rose-700 hover:bg-rose-50 disabled:opacity-40"
+              title="전체 지우기"
+            >
+              <Trash2 className="h-3 w-3" />
+              지우기
+            </button>
           </div>
         )}
       </div>

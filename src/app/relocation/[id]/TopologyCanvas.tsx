@@ -28,6 +28,7 @@ import {
   Sparkles,
   Trash2,
   Undo2,
+  Pencil,
 } from 'lucide-react'
 import {
   CABLE_SPEC_VALUES,
@@ -74,6 +75,7 @@ import {
 } from './facility-actions'
 import LegendPanel from './LegendPanel'
 import RoadviewPanel from './RoadviewPanel'
+import SketchOverlay from './SketchOverlay'
 import CableInfoPanel from './CableInfoPanel'
 import FacilityInfoPanel, {
   type TaskTypeOption,
@@ -825,6 +827,20 @@ export default function TopologyCanvas({
   // 케이블·시설 패널은 동시에 1개만 뜨므로 공유 상태 1개. 선택 바꿔도 유지.
   const [infoPanelCollapsed, setInfoPanelCollapsed] = useState(false)
 
+  // 실사(sketch) — 지도/위성/거리뷰 위에 펜으로 그림판처럼 그림.
+  //   메모리 휘발 (페이지 떠나면 사라짐). Phase 2 에서 화면 캡처→시설 첨부 저장 예정.
+  //   strokes 는 캔버스별로 분리: mapStrokes(지도, GPS 좌표) · roadviewStrokes(거리뷰, 픽셀).
+  //   그리기 모드 ON 시 지도 pan/zoom 잠금 + SketchOverlay 가 pointer 이벤트 캡처.
+  const [sketchMode, setSketchMode] = useState(false)
+  const [mapStrokes, setMapStrokes] = useState<import('./SketchOverlay').SketchStroke[]>([])
+  const [roadviewStrokes, setRoadviewStrokes] = useState<
+    import('./SketchOverlay').SketchStroke[]
+  >([])
+  const [sketchPen, setSketchPen] = useState<import('./SketchOverlay').SketchPen>({
+    color: '#ef4444', // rose-500
+    width: 3,
+  })
+
   // 거리뷰 패널 — 지도 모드 우측 컬럼. 시설 선택 또는 지도 클릭 시 그 좌표의 카카오 거리뷰.
   //   roadviewOpen 켜져 있으면 시설/케이블/고장점 패널을 가리고 거리뷰가 표시됨 (상호 배타).
   //   roadviewPos = 마지막으로 요청된 좌표. null 이면 안내 메시지만 표시.
@@ -1177,6 +1193,27 @@ export default function TopologyCanvas({
       // SDK 가 거부하면 무시 — 기본(roadmap) 유지
     }
   }, [kakaoMap, mapStatus, mapTypeId])
+
+  // 실사 모드 ON 시 카카오맵 드래그·줌 잠금 — SketchOverlay 가 pointer 이벤트 캡처.
+  //   OFF 로 돌아오면 다시 활성. SDK 가 지원 안 하면 무시.
+  useEffect(() => {
+    if (!kakaoMap || mapStatus !== 'ready') return
+    if (!sketchMode) return
+    try {
+      kakaoMap.setDraggable(false)
+      kakaoMap.setZoomable(false)
+    } catch {
+      /* SDK 거부 무시 */
+    }
+    return () => {
+      try {
+        kakaoMap.setDraggable(true)
+        kakaoMap.setZoomable(true)
+      } catch {
+        /* SDK 거부 무시 */
+      }
+    }
+  }, [kakaoMap, mapStatus, sketchMode])
 
   // 거리뷰 ROADVIEW 오버레이 동기화 — 지도 위 거리뷰 가능 도로의 파란 선.
   //   roadviewOpen 켜질 때 addOverlay, 꺼질 때 removeOverlay. SDK 가 거부하면 무시.
@@ -3364,6 +3401,31 @@ export default function TopologyCanvas({
             </button>
           )}
 
+          {/* 실사(sketch) — 지도/위성/거리뷰 위에 펜으로 자유 그리기.
+              켜면 지도 pan/zoom 잠금 + SketchOverlay 활성. 일회성 메모 (페이지 떠나면 사라짐).
+              Phase 2 에서 「화면 저장」 → 시설 첨부 + 「실사내용확인」 알림 예정. */}
+          {mode === 'map' && mapStatus === 'ready' && (
+            <button
+              type="button"
+              onClick={() => setSketchMode((v) => !v)}
+              className={
+                'mr-1 inline-flex items-center gap-1 rounded-md border px-2 h-7 text-[11px] font-medium ' +
+                (sketchMode
+                  ? 'bg-rose-600 text-white border-rose-600'
+                  : 'text-slate-700 border-slate-300 hover:bg-slate-50')
+              }
+              title={sketchMode ? '실사 그리기 끄기' : '지도/거리뷰 위에 펜으로 그리기 (그림판처럼)'}
+            >
+              <Pencil className="h-3 w-3" />
+              실사
+              {sketchMode && mapStrokes.length > 0 && (
+                <span className="ml-0.5 rounded bg-white px-1 text-[9px] font-semibold text-rose-700">
+                  {mapStrokes.length}
+                </span>
+              )}
+            </button>
+          )}
+
           {/* 캡처 메뉴 — 지도 모드. 자동/분할 두 가지 방식을 드롭다운에서 선택.
               진행 중이면 버튼이 해당 색으로 강조 + 「취소」 항목 노출. */}
           {mode === 'map' && mapStatus === 'ready' && (
@@ -5007,6 +5069,97 @@ export default function TopologyCanvas({
             )}
           </svg>
 
+          {/* 실사 그리기 오버레이 — 지도 모드 전용. sketchMode 일 때 pointer 캡처. */}
+          {mode === 'map' && (
+            <SketchOverlay
+              enabled={sketchMode}
+              pen={sketchPen}
+              strokes={mapStrokes}
+              onStrokesChange={setMapStrokes}
+              coords="gps"
+              kakaoMap={kakaoMap}
+              mapEpoch={mapEpoch}
+            />
+          )}
+
+          {/* 실사 도구 바 — sketchMode ON 시 캔버스 하단 중앙 floating */}
+          {mode === 'map' && sketchMode && (
+            <div
+              className="absolute bottom-3 left-1/2 -translate-x-1/2 z-40 flex items-center gap-1 rounded-full border border-slate-200 bg-white px-2 py-1.5 shadow-lg"
+              style={{ pointerEvents: 'auto' }}
+            >
+              {/* 색 */}
+              {['#ef4444', '#000000', '#2563eb', '#16a34a', '#eab308'].map((c) => (
+                <button
+                  key={c}
+                  type="button"
+                  onClick={() => setSketchPen((p) => ({ ...p, color: c }))}
+                  className={
+                    'h-6 w-6 rounded-full border-2 ' +
+                    (sketchPen.color === c ? 'border-slate-900' : 'border-slate-200')
+                  }
+                  style={{ backgroundColor: c }}
+                  title={`색 ${c}`}
+                />
+              ))}
+              <span className="mx-1 h-5 w-px bg-slate-200" />
+              {/* 굵기 */}
+              {[2, 3, 5, 8].map((w) => (
+                <button
+                  key={w}
+                  type="button"
+                  onClick={() => setSketchPen((p) => ({ ...p, width: w }))}
+                  className={
+                    'h-7 w-7 inline-flex items-center justify-center rounded-md border ' +
+                    (sketchPen.width === w
+                      ? 'bg-slate-900 border-slate-900 text-white'
+                      : 'bg-white border-slate-200 text-slate-700 hover:bg-slate-50')
+                  }
+                  title={`굵기 ${w}px`}
+                >
+                  <span
+                    className="rounded-full bg-current"
+                    style={{ width: w, height: w }}
+                  />
+                </button>
+              ))}
+              <span className="mx-1 h-5 w-px bg-slate-200" />
+              <button
+                type="button"
+                onClick={() => setMapStrokes((s) => s.slice(0, -1))}
+                disabled={mapStrokes.length === 0}
+                className="inline-flex items-center gap-1 rounded-md border border-slate-200 px-2 h-7 text-[11px] font-medium text-slate-700 hover:bg-slate-50 disabled:opacity-40"
+                title="마지막 선 되돌리기"
+              >
+                <Undo2 className="h-3 w-3" />
+                되돌리기
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  if (mapStrokes.length === 0) return
+                  if (!confirm('실사 그림을 모두 지웁니다. 계속하시겠습니까?')) return
+                  setMapStrokes([])
+                }}
+                disabled={mapStrokes.length === 0}
+                className="inline-flex items-center gap-1 rounded-md border border-rose-200 px-2 h-7 text-[11px] font-medium text-rose-700 hover:bg-rose-50 disabled:opacity-40"
+                title="전체 지우기"
+              >
+                <Trash2 className="h-3 w-3" />
+                전체 지우기
+              </button>
+              <button
+                type="button"
+                onClick={() => setSketchMode(false)}
+                className="inline-flex items-center gap-1 rounded-md border border-slate-300 bg-slate-100 px-2 h-7 text-[11px] font-medium text-slate-700 hover:bg-slate-200"
+                title="실사 끄기"
+              >
+                <X className="h-3 w-3" />
+                끄기
+              </button>
+            </div>
+          )}
+
           {/* 분할 캡처 가이드 — 지도 모드, 시설 영역을 격자로 나눠 스크린샷 */}
           {captureActive && mode === 'map' && mapStatus === 'ready' && kakaoMap && (
             <MapCaptureGuide
@@ -5038,6 +5191,10 @@ export default function TopologyCanvas({
             }}
             collapsed={roadviewCollapsed}
             onToggleCollapse={() => setRoadviewCollapsed((v) => !v)}
+            sketchMode={sketchMode}
+            sketchPen={sketchPen}
+            strokes={roadviewStrokes}
+            onStrokesChange={setRoadviewStrokes}
           />
         )}
 
