@@ -2003,22 +2003,24 @@ export default function TopologyCanvas({
       return segs
     }
 
-    const PERP_TOL = 20
-    const OVERLAP_MIN = 40
-    function segsOverlap(segsA: Seg[], segsB: Seg[]): boolean {
+    // 임계 파라미터화 — Pass 1 은 loose (시각적 인접 인식), Pass 2 는 strict (실제 겹침).
+    //   Pass 1 PERP_TOL=120: ㄷ자 우회로 VDETOUR(=halfH+80≈100px) 만큼 떨어진 segment 도 같은 그룹으로 인식.
+    //     owner 의도 "B-029 주변 두 케이블 시각 분리" — perp 80px 떨어졌어도 시각적으로 같은 영역.
+    //   Pass 2 PERP_TOL=20: 재배정 후 실제 겹친 케이블만 평행 이동.
+    function segsOverlap(segsA: Seg[], segsB: Seg[], perpTol: number, ovMin: number): boolean {
       for (const sa of segsA) {
         for (const sb of segsB) {
           if (sa.dir !== sb.dir) continue
-          if (Math.abs(sa.perp - sb.perp) > PERP_TOL) continue
+          if (Math.abs(sa.perp - sb.perp) > perpTol) continue
           const ov = Math.min(sa.end, sb.end) - Math.max(sa.start, sb.start)
-          if (ov >= OVERLAP_MIN) return true
+          if (ov >= ovMin) return true
         }
       }
       return false
     }
 
     // union-find 로 segment 겹치는 그룹 추출 (현재 finalPaths 기준)
-    function buildGroups(): string[][] {
+    function buildGroups(perpTol: number, ovMin: number): string[][] {
       const cableSegs = new Map<string, Seg[]>()
       for (const c of cables) {
         const path = finalPaths.get(c.id)
@@ -2043,7 +2045,7 @@ export default function TopologyCanvas({
       const ids = [...cableSegs.keys()]
       for (let i = 0; i < ids.length; i++) {
         for (let j = i + 1; j < ids.length; j++) {
-          if (segsOverlap(cableSegs.get(ids[i])!, cableSegs.get(ids[j])!)) {
+          if (segsOverlap(cableSegs.get(ids[i])!, cableSegs.get(ids[j])!, perpTol, ovMin)) {
             union(ids[i], ids[j])
           }
         }
@@ -2070,7 +2072,7 @@ export default function TopologyCanvas({
       removing: 3,
     }
     const cableById = new Map(cables.map((c) => [c.id, c]))
-    const groupsPass1 = buildGroups()
+    const groupsPass1 = buildGroups(120, 40) // loose — 시각적 인접
     for (const grp of groupsPass1) {
       const sorted = grp
         .map((id) => cableById.get(id))
@@ -2094,12 +2096,31 @@ export default function TopologyCanvas({
     }
 
     // Pass 2: 재배정 후 잔여 overlap → 평행 이동. (재배정으로 분리된 그룹은 buildGroups 가 제외)
-    const groupsPass2 = buildGroups()
+    const groupsPass2 = buildGroups(20, 40) // strict — 실제 겹침
     for (const grp of groupsPass2) {
       const sorted = [...grp].sort()
       sorted.forEach((id, i) => {
         offsets.set(id, (i - (sorted.length - 1) / 2) * CABLE_SHIFT_GAP * 2)
       })
+    }
+
+    // 진단용 — 어떤 케이블이 어느 그룹에 묶이고 어떤 path idx 사용 중인지.
+    //   owner 디버그 시 F12 콘솔 열어서 확인. production 빌드에도 남김 (작은 로그).
+    if (typeof window !== 'undefined' && groupsPass1.length > 0) {
+      const sha = process.env.NEXT_PUBLIC_VERCEL_GIT_COMMIT_SHA?.slice(0, 7) ?? 'local'
+      const summary = groupsPass1.map((g) =>
+        g
+          .map((id) => {
+            const c = cableById.get(id)
+            if (!c) return id
+            const cand = rawCablePaths.get(id)?.candidates ?? []
+            const finalP = finalPaths.get(id)
+            const usedIdx = cand.findIndex((p) => p === finalP)
+            return `${c.cable_code}(${c.spec},${c.status},cands=${cand.length},used=${usedIdx})`
+          })
+          .join(' | '),
+      )
+      console.log(`[relocation:${sha}] Pass1 그룹:`, summary)
     }
 
     return { paths: finalPaths, offsets }
