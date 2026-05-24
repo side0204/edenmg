@@ -305,9 +305,12 @@ export default function SketchOverlay({
         const lines = t.text.split('\n')
         const maxLineLen = lines.reduce((m, l) => Math.max(m, l.length), 0)
         // 폭 — 한글 폭 ≈ fontSize × 1.0, 영문 ≈ 0.6. 안전치 0.85.
-        // 편집 시 최소 280 (Enter 안내 들어가는 여유), 표시 시 최소 40.
+        // 편집 시 최소 8자 (≈ 한글 8자 폭) + padding + X 버튼 자리.
+        // 글자수가 늘면 박스도 자동 확장 (onChange 가 라이브 갱신).
+        const MIN_EDIT_CHARS = 8
+        const minEditW = MIN_EDIT_CHARS * t.fontSize * 0.85 + 56
         const estW = isEditing
-          ? Math.max(280, maxLineLen * t.fontSize * 0.85 + 40)
+          ? Math.max(minEditW, maxLineLen * t.fontSize * 0.85 + 56)
           : Math.max(40, maxLineLen * t.fontSize * 0.85 + 24)
         // 높이 — 줄 수 × (fontSize × line-height 1.25) + padding
         const lineH = t.fontSize * 1.25
@@ -352,6 +355,7 @@ export default function SketchOverlay({
                     onFinish={(value) => finishEditingText(t.id, value)}
                   />
                   {/* 모바일 닫기 버튼 — blur 가 모바일에서 잘 안 먹어 명시 X 노출.
+                      박스 안쪽 우상단에 배치 (가장자리 박스도 화면 안에 보이게).
                       textarea 외 영역이라 onPointerDown 으로 blur 직전 finish 호출. */}
                   <button
                     type="button"
@@ -367,15 +371,15 @@ export default function SketchOverlay({
                     title="닫기 (Esc)"
                     style={{
                       position: 'absolute',
-                      top: -10,
-                      right: -10,
-                      width: 26,
-                      height: 26,
+                      top: 2,
+                      right: 2,
+                      width: 22,
+                      height: 22,
                       borderRadius: '50%',
                       background: 'white',
-                      border: `2px solid ${t.color}`,
+                      border: `1.5px solid ${t.color}`,
                       color: t.color,
-                      fontSize: 14,
+                      fontSize: 13,
                       fontWeight: 700,
                       lineHeight: 1,
                       cursor: 'pointer',
@@ -520,7 +524,7 @@ function SketchTextEditor({
         background: 'rgba(255,255,255,0.95)',
         border: `2px dashed ${color}`,
         borderRadius: 4,
-        padding: '4px 10px',
+        padding: '4px 32px 4px 10px',  // 우측 padding 으로 X 버튼 자리 확보
         outline: 'none',
         width: '100%',
         height: '100%',

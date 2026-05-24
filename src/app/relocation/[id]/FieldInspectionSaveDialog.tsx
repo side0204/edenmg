@@ -1,8 +1,8 @@
 'use client'
 
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { toast } from 'sonner'
-import { X, Save, Search, Camera, Loader2 } from 'lucide-react'
+import { X, Save, Search, Camera, Loader2, Upload } from 'lucide-react'
 import { saveFieldInspection } from './field-inspection-actions'
 import { formatFacilityCode, type ClosureType } from '@/lib/relocation'
 
@@ -77,7 +77,21 @@ export default function FieldInspectionSaveDialog({
   const [search, setSearch] = useState('')
   const [busy, setBusy] = useState(false)
   const [phase, setPhase] = useState<'idle' | 'capturing' | 'uploading'>('idle')
+  const [pickedFile, setPickedFile] = useState<File | null>(null)
   const runningRef = useRef(false)
+
+  // 모바일 (iOS/Android) — getDisplayMedia 미지원·권한 흐름 불안정 → 파일 첨부 우선.
+  const isMobile = useMemo(() => {
+    if (typeof navigator === 'undefined') return false
+    return /Android|iPhone|iPad|iPod|Mobile/i.test(navigator.userAgent)
+  }, [])
+  const supportsDisplayMedia = useMemo(() => {
+    if (typeof navigator === 'undefined') return false
+    return !!(
+      navigator.mediaDevices &&
+      typeof navigator.mediaDevices.getDisplayMedia === 'function'
+    )
+  }, [])
 
   // open 토글 시 reset
   useEffect(() => {
@@ -86,6 +100,7 @@ export default function FieldInspectionSaveDialog({
       setNote('')
       setSearch('')
       setPhase('idle')
+      setPickedFile(null)
     }
   }, [open, preselectedFacilityId])
 
@@ -106,10 +121,55 @@ export default function FieldInspectionSaveDialog({
     ? facilities.find((f) => f.id === selectedId) ?? null
     : null
 
+  // 파일 직접 업로드 — 모바일 스크린샷 첨부 흐름. getDisplayMedia 우회.
+  async function doUploadFile(file: File) {
+    if (runningRef.current) return
+    if (!selected) {
+      toast.error('저장할 시설을 선택하세요')
+      return
+    }
+    if (!file.type.startsWith('image/')) {
+      toast.error('이미지 파일만 첨부할 수 있습니다')
+      return
+    }
+    setBusy(true)
+    runningRef.current = true
+    setPhase('uploading')
+    try {
+      const fd = new FormData()
+      fd.append('project_id', projectId)
+      fd.append('facility_id', selected.id)
+      fd.append('note', note.trim())
+      fd.append('file', file)
+      const res = await saveFieldInspection(fd)
+      if (!res.ok) {
+        toast.error(res.error)
+        return
+      }
+      const facName = `${formatFacilityCode(selected.closure_type, selected.seq_no)} ${selected.name}`
+      toast.success(`「${facName}」에 실사 사진을 저장했습니다`)
+      onSaved?.(selected.id)
+      onClose()
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : String(e)
+      toast.error('실사 저장 실패: ' + msg)
+    } finally {
+      runningRef.current = false
+      setBusy(false)
+      setPhase('idle')
+    }
+  }
+
   async function doCaptureAndSave() {
     if (runningRef.current) return
     if (!selected) {
       toast.error('저장할 시설을 선택하세요')
+      return
+    }
+    if (!supportsDisplayMedia) {
+      toast.error(
+        '이 기기는 화면 자동 캡처를 지원하지 않습니다. 「사진 파일 첨부」 를 사용하세요',
+      )
       return
     }
     setBusy(true)
@@ -238,9 +298,15 @@ export default function FieldInspectionSaveDialog({
         </header>
 
         <div className="flex-1 min-h-0 overflow-y-auto px-3 py-2 space-y-2">
-          <p className="text-[11px] text-slate-500 leading-snug">
-            현재 캔버스를 캡처해 선택 시설에 첨부합니다. 「캡처 + 저장」 → 화면 공유 창에서 <b>현재 탭</b> 선택.
-          </p>
+          {isMobile || !supportsDisplayMedia ? (
+            <p className="text-[11px] text-amber-700 bg-amber-50 border border-amber-200 rounded p-1.5 leading-snug">
+              📱 모바일에서는 화면 자동 캡처가 동작하지 않아요. 휴대폰으로 <b>스크린샷을 찍어</b> 아래에서 사진을 선택해 주세요.
+            </p>
+          ) : (
+            <p className="text-[11px] text-slate-500 leading-snug">
+              현재 캔버스를 캡처해 시설에 첨부합니다. 「캡처 + 저장」 → 화면 공유 창에서 <b>현재 탭</b> 선택.
+            </p>
+          )}
 
           {/* 시설 선택 */}
           <div>
@@ -323,6 +389,33 @@ export default function FieldInspectionSaveDialog({
               className="w-full rounded-md border border-slate-300 px-3 py-1.5 text-sm focus:outline-none focus:border-slate-500"
             />
           </div>
+
+          {/* 사진 파일 첨부 — 모바일 스크린샷 / 갤러리 / 카메라 사진.
+              데스크탑에서도 사용 가능 (캡처 대신 미리 찍은 이미지 업로드). */}
+          <div>
+            <label className="block text-xs font-semibold text-slate-700 mb-1">
+              사진 파일 첨부{' '}
+              <span className="text-slate-400 font-normal">
+                {isMobile ? '(권장)' : '(선택)'}
+              </span>
+            </label>
+            <input
+              type="file"
+              accept="image/*"
+              onChange={(e) => {
+                const f = e.target.files?.[0] ?? null
+                setPickedFile(f)
+              }}
+              disabled={busy}
+              className="block w-full text-xs file:mr-2 file:rounded-md file:border-0 file:bg-slate-100 file:px-3 file:py-1.5 file:text-xs file:font-semibold file:text-slate-700 hover:file:bg-slate-200 disabled:opacity-40"
+            />
+            {pickedFile && (
+              <p className="mt-1 text-[10px] text-slate-600 truncate">
+                선택됨: {pickedFile.name} (
+                {(pickedFile.size / 1024).toFixed(0)}KB)
+              </p>
+            )}
+          </div>
         </div>
 
         <footer className="flex items-center justify-end gap-2 border-t border-slate-200 px-3 py-2 shrink-0">
@@ -336,14 +429,27 @@ export default function FieldInspectionSaveDialog({
           </button>
           <button
             type="button"
-            onClick={doCaptureAndSave}
-            disabled={!selected || busy}
+            onClick={() => {
+              if (pickedFile) {
+                void doUploadFile(pickedFile)
+              } else {
+                void doCaptureAndSave()
+              }
+            }}
+            disabled={
+              !selected || busy || (!pickedFile && !supportsDisplayMedia)
+            }
             className="inline-flex items-center gap-1.5 rounded-md bg-rose-600 px-3 h-8 text-xs font-semibold text-white hover:bg-rose-700 disabled:opacity-40"
           >
             {busy ? (
               <>
                 <Loader2 className="h-4 w-4 animate-spin" />
                 {phase === 'capturing' ? '캡처 중…' : '업로드 중…'}
+              </>
+            ) : pickedFile ? (
+              <>
+                <Upload className="h-4 w-4" />
+                업로드 + 저장
               </>
             ) : (
               <>
