@@ -1261,6 +1261,63 @@ export default function TopologyCanvas({
     }
   }
 
+  // 「케이블 거리 배율」 — 모든 시설 좌표를 중심 기준 배율로 확대·축소.
+  //   배율 1 = 변화 없음. 0.5 = 반으로 축소. 2 = 두 배 확대. 0.5~4 사이 9 단계.
+  //   시설 사이 거리만 변경 — 케이블 라우팅·도형 모양은 그대로 (자동 재라우팅).
+  const [scaling, setScaling] = useState(false)
+  const onScale = async (factor: number) => {
+    if (scaling) return
+    if (factor === 1) {
+      toast.info('배율 1배 — 변화 없음')
+      return
+    }
+    if (!confirm(`모든 시설 간 거리를 ${factor}배로 변경합니다. 계속하시겠습니까?`)) return
+    setScaling(true)
+    try {
+      // 시설 중심 평균 — 배율 기준점
+      let sumX = 0
+      let sumY = 0
+      let count = 0
+      for (const f of facilities) {
+        const p = effectivePositions[f.id]
+        if (!p) continue
+        sumX += p.x + NODE_SIZE.width / 2
+        sumY += p.y + NODE_SIZE.height / 2 - 10
+        count++
+      }
+      if (count === 0) {
+        toast.info('재배치할 시설이 없습니다')
+        return
+      }
+      const cx = sumX / count
+      const cy = sumY / count
+
+      const changes: { id: string; x: number; y: number }[] = []
+      for (const f of facilities) {
+        const p = effectivePositions[f.id]
+        if (!p) continue
+        const facCx = p.x + NODE_SIZE.width / 2
+        const facCy = p.y + NODE_SIZE.height / 2 - 10
+        const newCx = cx + (facCx - cx) * factor
+        const newCy = cy + (facCy - cy) * factor
+        changes.push({
+          id: f.id,
+          x: newCx - NODE_SIZE.width / 2,
+          y: newCy - NODE_SIZE.height / 2 + 10,
+        })
+      }
+      const res = await saveNodePositions(projectId, changes)
+      if (!res.ok) {
+        toast.error(res.error ?? '배율 변경 실패')
+        return
+      }
+      toast.success(`시설 거리 ${factor}배 변경 완료`)
+      router.refresh()
+    } finally {
+      setScaling(false)
+    }
+  }
+
   // 「케이블 정렬」 — 케이블 V/H/대각선(45°) 각도에 맞춰 시설 위치 자동 재배치.
   //   BFS-snap (cable-snap-layout.ts). 가장 연결 많은 시설(국사·허브) 을 root 로
   //   원래 위치 유지, 그로부터 인접 시설을 부모→자식 방향각에 가장 가까운 45° 로
@@ -2815,33 +2872,68 @@ export default function TopologyCanvas({
             </button>
           )}
 
-          {/* 케이블 정렬 — 케이블 V/H/45° 각도에 맞춰 시설 위치 자동 재배치 (도식 모드 전용) */}
+          {/* 케이블 정렬 dropdown — 도식 모드 전용. 세 가지 작업 묶음:
+                1. V/H/45° 정렬 (기존 케이블 정렬, BFS-snap)
+                2. 그래프 자동 배치 (케이블 그래프 기반 전체 재배치)
+                3. 케이블 거리 배율 (시설 사이 간격 일괄 확대·축소)
+              owner 요청 (2026-05-24): 케이블 작업 모두 한 메뉴에. */}
           {editable && mode === 'schematic' && (
-            <button
-              type="button"
-              onClick={onCableSnap}
-              disabled={snapping}
-              className="mr-1 inline-flex items-center gap-1 rounded-md border border-slate-300 bg-white px-2 h-7 text-[11px] font-medium text-slate-700 hover:bg-slate-50 disabled:opacity-60"
-              title="케이블이 수직/수평/45° 대각선으로 보이도록 시설 위치를 자동 재배치"
-            >
-              <Sparkles className="h-3 w-3" />
-              {snapping ? '정렬 중…' : '케이블 정렬'}
-            </button>
-          )}
-
-          {/* 그래프 자동 배치 — 케이블 그래프 기반 모든 시설 재배치 (도식 모드 전용).
-              owner 가 직접 만진 위치 다 덮어씀. 설계 초기 또는 전체 재정리용. */}
-          {editable && mode === 'schematic' && (
-            <button
-              type="button"
-              onClick={onGraphLayout}
-              disabled={graphLayouting}
-              className="mr-1 inline-flex items-center gap-1 rounded-md border border-violet-300 bg-violet-50 px-2 h-7 text-[11px] font-medium text-violet-700 hover:bg-violet-100 disabled:opacity-60"
-              title="허브 중심 + 연결된 시설끼리 가까이 — 케이블 그래프 기반 전체 재배치"
-            >
-              <Sparkles className="h-3 w-3" />
-              {graphLayouting ? '배치 중…' : '그래프 자동 배치'}
-            </button>
+            <details className="relative mr-1">
+              <summary
+                className="inline-flex items-center gap-1 rounded-md border border-slate-300 bg-white px-2 h-7 text-[11px] font-medium text-slate-700 hover:bg-slate-50 cursor-pointer list-none [&::-webkit-details-marker]:hidden"
+                title="케이블 정렬·자동 배치·거리 배율 메뉴"
+              >
+                <Sparkles className="h-3 w-3" />
+                {snapping || graphLayouting || scaling ? '처리 중…' : '케이블 정렬'}
+              </summary>
+              <div className="absolute right-0 top-full mt-1 z-30 w-60 rounded-md border border-slate-200 bg-white shadow-lg p-2 space-y-2 text-[11px]">
+                <button
+                  type="button"
+                  onClick={(e) => {
+                    onCableSnap()
+                    ;(e.currentTarget.closest('details') as HTMLDetailsElement | null)?.removeAttribute('open')
+                  }}
+                  disabled={snapping}
+                  className="w-full text-left px-2 py-1.5 rounded hover:bg-slate-50 disabled:opacity-60"
+                  title="케이블이 수직/수평/45° 대각선으로 보이도록 시설 위치를 자동 재배치"
+                >
+                  <span className="font-medium text-slate-700">V/H/45° 정렬</span>
+                  <span className="block text-[10px] text-slate-500 mt-0.5">케이블이 직각·45° 로 보이도록 시설 snap</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={(e) => {
+                    onGraphLayout()
+                    ;(e.currentTarget.closest('details') as HTMLDetailsElement | null)?.removeAttribute('open')
+                  }}
+                  disabled={graphLayouting}
+                  className="w-full text-left px-2 py-1.5 rounded text-violet-700 bg-violet-50 hover:bg-violet-100 disabled:opacity-60"
+                  title="허브 중심 + 연결된 시설끼리 가까이 — 케이블 그래프 기반 전체 재배치"
+                >
+                  <span className="font-medium">그래프 자동 배치</span>
+                  <span className="block text-[10px] text-violet-600 mt-0.5">허브 중심 동심원 — 모든 시설 강제 재배치</span>
+                </button>
+                <div className="border-t pt-2">
+                  <div className="text-[10px] text-slate-500 mb-1 px-1">케이블 거리 배율</div>
+                  <div className="grid grid-cols-3 gap-1">
+                    {[0.5, 0.75, 1, 1.5, 2, 2.5, 3, 3.5, 4].map((s) => (
+                      <button
+                        key={s}
+                        type="button"
+                        onClick={(e) => {
+                          onScale(s)
+                          ;(e.currentTarget.closest('details') as HTMLDetailsElement | null)?.removeAttribute('open')
+                        }}
+                        disabled={scaling}
+                        className="px-2 py-1 rounded border border-slate-200 hover:bg-slate-50 text-slate-700 font-mono disabled:opacity-60"
+                      >
+                        ×{s}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              </div>
+            </details>
           )}
 
           {/* 검색창 보임/숨김 — 지도 모드에서만 (검색은 지도 기능) */}
