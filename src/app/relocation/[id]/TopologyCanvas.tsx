@@ -29,6 +29,7 @@ import {
   Trash2,
   Undo2,
   Pencil,
+  Type,
 } from 'lucide-react'
 import {
   CABLE_SPEC_VALUES,
@@ -838,6 +839,11 @@ export default function TopologyCanvas({
   const [sketchStrokes, setSketchStrokes] = useState<
     import('./SketchOverlay').SketchStroke[]
   >([])
+  // 텍스트 박스 — 캔버스 위 메모. 색은 펜 공유, 크기는 펜 굵기×6 (overlay 안 매핑).
+  const [sketchTexts, setSketchTexts] = useState<
+    import('./SketchOverlay').SketchText[]
+  >([])
+  const [sketchTool, setSketchTool] = useState<import('./SketchOverlay').SketchTool>('pen')
   const [sketchPen, setSketchPen] = useState<import('./SketchOverlay').SketchPen>({
     color: '#ef4444', // rose-500
     width: 3,
@@ -3420,9 +3426,9 @@ export default function TopologyCanvas({
             >
               <Pencil className="h-3 w-3" />
               실사
-              {sketchMode && sketchStrokes.length > 0 && (
+              {sketchMode && sketchStrokes.length + sketchTexts.length > 0 && (
                 <span className="ml-0.5 rounded bg-white px-1 text-[9px] font-semibold text-rose-700">
-                  {sketchStrokes.length}
+                  {sketchStrokes.length + sketchTexts.length}
                 </span>
               )}
             </button>
@@ -5234,12 +5240,16 @@ export default function TopologyCanvas({
 
         {/* 실사 그리기 오버레이 — 캔버스 영역(사이드바+지도+우측패널) 전체를 덮음.
             sketchMode 일 때 pointer 캡처 → 영역 구분 없이 한 그림판처럼 그리기.
+            도구: pen(자유 그리기) / text(클릭 위치 텍스트 박스).
             좌표는 화면 픽셀. sketchMode 활성 동안 지도 pan/zoom 잠금. */}
         <SketchOverlay
           enabled={sketchMode}
+          tool={sketchTool}
           pen={sketchPen}
           strokes={sketchStrokes}
           onStrokesChange={setSketchStrokes}
+          texts={sketchTexts}
+          onTextsChange={setSketchTexts}
           coords="pixel"
         />
 
@@ -5250,6 +5260,38 @@ export default function TopologyCanvas({
             className="absolute bottom-3 left-1/2 -translate-x-1/2 z-50 flex flex-wrap items-center justify-center gap-1 rounded-2xl border border-slate-200 bg-white px-2 py-1.5 shadow-lg"
             style={{ pointerEvents: 'auto', maxWidth: 'calc(100vw - 1rem)' }}
           >
+            {/* 도구 — 펜(자유 그리기) / T(텍스트 박스) */}
+            <div className="flex items-center gap-1">
+              <button
+                type="button"
+                onClick={() => setSketchTool('pen')}
+                className={
+                  'inline-flex h-7 w-7 shrink-0 items-center justify-center rounded-md border ' +
+                  (sketchTool === 'pen'
+                    ? 'bg-slate-900 border-slate-900 text-white'
+                    : 'bg-white border-slate-300 text-slate-700 hover:bg-slate-50')
+                }
+                title="펜 — 자유 그리기"
+                aria-label="펜"
+              >
+                <Pencil className="h-3.5 w-3.5" />
+              </button>
+              <button
+                type="button"
+                onClick={() => setSketchTool('text')}
+                className={
+                  'inline-flex h-7 w-7 shrink-0 items-center justify-center rounded-md border ' +
+                  (sketchTool === 'text'
+                    ? 'bg-slate-900 border-slate-900 text-white'
+                    : 'bg-white border-slate-300 text-slate-700 hover:bg-slate-50')
+                }
+                title="텍스트 — 클릭한 위치에 글자 입력"
+                aria-label="텍스트"
+              >
+                <Type className="h-3.5 w-3.5" />
+              </button>
+            </div>
+            <span className="mx-1 h-5 w-px bg-slate-200" />
             <div className="flex items-center gap-1">
               {['#ef4444', '#000000', '#2563eb', '#16a34a', '#eab308'].map((c) => (
                 <button
@@ -5279,7 +5321,11 @@ export default function TopologyCanvas({
                       ? 'bg-slate-900 border-slate-900 text-white'
                       : 'bg-white border-slate-300 text-slate-700 hover:bg-slate-50')
                   }
-                  title={`굵기 ${w}px`}
+                  title={
+                    sketchTool === 'text'
+                      ? `글자 크기 ${w * 6}px`
+                      : `굵기 ${w}px`
+                  }
                   aria-label={`굵기 ${w}px`}
                 >
                   <span
@@ -5293,10 +5339,19 @@ export default function TopologyCanvas({
             <div className="flex items-center gap-1">
               <button
                 type="button"
-                onClick={() => setSketchStrokes((s) => s.slice(0, -1))}
-                disabled={sketchStrokes.length === 0}
+                onClick={() => {
+                  // 가장 최근에 추가한 항목 1개 되돌리기 (선/텍스트 둘 다 비교)
+                  const lastS = sketchStrokes[sketchStrokes.length - 1]
+                  const lastT = sketchTexts[sketchTexts.length - 1]
+                  if (!lastS && !lastT) return
+                  const tsS = lastS ? Number(lastS.id.split('-')[1]) : 0
+                  const tsT = lastT ? Number(lastT.id.split('-')[1]) : 0
+                  if (tsS >= tsT) setSketchStrokes((s) => s.slice(0, -1))
+                  else setSketchTexts((t) => t.slice(0, -1))
+                }}
+                disabled={sketchStrokes.length === 0 && sketchTexts.length === 0}
                 className="inline-flex items-center gap-1 rounded-md border border-slate-300 px-2 h-7 text-[11px] font-medium text-slate-700 hover:bg-slate-50 disabled:opacity-40"
-                title="마지막 선 되돌리기"
+                title="마지막 항목 되돌리기"
               >
                 <Undo2 className="h-3 w-3" />
                 되돌리기
@@ -5304,11 +5359,12 @@ export default function TopologyCanvas({
               <button
                 type="button"
                 onClick={() => {
-                  if (sketchStrokes.length === 0) return
-                  if (!confirm('실사 그림을 모두 지웁니다. 계속하시겠습니까?')) return
+                  if (sketchStrokes.length === 0 && sketchTexts.length === 0) return
+                  if (!confirm('실사 그림·텍스트를 모두 지웁니다. 계속하시겠습니까?')) return
                   setSketchStrokes([])
+                  setSketchTexts([])
                 }}
-                disabled={sketchStrokes.length === 0}
+                disabled={sketchStrokes.length === 0 && sketchTexts.length === 0}
                 className="inline-flex items-center gap-1 rounded-md border border-rose-300 px-2 h-7 text-[11px] font-medium text-rose-700 hover:bg-rose-50 disabled:opacity-40"
                 title="전체 지우기"
               >

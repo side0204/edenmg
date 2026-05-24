@@ -2,18 +2,15 @@
 
 import { useCallback, useEffect, useRef, useState } from 'react'
 
-// 실사(sketch) 오버레이 — 캔버스/지도 위 그림판처럼 펜으로 자유롭게 그림.
-//   지도 모드: 점은 GPS 좌표로 저장 → pan/zoom 시 자동 재투영 (지도와 함께 이동).
-//   거리뷰 모드: 점은 화면 픽셀로 저장 → panorama 가 움직여도 그림은 그 자리 (메모용).
+// 실사(sketch) 오버레이 — 캔버스/지도 위 그림판처럼 펜으로 자유롭게 그리거나
+//   텍스트 박스를 추가. 도구는 tool prop 으로 분기 (pen/text).
 //
+// 좌표는 항상 화면 픽셀 (캔버스 컨테이너 내부 기준). 지도 pan/zoom 잠금 중에만 사용.
 // 휘발 — 페이지 새로고침/이동 시 사라짐. 저장은 별도 「화면 저장」 기능 (Phase 2).
-//
-// 그리기 ON 시 부모가 지도 pan/zoom 을 setDraggable(false)/setZoomable(false) 로 잠가야 함.
 
 export type SketchPoint =
-  // 지도 모드 — GPS 좌표 (lat/lng). 화면 좌표는 매 렌더 시 투영으로 계산.
+  // 지도 모드 (legacy) — GPS 좌표. 현재는 'pixel' 단일 모드.
   | { kind: 'gps'; lat: number; lng: number }
-  // 거리뷰 모드 — 컨테이너 내부 픽셀 좌표 (panorama 자체 좌표계 없음).
   | { kind: 'pixel'; x: number; y: number }
 
 export type SketchStroke = {
@@ -23,24 +20,39 @@ export type SketchStroke = {
   points: SketchPoint[]
 }
 
+// 텍스트 박스 — 캔버스 위 한 줄 텍스트 (multi-line 은 박스 여러 개로).
+//   색은 펜 색 공유, fontSize 는 펜 굵기 × 6 매핑.
+export type SketchText = {
+  id: string
+  x: number  // 컨테이너 픽셀 (좌상단 anchor)
+  y: number
+  color: string
+  fontSize: number  // px
+  text: string
+}
+
 export type SketchPen = {
   color: string
   width: number
 }
 
+export type SketchTool = 'pen' | 'text'
+
 type Props = {
-  // 그리기 활성 여부 — false 면 그려진 stroke 만 표시 (입력 비활성, pointer-events:none)
+  // 그리기 활성 여부 — false 면 그려진 항목만 표시 (pointer-events:none)
   enabled: boolean
-  // 펜 설정
+  // 도구 — 'pen' (자유 그리기) / 'text' (클릭 위치에 텍스트 박스)
+  tool: SketchTool
+  // 펜 설정 (색 + 굵기). 텍스트 박스도 같은 색 사용, fontSize 는 width×6.
   pen: SketchPen
-  // strokes 상태 (controlled)
+  // strokes / texts 상태 (controlled)
   strokes: SketchStroke[]
   onStrokesChange: (next: SketchStroke[]) => void
-  // 좌표 변환 모드:
-  //   - 'gps' 면 kakaoMap 필수 (containerPointFromCoords / coordsFromContainerPoint 사용)
-  //   - 'pixel' 이면 그대로 컨테이너 픽셀 좌표 사용
+  texts: SketchText[]
+  onTextsChange: (next: SketchText[]) => void
+  // 좌표 변환 모드 — 'pixel' 만 지원 (legacy 'gps' 는 단일 표면 통합으로 폐기)
   coords: 'gps' | 'pixel'
-  // 지도 모드용 — 카카오맵 인스턴스 + epoch (pan/zoom 시 재투영 트리거)
+  // legacy — 지도 모드용. coords='gps' 일 때만 사용.
   kakaoMap?: kakao.maps.Map | null
   mapEpoch?: number
 }
@@ -50,21 +62,36 @@ function nextStrokeId(): string {
   __strokeSeq += 1
   return `s-${Date.now()}-${__strokeSeq}`
 }
+let __textSeq = 0
+function nextTextId(): string {
+  __textSeq += 1
+  return `t-${Date.now()}-${__textSeq}`
+}
+
+// 펜 굵기 → 텍스트 폰트 크기 매핑
+function widthToFontSize(w: number): number {
+  return Math.max(12, w * 6)
+}
 
 export default function SketchOverlay({
   enabled,
+  tool,
   pen,
   strokes,
   onStrokesChange,
+  texts,
+  onTextsChange,
   coords,
   kakaoMap,
   mapEpoch,
 }: Props) {
   const svgRef = useRef<SVGSVGElement | null>(null)
   const drawingRef = useRef<SketchStroke | null>(null)
-  // 현재 그리는 중인 stroke — 상태로도 가져야 polyline 이 즉시 보임
   const [drawing, setDrawing] = useState<SketchStroke | null>(null)
-  // 컨테이너 내부 픽셀 좌표로 변환 — SVG getBoundingClientRect 기준
+  // 편집 중인 텍스트 박스 id — null 이면 모두 표시 전용
+  const [editingTextId, setEditingTextId] = useState<string | null>(null)
+
+  // 컨테이너 내부 픽셀 좌표로 변환
   const toLocalPx = useCallback(
     (clientX: number, clientY: number): { x: number; y: number } | null => {
       const svg = svgRef.current
@@ -75,7 +102,6 @@ export default function SketchOverlay({
     [],
   )
 
-  // 픽셀 → SketchPoint 변환 (모드에 맞춰)
   const pxToPoint = useCallback(
     (px: { x: number; y: number }): SketchPoint | null => {
       if (coords === 'pixel') return { kind: 'pixel', x: px.x, y: px.y }
@@ -93,7 +119,6 @@ export default function SketchOverlay({
     [coords, kakaoMap],
   )
 
-  // SketchPoint → 현재 화면 픽셀 (렌더용)
   const pointToPx = useCallback(
     (p: SketchPoint): { x: number; y: number } | null => {
       if (p.kind === 'pixel') return { x: p.x, y: p.y }
@@ -111,16 +136,31 @@ export default function SketchOverlay({
     [kakaoMap],
   )
 
-  // mapEpoch 가 바뀌면 (지도 pan/zoom) 강제 리렌더 — 좌표 재투영
-  // pointToPx 는 매 렌더마다 호출되므로 별도 effect 불필요. 단지 의존성으로 충분.
   useEffect(() => {
-    // 의도적 빈 effect — mapEpoch 가 deps 에 있어 변경 시 리렌더 트리거
+    /* mapEpoch 변경 시 리렌더 */
   }, [mapEpoch])
 
-  // 그리기 시작
+  // 그리기 시작 (pen 도구)
   const onPointerDown = (e: React.PointerEvent<SVGSVGElement>) => {
     if (!enabled) return
-    if (e.button !== 0 && e.pointerType === 'mouse') return // 마우스는 좌클릭만
+    if (e.button !== 0 && e.pointerType === 'mouse') return
+    // text 도구 — 클릭 위치에 새 텍스트 박스 추가 + 즉시 편집 모드
+    if (tool === 'text') {
+      const px = toLocalPx(e.clientX, e.clientY)
+      if (!px) return
+      const t: SketchText = {
+        id: nextTextId(),
+        x: px.x,
+        y: px.y,
+        color: pen.color,
+        fontSize: widthToFontSize(pen.width),
+        text: '',
+      }
+      onTextsChange([...texts, t])
+      setEditingTextId(t.id)
+      return
+    }
+    // pen 도구 — stroke 시작
     const px = toLocalPx(e.clientX, e.clientY)
     if (!px) return
     const pt = pxToPoint(px)
@@ -138,22 +178,21 @@ export default function SketchOverlay({
 
   const onPointerMove = (e: React.PointerEvent<SVGSVGElement>) => {
     if (!enabled) return
+    if (tool !== 'pen') return
     const cur = drawingRef.current
     if (!cur) return
     const px = toLocalPx(e.clientX, e.clientY)
     if (!px) return
     const pt = pxToPoint(px)
     if (!pt) return
-    // 너무 조밀한 점은 건너뜀 (성능 + 매끈한 선)
     const last = cur.points[cur.points.length - 1]
     const lastPx = pointToPx(last)
     if (lastPx) {
       const dx = px.x - lastPx.x
       const dy = px.y - lastPx.y
-      if (dx * dx + dy * dy < 4) return // 2px 안은 무시
+      if (dx * dx + dy * dy < 4) return
     }
     cur.points.push(pt)
-    // shallow copy 로 리렌더 트리거
     setDrawing({ ...cur, points: cur.points.slice() })
   }
 
@@ -161,7 +200,6 @@ export default function SketchOverlay({
     const cur = drawingRef.current
     if (!cur) return
     drawingRef.current = null
-    // 점 1개뿐이면 (탭만 한 경우) dot 으로 보이게 — 그대로 push
     onStrokesChange([...strokes, cur])
     setDrawing(null)
   }
@@ -174,7 +212,6 @@ export default function SketchOverlay({
       .filter((p): p is { x: number; y: number } => p !== null)
     if (screenPts.length === 0) return ''
     if (screenPts.length === 1) {
-      // 단일 점 — 작은 원
       const p = screenPts[0]
       return `M ${p.x} ${p.y} l 0.01 0`
     }
@@ -187,17 +224,24 @@ export default function SketchOverlay({
     return d
   }
 
+  // 텍스트 박스 편집 마무리 — 빈 문자열이면 삭제
+  const finishEditingText = (id: string, value: string) => {
+    const trimmed = value.replace(/\s+$/, '')
+    if (trimmed.length === 0) {
+      onTextsChange(texts.filter((t) => t.id !== id))
+    } else {
+      onTextsChange(texts.map((t) => (t.id === id ? { ...t, text: trimmed } : t)))
+    }
+    setEditingTextId(null)
+  }
+
   return (
     <svg
       ref={svgRef}
       className="absolute inset-0 w-full h-full"
       style={{
-        // 그리기 활성 시만 pointer 캡처 — 그 외엔 통과 (지도·시설 클릭 가능)
         pointerEvents: enabled ? 'auto' : 'none',
-        // 그리기 모드 커서 = 십자
-        cursor: enabled ? 'crosshair' : 'default',
-        // 모든 패널·시설·케이블 위 — sketchMode 활성 시만 pointer 캡처.
-        //   비활성 시는 pointer-events:none 으로 통과해서 패널 클릭 가능.
+        cursor: enabled ? (tool === 'text' ? 'text' : 'crosshair') : 'default',
         zIndex: 45,
         touchAction: enabled ? 'none' : 'auto',
       }}
@@ -229,6 +273,99 @@ export default function SketchOverlay({
           style={{ pointerEvents: 'none' }}
         />
       )}
+      {/* 텍스트 박스 — SVG 안 HTML (foreignObject). 편집 중인 박스는 input, 그 외엔 정적 표시. */}
+      {texts.map((t) => {
+        const isEditing = editingTextId === t.id
+        // 박스 크기 — 글자 폭 추정 (대충 fontSize × text length × 0.6) + padding.
+        // 빈 박스는 최소 폭 120.
+        const estW = Math.max(120, t.text.length * t.fontSize * 0.65 + 24)
+        const h = t.fontSize + 16
+        return (
+          <foreignObject
+            key={t.id}
+            x={t.x}
+            y={t.y}
+            width={estW}
+            height={h}
+            style={{ overflow: 'visible', pointerEvents: enabled ? 'auto' : 'none' }}
+          >
+            <div
+              style={{
+                fontFamily:
+                  'Pretendard, -apple-system, BlinkMacSystemFont, system-ui, sans-serif',
+                fontSize: t.fontSize,
+                color: t.color,
+                fontWeight: 600,
+                lineHeight: 1,
+                userSelect: isEditing ? 'text' : 'none',
+                pointerEvents: enabled ? 'auto' : 'none',
+              }}
+            >
+              {isEditing ? (
+                <input
+                  type="text"
+                  defaultValue={t.text}
+                  autoFocus
+                  onFocus={(e) => e.currentTarget.select()}
+                  onBlur={(e) => finishEditingText(t.id, e.currentTarget.value)}
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter') {
+                      e.preventDefault()
+                      ;(e.currentTarget as HTMLInputElement).blur()
+                    }
+                    if (e.key === 'Escape') {
+                      e.preventDefault()
+                      ;(e.currentTarget as HTMLInputElement).blur()
+                    }
+                    e.stopPropagation()
+                  }}
+                  onPointerDown={(e) => e.stopPropagation()}
+                  style={{
+                    fontFamily: 'inherit',
+                    fontSize: 'inherit',
+                    color: 'inherit',
+                    fontWeight: 'inherit',
+                    background: 'rgba(255,255,255,0.85)',
+                    border: `1.5px dashed ${t.color}`,
+                    borderRadius: 4,
+                    padding: '4px 8px',
+                    outline: 'none',
+                    minWidth: 100,
+                    width: '100%',
+                    boxSizing: 'border-box',
+                  }}
+                />
+              ) : (
+                <div
+                  onPointerDown={(e) => {
+                    if (!enabled) return
+                    e.stopPropagation()
+                    setEditingTextId(t.id)
+                  }}
+                  onContextMenu={(e) => {
+                    if (!enabled) return
+                    e.preventDefault()
+                    if (confirm(`텍스트 "${t.text}" 를 삭제하시겠습니까?`)) {
+                      onTextsChange(texts.filter((x) => x.id !== t.id))
+                    }
+                  }}
+                  title={enabled ? '클릭 = 편집, 우클릭 = 삭제' : undefined}
+                  style={{
+                    display: 'inline-block',
+                    background: 'rgba(255,255,255,0.7)',
+                    padding: '4px 8px',
+                    borderRadius: 4,
+                    cursor: enabled ? 'pointer' : 'default',
+                    whiteSpace: 'nowrap',
+                  }}
+                >
+                  {t.text}
+                </div>
+              )}
+            </div>
+          </foreignObject>
+        )
+      })}
     </svg>
   )
 }
