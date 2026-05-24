@@ -2116,21 +2116,14 @@ export default function TopologyCanvas({
             const cand = rawCablePaths.get(id)?.candidates ?? []
             const finalP = finalPaths.get(id)
             const usedIdx = cand.findIndex((p) => p === finalP)
-            return `${c.cable_code}(${c.spec},${c.status},cands=${cand.length},used=${usedIdx})`
+            const pts = finalP?.length ?? 0
+            const coords =
+              finalP?.map((p) => `(${p.x.toFixed(0)},${p.y.toFixed(0)})`).join('→') ?? ''
+            return `${c.cable_code}(${c.spec},cands=${cand.length},used=${usedIdx},pts=${pts}) ${coords}`
           })
-          .join(' | '),
+          .join('  ||  '),
       )
       console.log(`[relocation:${sha}] Pass1 그룹:`, summary)
-      // 진단 — T-4TLR 의 최종 좌표 출력 (직선이면 2점, ㄷ자면 4점)
-      for (const c of cables) {
-        if (c.cable_code === 'T-4TLR') {
-          const path = finalPaths.get(c.id)
-          console.log(
-            `[T-4TLR final path] points=${path?.length}`,
-            path?.map((p) => `(${p.x.toFixed(0)},${p.y.toFixed(0)})`).join(' → '),
-          )
-        }
-      }
     }
 
     return { paths: finalPaths, offsets }
