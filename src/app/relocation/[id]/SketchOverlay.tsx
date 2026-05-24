@@ -196,8 +196,9 @@ export default function SketchOverlay({
         pointerEvents: enabled ? 'auto' : 'none',
         // 그리기 모드 커서 = 십자
         cursor: enabled ? 'crosshair' : 'default',
-        // 시설·케이블보다 위, 정보 패널보다 아래
-        zIndex: 25,
+        // 모든 패널·시설·케이블 위 — sketchMode 활성 시만 pointer 캡처.
+        //   비활성 시는 pointer-events:none 으로 통과해서 패널 클릭 가능.
+        zIndex: 45,
         touchAction: enabled ? 'none' : 'auto',
       }}
       onPointerDown={onPointerDown}
