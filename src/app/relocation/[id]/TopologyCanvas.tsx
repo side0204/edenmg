@@ -2226,7 +2226,14 @@ export default function TopologyCanvas({
       const nx = -overallDy / len
       const ny = overallDx / len
 
-      return trimmed.map((p) => ({ x: p.x + nx * offset, y: p.y + ny * offset }))
+      // 평행 이동 시 첫·끝점은 시설 도형 가장자리 유지, 중간 점만 평행 이동.
+      //   (2026-05-24) 전체 평행 이동 시 케이블 시작·종료가 시설 도형에서 offset 만큼
+      //   떨어져 보임 → 첫·끝 segment 가 살짝 꺾여 시설 도형까지 자연히 연결되도록.
+      if (trimmed.length === 2) return trimmed // 끝점 두 개뿐이면 평행 이동 안 함
+      const offsetMid = trimmed
+        .slice(1, -1)
+        .map((p) => ({ x: p.x + nx * offset, y: p.y + ny * offset }))
+      return [trimmed[0], ...offsetMid, trimmed[trimmed.length - 1]]
     },
     [pathsWithOverlap, cableOffsets, facilities],
   )
