@@ -2325,11 +2325,15 @@ export default function TopologyCanvas({
       //   가려짐 → 도형과 케이블 사이 빈 공간 보임. 도형 가장자리에서 시작·도착하면
       //   마커·라벨이 도형 안에 있고 케이블은 도형 밖에서 도형 외곽에 직접 닿음.
       //   FacilityShape 의 도형별 반경에 -1 (시각적으로 살짝 잠겨야 도형이 케이블 끝점을 가려 닿아 보임).
+      // 지도 모드는 trim 안 함 (2026-05-24 owner 보고):
+      //   지도 모드에서는 시설 마커가 작고 줌과 함께 축소돼서 trim 만큼이 큰 비율로 보임 →
+      //   케이블이 시설과 떨어져 보임. owner 가 기존(중심 직접 연결) 동작을 원함.
       const fromF = facilities.find((f) => f.id === c.from_facility_id)
       const toF = facilities.find((f) => f.id === c.to_facility_id)
-      const fromR = facilityEdgeRadius(fromF?.closure_type)
-      const toR = facilityEdgeRadius(toF?.closure_type)
+      const fromR = mode === 'map' ? 0 : facilityEdgeRadius(fromF?.closure_type)
+      const toR = mode === 'map' ? 0 : facilityEdgeRadius(toF?.closure_type)
       const trimEdge = (start: Waypoint, next: Waypoint, radius: number): Waypoint => {
+        if (radius === 0) return start
         const dx = next.x - start.x
         const dy = next.y - start.y
         const d = Math.hypot(dx, dy)
@@ -2363,7 +2367,7 @@ export default function TopologyCanvas({
         .map((p) => ({ x: p.x + nx * offset, y: p.y + ny * offset }))
       return [trimmed[0], ...offsetMid, trimmed[trimmed.length - 1]]
     },
-    [pathsWithOverlap, cableOffsets, facilities],
+    [pathsWithOverlap, cableOffsets, facilities, mode],
   )
 
   // 경로점의 화면 좌표 — 도식: x/y · 지도: lat/lng 투영 (없으면 null)
