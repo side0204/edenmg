@@ -25,6 +25,7 @@ type Props = {
   // 실사 그리기 — sketchMode true 면 panorama 위에 펜 캡처. 좌표는 패널 픽셀 고정.
   sketchMode: boolean
   sketchPen: SketchPen
+  onSketchPenChange: (next: SketchPen) => void
   strokes: SketchStroke[]
   onStrokesChange: (next: SketchStroke[]) => void
 }
@@ -41,6 +42,7 @@ export default function RoadviewPanel({
   onToggleCollapse,
   sketchMode,
   sketchPen,
+  onSketchPenChange,
   strokes,
   onStrokesChange,
 }: Props) {
@@ -200,33 +202,79 @@ export default function RoadviewPanel({
           onStrokesChange={onStrokesChange}
           coords="pixel"
         />
-        {/* 실사 도구 (거리뷰 안 인라인) — 색·굵기는 상위 toolbar 공유. 되돌리기·전체 지우기만 노출. */}
+        {/* 실사 도구 (거리뷰 안 인라인) — 거리뷰 패널이 우측을 차지해 메인 도구바가
+            가려지므로 자체 완비. 좁은 폭에 flex-wrap 으로 2~3 줄 자동 줄바꿈. */}
         {sketchMode && (
-          <div className="absolute bottom-2 left-1/2 -translate-x-1/2 z-50 flex items-center gap-1 rounded-full border border-slate-200 bg-white px-2 py-1 shadow-lg">
-            <button
-              type="button"
-              onClick={() => onStrokesChange(strokes.slice(0, -1))}
-              disabled={strokes.length === 0}
-              className="inline-flex items-center gap-1 rounded-md border border-slate-200 px-2 h-7 text-[11px] font-medium text-slate-700 hover:bg-slate-50 disabled:opacity-40"
-              title="마지막 선 되돌리기"
-            >
-              <Undo2 className="h-3 w-3" />
-              되돌리기
-            </button>
-            <button
-              type="button"
-              onClick={() => {
-                if (strokes.length === 0) return
-                if (!confirm('거리뷰 실사 그림을 모두 지웁니다. 계속하시겠습니까?')) return
-                onStrokesChange([])
-              }}
-              disabled={strokes.length === 0}
-              className="inline-flex items-center gap-1 rounded-md border border-rose-200 px-2 h-7 text-[11px] font-medium text-rose-700 hover:bg-rose-50 disabled:opacity-40"
-              title="전체 지우기"
-            >
-              <Trash2 className="h-3 w-3" />
-              지우기
-            </button>
+          <div
+            className="absolute bottom-2 left-1/2 -translate-x-1/2 z-50 flex flex-wrap items-center justify-center gap-1 rounded-2xl border border-slate-200 bg-white px-2 py-1.5 shadow-lg"
+            style={{ maxWidth: 'calc(100% - 1rem)' }}
+          >
+            <div className="flex items-center gap-1">
+              {['#ef4444', '#000000', '#2563eb', '#16a34a', '#eab308'].map((c) => (
+                <button
+                  key={c}
+                  type="button"
+                  onClick={() => onSketchPenChange({ ...sketchPen, color: c })}
+                  className={
+                    'inline-block h-6 w-6 shrink-0 rounded-full border-2 ' +
+                    (sketchPen.color === c ? 'border-slate-900' : 'border-slate-300')
+                  }
+                  style={{ backgroundColor: c }}
+                  title={`색 ${c}`}
+                  aria-label={`색 ${c}`}
+                />
+              ))}
+            </div>
+            <span className="mx-1 h-5 w-px bg-slate-200" />
+            <div className="flex items-center gap-1">
+              {[2, 3, 5, 8].map((w) => (
+                <button
+                  key={w}
+                  type="button"
+                  onClick={() => onSketchPenChange({ ...sketchPen, width: w })}
+                  className={
+                    'inline-flex h-7 w-7 shrink-0 items-center justify-center rounded-md border ' +
+                    (sketchPen.width === w
+                      ? 'bg-slate-900 border-slate-900 text-white'
+                      : 'bg-white border-slate-300 text-slate-700 hover:bg-slate-50')
+                  }
+                  title={`굵기 ${w}px`}
+                  aria-label={`굵기 ${w}px`}
+                >
+                  <span
+                    className="inline-block rounded-full bg-current"
+                    style={{ width: w, height: w }}
+                  />
+                </button>
+              ))}
+            </div>
+            <span className="mx-1 h-5 w-px bg-slate-200" />
+            <div className="flex items-center gap-1">
+              <button
+                type="button"
+                onClick={() => onStrokesChange(strokes.slice(0, -1))}
+                disabled={strokes.length === 0}
+                className="inline-flex items-center gap-1 rounded-md border border-slate-300 px-2 h-7 text-[11px] font-medium text-slate-700 hover:bg-slate-50 disabled:opacity-40"
+                title="마지막 선 되돌리기"
+              >
+                <Undo2 className="h-3 w-3" />
+                되돌리기
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  if (strokes.length === 0) return
+                  if (!confirm('거리뷰 실사 그림을 모두 지웁니다. 계속하시겠습니까?')) return
+                  onStrokesChange([])
+                }}
+                disabled={strokes.length === 0}
+                className="inline-flex items-center gap-1 rounded-md border border-rose-300 px-2 h-7 text-[11px] font-medium text-rose-700 hover:bg-rose-50 disabled:opacity-40"
+                title="전체 지우기"
+              >
+                <Trash2 className="h-3 w-3" />
+                지우기
+              </button>
+            </div>
           </div>
         )}
       </div>

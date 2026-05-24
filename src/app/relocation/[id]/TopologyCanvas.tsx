@@ -5082,81 +5082,91 @@ export default function TopologyCanvas({
             />
           )}
 
-          {/* 실사 도구 바 — sketchMode ON 시 캔버스 하단 중앙 floating */}
+          {/* 실사 도구 바 — sketchMode ON 시 캔버스 하단 중앙 floating.
+              flex-wrap 으로 좁은 화면에서는 색/굵기/액션이 자동 줄바꿈 (모바일 대응).
+              max-w 로 화면 밖 잘림 방지. z-50 (지도 capture 가이드보다 위). */}
           {mode === 'map' && sketchMode && (
             <div
-              className="absolute bottom-3 left-1/2 -translate-x-1/2 z-40 flex items-center gap-1 rounded-full border border-slate-200 bg-white px-2 py-1.5 shadow-lg"
-              style={{ pointerEvents: 'auto' }}
+              className="absolute bottom-3 left-1/2 -translate-x-1/2 z-50 flex flex-wrap items-center justify-center gap-1 rounded-2xl border border-slate-200 bg-white px-2 py-1.5 shadow-lg"
+              style={{ pointerEvents: 'auto', maxWidth: 'calc(100vw - 1rem)' }}
             >
-              {/* 색 */}
-              {['#ef4444', '#000000', '#2563eb', '#16a34a', '#eab308'].map((c) => (
-                <button
-                  key={c}
-                  type="button"
-                  onClick={() => setSketchPen((p) => ({ ...p, color: c }))}
-                  className={
-                    'h-6 w-6 rounded-full border-2 ' +
-                    (sketchPen.color === c ? 'border-slate-900' : 'border-slate-200')
-                  }
-                  style={{ backgroundColor: c }}
-                  title={`색 ${c}`}
-                />
-              ))}
-              <span className="mx-1 h-5 w-px bg-slate-200" />
-              {/* 굵기 */}
-              {[2, 3, 5, 8].map((w) => (
-                <button
-                  key={w}
-                  type="button"
-                  onClick={() => setSketchPen((p) => ({ ...p, width: w }))}
-                  className={
-                    'h-7 w-7 inline-flex items-center justify-center rounded-md border ' +
-                    (sketchPen.width === w
-                      ? 'bg-slate-900 border-slate-900 text-white'
-                      : 'bg-white border-slate-200 text-slate-700 hover:bg-slate-50')
-                  }
-                  title={`굵기 ${w}px`}
-                >
-                  <span
-                    className="rounded-full bg-current"
-                    style={{ width: w, height: w }}
+              {/* 색 5종 */}
+              <div className="flex items-center gap-1">
+                {['#ef4444', '#000000', '#2563eb', '#16a34a', '#eab308'].map((c) => (
+                  <button
+                    key={c}
+                    type="button"
+                    onClick={() => setSketchPen((p) => ({ ...p, color: c }))}
+                    className={
+                      'inline-block h-6 w-6 shrink-0 rounded-full border-2 ' +
+                      (sketchPen.color === c ? 'border-slate-900' : 'border-slate-300')
+                    }
+                    style={{ backgroundColor: c }}
+                    title={`색 ${c}`}
+                    aria-label={`색 ${c}`}
                   />
-                </button>
-              ))}
+                ))}
+              </div>
               <span className="mx-1 h-5 w-px bg-slate-200" />
-              <button
-                type="button"
-                onClick={() => setMapStrokes((s) => s.slice(0, -1))}
-                disabled={mapStrokes.length === 0}
-                className="inline-flex items-center gap-1 rounded-md border border-slate-200 px-2 h-7 text-[11px] font-medium text-slate-700 hover:bg-slate-50 disabled:opacity-40"
-                title="마지막 선 되돌리기"
-              >
-                <Undo2 className="h-3 w-3" />
-                되돌리기
-              </button>
-              <button
-                type="button"
-                onClick={() => {
-                  if (mapStrokes.length === 0) return
-                  if (!confirm('실사 그림을 모두 지웁니다. 계속하시겠습니까?')) return
-                  setMapStrokes([])
-                }}
-                disabled={mapStrokes.length === 0}
-                className="inline-flex items-center gap-1 rounded-md border border-rose-200 px-2 h-7 text-[11px] font-medium text-rose-700 hover:bg-rose-50 disabled:opacity-40"
-                title="전체 지우기"
-              >
-                <Trash2 className="h-3 w-3" />
-                전체 지우기
-              </button>
-              <button
-                type="button"
-                onClick={() => setSketchMode(false)}
-                className="inline-flex items-center gap-1 rounded-md border border-slate-300 bg-slate-100 px-2 h-7 text-[11px] font-medium text-slate-700 hover:bg-slate-200"
-                title="실사 끄기"
-              >
-                <X className="h-3 w-3" />
-                끄기
-              </button>
+              {/* 굵기 4단계 */}
+              <div className="flex items-center gap-1">
+                {[2, 3, 5, 8].map((w) => (
+                  <button
+                    key={w}
+                    type="button"
+                    onClick={() => setSketchPen((p) => ({ ...p, width: w }))}
+                    className={
+                      'inline-flex h-7 w-7 shrink-0 items-center justify-center rounded-md border ' +
+                      (sketchPen.width === w
+                        ? 'bg-slate-900 border-slate-900 text-white'
+                        : 'bg-white border-slate-300 text-slate-700 hover:bg-slate-50')
+                    }
+                    title={`굵기 ${w}px`}
+                    aria-label={`굵기 ${w}px`}
+                  >
+                    <span
+                      className="inline-block rounded-full bg-current"
+                      style={{ width: w, height: w }}
+                    />
+                  </button>
+                ))}
+              </div>
+              <span className="mx-1 h-5 w-px bg-slate-200" />
+              <div className="flex items-center gap-1">
+                <button
+                  type="button"
+                  onClick={() => setMapStrokes((s) => s.slice(0, -1))}
+                  disabled={mapStrokes.length === 0}
+                  className="inline-flex items-center gap-1 rounded-md border border-slate-300 px-2 h-7 text-[11px] font-medium text-slate-700 hover:bg-slate-50 disabled:opacity-40"
+                  title="마지막 선 되돌리기"
+                >
+                  <Undo2 className="h-3 w-3" />
+                  되돌리기
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    if (mapStrokes.length === 0) return
+                    if (!confirm('실사 그림을 모두 지웁니다. 계속하시겠습니까?')) return
+                    setMapStrokes([])
+                  }}
+                  disabled={mapStrokes.length === 0}
+                  className="inline-flex items-center gap-1 rounded-md border border-rose-300 px-2 h-7 text-[11px] font-medium text-rose-700 hover:bg-rose-50 disabled:opacity-40"
+                  title="전체 지우기"
+                >
+                  <Trash2 className="h-3 w-3" />
+                  지우기
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setSketchMode(false)}
+                  className="inline-flex items-center gap-1 rounded-md border border-slate-300 bg-slate-100 px-2 h-7 text-[11px] font-medium text-slate-700 hover:bg-slate-200"
+                  title="실사 끄기"
+                >
+                  <X className="h-3 w-3" />
+                  끄기
+                </button>
+              </div>
             </div>
           )}
 
@@ -5193,6 +5203,7 @@ export default function TopologyCanvas({
             onToggleCollapse={() => setRoadviewCollapsed((v) => !v)}
             sketchMode={sketchMode}
             sketchPen={sketchPen}
+            onSketchPenChange={setSketchPen}
             strokes={roadviewStrokes}
             onStrokesChange={setRoadviewStrokes}
           />
