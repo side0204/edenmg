@@ -154,24 +154,16 @@ export default function SketchOverlay({
     /* mapEpoch 변경 시 리렌더 */
   }, [mapEpoch])
 
-  // 그리기 시작 (pen 도구)
+  // 그리기 시작 (pen 도구) / 텍스트 박스 추가 후보 위치 기록 (text 도구)
+  //   text 는 onPointerUp 에서 실제 생성 (모바일 touch 좌표 안정성 ↑).
+  const pendingTextPosRef = useRef<{ x: number; y: number } | null>(null)
   const onPointerDown = (e: React.PointerEvent<SVGSVGElement>) => {
     if (!enabled) return
     if (e.button !== 0 && e.pointerType === 'mouse') return
-    // text 도구 — 클릭 위치에 새 텍스트 박스 추가 + 즉시 편집 모드
+    // text 도구 — pointerup 까지 대기 (모바일 tap 위치 안정화)
     if (tool === 'text') {
       const px = toLocalPx(e.clientX, e.clientY)
-      if (!px) return
-      const t: SketchText = {
-        id: nextTextId(),
-        x: px.x,
-        y: px.y,
-        color: pen.color,
-        fontSize: widthToFontSize(pen.width),
-        text: '',
-      }
-      onTextsChange([...texts, t])
-      setEditingTextId(t.id)
+      pendingTextPosRef.current = px
       return
     }
     // pen 도구 — stroke 시작
@@ -210,7 +202,23 @@ export default function SketchOverlay({
     setDrawing({ ...cur, points: cur.points.slice() })
   }
 
-  const onPointerUp = () => {
+  const onPointerUp = (e: React.PointerEvent<SVGSVGElement>) => {
+    // text 도구 — pointerdown 시 기록한 위치 사용 (drag 없이 tap 시 거의 동일)
+    if (tool === 'text' && pendingTextPosRef.current) {
+      const px = toLocalPx(e.clientX, e.clientY) ?? pendingTextPosRef.current
+      pendingTextPosRef.current = null
+      const t: SketchText = {
+        id: nextTextId(),
+        x: px.x,
+        y: px.y,
+        color: pen.color,
+        fontSize: widthToFontSize(pen.width),
+        text: '',
+      }
+      onTextsChange([...texts, t])
+      setEditingTextId(t.id)
+      return
+    }
     const cur = drawingRef.current
     if (!cur) return
     drawingRef.current = null
@@ -329,19 +337,59 @@ export default function SketchOverlay({
               }}
             >
               {isEditing ? (
-                <SketchTextEditor
-                  initialText={t.text}
-                  color={t.color}
-                  onChange={(value) => {
-                    // 라이브 갱신 — 줄 수/길이 변화에 따라 foreignObject 크기 즉시 확장
-                    onTextsChange(
-                      textsRef.current.map((x) =>
-                        x.id === t.id ? { ...x, text: value } : x,
-                      ),
-                    )
-                  }}
-                  onFinish={(value) => finishEditingText(t.id, value)}
-                />
+                <div style={{ position: 'relative', width: '100%', height: '100%' }}>
+                  <SketchTextEditor
+                    initialText={t.text}
+                    color={t.color}
+                    onChange={(value) => {
+                      // 라이브 갱신 — 줄 수/길이 변화에 따라 foreignObject 크기 즉시 확장
+                      onTextsChange(
+                        textsRef.current.map((x) =>
+                          x.id === t.id ? { ...x, text: value } : x,
+                        ),
+                      )
+                    }}
+                    onFinish={(value) => finishEditingText(t.id, value)}
+                  />
+                  {/* 모바일 닫기 버튼 — blur 가 모바일에서 잘 안 먹어 명시 X 노출.
+                      textarea 외 영역이라 onPointerDown 으로 blur 직전 finish 호출. */}
+                  <button
+                    type="button"
+                    onPointerDown={(e) => {
+                      e.preventDefault()
+                      e.stopPropagation()
+                      const ta = (e.currentTarget.parentElement?.querySelector(
+                        'textarea',
+                      ) as HTMLTextAreaElement | null)
+                      finishEditingText(t.id, ta?.value ?? '')
+                    }}
+                    aria-label="텍스트 박스 닫기"
+                    title="닫기 (Esc)"
+                    style={{
+                      position: 'absolute',
+                      top: -10,
+                      right: -10,
+                      width: 26,
+                      height: 26,
+                      borderRadius: '50%',
+                      background: 'white',
+                      border: `2px solid ${t.color}`,
+                      color: t.color,
+                      fontSize: 14,
+                      fontWeight: 700,
+                      lineHeight: 1,
+                      cursor: 'pointer',
+                      display: 'flex',
+                      alignItems: 'center',
+                      justifyContent: 'center',
+                      boxShadow: '0 1px 3px rgba(0,0,0,0.2)',
+                      padding: 0,
+                      zIndex: 2,
+                    }}
+                  >
+                    ×
+                  </button>
+                </div>
               ) : (
                 <div
                   onPointerDown={(e) => {
@@ -437,6 +485,12 @@ function SketchTextEditor({
       if (el) {
         el.focus()
         el.select()
+        // 모바일 키보드가 박스를 가리지 않도록 화면 안 보이게 스크롤
+        try {
+          el.scrollIntoView({ block: 'center', inline: 'center', behavior: 'smooth' })
+        } catch {
+          /* 일부 브라우저 옵션 미지원 — 무시 */
+        }
       }
     })
     return () => window.cancelAnimationFrame(id)

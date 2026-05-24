@@ -3139,11 +3139,11 @@ export default function TopologyCanvas({
 
   return (
     <div className={wrapperClass}>
-      <div className="px-4 py-2 border-b border-slate-100 flex items-center justify-between gap-2">
+      <div className="px-4 py-2 border-b border-slate-100 flex items-center gap-2 overflow-x-auto">
         <p className="shrink-0 text-xs text-slate-600">
           시설 {facilities.length}개 · 케이블 {cables.length}개
         </p>
-        <div className="flex items-center gap-1">
+        <div className="ml-auto flex items-center gap-1 shrink-0">
           {/* 도식 / 지도 모드 토글 */}
           <div className="mr-1 inline-flex items-center rounded-md border border-slate-300 overflow-hidden">
             <button

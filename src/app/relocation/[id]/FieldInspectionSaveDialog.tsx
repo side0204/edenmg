@@ -120,9 +120,15 @@ export default function FieldInspectionSaveDialog({
       // 화면 공유 권한 요청 — 사용자 클릭에서 직접 호출 필수
       setPhase('capturing')
       try {
-        const opts = { video: true, audio: false, preferCurrentTab: true }
+        // cursor: 'never' — 마우스 포인터를 캡처 영상에서 제외 (Chrome 지원).
+        //   spec: MediaTrackConstraintSet.cursor — 일부 브라우저에서 미지원이라 cast.
+        const opts = {
+          video: { cursor: 'never' },
+          audio: false,
+          preferCurrentTab: true,
+        }
         stream = await navigator.mediaDevices.getDisplayMedia(
-          opts as DisplayMediaStreamOptions,
+          opts as unknown as DisplayMediaStreamOptions,
         )
       } catch {
         toast.error('화면 공유가 취소되었습니다')
