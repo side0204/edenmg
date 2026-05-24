@@ -1234,7 +1234,14 @@ export default function TopologyCanvas({
   //   시설끼리 가까이 배치. 설계 초기 또는 시설 많은 프로젝트 재정리 시 사용.
   const onGraphLayout = async () => {
     if (graphLayouting) return
-    if (!confirm('모든 시설 위치를 케이블 그래프 기반으로 자동 재배치합니다. 기존 수동 배치는 모두 덮어씁니다. 계속하시겠습니까?')) return
+    if (
+      !confirm(
+        '모든 시설 위치를 케이블 그래프 기반으로 자동 재배치합니다.\n' +
+          '※ 기존 수동 배치 + 케이블 경로점(배율 freeze 결과 포함) 도 모두 삭제됩니다.\n' +
+          '계속하시겠습니까?',
+      )
+    )
+      return
     setGraphLayouting(true)
     try {
       const positions = graphAwareLayout(
@@ -1254,7 +1261,24 @@ export default function TopologyCanvas({
         toast.error(res.error ?? '자동 배치 저장에 실패했습니다')
         return
       }
-      toast.success(`시설 ${changes.length}개 자동 배치 완료 — 그래프 기반`)
+      // 케이블 경로점 일괄 clear — 시설 새 위치로 자동 라우팅 재적용.
+      //   (2026-05-24 owner 보고) 배율 freeze 된 waypoint 가 옛 시설 좌표 기준이라
+      //   새 시설 위치에서 매우 멀리 늘어남. 그래프 재배치 시 함께 reset.
+      let wpCleared = 0
+      let wpFailed = 0
+      for (const c of cables) {
+        const cur = (mode === 'map' ? c.mapWaypoints : c.waypoints) ?? []
+        if (cur.length === 0) continue
+        const clr = await saveCableWaypoints(projectId, c.id, [])
+        if (clr.ok) wpCleared++
+        else wpFailed++
+      }
+      const msg =
+        wpFailed === 0
+          ? `시설 ${changes.length}개 자동 배치 완료 (경로점 ${wpCleared}건 reset)`
+          : `시설 ${changes.length}개 배치 — 경로점 ${wpCleared}건 reset, ${wpFailed}건 실패`
+      if (wpFailed === 0) toast.success(msg)
+      else toast.warning(msg)
       router.refresh()
     } finally {
       setGraphLayouting(false)
