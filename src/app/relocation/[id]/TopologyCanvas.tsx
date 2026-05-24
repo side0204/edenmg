@@ -895,6 +895,9 @@ export default function TopologyCanvas({
   //   기존 펜/T 도구와 상호 배타 (sketchTool 은 그대로 두고 별도 플래그).
   const [inspectionPlaceMode, setInspectionPlaceMode] = useState(false)
   const inspectionPlaceRef = useRef(false)
+  // 실사 모드 세션 동안 배치한 실사정보 시설 카운트 (실사 모드 토글 시 초기화).
+  //   실사 버튼 옆 배지 = strokes + texts + 이 카운트.
+  const [sketchInspectionCount, setSketchInspectionCount] = useState(0)
   useEffect(() => {
     inspectionPlaceRef.current = inspectionPlaceMode
   }, [inspectionPlaceMode])
@@ -1054,6 +1057,13 @@ export default function TopologyCanvas({
   } | null>(null)
 
   const svgRef = useRef<SVGSVGElement>(null)
+  // SketchOverlay 가 메인 SVG 의 CTM 으로 좌표 변환할 수 있도록 state 로도 보관.
+  //   refCallback 으로 마운트 시 한 번 setState (이후 ref·state 가 같은 element 가리킴).
+  const [mainSvgElState, setMainSvgElState] = useState<SVGSVGElement | null>(null)
+  const setSvgRef = useCallback((el: SVGSVGElement | null) => {
+    svgRef.current = el
+    setMainSvgElState(el)
+  }, [])
 
   // ===== Viewport (zoom · pan) ============================================
   // viewBox = `${x} ${y} ${width} ${height}` 동적 갱신. 모든 좌표는 SVG 좌표계.
@@ -1129,6 +1139,26 @@ export default function TopologyCanvas({
 
   // pan 드래그 직후 발생하는 click 을 무시하기 위한 flag (pointerup → click 순서)
   const recentlyPannedRef = useRef(false)
+
+  // ===== 모바일 두 손가락 핀치 줌·팬 (도식 모드 전용) ====================
+  // 카카오맵은 자체적으로 멀티터치 처리 → 지도 모드는 추가 코드 불필요.
+  // 도식 모드는 SVG 자체 viewport 라 직접 처리.
+  //   activeTouchesRef: 현재 화면에 닿아있는 touch pointer 들 (id → clientX,Y)
+  //   pinchRef: 두 손가락 입력 시작 시 스냅샷 (거리·중점·viewport 4 값)
+  const activeTouchesRef = useRef(new Map<number, { x: number; y: number }>())
+  const pinchRef = useRef<{
+    startDist: number
+    startMidX: number
+    startMidY: number
+    startVx: number
+    startVy: number
+    startVw: number
+    startVh: number
+    rectLeft: number
+    rectTop: number
+    rectWidth: number
+    rectHeight: number
+  } | null>(null)
 
   // 함체 기설/신설 자동 추론
   const facilityIsNew = useMemo(() => {
@@ -1359,6 +1389,8 @@ export default function TopologyCanvas({
             toast.error(r.error)
             return
           }
+          // 실사 모드 세션 배지 카운트 ↑ (sketchStrokes + sketchTexts 와 합산)
+          setSketchInspectionCount((n) => n + 1)
           toast.success(`「${r.name}」 배치 완료`)
           router.refresh()
         })()
@@ -2792,6 +2824,31 @@ export default function TopologyCanvas({
     }
     const rect = svg.getBoundingClientRect()
     if (rect.width === 0 || rect.height === 0) return
+    // 멀티터치 — touch 만 추적 (마우스는 단일 입력이라 무의미)
+    if (e.pointerType === 'touch') {
+      activeTouchesRef.current.set(e.pointerId, { x: e.clientX, y: e.clientY })
+      if (activeTouchesRef.current.size === 2) {
+        // 두 번째 손가락 도착 → 핀치 시작 (진행 중인 pan 취소)
+        panRef.current = null
+        const pts = Array.from(activeTouchesRef.current.values())
+        const dx = pts[1].x - pts[0].x
+        const dy = pts[1].y - pts[0].y
+        pinchRef.current = {
+          startDist: Math.hypot(dx, dy) || 1,
+          startMidX: (pts[0].x + pts[1].x) / 2,
+          startMidY: (pts[0].y + pts[1].y) / 2,
+          startVx: viewport.x,
+          startVy: viewport.y,
+          startVw: viewport.width,
+          startVh: viewport.height,
+          rectLeft: rect.left,
+          rectTop: rect.top,
+          rectWidth: rect.width,
+          rectHeight: rect.height,
+        }
+        return
+      }
+    }
     panRef.current = {
       startClientX: e.clientX,
       startClientY: e.clientY,
@@ -2955,6 +3012,34 @@ export default function TopologyCanvas({
       })
       return
     }
+    // 2.7) 두 손가락 핀치 — 줌·팬 동시. activeTouchesRef 갱신 + pinch 계산.
+    if (e.pointerType === 'touch' && activeTouchesRef.current.has(e.pointerId)) {
+      activeTouchesRef.current.set(e.pointerId, { x: e.clientX, y: e.clientY })
+      const pinch = pinchRef.current
+      if (pinch && activeTouchesRef.current.size === 2) {
+        const pts = Array.from(activeTouchesRef.current.values())
+        const dx = pts[1].x - pts[0].x
+        const dy = pts[1].y - pts[0].y
+        const dist = Math.hypot(dx, dy) || 1
+        const midX = (pts[0].x + pts[1].x) / 2
+        const midY = (pts[0].y + pts[1].y) / 2
+        // scale: 손가락이 멀어지면 확대(viewport 축소)
+        const scale = dist / pinch.startDist
+        // viewport 한계 (wheel zoom 과 동일)
+        const minW = 200
+        const maxW = 12000
+        const newW = Math.max(minW, Math.min(maxW, pinch.startVw / scale))
+        const newH = Math.max(minW * 0.75, Math.min(maxW * 0.75, pinch.startVh / scale))
+        // 시작 중점에 해당하는 SVG 좌표 = anchor (시작 viewport 기준 한 번만 계산)
+        const sxStart = pinch.startVx + (pinch.startMidX - pinch.rectLeft) * (pinch.startVw / pinch.rectWidth)
+        const syStart = pinch.startVy + (pinch.startMidY - pinch.rectTop) * (pinch.startVh / pinch.rectHeight)
+        // 현재 중점이 같은 SVG 좌표를 가리키도록 viewport.x/y 계산 (anchor + 팬)
+        const newVx = sxStart - (midX - pinch.rectLeft) * (newW / pinch.rectWidth)
+        const newVy = syStart - (midY - pinch.rectTop) * (newH / pinch.rectHeight)
+        setViewport({ x: newVx, y: newVy, width: newW, height: newH })
+        return
+      }
+    }
     // 3) 빈 영역 pan 진행 중
     const pan = panRef.current
     if (pan) {
@@ -2971,7 +3056,19 @@ export default function TopologyCanvas({
     }
   }
 
-  const onPointerUp = async () => {
+  const onPointerUp = async (e?: React.PointerEvent<SVGSVGElement>) => {
+    // 멀티터치 정리 — touch pointer 떨어지면 추적 맵에서 제거.
+    //   2 개 미만 되면 핀치 종료.
+    if (e && e.pointerType === 'touch') {
+      activeTouchesRef.current.delete(e.pointerId)
+      if (activeTouchesRef.current.size < 2) {
+        pinchRef.current = null
+      }
+      // 핀치 직후의 click 으로 선택 해제 안 되게 flag
+      if (e.pointerType === 'touch' && pinchRef.current === null) {
+        // 핀치 중이었다면 recentlyPannedRef 플래그 활용
+      }
+    }
     // 1) 노드 드래그 마무리
     const ir = interactionRef.current
     if (ir) {
@@ -3189,6 +3286,8 @@ export default function TopologyCanvas({
           toast.error(r.error)
           return
         }
+        // 실사 모드 세션 배지 카운트 ↑
+        setSketchInspectionCount((n) => n + 1)
         toast.success(`「${r.name}」 배치 완료`)
         router.refresh()
       })()
@@ -3560,7 +3659,13 @@ export default function TopologyCanvas({
           {mode === 'map' && mapStatus === 'ready' && (
             <button
               type="button"
-              onClick={() => setSketchMode((v) => !v)}
+              onClick={() =>
+                setSketchMode((v) => {
+                  // 모드 OFF→ON 전환 시 세션 카운터 리셋
+                  if (!v) setSketchInspectionCount(0)
+                  return !v
+                })
+              }
               className={
                 'mr-1 inline-flex items-center gap-1 rounded-md border px-2 h-7 text-[11px] font-medium ' +
                 (sketchMode
@@ -3571,11 +3676,12 @@ export default function TopologyCanvas({
             >
               <Pencil className="h-3 w-3" />
               실사
-              {sketchMode && sketchStrokes.length + sketchTexts.length > 0 && (
-                <span className="ml-0.5 rounded bg-white px-1 text-[9px] font-semibold text-rose-700">
-                  {sketchStrokes.length + sketchTexts.length}
-                </span>
-              )}
+              {sketchMode &&
+                sketchStrokes.length + sketchTexts.length + sketchInspectionCount > 0 && (
+                  <span className="ml-0.5 rounded bg-white px-1 text-[9px] font-semibold text-rose-700">
+                    {sketchStrokes.length + sketchTexts.length + sketchInspectionCount}
+                  </span>
+                )}
             </button>
           )}
 
@@ -4309,7 +4415,7 @@ export default function TopologyCanvas({
             </div>
           )}
           <svg
-            ref={svgRef}
+            ref={setSvgRef}
             viewBox={mode === 'map' ? undefined : viewBoxStr}
             className="select-none absolute inset-0 w-full h-full"
             style={{
@@ -4338,6 +4444,7 @@ export default function TopologyCanvas({
             onPointerDown={onSvgPointerDown}
             onPointerMove={onPointerMove}
             onPointerUp={onPointerUp}
+            onPointerCancel={onPointerUp}
             onClick={onCanvasClick}
         >
           {/* 고장점 검색 하이라이트 — 경로 케이블 글로우 + 시설 링 (케이블·노드 아래) */}
@@ -5408,7 +5515,13 @@ export default function TopologyCanvas({
           onStrokesChange={setSketchStrokes}
           texts={sketchTexts}
           onTextsChange={setSketchTexts}
-          coords="pixel"
+          // 도식 모드는 메인 SVG content 좌표(viewport pan/zoom 따라옴),
+          // 지도 모드는 GPS 좌표(카카오 지도 pan/zoom 따라옴).
+          coords={mode === 'map' ? 'gps' : 'svg'}
+          kakaoMap={kakaoMap}
+          mapEpoch={mapEpoch}
+          mainSvgEl={mainSvgElState}
+          svgViewport={viewport}
         />
 
         {/* 실사 도구 바 — sketchMode ON 시 캔버스 하단 중앙 floating.

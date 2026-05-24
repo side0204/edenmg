@@ -9,8 +9,11 @@ import { useCallback, useEffect, useRef, useState } from 'react'
 // 휘발 — 페이지 새로고침/이동 시 사라짐. 저장은 별도 「화면 저장」 기능 (Phase 2).
 
 export type SketchPoint =
-  // 지도 모드 (legacy) — GPS 좌표. 현재는 'pixel' 단일 모드.
+  // 지도 모드 — GPS 좌표 (kakaoMap projection 으로 픽셀 변환)
   | { kind: 'gps'; lat: number; lng: number }
+  // 도식 모드 — 메인 SVG 의 viewBox 안 컨텐츠 좌표 (viewport pan/zoom 변화에 따라옴)
+  | { kind: 'svg'; x: number; y: number }
+  // 스크린 고정 픽셀 — 캔버스 위쪽 사이드바·도구바 등 컨텐츠가 없는 영역용 폴백
   | { kind: 'pixel'; x: number; y: number }
 
 export type SketchStroke = {
@@ -50,11 +53,17 @@ type Props = {
   onStrokesChange: (next: SketchStroke[]) => void
   texts: SketchText[]
   onTextsChange: (next: SketchText[]) => void
-  // 좌표 변환 모드 — 'pixel' 만 지원 (legacy 'gps' 는 단일 표면 통합으로 폐기)
-  coords: 'gps' | 'pixel'
-  // legacy — 지도 모드용. coords='gps' 일 때만 사용.
+  // 좌표 변환 모드:
+  //   'gps' — 카카오맵 + GPS 좌표 (kakaoMap 필수)
+  //   'svg' — 도식 모드 SVG viewBox 컨텐츠 좌표 (mainSvgEl + svgViewport 필수)
+  //   'pixel' — 스크린 고정 픽셀 (폴백)
+  coords: 'gps' | 'svg' | 'pixel'
+  // 지도 모드용 — kakaoMap projection 으로 GPS ↔ 픽셀
   kakaoMap?: kakao.maps.Map | null
   mapEpoch?: number
+  // 도식 모드용 — 메인 SVG element + 현재 viewport. viewport 변경 시 자동 재투영.
+  mainSvgEl?: SVGSVGElement | null
+  svgViewport?: { x: number; y: number; width: number; height: number }
 }
 
 let __strokeSeq = 0
@@ -83,6 +92,8 @@ export default function SketchOverlay({
   coords,
   kakaoMap,
   mapEpoch,
+  mainSvgEl,
+  svgViewport,
 }: Props) {
   const svgRef = useRef<SVGSVGElement | null>(null)
   const drawingRef = useRef<SketchStroke | null>(null)
@@ -119,6 +130,19 @@ export default function SketchOverlay({
   const pxToPoint = useCallback(
     (px: { x: number; y: number }): SketchPoint | null => {
       if (coords === 'pixel') return { kind: 'pixel', x: px.x, y: px.y }
+      if (coords === 'svg' && mainSvgEl) {
+        // overlay-rel px → client px → main SVG content coord (CTM 역행렬)
+        const overlay = svgRef.current
+        if (!overlay) return null
+        const orect = overlay.getBoundingClientRect()
+        const pt = mainSvgEl.createSVGPoint()
+        pt.x = px.x + orect.left
+        pt.y = px.y + orect.top
+        const ctm = mainSvgEl.getScreenCTM()
+        if (!ctm) return null
+        const r = pt.matrixTransform(ctm.inverse())
+        return { kind: 'svg', x: r.x, y: r.y }
+      }
       const m = kakaoMap
       if (!m) return null
       try {
@@ -130,12 +154,26 @@ export default function SketchOverlay({
         return null
       }
     },
-    [coords, kakaoMap],
+    [coords, kakaoMap, mainSvgEl],
   )
 
   const pointToPx = useCallback(
     (p: SketchPoint): { x: number; y: number } | null => {
       if (p.kind === 'pixel') return { x: p.x, y: p.y }
+      if (p.kind === 'svg' && mainSvgEl) {
+        // main SVG content coord → client px (CTM) → overlay-rel px
+        const overlay = svgRef.current
+        if (!overlay) return null
+        const orect = overlay.getBoundingClientRect()
+        const pt = mainSvgEl.createSVGPoint()
+        pt.x = p.x
+        pt.y = p.y
+        const ctm = mainSvgEl.getScreenCTM()
+        if (!ctm) return null
+        const r = pt.matrixTransform(ctm)
+        return { x: r.x - orect.left, y: r.y - orect.top }
+      }
+      if (p.kind !== 'gps') return null
       const m = kakaoMap
       if (!m) return null
       try {
@@ -147,7 +185,9 @@ export default function SketchOverlay({
         return null
       }
     },
-    [kakaoMap],
+    // svgViewport 변화 = pan/zoom = CTM 변화 → 재투영 필요
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [kakaoMap, mainSvgEl, svgViewport?.x, svgViewport?.y, svgViewport?.width, svgViewport?.height, mapEpoch],
   )
 
   useEffect(() => {
