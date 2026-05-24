@@ -1014,6 +1014,8 @@ export default function TopologyCanvas({
     offsetX: number
     offsetY: number
     hasMoved: boolean
+    pointerType: string     // 'touch' 면 모바일 — 임계값 ↑ + 저장 전 확인 다이얼로그
+    origPos: { x: number; y: number }  // 드래그 시작 시 원 위치 — 취소 시 복원용
   } | null>(null)
 
   const svgRef = useRef<SVGSVGElement>(null)
@@ -2707,6 +2709,8 @@ export default function TopologyCanvas({
       offsetX: x - pos.x,
       offsetY: y - pos.y,
       hasMoved: false,
+      pointerType: e.pointerType,
+      origPos: { x: pos.x, y: pos.y },
     }
     ;(e.target as Element).setPointerCapture(e.pointerId)
   }
@@ -2773,7 +2777,14 @@ export default function TopologyCanvas({
       const { x, y } = toSvgCoord(e.clientX, e.clientY)
       const dx = x - ir.startX
       const dy = y - ir.startY
-      if (!ir.hasMoved && Math.hypot(dx, dy) < DRAG_THRESHOLD) return
+      // 모바일 터치 — 임계값을 화면 픽셀 30px 상당으로 ↑ (손가락 떨림으로 인한 의도치 않은 이동 방지)
+      //   SVG 좌표계라 viewport 스케일 반영해야 함 (확대 시 더 큰 SVG 거리 필요)
+      const svgPxPerScreenPx = svgRef.current
+        ? viewport.width / (svgRef.current.getBoundingClientRect().width || 1)
+        : 1
+      const threshold =
+        ir.pointerType === 'touch' ? 30 * svgPxPerScreenPx : DRAG_THRESHOLD
+      if (!ir.hasMoved && Math.hypot(dx, dy) < threshold) return
       if (!ir.hasMoved) {
         ir.hasMoved = true
         setDragging(ir.id)
@@ -2933,6 +2944,49 @@ export default function TopologyCanvas({
       interactionRef.current = null
       groupDragRef.current = null
       setSnapGuide(null)
+      // 모바일 터치 — 시설 이동 직전 확인. 취소 시 원위치 복원 + 저장 skip.
+      //   손으로 화면 이동(pan) 시 의도치 않은 시설 이동 방지.
+      if (ir.hasMoved && ir.pointerType === 'touch') {
+        const count = gd ? gd.startPositions.size : 1
+        const msg =
+          count > 1
+            ? `시설 ${count}개를 이동하시겠습니까?`
+            : '시설을 이동하시겠습니까?'
+        if (!confirm(msg)) {
+          // 취소 — 원위치로 복원 (group 은 모든 시설 + 케이블 경로점, 단일은 해당 시설만)
+          setDragging(null)
+          if (gd) {
+            setPositions((prev) => {
+              const next = { ...prev }
+              for (const [sid, sStart] of gd.startPositions.entries()) {
+                next[sid] = { x: sStart.x, y: sStart.y }
+              }
+              return next
+            })
+            if (gd.startCableWaypoints.size > 0) {
+              setCableWaypoints((prev) => {
+                const next = { ...prev }
+                for (const [cid, startWps] of gd.startCableWaypoints.entries()) {
+                  next[cid] = startWps.map((w) => ({ ...w }))
+                }
+                return next
+              })
+            }
+          } else if (mode === 'map') {
+            setMapDragPos((prev) => {
+              const next = { ...prev }
+              delete next[ir.id]
+              return next
+            })
+          } else {
+            setPositions((prev) => ({
+              ...prev,
+              [ir.id]: { x: ir.origPos.x, y: ir.origPos.y },
+            }))
+          }
+          return
+        }
+      }
       if (ir.hasMoved && gd) {
         // 그룹 드래그 일괄 저장 — 모든 선택 시설의 새 좌표 한 번에 push
         setDragging(null)
@@ -5318,7 +5372,7 @@ export default function TopologyCanvas({
             캡처 중에는 visibility:hidden 으로 PNG 에 안 찍히게 가림. */}
         {sketchMode && (
           <div
-            className="absolute bottom-3 left-1/2 -translate-x-1/2 z-50 flex flex-wrap items-center justify-center gap-1 rounded-2xl border border-slate-200 bg-white px-2 py-1.5 shadow-lg"
+            className="absolute bottom-3 left-1/2 -translate-x-1/2 z-50 flex flex-wrap items-center justify-center gap-1.5 rounded-2xl border border-slate-200 bg-white px-2.5 py-2 shadow-lg"
             style={{
               pointerEvents: 'auto',
               maxWidth: 'calc(100vw - 1rem)',
@@ -5331,7 +5385,7 @@ export default function TopologyCanvas({
                 type="button"
                 onClick={() => setSketchTool('pen')}
                 className={
-                  'inline-flex h-7 w-7 shrink-0 items-center justify-center rounded-md border ' +
+                  'inline-flex h-9 w-9 sm:h-7 sm:w-7 shrink-0 items-center justify-center rounded-md border ' +
                   (sketchTool === 'pen'
                     ? 'bg-slate-900 border-slate-900 text-white'
                     : 'bg-white border-slate-300 text-slate-700 hover:bg-slate-50')
@@ -5339,13 +5393,13 @@ export default function TopologyCanvas({
                 title="펜 — 자유 그리기"
                 aria-label="펜"
               >
-                <Pencil className="h-3.5 w-3.5" />
+                <Pencil className="h-4 w-4 sm:h-3.5 sm:w-3.5" />
               </button>
               <button
                 type="button"
                 onClick={() => setSketchTool('text')}
                 className={
-                  'inline-flex h-7 w-7 shrink-0 items-center justify-center rounded-md border ' +
+                  'inline-flex h-9 w-9 sm:h-7 sm:w-7 shrink-0 items-center justify-center rounded-md border ' +
                   (sketchTool === 'text'
                     ? 'bg-slate-900 border-slate-900 text-white'
                     : 'bg-white border-slate-300 text-slate-700 hover:bg-slate-50')
@@ -5353,14 +5407,14 @@ export default function TopologyCanvas({
                 title="텍스트 — 클릭한 위치에 글자 입력"
                 aria-label="텍스트"
               >
-                <Type className="h-3.5 w-3.5" />
+                <Type className="h-4 w-4 sm:h-3.5 sm:w-3.5" />
               </button>
               {/* 실사정보입력 — 클릭한 위치에 「실사{N}」 시설 즉시 배치 (모달 X) */}
               <button
                 type="button"
                 onClick={() => setInspectionPlaceMode((v) => !v)}
                 className={
-                  'inline-flex h-7 items-center gap-1 shrink-0 px-2 rounded-md border text-[11px] font-semibold ' +
+                  'inline-flex h-9 sm:h-7 items-center gap-1 shrink-0 whitespace-nowrap px-2.5 rounded-md border text-xs sm:text-[11px] font-semibold ' +
                   (inspectionPlaceMode
                     ? 'bg-rose-600 border-rose-600 text-white'
                     : 'bg-white border-rose-400 text-rose-700 hover:bg-rose-50')
@@ -5390,7 +5444,7 @@ export default function TopologyCanvas({
                   type="button"
                   onClick={() => setSketchPen((p) => ({ ...p, color: c }))}
                   className={
-                    'inline-block h-6 w-6 shrink-0 rounded-full border-2 ' +
+                    'inline-block h-7 w-7 sm:h-6 sm:w-6 shrink-0 rounded-full border-2 ' +
                     (sketchPen.color === c ? 'border-slate-900' : 'border-slate-300')
                   }
                   style={{ backgroundColor: c }}
@@ -5407,7 +5461,7 @@ export default function TopologyCanvas({
                   type="button"
                   onClick={() => setSketchPen((p) => ({ ...p, width: w }))}
                   className={
-                    'inline-flex h-7 w-7 shrink-0 items-center justify-center rounded-md border ' +
+                    'inline-flex h-9 w-9 sm:h-7 sm:w-7 shrink-0 items-center justify-center rounded-md border ' +
                     (sketchPen.width === w
                       ? 'bg-slate-900 border-slate-900 text-white'
                       : 'bg-white border-slate-300 text-slate-700 hover:bg-slate-50')
@@ -5441,10 +5495,10 @@ export default function TopologyCanvas({
                   else setSketchTexts((t) => t.slice(0, -1))
                 }}
                 disabled={sketchStrokes.length === 0 && sketchTexts.length === 0}
-                className="inline-flex items-center gap-1 rounded-md border border-slate-300 px-2 h-7 text-[11px] font-medium text-slate-700 hover:bg-slate-50 disabled:opacity-40"
+                className="inline-flex items-center gap-1 shrink-0 whitespace-nowrap rounded-md border border-slate-300 px-2.5 h-9 sm:h-7 text-xs sm:text-[11px] font-medium text-slate-700 hover:bg-slate-50 disabled:opacity-40"
                 title="마지막 항목 되돌리기"
               >
-                <Undo2 className="h-3 w-3" />
+                <Undo2 className="h-3.5 w-3.5 sm:h-3 sm:w-3" />
                 되돌리기
               </button>
               <button
@@ -5456,28 +5510,28 @@ export default function TopologyCanvas({
                   setSketchTexts([])
                 }}
                 disabled={sketchStrokes.length === 0 && sketchTexts.length === 0}
-                className="inline-flex items-center gap-1 rounded-md border border-rose-300 px-2 h-7 text-[11px] font-medium text-rose-700 hover:bg-rose-50 disabled:opacity-40"
+                className="inline-flex items-center gap-1 shrink-0 whitespace-nowrap rounded-md border border-rose-300 px-2.5 h-9 sm:h-7 text-xs sm:text-[11px] font-medium text-rose-700 hover:bg-rose-50 disabled:opacity-40"
                 title="전체 지우기"
               >
-                <Trash2 className="h-3 w-3" />
+                <Trash2 className="h-3.5 w-3.5 sm:h-3 sm:w-3" />
                 지우기
               </button>
               <button
                 type="button"
                 onClick={() => setSaveDialogOpen(true)}
-                className="inline-flex items-center gap-1 rounded-md bg-rose-600 px-2 h-7 text-[11px] font-semibold text-white hover:bg-rose-700"
+                className="inline-flex items-center gap-1 shrink-0 whitespace-nowrap rounded-md bg-rose-600 px-2.5 h-9 sm:h-7 text-xs sm:text-[11px] font-semibold text-white hover:bg-rose-700"
                 title="현재 캔버스 화면을 시설에 저장"
               >
-                <Save className="h-3 w-3" />
+                <Save className="h-3.5 w-3.5 sm:h-3 sm:w-3" />
                 시설에 저장
               </button>
               <button
                 type="button"
                 onClick={() => setSketchMode(false)}
-                className="inline-flex items-center gap-1 rounded-md border border-slate-300 bg-slate-100 px-2 h-7 text-[11px] font-medium text-slate-700 hover:bg-slate-200"
+                className="inline-flex items-center gap-1 shrink-0 whitespace-nowrap rounded-md border border-slate-300 bg-slate-100 px-2.5 h-9 sm:h-7 text-xs sm:text-[11px] font-medium text-slate-700 hover:bg-slate-200"
                 title="실사 끄기"
               >
-                <X className="h-3 w-3" />
+                <X className="h-3.5 w-3.5 sm:h-3 sm:w-3" />
                 끄기
               </button>
             </div>
