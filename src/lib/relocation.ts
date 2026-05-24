@@ -48,6 +48,9 @@ export type ClosureType =
   | 'TPS_LTE_외'
   | 'IJP'
   | '광Mux'
+  // 실사정보 — 시설 인프라(드래그·정보 패널·실사 캡처 첨부)를 그대로 쓰는 가상 시설.
+  //   사용자가 임의 위치에 마커처럼 배치하고 비고·실사 캡처를 첨부.
+  | '실사정보'
 
 export const CLOSURE_TYPE_VALUES: readonly ClosureType[] = [
   '국사', '종합국사', '집중국사', '가입자국사', '간이국사',
@@ -58,6 +61,7 @@ export const CLOSURE_TYPE_VALUES: readonly ClosureType[] = [
   'ESS_LTE_DU', 'ESS_LTE_RRH',
   'ESS_CDMA_기지국', 'ESS_CDMA_광중계기', 'ESS_RF중계기',
   'RN_TPS', 'RN_LTE', 'TPS_LTE_외', 'IJP', '광Mux',
+  '실사정보',
 ]
 
 export const CLOSURE_TYPE_LABEL: Record<ClosureType, string> = {
@@ -91,6 +95,7 @@ export const CLOSURE_TYPE_LABEL: Record<ClosureType, string> = {
   TPS_LTE_외: 'TPS,LTE 외',
   IJP: 'IJP',
   광Mux: '광Mux',
+  실사정보: '실사정보',
 }
 
 // 시설 번호 prefix — 카테고리·종류별로 1자.
@@ -126,6 +131,7 @@ export const CLOSURE_TYPE_PREFIX: Record<ClosureType, string> = {
   TPS_LTE_외: 'N',
   IJP: 'J',
   광Mux: 'X',
+  실사정보: 'I', // I for Inspection
 }
 
 // 카테고리 — 범례 + 추가 도구 패널 그룹화에 사용
@@ -175,6 +181,8 @@ export const CLOSURE_TYPE_CATEGORY: Record<ClosureType, ClosureCategory> = {
   TPS_LTE_외: 'RN_IJP_광MUX',
   IJP: 'RN_IJP_광MUX',
   광Mux: 'RN_IJP_광MUX',
+  // 실사정보 — '설치장소' 카테고리에 매핑 (별도 카테고리 추가 회피, 작업량 ↓)
+  실사정보: '설치장소',
 }
 
 // LGU+ 표준 색깔 (범례 이미지 기준 추정)
@@ -210,6 +218,7 @@ export const CLOSURE_TYPE_COLOR: Record<ClosureType, string> = {
   TPS_LTE_외: '#16a34a',     // 초록 R
   IJP: '#eab308',            // yellow i
   광Mux: '#2563eb',          // 파랑 M
+  실사정보: '#dc2626',       // 빨강 (눈에 잘 보이는 강조 — 노란마크처럼 펄스 후광)
 }
 
 // 국사 내부 토폴로지 노드만 parent 를 가질 수 있음 (DB CHECK 와 일치)

@@ -67,7 +67,6 @@ function nextTextId(): string {
   __textSeq += 1
   return `t-${Date.now()}-${__textSeq}`
 }
-
 // 펜 굵기 → 텍스트 폰트 크기 매핑
 function widthToFontSize(w: number): number {
   return Math.max(12, w * 6)

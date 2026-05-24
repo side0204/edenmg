@@ -71,6 +71,7 @@ import { seedTestFacilities, clearTestFacilities } from './test-actions'
 import {
   createFacilityAtPosition,
   createFacilityAtLatLng,
+  createInspectionFacility,
   updateFacilityLatLng,
   bulkPlaceFacilities,
   saveFacilityLabelOffset,
@@ -853,6 +854,15 @@ export default function TopologyCanvas({
   // 실사 저장 다이얼로그 — 시설 선택 + 화면 캡처 (getDisplayMedia) → Storage 업로드
   const [saveDialogOpen, setSaveDialogOpen] = useState(false)
 
+  // 실사정보 배치 모드 — sketchMode 안에서 활성. 캔버스 좌클릭 시 그 위치에
+  //   '실사정보' 시설 즉시 등록 (이름 자동 「실사{seq}」, 모달 X).
+  //   기존 펜/T 도구와 상호 배타 (sketchTool 은 그대로 두고 별도 플래그).
+  const [inspectionPlaceMode, setInspectionPlaceMode] = useState(false)
+  const inspectionPlaceRef = useRef(false)
+  useEffect(() => {
+    inspectionPlaceRef.current = inspectionPlaceMode
+  }, [inspectionPlaceMode])
+
   // 거리뷰 패널 — 지도 모드 우측 컬럼. 시설 선택 또는 지도 클릭 시 그 좌표의 카카오 거리뷰.
   //   roadviewOpen 켜져 있으면 시설/케이블/고장점 패널을 가리고 거리뷰가 표시됨 (상호 배타).
   //   roadviewPos = 마지막으로 요청된 좌표. null 이면 안내 메시지만 표시.
@@ -1297,6 +1307,25 @@ export default function TopologyCanvas({
           setPlacingId(null)
           router.refresh()
         })()
+        return
+      }
+      // 1.5) 실사정보 배치 모드 — 클릭 위치에 실사정보 시설 즉시 등록
+      if (inspectionPlaceRef.current) {
+        void (async () => {
+          const r = await createInspectionFacility({
+            project_id: projectId,
+            lat,
+            lng,
+          })
+          if (!r.ok) {
+            toast.error(r.error)
+            return
+          }
+          toast.success(`「${r.name}」 배치 완료`)
+          router.refresh()
+        })()
+        // 1회 배치 후 해제 — 연속 배치는 다시 버튼
+        setInspectionPlaceMode(false)
         return
       }
       // 2) 시설 추가 도구가 선택돼 있으면 그 위치에 새 시설 배치 폼 열기
@@ -3054,6 +3083,28 @@ export default function TopologyCanvas({
     // 무시한다. (안 그러면 노드 클릭으로 한 선택이 직후 click 으로 바로 해제됨)
     // SVG 배경을 직접 클릭한 경우만 e.target === svg.
     if (e.target !== svgRef.current) return
+
+    // 실사정보 배치 모드 — 클릭 위치에 즉시 등록 (모달 X, 이름 자동)
+    if (inspectionPlaceMode) {
+      const { x, y } = toSvgCoord(e.clientX, e.clientY)
+      const placedX = Math.max(0, Math.round(x - NODE_SIZE.width / 2))
+      const placedY = Math.max(0, Math.round(y - NODE_SIZE.height / 2))
+      void (async () => {
+        const r = await createInspectionFacility({
+          project_id: projectId,
+          x: placedX,
+          y: placedY,
+        })
+        if (!r.ok) {
+          toast.error(r.error)
+          return
+        }
+        toast.success(`「${r.name}」 배치 완료`)
+        router.refresh()
+      })()
+      setInspectionPlaceMode(false)
+      return
+    }
 
     // 추가 모드 ON — 클릭 좌표에서 노드 중심 기준으로 좌상단 위치 환산해 임시 배치
     if (addTool) {
@@ -5247,9 +5298,10 @@ export default function TopologyCanvas({
         {/* 실사 그리기 오버레이 — 캔버스 영역(사이드바+지도+우측패널) 전체를 덮음.
             sketchMode 일 때 pointer 캡처 → 영역 구분 없이 한 그림판처럼 그리기.
             도구: pen(자유 그리기) / text(클릭 위치 텍스트 박스).
-            좌표는 화면 픽셀. sketchMode 활성 동안 지도 pan/zoom 잠금. */}
+            inspectionPlaceMode 가 켜진 동안엔 pointer 캡처 안 함 → 클릭이 지도/캔버스로
+            통과해서 시설 즉시 배치. */}
         <SketchOverlay
-          enabled={sketchMode}
+          enabled={sketchMode && !inspectionPlaceMode}
           tool={sketchTool}
           pen={sketchPen}
           strokes={sketchStrokes}
@@ -5300,6 +5352,32 @@ export default function TopologyCanvas({
                 aria-label="텍스트"
               >
                 <Type className="h-3.5 w-3.5" />
+              </button>
+              {/* 실사정보입력 — 클릭한 위치에 「실사{N}」 시설 즉시 배치 (모달 X) */}
+              <button
+                type="button"
+                onClick={() => setInspectionPlaceMode((v) => !v)}
+                className={
+                  'inline-flex h-7 items-center gap-1 shrink-0 px-2 rounded-md border text-[11px] font-semibold ' +
+                  (inspectionPlaceMode
+                    ? 'bg-rose-600 border-rose-600 text-white'
+                    : 'bg-white border-rose-400 text-rose-700 hover:bg-rose-50')
+                }
+                title="실사정보 입력 — 클릭한 위치에 실사정보 시설 즉시 등록 (이름 자동 「실사N」)"
+                aria-label="실사정보입력"
+              >
+                <span
+                  className="inline-flex h-4 w-4 items-center justify-center rounded-full"
+                  style={{
+                    backgroundColor: inspectionPlaceMode ? 'white' : '#dc2626',
+                    color: inspectionPlaceMode ? '#dc2626' : 'white',
+                    fontWeight: 900,
+                    fontSize: 10,
+                  }}
+                >
+                  i
+                </span>
+                실사정보입력
               </button>
             </div>
             <span className="mx-1 h-5 w-px bg-slate-200" />
@@ -5992,6 +6070,42 @@ function FacilityShape({
   }
   if (closureType === '광Mux') {
     return <CircledText cx={cx} cy={cy} text="M" color={stdColor} />
+  }
+
+  // ===== 실사정보 — 큰 빨간 원 + 흰 'i' + 펄스 후광 (눈에 확 띄게) ============
+  if (closureType === '실사정보') {
+    const R = 18
+    return (
+      <g>
+        {/* 펄스 후광 — 노란 마크와 유사한 강조 효과 */}
+        <circle cx={cx} cy={cy} r={R + 4} fill="#fecaca" fillOpacity={0.5}>
+          <animate
+            attributeName="r"
+            values={`${R + 2};${R + 10};${R + 2}`}
+            dur="1.8s"
+            repeatCount="indefinite"
+          />
+          <animate
+            attributeName="fill-opacity"
+            values="0.7;0;0.7"
+            dur="1.8s"
+            repeatCount="indefinite"
+          />
+        </circle>
+        {/* 본체 원 — 채움 + 흰 테두리로 어떤 배경에서도 보이게 */}
+        <circle
+          cx={cx}
+          cy={cy}
+          r={R}
+          fill="#dc2626"
+          stroke="white"
+          strokeWidth={3}
+        />
+        {/* 안에 흰 'i' 글자 — 작은 점 + 세로 긴 사각 */}
+        <circle cx={cx} cy={cy - 6} r={2.5} fill="white" />
+        <rect x={cx - 2} y={cy - 2} width={4} height={11} rx={1.5} fill="white" />
+      </g>
+    )
   }
 
   // ===== 안전망 — 미매칭 시 기본 박스 =======================================

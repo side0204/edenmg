@@ -159,6 +159,8 @@ export default function FacilityInfoPanel({
   // 설치 구분(기설/신설) 은 접속함체 + RN/IJP 에 표시
   const showInstallStatus = hasInstallStatus(facility.closure_type)
   const isInternal = isInternalNode(facility.closure_type)
+  // 실사정보 시설 — 정보 패널을 비고 + 첨부 사진만 노출 (다른 필드 숨김)
+  const isInspectionFacility = facility.closure_type === '실사정보'
 
   // 공종 추가 폼
   const [newTaskType, setNewTaskType] = useState('')
@@ -429,6 +431,192 @@ export default function FacilityInfoPanel({
           시설 정보
         </span>
       </button>
+    )
+  }
+
+  // 실사정보 시설 — 단순화된 패널 (식별·이름·비고·갤러리만, 다른 필드 숨김).
+  //   owner 결정 (2026-05-24): "정보패널에서 첨부사진과 비고에 들어가는
+  //   실사내용만 표시하면 돼".
+  if (isInspectionFacility) {
+    return (
+      <div className="w-80 shrink-0 min-h-0 overflow-y-auto border-l border-slate-300 bg-white">
+        <div className="sticky top-0 z-10 bg-white border-b border-slate-200 px-3 py-2 flex items-center justify-between">
+          <span className="text-sm font-bold text-slate-900">실사정보</span>
+          <div className="flex items-center gap-1">
+            <button
+              type="button"
+              onClick={onDelete}
+              disabled={busy}
+              title="실사정보 시설 삭제"
+              className="inline-flex items-center gap-0.5 rounded-md border border-rose-300 px-1.5 py-0.5 text-[11px] font-medium text-rose-700 hover:bg-rose-50 disabled:opacity-40"
+            >
+              <Trash2 className="h-3.5 w-3.5" />
+              삭제
+            </button>
+            <button
+              type="button"
+              onClick={onToggleCollapse}
+              title="패널 접기"
+              className="text-slate-400 hover:text-slate-900"
+            >
+              <ChevronRight className="h-4 w-4" />
+            </button>
+            <button
+              type="button"
+              onClick={onClose}
+              title="닫기"
+              className="text-slate-400 hover:text-slate-900"
+            >
+              <X className="h-4 w-4" />
+            </button>
+          </div>
+        </div>
+
+        <div className="p-3 space-y-3">
+          {/* 식별 정보 */}
+          <div className="rounded-lg bg-slate-50 px-2.5 py-1.5 text-[11px] text-slate-600">
+            <p className="font-mono font-semibold text-slate-800">
+              {formatFacilityCode(facility.closure_type, facility.seq_no)}
+              <span className="ml-1.5 font-sans font-normal text-slate-500">실사정보</span>
+            </p>
+            {position && (
+              <p className="mt-0.5 font-mono text-[10px] text-slate-500">
+                좌표 ({Math.round(position.x)}, {Math.round(position.y)})
+              </p>
+            )}
+          </div>
+
+          {/* 이름 + 비고 + 저장 */}
+          <div className="space-y-2">
+            <div>
+              <label className="block text-[11px] font-medium text-slate-600">이름</label>
+              <input
+                type="text"
+                value={name}
+                onChange={(e) => setName(e.target.value)}
+                maxLength={200}
+                className="mt-0.5 w-full rounded-md border border-slate-300 px-2 py-1 text-xs"
+              />
+            </div>
+            <div>
+              <label className="block text-[11px] font-medium text-slate-600">실사 내용 (비고)</label>
+              <textarea
+                value={notes}
+                onChange={(e) => setNotes(e.target.value)}
+                rows={4}
+                maxLength={1000}
+                placeholder="이 위치에서 확인한 실사 내용을 적어주세요"
+                className="mt-0.5 w-full rounded-md border border-slate-300 px-2 py-1 text-xs resize-none"
+              />
+            </div>
+            <div className="flex justify-end">
+              <button
+                type="button"
+                onClick={onSaveInfo}
+                disabled={busy}
+                className="inline-flex items-center gap-1 rounded-md bg-slate-900 px-3 py-1 text-[11px] font-medium text-white hover:bg-slate-800 disabled:bg-slate-300"
+              >
+                <Save className="h-3.5 w-3.5" />
+                정보 저장
+              </button>
+            </div>
+          </div>
+
+          {/* 첨부 사진 (실사 캡처 갤러리) */}
+          <div className="border-t border-slate-200 pt-2">
+            <p className="flex items-center gap-1 text-[11px] font-bold text-slate-700">
+              <Camera className="h-3.5 w-3.5" />
+              첨부 사진
+              {inspections.length > 0 && (
+                <span className="ml-1 rounded-full bg-amber-100 px-1.5 py-0.5 text-[10px] font-semibold text-amber-800">
+                  실사내용확인 · {inspections.length}건
+                </span>
+              )}
+            </p>
+            {inspections.length === 0 ? (
+              <p className="mt-1.5 text-[11px] text-slate-400 italic">
+                저장된 실사 캡처 없음
+              </p>
+            ) : (
+              <ul className="mt-1.5 grid grid-cols-2 gap-1.5">
+                {inspections.map((insp) => {
+                  const url = inspectionUrls[insp.image_path]
+                  const date = new Date(insp.captured_at)
+                  const dateStr = `${date.getMonth() + 1}/${date.getDate()} ${String(
+                    date.getHours(),
+                  ).padStart(2, '0')}:${String(date.getMinutes()).padStart(2, '0')}`
+                  return (
+                    <li
+                      key={insp.id}
+                      className="group relative rounded-md border border-slate-200 overflow-hidden bg-slate-100"
+                    >
+                      {url ? (
+                        <button
+                          type="button"
+                          onClick={() => setPreviewUrl(url)}
+                          className="block w-full"
+                          title={insp.note ?? '클릭하여 크게 보기'}
+                        >
+                          {/* eslint-disable-next-line @next/next/no-img-element */}
+                          <img
+                            src={url}
+                            alt={insp.note ?? '실사 캡처'}
+                            className="w-full h-24 object-cover"
+                          />
+                        </button>
+                      ) : (
+                        <div className="w-full h-24 flex items-center justify-center text-[10px] text-slate-400">
+                          로딩 중…
+                        </div>
+                      )}
+                      <div className="px-1.5 py-1 bg-white">
+                        <p className="text-[10px] text-slate-500">{dateStr}</p>
+                        {insp.note && (
+                          <p className="text-[10px] text-slate-700 truncate" title={insp.note}>
+                            {insp.note}
+                          </p>
+                        )}
+                      </div>
+                      <button
+                        type="button"
+                        onClick={() => onDeleteInspection(insp.id)}
+                        className="absolute top-1 right-1 rounded-md bg-white/90 p-1 text-slate-400 opacity-0 group-hover:opacity-100 hover:text-rose-600 transition"
+                        title="삭제"
+                      >
+                        <Trash2 className="h-3 w-3" />
+                      </button>
+                    </li>
+                  )
+                })}
+              </ul>
+            )}
+          </div>
+
+          {/* Lightbox */}
+          {previewUrl && (
+            <div
+              className="fixed inset-0 z-[70] flex items-center justify-center bg-black/80 p-4 cursor-zoom-out"
+              onClick={() => setPreviewUrl(null)}
+            >
+              {/* eslint-disable-next-line @next/next/no-img-element */}
+              <img
+                src={previewUrl}
+                alt="실사 캡처"
+                className="max-w-full max-h-full rounded-lg shadow-2xl"
+                onClick={(e) => e.stopPropagation()}
+              />
+              <button
+                type="button"
+                onClick={() => setPreviewUrl(null)}
+                className="absolute top-4 right-4 rounded-full bg-white/90 p-2 text-slate-700 hover:bg-white"
+                title="닫기"
+              >
+                <X className="h-5 w-5" />
+              </button>
+            </div>
+          )}
+        </div>
+      </div>
     )
   }
 

@@ -864,3 +864,82 @@ export async function bulkPlaceFacilities(
   revalidatePath(`/relocation/${projectId}`)
   return { ok: true, count }
 }
+
+
+/**
+ * 실사정보 시설 즉시 배치 — 캔버스 좌클릭 시 모달 없이 바로 생성.
+ *   이름은 자동 「실사{seq_no}」 (seq_no 는 카운터 atomic 발급).
+ *   닥션: x/y 도식 모드 또는 lat/lng 지도 모드. 둘 다 없으면 좌표 null.
+ *
+ * @returns { ok: true, id, seq_no, name } | { ok: false, error: string }
+ */
+export async function createInspectionFacility(input: {
+  project_id: string
+  x?: number | null
+  y?: number | null
+  lat?: number | null
+  lng?: number | null
+}): Promise<
+  | { ok: true; id: string; seq_no: number; name: string }
+  | { ok: false; error: string }
+> {
+  if (!input.project_id) return { ok: false, error: '프로젝트 id 가 없습니다' }
+
+  const { supabase, me } = await requireMember()
+
+  let attempt = 0
+  let lastErr: string | null = null
+  while (attempt < 3) {
+    attempt += 1
+    try {
+      const seqNo = await allocateNextFacilitySeq(supabase, input.project_id, '실사정보')
+      const name = `실사${seqNo}`
+
+      const { data: row, error } = await supabase
+        .from('relocation_facilities')
+        .insert({
+          project_id: input.project_id,
+          closure_type: '실사정보',
+          seq_no: seqNo,
+          name,
+          x_hint:
+            typeof input.x === 'number' && Number.isFinite(input.x)
+              ? Math.round(input.x)
+              : null,
+          y_hint:
+            typeof input.y === 'number' && Number.isFinite(input.y)
+              ? Math.round(input.y)
+              : null,
+          lat:
+            typeof input.lat === 'number' && isValidLat(input.lat) ? input.lat : null,
+          lng:
+            typeof input.lng === 'number' && isValidLng(input.lng) ? input.lng : null,
+          is_marked: false,
+          install_status: 'new',
+          created_by: me.id,
+        })
+        .select('id, seq_no, name')
+        .maybeSingle()
+
+      if (!error && row) {
+        revalidatePath(`/relocation/${input.project_id}`)
+        const r = row as { id: string; seq_no: number; name: string }
+        return { ok: true, id: r.id, seq_no: r.seq_no, name: r.name }
+      }
+
+      lastErr = error?.message ?? '알 수 없음'
+      if (
+        error?.message.includes('unique') ||
+        error?.message.includes('duplicate') ||
+        error?.code === '23505'
+      ) {
+        continue // seq 충돌 — 재시도
+      }
+      break
+    } catch (e: unknown) {
+      lastErr = e instanceof Error ? e.message : String(e)
+      break
+    }
+  }
+  return { ok: false, error: '실사정보 시설 생성 실패: ' + (lastErr ?? '알 수 없음') }
+}
