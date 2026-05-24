@@ -797,9 +797,13 @@ export default function TopologyCanvas({
   } | null>(null)
   // 그룹 드래그 — selectedIds 중 하나를 드래그하면 모든 선택 시설의 시작 좌표 캐시.
   //   delta 만큼 평행 이동 후 onPointerUp 에서 saveNodePositions 일괄 호출.
+  //   양 끝 모두 선택된 케이블의 사용자 경로점(waypoints)도 같은 delta 이동 — 그렇지
+  //   않으면 함체는 옮겨졌는데 경로점만 원래 위치에 남아 케이블이 꺾여 보임.
+  //   pole_name·dist 메타 보존 (spread 로 x/y 만 교체).
   const groupDragRef = useRef<{
     anchorId: string  // 사용자가 잡은 시설
     startPositions: Map<string, { x: number; y: number }>
+    startCableWaypoints: Map<string, Waypoint[]>  // cableId → 시작 waypoints (메타 포함)
     hasMoved: boolean
   } | null>(null)
 
@@ -2518,7 +2522,15 @@ export default function TopologyCanvas({
         const p = effectivePositions[sid]
         if (p) startPositions.set(sid, { x: p.x, y: p.y })
       }
-      groupDragRef.current = { anchorId: id, startPositions, hasMoved: false }
+      // 양 끝이 모두 선택된 케이블의 사용자 경로점도 함께 이동 — 메타(pole_name·dist) 보존.
+      const startCableWaypoints = new Map<string, Waypoint[]>()
+      for (const c of cables) {
+        if (!selectedIds.has(c.from_facility_id) || !selectedIds.has(c.to_facility_id)) continue
+        const wps = effectiveWaypoints(c.id)
+        if (wps.length === 0) continue
+        startCableWaypoints.set(c.id, wps.map((w) => ({ ...w })))
+      }
+      groupDragRef.current = { anchorId: id, startPositions, startCableWaypoints, hasMoved: false }
     }
     interactionRef.current = {
       id,
@@ -2624,6 +2636,20 @@ export default function TopologyCanvas({
           }
           return next
         })
+        // 양 끝 모두 선택된 케이블 — 사용자 경로점도 동일 delta 이동 (메타 보존)
+        if (gd.startCableWaypoints.size > 0) {
+          setCableWaypoints((prev) => {
+            const next = { ...prev }
+            for (const [cid, startWps] of gd.startCableWaypoints.entries()) {
+              next[cid] = startWps.map((w) => ({
+                ...w,
+                x: Math.round(w.x + gdx),
+                y: Math.round(w.y + gdy),
+              }))
+            }
+            return next
+          })
+        }
         return
       }
       let np = { x: x - ir.offsetX, y: y - ir.offsetY }
@@ -2748,10 +2774,16 @@ export default function TopologyCanvas({
           const p = effectivePositions[sid]
           if (p) updates.push({ id: sid, x: p.x, y: p.y })
         }
-        if (updates.length > 0) {
-          const result = await saveNodePositions(projectId, updates)
-          if (!result.ok) toast.error(result.error)
+        // 시설 위치 + 영향받은 케이블 경로점 동시 저장 (병렬)
+        const tasks: Promise<{ ok: true } | { ok: false; error: string }>[] = []
+        if (updates.length > 0) tasks.push(saveNodePositions(projectId, updates))
+        for (const cid of gd.startCableWaypoints.keys()) {
+          const wps = effectiveWaypoints(cid)
+          tasks.push(saveCableWaypoints(projectId, cid, wps, 'waypoints'))
         }
+        const results = await Promise.all(tasks)
+        const failed = results.find((r) => !r.ok)
+        if (failed && !failed.ok) toast.error(failed.error)
         return
       }
       if (ir.hasMoved) {
