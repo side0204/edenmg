@@ -27,6 +27,7 @@ import {
   Download,
   Sparkles,
   Trash2,
+  Undo2,
 } from 'lucide-react'
 import {
   CABLE_SPEC_VALUES,
@@ -1333,6 +1334,24 @@ export default function TopologyCanvas({
         toast.info('재배치할 시설이 없습니다')
         return
       }
+      // undo 스냅샷 — 이전 시설 좌표 + 이전 케이블 경로점 (clear 대상)
+      const wpField: 'waypoints' | 'map_waypoints' = mode === 'map' ? 'map_waypoints' : 'waypoints'
+      const snap: UndoSnapshot = {
+        label: '그래프 자동 배치',
+        positions: scopedFacilities
+          .map((f) => {
+            const p = effectivePositions[f.id]
+            return p ? { id: f.id, x: p.x, y: p.y } : null
+          })
+          .filter((p): p is { id: string; x: number; y: number } => p !== null),
+        cableWaypoints: scopedCables
+          .map((c) => {
+            const cur = (mode === 'map' ? c.mapWaypoints : c.waypoints) ?? []
+            if (cur.length === 0) return null
+            return { cableId: c.id, waypoints: cur.map((w) => ({ ...w })), field: wpField }
+          })
+          .filter((wp): wp is NonNullable<typeof wp> => wp !== null),
+      }
       const res = await saveNodePositions(projectId, changes)
       if (!res.ok) {
         toast.error(res.error ?? '자동 배치 저장에 실패했습니다')
@@ -1350,112 +1369,58 @@ export default function TopologyCanvas({
       }
       const msg =
         wpFailed === 0
-          ? `시설 ${changes.length}개 자동 배치 완료 (경로점 ${wpCleared}건 reset)`
+          ? `시설 ${changes.length}개 자동 배치 완료 (경로점 ${wpCleared}건 reset) — 「되돌리기」 가능`
           : `시설 ${changes.length}개 배치 — 경로점 ${wpCleared}건 reset, ${wpFailed}건 실패`
       if (wpFailed === 0) toast.success(msg)
       else toast.warning(msg)
+      setUndoSnapshot(snap)
       router.refresh()
     } finally {
       setGraphLayouting(false)
     }
   }
 
-  // 「케이블 거리 배율」 — 모든 시설 좌표를 중심 기준 배율로 확대·축소.
-  //   배율 1 = 변화 없음. 0.5 = 반으로 축소. 2 = 두 배 확대. 0.5~4 사이 9 단계.
-  //   시설 사이 거리만 변경 — 케이블 라우팅·도형 모양은 그대로 (자동 재라우팅).
-  const [scaling, setScaling] = useState(false)
-  const onScale = async (factor: number) => {
-    if (scaling) return
-    if (factor === 1) {
-      toast.info('배율 1배 — 변화 없음')
-      return
-    }
-    if (!confirm(`모든 시설 간 거리를 ${factor}배로 변경합니다. 계속하시겠습니까?`)) return
-    setScaling(true)
+  // 「케이블 거리 배율」 — 결과가 너무 틀어져 사용 어려워 비활성 (2026-05-24 owner 결정).
+  //   코드는 git history 에 보존. 필요 시 reinstate.
+
+  // 「도면정렬 / 그래프 자동 배치」 되돌리기 (undo) — 직전 실행 결과를 한 단계 복원.
+  //   캐시는 메모리 (페이지 새로고침하면 사라짐). 단일 undo (실행마다 새 스냅샷이 옛 것 대체).
+  type UndoSnapshot = {
+    label: '도면자동배치' | '그래프 자동 배치'
+    positions: { id: string; x: number; y: number }[]
+    cableWaypoints: {
+      cableId: string
+      waypoints: Waypoint[]
+      field: 'waypoints' | 'map_waypoints'
+    }[]
+  }
+  const [undoSnapshot, setUndoSnapshot] = useState<UndoSnapshot | null>(null)
+  const [undoing, setUndoing] = useState(false)
+  const onUndo = async () => {
+    if (!undoSnapshot || undoing) return
+    setUndoing(true)
     try {
-      // 시설 중심 평균 — 배율 기준점
-      let sumX = 0
-      let sumY = 0
-      let count = 0
-      for (const f of facilities) {
-        const p = effectivePositions[f.id]
-        if (!p) continue
-        sumX += p.x + NODE_SIZE.width / 2
-        sumY += p.y + NODE_SIZE.height / 2 - 10
-        count++
-      }
-      if (count === 0) {
-        toast.info('재배치할 시설이 없습니다')
-        return
-      }
-      const cx = sumX / count
-      const cy = sumY / count
-
-      const changes: { id: string; x: number; y: number }[] = []
-      for (const f of facilities) {
-        const p = effectivePositions[f.id]
-        if (!p) continue
-        const facCx = p.x + NODE_SIZE.width / 2
-        const facCy = p.y + NODE_SIZE.height / 2 - 10
-        const newCx = cx + (facCx - cx) * factor
-        const newCy = cy + (facCy - cy) * factor
-        changes.push({
-          id: f.id,
-          x: newCx - NODE_SIZE.width / 2,
-          y: newCy - NODE_SIZE.height / 2 + 10,
-        })
-      }
-
-      // 케이블 path freeze + 배율 — 시설만 배율 시 자동 라우팅의 VDETOUR 등 fixed
-      //   값과 시설 거리 비율이 바뀌어 candidate sort 결과 달라짐 → 모양 변경.
-      //   현재 path 의 중간점을 waypoints 로 freeze + 같은 중심·배율 곱 → 모양 보존.
-      //   부작용: freeze 된 케이블은 다음 시설 이동 시 자동 라우팅 안 함 (사용자 waypoint 로 됨).
-      //   (2026-05-24 owner 보고) 사용자 경로점 케이블은 원본 메타(pole_name·dist·lat·lng)
-      //   보존 + x/y 만 곱. 자동 라우팅 케이블만 pathsWithOverlap 의 {x,y} freeze.
-      const cableUpdates: { cableId: string; waypoints: Waypoint[] }[] = []
-      for (const c of cables) {
-        const userWps = effectiveWaypoints(c.id)
-        if (userWps.length > 0) {
-          // 사용자 경로점 케이블 — 원본 메타 보존, x/y 만 곱
-          const scaled: Waypoint[] = userWps.map((w) => ({
-            ...w,
-            x: cx + (w.x - cx) * factor,
-            y: cy + (w.y - cy) * factor,
-          }))
-          cableUpdates.push({ cableId: c.id, waypoints: scaled })
-          continue
+      if (undoSnapshot.positions.length > 0) {
+        const r = await saveNodePositions(projectId, undoSnapshot.positions)
+        if (!r.ok) {
+          toast.error(r.error ?? '되돌리기 실패')
+          return
         }
-        // 자동 라우팅 케이블 — pathsWithOverlap 의 중간점 freeze
-        const path = pathsWithOverlap.paths.get(c.id)
-        if (!path || path.length <= 2) continue
-        const midPoints = path.slice(1, -1)
-        const scaled: Waypoint[] = midPoints.map((p) => ({
-          x: cx + (p.x - cx) * factor,
-          y: cy + (p.y - cy) * factor,
-        }))
-        cableUpdates.push({ cableId: c.id, waypoints: scaled })
       }
-
-      const res = await saveNodePositions(projectId, changes)
-      if (!res.ok) {
-        toast.error(res.error ?? '배율 변경 실패')
-        return
-      }
-      // 케이블 waypoints 일괄 저장 (실패해도 시설 좌표는 유지)
       let wpFailed = 0
-      for (const cu of cableUpdates) {
-        const wpRes = await saveCableWaypoints(projectId, cu.cableId, cu.waypoints)
-        if (!wpRes.ok) wpFailed++
+      for (const wp of undoSnapshot.cableWaypoints) {
+        const r = await saveCableWaypoints(projectId, wp.cableId, wp.waypoints, wp.field)
+        if (!r.ok) wpFailed++
       }
-      const msg =
-        wpFailed === 0
-          ? `시설 거리 ${factor}배 변경 완료 (시설 ${changes.length}, 케이블 ${cableUpdates.length})`
-          : `시설 거리 ${factor}배 변경 — 시설 ${changes.length}, 케이블 ${cableUpdates.length - wpFailed}/${cableUpdates.length} 성공`
-      if (wpFailed === 0) toast.success(msg)
-      else toast.warning(msg)
+      if (wpFailed > 0) {
+        toast.warning(`되돌리기 완료 — 케이블 경로점 ${wpFailed}건 복원 실패`)
+      } else {
+        toast.success(`${undoSnapshot.label} 결과를 이전 상태로 복원했습니다`)
+      }
+      setUndoSnapshot(null)
       router.refresh()
     } finally {
-      setScaling(false)
+      setUndoing(false)
     }
   }
 
@@ -1503,6 +1468,19 @@ export default function TopologyCanvas({
         toast.info('이미 모든 케이블이 V/H/45° 로 정렬되어 있습니다')
         return
       }
+      // undo 스냅샷 — 변경 대상 시설의 「이전」 좌표만 (도면자동배치는 경로점 안 건드림)
+      const changeIds = new Set(changes.map((c) => c.id))
+      const snap: UndoSnapshot = {
+        label: '도면자동배치',
+        positions: scopedFacilities
+          .filter((f) => changeIds.has(f.id))
+          .map((f) => {
+            const p = effectivePositions[f.id]
+            return p ? { id: f.id, x: p.x, y: p.y } : null
+          })
+          .filter((p): p is { id: string; x: number; y: number } => p !== null),
+        cableWaypoints: [],
+      }
       const res = await saveNodePositions(
         projectId,
         changes.map((c) => ({ id: c.id, x: c.x, y: c.y })),
@@ -1511,7 +1489,8 @@ export default function TopologyCanvas({
         toast.error(res.error ?? '정렬 저장에 실패했습니다')
         return
       }
-      toast.success(`시설 ${changes.length}개 재배치 완료 — 케이블 정렬`)
+      toast.success(`시설 ${changes.length}개 재배치 완료 — 도면자동배치 (「되돌리기」 가능)`)
+      setUndoSnapshot(snap)
       router.refresh()
     } finally {
       setSnapping(false)
@@ -3219,68 +3198,64 @@ export default function TopologyCanvas({
             </button>
           )}
 
-          {/* 케이블 정렬 dropdown — 도식 모드 전용. 세 가지 작업 묶음:
-                1. V/H/45° 정렬 (기존 케이블 정렬, BFS-snap)
-                2. 그래프 자동 배치 (케이블 그래프 기반 전체 재배치)
-                3. 케이블 거리 배율 (시설 사이 간격 일괄 확대·축소)
-              owner 요청 (2026-05-24): 케이블 작업 모두 한 메뉴에. */}
+          {/* 도면정렬 dropdown — 도식 모드 전용:
+                1. 도면자동배치 (케이블 V/H/45° snap)
+                2. 그래프 자동 배치 (허브 중심 동심원 재배치)
+              owner 요청 (2026-05-24): 잘못 실행 시 「되돌리기」 버튼으로 즉시 복원.
+              케이블 거리 배율은 결과가 너무 틀어져 사용 어려워 비활성 (2026-05-24). */}
           {editable && mode === 'schematic' && (
-            <details className="relative mr-1">
-              <summary
-                className="inline-flex items-center gap-1 rounded-md border border-slate-300 bg-white px-2 h-7 text-[11px] font-medium text-slate-700 hover:bg-slate-50 cursor-pointer list-none [&::-webkit-details-marker]:hidden"
-                title="케이블 정렬·자동 배치·거리 배율 메뉴"
-              >
-                <Sparkles className="h-3 w-3" />
-                {snapping || graphLayouting || scaling ? '처리 중…' : '케이블 정렬'}
-              </summary>
-              <div className="absolute right-0 top-full mt-1 z-30 w-60 rounded-md border border-slate-200 bg-white shadow-lg p-2 space-y-2 text-[11px]">
-                <button
-                  type="button"
-                  onClick={(e) => {
-                    onCableSnap()
-                    ;(e.currentTarget.closest('details') as HTMLDetailsElement | null)?.removeAttribute('open')
-                  }}
-                  disabled={snapping}
-                  className="w-full text-left px-2 py-1.5 rounded hover:bg-slate-50 disabled:opacity-60"
-                  title="케이블이 수직/수평/45° 대각선으로 보이도록 시설 위치를 자동 재배치"
+            <>
+              <details className="relative mr-1">
+                <summary
+                  className="inline-flex items-center gap-1 rounded-md border border-slate-300 bg-white px-2 h-7 text-[11px] font-medium text-slate-700 hover:bg-slate-50 cursor-pointer list-none [&::-webkit-details-marker]:hidden"
+                  title="도면 자동 정렬·재배치 메뉴"
                 >
-                  <span className="font-medium text-slate-700">V/H/45° 정렬</span>
-                  <span className="block text-[10px] text-slate-500 mt-0.5">케이블이 직각·45° 로 보이도록 시설 snap</span>
-                </button>
-                <button
-                  type="button"
-                  onClick={(e) => {
-                    onGraphLayout()
-                    ;(e.currentTarget.closest('details') as HTMLDetailsElement | null)?.removeAttribute('open')
-                  }}
-                  disabled={graphLayouting}
-                  className="w-full text-left px-2 py-1.5 rounded text-violet-700 bg-violet-50 hover:bg-violet-100 disabled:opacity-60"
-                  title="허브 중심 + 연결된 시설끼리 가까이 — 케이블 그래프 기반 전체 재배치"
-                >
-                  <span className="font-medium">그래프 자동 배치</span>
-                  <span className="block text-[10px] text-violet-600 mt-0.5">허브 중심 동심원 — 모든 시설 강제 재배치</span>
-                </button>
-                <div className="border-t pt-2">
-                  <div className="text-[10px] text-slate-500 mb-1 px-1">케이블 거리 배율</div>
-                  <div className="grid grid-cols-3 gap-1">
-                    {[0.5, 0.75, 1, 1.5, 2, 2.5, 3, 3.5, 4].map((s) => (
-                      <button
-                        key={s}
-                        type="button"
-                        onClick={(e) => {
-                          onScale(s)
-                          ;(e.currentTarget.closest('details') as HTMLDetailsElement | null)?.removeAttribute('open')
-                        }}
-                        disabled={scaling}
-                        className="px-2 py-1 rounded border border-slate-200 hover:bg-slate-50 text-slate-700 font-mono disabled:opacity-60"
-                      >
-                        ×{s}
-                      </button>
-                    ))}
-                  </div>
+                  <Sparkles className="h-3 w-3" />
+                  {snapping || graphLayouting ? '처리 중…' : '도면정렬'}
+                </summary>
+                <div className="absolute right-0 top-full mt-1 z-30 w-60 rounded-md border border-slate-200 bg-white shadow-lg p-2 space-y-2 text-[11px]">
+                  <button
+                    type="button"
+                    onClick={(e) => {
+                      onCableSnap()
+                      ;(e.currentTarget.closest('details') as HTMLDetailsElement | null)?.removeAttribute('open')
+                    }}
+                    disabled={snapping}
+                    className="w-full text-left px-2 py-1.5 rounded hover:bg-slate-50 disabled:opacity-60"
+                    title="케이블이 수직/수평/45° 대각선으로 보이도록 시설 위치를 자동 재배치"
+                  >
+                    <span className="font-medium text-slate-700">도면자동배치</span>
+                    <span className="block text-[10px] text-slate-500 mt-0.5">케이블이 직각·45° 로 보이도록 시설 snap</span>
+                  </button>
+                  <button
+                    type="button"
+                    onClick={(e) => {
+                      onGraphLayout()
+                      ;(e.currentTarget.closest('details') as HTMLDetailsElement | null)?.removeAttribute('open')
+                    }}
+                    disabled={graphLayouting}
+                    className="w-full text-left px-2 py-1.5 rounded text-violet-700 bg-violet-50 hover:bg-violet-100 disabled:opacity-60"
+                    title="허브 중심 + 연결된 시설끼리 가까이 — 케이블 그래프 기반 전체 재배치"
+                  >
+                    <span className="font-medium">그래프 자동 배치</span>
+                    <span className="block text-[10px] text-violet-600 mt-0.5">허브 중심 동심원 — 모든 시설 강제 재배치</span>
+                  </button>
                 </div>
-              </div>
-            </details>
+              </details>
+              {/* 되돌리기 — 직전 도면정렬/그래프 자동 배치 결과를 이전 상태로 복원 */}
+              {undoSnapshot && (
+                <button
+                  type="button"
+                  onClick={onUndo}
+                  disabled={undoing}
+                  className="mr-1 inline-flex items-center gap-1 rounded-md border border-amber-400 bg-amber-50 px-2 h-7 text-[11px] font-medium text-amber-800 hover:bg-amber-100 disabled:opacity-60"
+                  title={`${undoSnapshot.label} 결과를 이전 상태로 복원`}
+                >
+                  <Undo2 className="h-3 w-3" />
+                  {undoing ? '복원 중…' : `되돌리기 (${undoSnapshot.label})`}
+                </button>
+              )}
+            </>
           )}
 
           {/* 검색창 보임/숨김 — 지도 모드에서만 (검색은 지도 기능) */}
