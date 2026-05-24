@@ -60,6 +60,7 @@ import {
 import { CABLE_STATUS_LABEL, CABLE_STATUS_VALUES } from '@/lib/relocation'
 import { autoLayoutPositions, NODE_SIZE } from './auto-layout'
 import { snapPositionsToCableDirections } from './cable-snap-layout'
+import { graphAwareLayout } from './graph-layout'
 import { saveNodePositions, saveCableWaypoints } from './position-actions'
 import { createCableFromCanvas } from './cable-actions'
 import { seedTestFacilities, clearTestFacilities } from './test-actions'
@@ -1225,6 +1226,41 @@ export default function TopologyCanvas({
   } | null>(null)
 
   const [snapping, setSnapping] = useState(false)
+  const [graphLayouting, setGraphLayouting] = useState(false)
+
+  // 「그래프 자동 배치」 — 케이블 그래프 기반 시설 위치 완전 재배치.
+  //   허브(degree 최대 시설) 가운데 → BFS spanning tree → level 별 동심원 분포.
+  //   owner 의 모든 시설 위치 덮어씀 (x_hint 무시). 케이블 cross 자연 감소·연결된
+  //   시설끼리 가까이 배치. 설계 초기 또는 시설 많은 프로젝트 재정리 시 사용.
+  const onGraphLayout = async () => {
+    if (graphLayouting) return
+    if (!confirm('모든 시설 위치를 케이블 그래프 기반으로 자동 재배치합니다. 기존 수동 배치는 모두 덮어씁니다. 계속하시겠습니까?')) return
+    setGraphLayouting(true)
+    try {
+      const positions = graphAwareLayout(
+        facilities.map((f) => ({ id: f.id })),
+        cables.map((c) => ({
+          from_facility_id: c.from_facility_id,
+          to_facility_id: c.to_facility_id,
+        })),
+      )
+      const changes = [...positions.values()].map((p) => ({ id: p.id, x: p.x, y: p.y }))
+      if (changes.length === 0) {
+        toast.info('재배치할 시설이 없습니다')
+        return
+      }
+      const res = await saveNodePositions(projectId, changes)
+      if (!res.ok) {
+        toast.error(res.error ?? '자동 배치 저장에 실패했습니다')
+        return
+      }
+      toast.success(`시설 ${changes.length}개 자동 배치 완료 — 그래프 기반`)
+      router.refresh()
+    } finally {
+      setGraphLayouting(false)
+    }
+  }
+
   // 「케이블 정렬」 — 케이블 V/H/대각선(45°) 각도에 맞춰 시설 위치 자동 재배치.
   //   BFS-snap (cable-snap-layout.ts). 가장 연결 많은 시설(국사·허브) 을 root 로
   //   원래 위치 유지, 그로부터 인접 시설을 부모→자식 방향각에 가장 가까운 45° 로
@@ -2783,6 +2819,21 @@ export default function TopologyCanvas({
             >
               <Sparkles className="h-3 w-3" />
               {snapping ? '정렬 중…' : '케이블 정렬'}
+            </button>
+          )}
+
+          {/* 그래프 자동 배치 — 케이블 그래프 기반 모든 시설 재배치 (도식 모드 전용).
+              owner 가 직접 만진 위치 다 덮어씀. 설계 초기 또는 전체 재정리용. */}
+          {editable && mode === 'schematic' && (
+            <button
+              type="button"
+              onClick={onGraphLayout}
+              disabled={graphLayouting}
+              className="mr-1 inline-flex items-center gap-1 rounded-md border border-violet-300 bg-violet-50 px-2 h-7 text-[11px] font-medium text-violet-700 hover:bg-violet-100 disabled:opacity-60"
+              title="허브 중심 + 연결된 시설끼리 가까이 — 케이블 그래프 기반 전체 재배치"
+            >
+              <Sparkles className="h-3 w-3" />
+              {graphLayouting ? '배치 중…' : '그래프 자동 배치'}
             </button>
           )}
 
