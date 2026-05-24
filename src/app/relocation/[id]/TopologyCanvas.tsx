@@ -5260,11 +5260,16 @@ export default function TopologyCanvas({
         />
 
         {/* 실사 도구 바 — sketchMode ON 시 캔버스 하단 중앙 floating.
-            flex-wrap 으로 좁은 화면에서 자동 줄바꿈. z-50 (캡처 가이드보다 위). */}
+            flex-wrap 으로 좁은 화면에서 자동 줄바꿈. z-50 (캡처 가이드보다 위).
+            캡처 중에는 visibility:hidden 으로 PNG 에 안 찍히게 가림. */}
         {sketchMode && (
           <div
             className="absolute bottom-3 left-1/2 -translate-x-1/2 z-50 flex flex-wrap items-center justify-center gap-1 rounded-2xl border border-slate-200 bg-white px-2 py-1.5 shadow-lg"
-            style={{ pointerEvents: 'auto', maxWidth: 'calc(100vw - 1rem)' }}
+            style={{
+              pointerEvents: 'auto',
+              maxWidth: 'calc(100vw - 1rem)',
+              visibility: labelsHiddenForCapture ? 'hidden' : undefined,
+            }}
           >
             {/* 도구 — 펜(자유 그리기) / T(텍스트 박스) */}
             <div className="flex items-center gap-1">
@@ -5413,20 +5418,15 @@ export default function TopologyCanvas({
         }))}
         preselectedFacilityId={selectedId}
         onCaptureRunningChange={(running) => {
-          // 캡처 중에는 다이얼로그·도구바·핸들이 PNG 에 안 찍히게 다이얼로그 잠시 가림
-          // (다이얼로그 자체는 onCaptureRunningChange 콜백을 호출하기 직전에 보이지만,
-          //  capture 시점에는 fixed dialog 가 화면 중앙에 있어 캡처에 같이 잡힘 → 가림)
-          if (running) {
-            const el = document.querySelector(
-              '[data-field-inspection-dialog]',
-            ) as HTMLElement | null
-            if (el) el.style.opacity = '0'
-          } else {
-            const el = document.querySelector(
-              '[data-field-inspection-dialog]',
-            ) as HTMLElement | null
-            if (el) el.style.opacity = '1'
-          }
+          // 캡처 중에는 다이얼로그·도구바·라벨 등 모두 PNG 에 안 찍히게 가림.
+          //   labelsHiddenForCapture state 로 React 렌더에 visibility:hidden 적용
+          //   (실사 도구바·다이얼로그·고정 UI 등 일괄 처리)
+          setLabelsHiddenForCapture(running)
+          // 다이얼로그 자체도 가림 (fixed z-60 이라 React rerender 후에도 보임)
+          const el = document.querySelector(
+            '[data-field-inspection-dialog]',
+          ) as HTMLElement | null
+          if (el) el.style.opacity = running ? '0' : '1'
         }}
         onSaved={() => router.refresh()}
       />
