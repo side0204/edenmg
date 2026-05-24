@@ -20,9 +20,11 @@ type Props = {
   onToggleCollapse: () => void
 }
 
-const MIN_W = 280
+const MIN_W = 200       // 모바일에서도 거리뷰 알아볼 수 있는 최소 폭
 const MAX_W = 720
 const DEFAULT_W = 420
+// 모바일 (≤ 640px) 기본 폭 — 화면의 절반 정도. 지도가 가려지지 않도록 작게 시작.
+const MOBILE_DEFAULT_W = 240
 
 export default function RoadviewPanel({
   position,
@@ -35,7 +37,26 @@ export default function RoadviewPanel({
   const roadviewRef = useRef<kakao.maps.Roadview | null>(null)
   const clientRef = useRef<kakao.maps.RoadviewClient | null>(null)
   const [noPano, setNoPano] = useState(false)
-  const [width, setWidth] = useState(DEFAULT_W)
+  // 초기 폭 — 화면 폭 기반. 모바일은 작게 시작 (지도 가리지 않도록).
+  //   useState 초기화 함수에서 한 번만 계산 (SSR 안전: window 가드).
+  const [width, setWidth] = useState<number>(() => {
+    if (typeof window === 'undefined') return DEFAULT_W
+    const vw = window.innerWidth
+    if (vw < 640) {
+      // 모바일 — 화면의 약 45% (최소 MOBILE_DEFAULT_W, 최대 viewport - 200)
+      return Math.min(Math.max(MOBILE_DEFAULT_W, Math.round(vw * 0.45)), vw - 200)
+    }
+    return DEFAULT_W
+  })
+  // 화면 회전·창 크기 변경 시 폭이 viewport - MIN_W 을 넘으면 자동 축소 (지도가 안 보이지 않게)
+  useEffect(() => {
+    function onResize() {
+      const vw = window.innerWidth
+      setWidth((w) => Math.min(w, Math.max(MIN_W, vw - 200)))
+    }
+    window.addEventListener('resize', onResize)
+    return () => window.removeEventListener('resize', onResize)
+  }, [])
   const resizeRef = useRef<{ startX: number; startW: number } | null>(null)
 
   // Roadview 인스턴스 — 컨테이너 마운트 후 1회 생성 (collapsed 토글 시 unmount 됨)

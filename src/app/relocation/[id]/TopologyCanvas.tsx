@@ -855,6 +855,41 @@ export default function TopologyCanvas({
   // 실사 저장 다이얼로그 — 시설 선택 + 화면 캡처 (getDisplayMedia) → Storage 업로드
   const [saveDialogOpen, setSaveDialogOpen] = useState(false)
 
+  // 「더보기」 dropdown — controlled state + position: fixed (overflow-x-auto 부모에서도 잘리지 않음)
+  const [moreOpen, setMoreOpen] = useState(false)
+  const moreBtnRef = useRef<HTMLButtonElement | null>(null)
+  const [morePos, setMorePos] = useState<{ top: number; right: number } | null>(null)
+  useEffect(() => {
+    if (!moreOpen) return
+    function update() {
+      const r = moreBtnRef.current?.getBoundingClientRect()
+      if (r) {
+        setMorePos({ top: r.bottom + 4, right: window.innerWidth - r.right })
+      }
+    }
+    update()
+    const onScroll = () => update()
+    const onResize = () => update()
+    window.addEventListener('scroll', onScroll, true)
+    window.addEventListener('resize', onResize)
+    // 외부 클릭 닫기
+    function onDocPointer(e: PointerEvent) {
+      const btn = moreBtnRef.current
+      const target = e.target as Node | null
+      if (btn && target && btn.contains(target)) return
+      // 패널 안 클릭은 통과 (data-more-panel 으로 표시)
+      const panel = (target as Element | null)?.closest?.('[data-more-panel]')
+      if (panel) return
+      setMoreOpen(false)
+    }
+    document.addEventListener('pointerdown', onDocPointer)
+    return () => {
+      window.removeEventListener('scroll', onScroll, true)
+      window.removeEventListener('resize', onResize)
+      document.removeEventListener('pointerdown', onDocPointer)
+    }
+  }, [moreOpen])
+
   // 실사정보 배치 모드 — sketchMode 안에서 활성. 캔버스 좌클릭 시 그 위치에
   //   '실사정보' 시설 즉시 등록 (이름 자동 「실사{seq}」, 모달 X).
   //   기존 펜/T 도구와 상호 배타 (sketchTool 은 그대로 두고 별도 플래그).
@@ -3194,11 +3229,11 @@ export default function TopologyCanvas({
 
   return (
     <div className={wrapperClass}>
-      <div className="px-4 py-2 border-b border-slate-100 flex items-center gap-2 overflow-x-auto">
+      <div className="px-4 py-2 border-b border-slate-100 flex items-center gap-2">
         <p className="shrink-0 text-xs text-slate-600">
           시설 {facilities.length}개 · 케이블 {cables.length}개
         </p>
-        <div className="ml-auto flex items-center gap-1 shrink-0">
+        <div className="ml-auto flex items-center gap-1 overflow-x-auto min-w-0">
           {/* 도식 / 지도 모드 토글 */}
           <div className="mr-1 inline-flex items-center rounded-md border border-slate-300 overflow-hidden">
             <button
@@ -3703,24 +3738,33 @@ export default function TopologyCanvas({
             </>
           )}
 
-          {/* 더보기 — 자주 안 쓰는 컨트롤(표준 범례·탭 메뉴·캔버스 표시 크기)을 묶어 툴바 정리 */}
-          <details className="relative ml-1">
-            <summary
-              className="inline-flex h-7 w-7 cursor-pointer list-none items-center justify-center rounded-md border border-slate-300 text-slate-700 hover:bg-slate-50 [&::-webkit-details-marker]:hidden"
-              title="더보기"
-            >
-              <MoreHorizontal className="h-3.5 w-3.5" />
-            </summary>
+          {/* 더보기 — 자주 안 쓰는 컨트롤(표준 범례·탭 메뉴·캔버스 표시 크기)을 묶어 툴바 정리.
+              controlled state + position:fixed — 부모 overflow-x-auto 영향 회피.
+              모바일 터치 영역 확보 위해 h-9 (모바일) / sm:h-7 (데스크탑). */}
+          <button
+            ref={moreBtnRef}
+            type="button"
+            onClick={() => setMoreOpen((v) => !v)}
+            className={
+              'ml-1 inline-flex h-9 w-9 sm:h-7 sm:w-7 shrink-0 items-center justify-center rounded-md border ' +
+              (moreOpen
+                ? 'bg-slate-900 border-slate-900 text-white'
+                : 'border-slate-300 text-slate-700 hover:bg-slate-50')
+            }
+            title="더보기"
+            aria-label="더보기"
+            aria-expanded={moreOpen}
+          >
+            <MoreHorizontal className="h-4 w-4 sm:h-3.5 sm:w-3.5" />
+          </button>
+          {moreOpen && morePos && (
             <div
-              className="absolute right-0 top-8 z-30 w-52 rounded-lg border border-slate-200 bg-white p-2 shadow-lg space-y-1"
-              onClick={(e) => {
-                // 항목 클릭 후 드롭다운 자동 닫힘
-                const det = e.currentTarget.parentElement as HTMLDetailsElement | null
-                if (det && det.open) {
-                  requestAnimationFrame(() => {
-                    det.open = false
-                  })
-                }
+              data-more-panel
+              className="z-50 w-56 rounded-lg border border-slate-200 bg-white p-2 shadow-lg space-y-1"
+              style={{ position: 'fixed', top: morePos.top, right: morePos.right }}
+              onClick={() => {
+                // 항목 클릭 후 자동 닫힘 (개별 버튼 onClick 후)
+                requestAnimationFrame(() => setMoreOpen(false))
               }}
             >
               <button
@@ -3820,7 +3864,7 @@ export default function TopologyCanvas({
                 </div>
               )}
             </div>
-          </details>
+          )}
 
           <button
             type="button"
