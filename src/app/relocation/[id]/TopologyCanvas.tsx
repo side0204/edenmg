@@ -1311,16 +1311,30 @@ export default function TopologyCanvas({
       //   값과 시설 거리 비율이 바뀌어 candidate sort 결과 달라짐 → 모양 변경.
       //   현재 path 의 중간점을 waypoints 로 freeze + 같은 중심·배율 곱 → 모양 보존.
       //   부작용: freeze 된 케이블은 다음 시설 이동 시 자동 라우팅 안 함 (사용자 waypoint 로 됨).
+      //   (2026-05-24 owner 보고) 사용자 경로점 케이블은 원본 메타(pole_name·dist·lat·lng)
+      //   보존 + x/y 만 곱. 자동 라우팅 케이블만 pathsWithOverlap 의 {x,y} freeze.
       const cableUpdates: { cableId: string; waypoints: Waypoint[] }[] = []
       for (const c of cables) {
+        const userWps = effectiveWaypoints(c.id)
+        if (userWps.length > 0) {
+          // 사용자 경로점 케이블 — 원본 메타 보존, x/y 만 곱
+          const scaled: Waypoint[] = userWps.map((w) => ({
+            ...w,
+            x: cx + (w.x - cx) * factor,
+            y: cy + (w.y - cy) * factor,
+          }))
+          cableUpdates.push({ cableId: c.id, waypoints: scaled })
+          continue
+        }
+        // 자동 라우팅 케이블 — pathsWithOverlap 의 중간점 freeze
         const path = pathsWithOverlap.paths.get(c.id)
-        if (!path || path.length <= 2) continue // 직선 (waypoint 없음) → skip
+        if (!path || path.length <= 2) continue
         const midPoints = path.slice(1, -1)
-        const scaledWaypoints: Waypoint[] = midPoints.map((p) => ({
+        const scaled: Waypoint[] = midPoints.map((p) => ({
           x: cx + (p.x - cx) * factor,
           y: cy + (p.y - cy) * factor,
         }))
-        cableUpdates.push({ cableId: c.id, waypoints: scaledWaypoints })
+        cableUpdates.push({ cableId: c.id, waypoints: scaled })
       }
 
       const res = await saveNodePositions(projectId, changes)
