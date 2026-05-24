@@ -2156,26 +2156,29 @@ export default function TopologyCanvas({
       const path = pathsWithOverlap.paths.get(c.id)
       if (!path || path.length < 2) return []
 
-      // 도형 가장자리 trim — 시설 중심 path[0]/path[end] 를 도형 반경만큼 안쪽 점으로 이동.
+      // 도형 가장자리 trim — 시설 종류별 정확한 반경 적용.
       //   (2026-05-24 owner 보고) 시설 도형 위에 cable_code 마커·라벨이 그려져서 케이블이
       //   가려짐 → 도형과 케이블 사이 빈 공간 보임. 도형 가장자리에서 시작·도착하면
       //   마커·라벨이 도형 안에 있고 케이블은 도형 밖에서 도형 외곽에 직접 닿음.
-      //   NODE_RADIUS=14 — 접속함체 원 반지름. 다른 도형 (마름모·박스) 도 평균 11~15 이라 14 통일.
-      const NODE_RADIUS = 14
-      const trimEdge = (start: Waypoint, next: Waypoint): Waypoint => {
+      //   FacilityShape 의 도형별 반경에 -1 (시각적으로 살짝 잠겨야 도형이 케이블 끝점을 가려 닿아 보임).
+      const fromF = facilities.find((f) => f.id === c.from_facility_id)
+      const toF = facilities.find((f) => f.id === c.to_facility_id)
+      const fromR = facilityEdgeRadius(fromF?.closure_type)
+      const toR = facilityEdgeRadius(toF?.closure_type)
+      const trimEdge = (start: Waypoint, next: Waypoint, radius: number): Waypoint => {
         const dx = next.x - start.x
         const dy = next.y - start.y
         const d = Math.hypot(dx, dy)
-        if (d <= NODE_RADIUS) return start
+        if (d <= radius) return start
         return {
-          x: start.x + dx * (NODE_RADIUS / d),
-          y: start.y + dy * (NODE_RADIUS / d),
+          x: start.x + dx * (radius / d),
+          y: start.y + dy * (radius / d),
         }
       }
       const trimmed: Waypoint[] =
         path.length === 2
-          ? [trimEdge(path[0], path[1]), trimEdge(path[1], path[0])]
-          : [trimEdge(path[0], path[1]), ...path.slice(1, -1), trimEdge(path[path.length - 1], path[path.length - 2])]
+          ? [trimEdge(path[0], path[1], fromR), trimEdge(path[1], path[0], toR)]
+          : [trimEdge(path[0], path[1], fromR), ...path.slice(1, -1), trimEdge(path[path.length - 1], path[path.length - 2], toR)]
 
       const fromPt = path[0]
       const toPt = path[path.length - 1]
@@ -2189,7 +2192,7 @@ export default function TopologyCanvas({
 
       return trimmed.map((p) => ({ x: p.x + nx * offset, y: p.y + ny * offset }))
     },
-    [pathsWithOverlap, cableOffsets],
+    [pathsWithOverlap, cableOffsets, facilities],
   )
 
   // 경로점의 화면 좌표 — 도식: x/y · 지도: lat/lng 투영 (없으면 null)
@@ -4870,6 +4873,54 @@ function NewFacilityModal({
 //   접속함체 (5종) — 함체_가공형/관로형(원+X 검정), 중간접속형(원+X 빨강), 중간분기형(원+T 주황), SP내장형(보타이 빨강)
 //   모바일국소 (8종) — 기지국(탑), 중계기(깃발), 안테나(H원), ESS_LTE_DU(eNB 박스), ESS_LTE_RRH(충원), ESS_CDMA_기지국(기원), ESS_CDMA_광중계기(광원), ESS_RF중계기(RF원)
 //   RN/IJP/광MUX (5종) — RN_TPS(R빨강), RN_LTE(R보라), TPS_LTE_외(R초록), IJP(i노랑), 광Mux(M파랑)
+// 시설 종류별 도형 가장자리 반경 — 케이블 끝점 trim 용.
+//   FacilityShape 의 도형별 외접 반경에 -1 (도형이 케이블 끝점을 살짝 가려 닿아 보이도록).
+//   undefined 또는 미정의 종류는 기본 9.
+function facilityEdgeRadius(closureType: ClosureType | undefined): number {
+  if (!closureType) return 9
+  // 접속함체 원+X 또는 원+T (r=14)
+  if (
+    closureType === '함체_가공형' ||
+    closureType === '함체_관로형' ||
+    closureType === '중간접속형' ||
+    closureType === '중간분기형'
+  ) return 13
+  if (closureType === 'SP내장형') return 12 // 보타이
+  // 국사 마름모 s=22 — 내접원 ≈ 11
+  if (
+    closureType === '종합국사' ||
+    closureType === '집중국사' ||
+    closureType === '가입자국사' ||
+    closureType === '간이국사' ||
+    closureType === '창고'
+  ) return 10
+  // 국사 (깃대+깃발) — 작은 영역
+  if (closureType === '국사') return 8
+  // 국사 내부 박스 (32×16) — 짧은 변 반
+  if (closureType === 'MOFD' || closureType === 'OJC' || closureType === '국사내장비') return 7
+  if (closureType === '맨홀') return 8
+  if (closureType === '가입자시설') return 10
+  if (closureType === '일반설치장소') return 9
+  if (closureType === '기지국') return 10
+  if (closureType === '중계기') return 7
+  if (closureType === '안테나') return 10
+  if (
+    closureType === 'ESS_LTE_DU' ||
+    closureType === 'ESS_LTE_RRH' ||
+    closureType === 'ESS_CDMA_기지국' ||
+    closureType === 'ESS_CDMA_광중계기' ||
+    closureType === 'ESS_RF중계기'
+  ) return 8
+  if (
+    closureType === 'RN_TPS' ||
+    closureType === 'RN_LTE' ||
+    closureType === 'TPS_LTE_외' ||
+    closureType === 'IJP' ||
+    closureType === '광Mux'
+  ) return 10
+  return 9
+}
+
 function FacilityShape({
   closureType,
   isNew,
