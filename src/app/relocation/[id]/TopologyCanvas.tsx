@@ -73,6 +73,7 @@ import {
   saveFacilityLabelOffset,
 } from './facility-actions'
 import LegendPanel from './LegendPanel'
+import RoadviewPanel from './RoadviewPanel'
 import CableInfoPanel from './CableInfoPanel'
 import FacilityInfoPanel, {
   type TaskTypeOption,
@@ -532,6 +533,9 @@ export default function TopologyCanvas({
     placingIdRef.current = placingId
   }, [placingId])
 
+  // 거리뷰 패널 열림 — 카카오 click 리스너(클로저 고정)에서 읽기 위한 ref
+  const roadviewOpenRef = useRef(false)
+
   // addTool 의 최신값 — 카카오 클릭 리스너(클로저 고정)에서 읽기 위한 ref
   const addToolRef = useRef<ClosureType | null>(null)
 
@@ -820,6 +824,17 @@ export default function TopologyCanvas({
   // 정보 패널(케이블·접속함체) 접기 상태 — 캔버스 작업 공간 확보용.
   // 케이블·시설 패널은 동시에 1개만 뜨므로 공유 상태 1개. 선택 바꿔도 유지.
   const [infoPanelCollapsed, setInfoPanelCollapsed] = useState(false)
+
+  // 거리뷰 패널 — 지도 모드 우측 컬럼. 시설 선택 또는 지도 클릭 시 그 좌표의 카카오 거리뷰.
+  //   roadviewOpen 켜져 있으면 시설/케이블/고장점 패널을 가리고 거리뷰가 표시됨 (상호 배타).
+  //   roadviewPos = 마지막으로 요청된 좌표. null 이면 안내 메시지만 표시.
+  const [roadviewOpen, setRoadviewOpen] = useState(false)
+  const [roadviewPos, setRoadviewPos] = useState<{ lat: number; lng: number } | null>(null)
+  const [roadviewTitle, setRoadviewTitle] = useState<string | null>(null)
+  const [roadviewCollapsed, setRoadviewCollapsed] = useState(false)
+  useEffect(() => {
+    roadviewOpenRef.current = roadviewOpen
+  }, [roadviewOpen])
 
   // 고장점 검색 패널 — 캔버스 우측. 회선(코어연결) 기준.
   //   선택 드릴다운: 시설물 → 케이블 → 코어선번(회선).
@@ -1163,6 +1178,39 @@ export default function TopologyCanvas({
     }
   }, [kakaoMap, mapStatus, mapTypeId])
 
+  // 거리뷰 ROADVIEW 오버레이 동기화 — 지도 위 거리뷰 가능 도로의 파란 선.
+  //   roadviewOpen 켜질 때 addOverlay, 꺼질 때 removeOverlay. SDK 가 거부하면 무시.
+  useEffect(() => {
+    if (!kakaoMap || mapStatus !== 'ready') return
+    if (!roadviewOpen) return
+    try {
+      kakaoMap.addOverlayMapTypeId(kakao.maps.MapTypeId.ROADVIEW)
+    } catch {
+      /* SDK 거부 시 무시 */
+    }
+    return () => {
+      try {
+        kakaoMap.removeOverlayMapTypeId(kakao.maps.MapTypeId.ROADVIEW)
+      } catch {
+        /* SDK 거부 시 무시 */
+      }
+    }
+  }, [kakaoMap, mapStatus, roadviewOpen])
+
+  // 거리뷰 패널 열려 있을 때 시설 선택 시 그 시설 좌표로 panorama 이동.
+  //   GPS 없으면 안내 toast.
+  useEffect(() => {
+    if (!roadviewOpen || !selectedId) return
+    const f = facilities.find((x) => x.id === selectedId)
+    if (!f) return
+    if (f.lat == null || f.lng == null) {
+      toast.info('이 시설은 GPS 좌표가 없습니다 — 지도 위 파란 선을 직접 클릭해 보세요')
+      return
+    }
+    setRoadviewPos({ lat: f.lat, lng: f.lng })
+    setRoadviewTitle(`${formatFacilityCode(f.closure_type, f.seq_no)} ${f.name}`)
+  }, [roadviewOpen, selectedId, facilities])
+
   // GPS 가 없는(지도 미배치) 시설 목록 — 배치 패널에서 사용
   const unplacedFacilities = useMemo(
     () => facilities.filter((f) => f.lat == null || f.lng == null),
@@ -1207,6 +1255,12 @@ export default function TopologyCanvas({
       if (tool) {
         setPendingPlacement({ closureType: tool, kind: 'latlng', lat, lng })
         setAddTool(null) // 1회 배치 후 도구 해제
+        return
+      }
+      // 2.5) 거리뷰 패널이 열려 있으면 그 좌표로 panorama 이동 (가까운 거리뷰 자동 검색)
+      if (roadviewOpenRef.current) {
+        setRoadviewPos({ lat, lng })
+        setRoadviewTitle(null)
         return
       }
       // 3) 빈 지도 클릭 — 선택 해제 (도식 모드의 빈 영역 클릭과 동일).
@@ -3276,6 +3330,40 @@ export default function TopologyCanvas({
             </button>
           )}
 
+          {/* 거리뷰 — 지도 모드에서만. 카카오 Roadview panorama 를 우측 패널에 표시.
+              켜면 지도 위에 파란 선(거리뷰 가능 도로) 오버레이. 시설 클릭 또는
+              지도 빈 곳(파란 선 위) 클릭 시 그 위치의 거리뷰가 보임. */}
+          {mode === 'map' && mapStatus === 'ready' && (
+            <button
+              type="button"
+              onClick={() => {
+                const next = !roadviewOpen
+                setRoadviewOpen(next)
+                if (next) {
+                  setFaultSearchOpen(false)
+                  setRoadviewCollapsed(false)
+                } else {
+                  setRoadviewPos(null)
+                  setRoadviewTitle(null)
+                }
+              }}
+              className={
+                'mr-1 inline-flex items-center gap-1 rounded-md border px-2 h-7 text-[11px] font-medium ' +
+                (roadviewOpen
+                  ? 'bg-emerald-600 text-white border-emerald-600'
+                  : 'text-slate-700 border-slate-300 hover:bg-slate-50')
+              }
+              title={
+                roadviewOpen
+                  ? '거리뷰 끄기'
+                  : '카카오 거리뷰 — 시설 클릭 또는 지도 위 파란 선 클릭으로 표시'
+              }
+            >
+              <Camera className="h-3 w-3" />
+              거리뷰
+            </button>
+          )}
+
           {/* 캡처 메뉴 — 지도 모드. 자동/분할 두 가지 방식을 드롭다운에서 선택.
               진행 중이면 버튼이 해당 색으로 강조 + 「취소」 항목 노출. */}
           {mode === 'map' && mapStatus === 'ready' && (
@@ -4938,8 +5026,24 @@ export default function TopologyCanvas({
           )}
         </div>
 
+        {/* 거리뷰 패널 — 지도 모드 + 거리뷰 토글 ON. 다른 우측 패널보다 우선 */}
+        {roadviewOpen && mode === 'map' && (
+          <RoadviewPanel
+            position={roadviewPos}
+            title={roadviewTitle}
+            onClose={() => {
+              setRoadviewOpen(false)
+              setRoadviewPos(null)
+              setRoadviewTitle(null)
+            }}
+            collapsed={roadviewCollapsed}
+            onToggleCollapse={() => setRoadviewCollapsed((v) => !v)}
+          />
+        )}
+
         {/* 케이블 정보 패널 — 케이블 선택 시 우측 컬럼. 정보 수정·경로점 거리·삭제 */}
-        {!faultSearchOpen &&
+        {!roadviewOpen &&
+          !faultSearchOpen &&
           selectedCableId &&
           (() => {
             const c = cableById.get(selectedCableId)
@@ -4992,7 +5096,8 @@ export default function TopologyCanvas({
 
         {/* 시설 정보 패널 — 시설(모든 종류) 선택 시 우측 컬럼.
             기본 정보 수정 + 공종량·자재 입력 (기별명세서용) */}
-        {!faultSearchOpen &&
+        {!roadviewOpen &&
+          !faultSearchOpen &&
           selectedId &&
           (() => {
             const f = facilities.find((x) => x.id === selectedId)
@@ -5042,7 +5147,7 @@ export default function TopologyCanvas({
           })()}
 
         {/* 고장점 검색 패널 — 우측 컬럼. 시설물→케이블→회선 드릴다운 */}
-        {faultSearchOpen && (
+        {!roadviewOpen && faultSearchOpen && (
           <FaultSearchPanel
             facilities={facilities}
             cables={cables}

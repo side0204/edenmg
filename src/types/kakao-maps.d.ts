@@ -37,10 +37,12 @@ declare namespace kakao.maps {
   }
 
   // 지도 타일 종류 — ROADMAP(기본 도로지도) / SKYVIEW(위성) / HYBRID(위성+도로명)
+  //   ROADVIEW = 거리뷰 가능 도로 표시 오버레이용 ID (addOverlayMapTypeId 인자)
   const MapTypeId: {
     ROADMAP: string
     SKYVIEW: string
     HYBRID: string
+    ROADVIEW: string
   }
 
   class Map {
@@ -59,6 +61,27 @@ declare namespace kakao.maps {
     setDraggable(draggable: boolean): void
     setZoomable(zoomable: boolean): void
     setMapTypeId(mapTypeId: string): void
+    // 오버레이 토글 — 기본 지도 위 추가 레이어. 거리뷰 가능 도로 파란 선 등.
+    addOverlayMapTypeId(mapTypeId: string): void
+    removeOverlayMapTypeId(mapTypeId: string): void
+  }
+
+  // ===== Roadview (거리뷰) =================================================
+  // Roadview = panorama 표시 객체 · RoadviewClient = 좌표 ↔ panorama 검색
+  class Roadview {
+    constructor(container: HTMLElement)
+    // panorama 표시. position 은 거리뷰의 「관점 위치」 (panoId 가 있는 도로 위 좌표).
+    setPanoId(panoId: number, position: LatLng): void
+    relayout(): void
+  }
+  class RoadviewClient {
+    constructor()
+    // 좌표에서 반경 안 가장 가까운 panoId 검색. 없으면 callback 인자 0/null.
+    getNearestPanoId(
+      position: LatLng,
+      radius: number,
+      callback: (panoId: number | null) => void,
+    ): void
   }
 
   interface MarkerOptions {
