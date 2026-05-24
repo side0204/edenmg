@@ -212,14 +212,14 @@ export default function FieldInspectionSaveDialog({
   return (
     <div
       data-field-inspection-dialog
-      className="fixed inset-0 z-[60] flex items-center justify-center bg-black/40 p-4"
+      className="fixed top-3 right-3 z-[60] w-[min(360px,calc(100vw-1.5rem))] max-h-[calc(100vh-1.5rem)]"
       style={{ transition: 'opacity 0.15s' }}
     >
-      <div className="w-full max-w-lg max-h-[90vh] overflow-hidden rounded-2xl bg-white shadow-2xl flex flex-col">
-        <header className="flex items-center justify-between border-b border-slate-200 px-4 h-12 shrink-0">
-          <div className="flex items-center gap-2 min-w-0">
+      <div className="w-full max-h-[calc(100vh-1.5rem)] overflow-hidden rounded-2xl bg-white shadow-2xl ring-1 ring-slate-200 flex flex-col">
+        <header className="flex items-center justify-between border-b border-slate-200 px-3 h-10 shrink-0">
+          <div className="flex items-center gap-1.5 min-w-0">
             <Camera className="h-4 w-4 text-rose-600 shrink-0" />
-            <h2 className="text-base font-bold text-slate-900">실사 화면 저장</h2>
+            <h2 className="text-sm font-bold text-slate-900">실사 화면 저장</h2>
           </div>
           <button
             type="button"
@@ -227,16 +227,14 @@ export default function FieldInspectionSaveDialog({
             disabled={busy}
             className="text-slate-400 hover:text-slate-900 disabled:opacity-40"
           >
-            <X className="h-5 w-5" />
+            <X className="h-4 w-4" />
           </button>
         </header>
 
-        <div className="flex-1 min-h-0 overflow-y-auto px-4 py-3 space-y-3">
-          <div className="rounded-lg bg-slate-50 border border-slate-200 p-2 text-[11px] text-slate-600 leading-relaxed">
-            현재 캔버스 화면(지도·거리뷰·실사 그림·텍스트) 을 그대로 캡처해
-            선택한 시설에 첨부합니다. 「캡처 + 저장」 클릭 시 화면 공유 권한을
-            요청하는 브라우저 창이 뜨면 <b>현재 탭</b> 을 선택해 주세요.
-          </div>
+        <div className="flex-1 min-h-0 overflow-y-auto px-3 py-2 space-y-2">
+          <p className="text-[11px] text-slate-500 leading-snug">
+            현재 캔버스를 캡처해 선택 시설에 첨부합니다. 「캡처 + 저장」 → 화면 공유 창에서 <b>현재 탭</b> 선택.
+          </p>
 
           {/* 시설 선택 */}
           <div>
@@ -321,12 +319,12 @@ export default function FieldInspectionSaveDialog({
           </div>
         </div>
 
-        <footer className="flex items-center justify-end gap-2 border-t border-slate-200 px-4 py-3 shrink-0">
+        <footer className="flex items-center justify-end gap-2 border-t border-slate-200 px-3 py-2 shrink-0">
           <button
             type="button"
             onClick={onClose}
             disabled={busy}
-            className="rounded-md border border-slate-300 px-3 h-9 text-sm font-medium text-slate-700 hover:bg-slate-50 disabled:opacity-40"
+            className="rounded-md border border-slate-300 px-2.5 h-8 text-xs font-medium text-slate-700 hover:bg-slate-50 disabled:opacity-40"
           >
             취소
           </button>
@@ -334,7 +332,7 @@ export default function FieldInspectionSaveDialog({
             type="button"
             onClick={doCaptureAndSave}
             disabled={!selected || busy}
-            className="inline-flex items-center gap-1.5 rounded-md bg-rose-600 px-4 h-9 text-sm font-semibold text-white hover:bg-rose-700 disabled:opacity-40"
+            className="inline-flex items-center gap-1.5 rounded-md bg-rose-600 px-3 h-8 text-xs font-semibold text-white hover:bg-rose-700 disabled:opacity-40"
           >
             {busy ? (
               <>

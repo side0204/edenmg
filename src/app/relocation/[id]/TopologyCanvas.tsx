@@ -697,7 +697,7 @@ export default function TopologyCanvas({
       }
     }
     const eligible = facilities.filter((f) => {
-      if (!isInstallNumbered()) return false
+      if (!isInstallNumbered(f.closure_type)) return false
       const conns = byFacility.get(f.id) ?? []
       // 기설 케이블 한 조만 연결된 시설은 제외
       if (conns.length === 1 && conns[0].status === 'existing') return false
@@ -5320,7 +5320,7 @@ export default function TopologyCanvas({
             style={{
               pointerEvents: 'auto',
               maxWidth: 'calc(100vw - 1rem)',
-              visibility: labelsHiddenForCapture ? 'hidden' : undefined,
+              visibility: labelsHiddenForCapture || saveDialogOpen ? 'hidden' : undefined,
             }}
           >
             {/* 도구 — 펜(자유 그리기) / T(텍스트 박스) */}

@@ -283,7 +283,9 @@ export function haversineMeters(
 
 // 설치 순번 배지 대상 시설 — 모든 시설 종류 (owner 결정 2026-05-23).
 //   원래 접속함체·RN·IJP 한정이었으나 국사·설치장소 등 전 시설로 확대.
-export function isInstallNumbered(): boolean {
+//   단 '실사정보' 시설은 실사 캡처 첨부 전용 마커라 작업 순번 무관 — 제외.
+export function isInstallNumbered(closureType?: ClosureType): boolean {
+  if (closureType === '실사정보') return false
   return true
 }
 
