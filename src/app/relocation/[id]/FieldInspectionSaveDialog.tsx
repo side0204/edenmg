@@ -220,10 +220,36 @@ export default function FieldInspectionSaveDialog({
       const rect = region ? region.getBoundingClientRect() : null
       let canvas: HTMLCanvasElement
       if (rect && rect.width > 10 && rect.height > 10) {
-        const scaleX = video.videoWidth / window.innerWidth
-        const scaleY = video.videoHeight / window.innerHeight
-        const sx = Math.max(0, Math.round(rect.left * scaleX))
-        const sy = Math.max(0, Math.round(rect.top * scaleY))
+        // 사용자가 어떤 화면을 공유했는지 — getSettings().displaySurface 로 판정.
+        //   'browser' (탭) : video 영역 = 이 탭 viewport. window.innerWidth/Height 와 1:1
+        //   'window'        : video 영역 = 브라우저 창 전체 (chrome 포함)
+        //   'monitor'       : video 영역 = 전체 화면
+        // 'window'·'monitor' 의 경우 viewport 의 위치는 window.screenX/Y +
+        //   브라우저 chrome 높이만큼 아래로 떨어진 곳. 보정 안 하면 캡처 위치가 틀어짐.
+        const track = stream?.getVideoTracks()[0]
+        const settings = (track?.getSettings?.() ?? {}) as {
+          displaySurface?: string
+        }
+        const surface = settings.displaySurface
+        const dpr = window.devicePixelRatio || 1
+        let videoLeft = 0
+        let videoTop = 0
+        let scaleX: number
+        let scaleY: number
+        if (surface === 'browser' || !surface) {
+          // 탭 공유 (또는 displaySurface 미지원 → 가장 일반적인 케이스로 처리)
+          scaleX = video.videoWidth / window.innerWidth
+          scaleY = video.videoHeight / window.innerHeight
+        } else {
+          // 창 / 전체 화면 공유 — 브라우저 chrome 높이만큼 viewport 가 아래로 밀려 있음
+          const chromeTop = Math.max(0, window.outerHeight - window.innerHeight)
+          videoLeft = window.screenX
+          videoTop = window.screenY + chromeTop
+          scaleX = dpr
+          scaleY = dpr
+        }
+        const sx = Math.max(0, Math.round((videoLeft + rect.left) * scaleX))
+        const sy = Math.max(0, Math.round((videoTop + rect.top) * scaleY))
         const sw = Math.min(
           video.videoWidth - sx,
           Math.round(rect.width * scaleX),
