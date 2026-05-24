@@ -1306,12 +1306,40 @@ export default function TopologyCanvas({
           y: newCy - NODE_SIZE.height / 2 + 10,
         })
       }
+
+      // 케이블 path freeze + 배율 — 시설만 배율 시 자동 라우팅의 VDETOUR 등 fixed
+      //   값과 시설 거리 비율이 바뀌어 candidate sort 결과 달라짐 → 모양 변경.
+      //   현재 path 의 중간점을 waypoints 로 freeze + 같은 중심·배율 곱 → 모양 보존.
+      //   부작용: freeze 된 케이블은 다음 시설 이동 시 자동 라우팅 안 함 (사용자 waypoint 로 됨).
+      const cableUpdates: { cableId: string; waypoints: Waypoint[] }[] = []
+      for (const c of cables) {
+        const path = pathsWithOverlap.paths.get(c.id)
+        if (!path || path.length <= 2) continue // 직선 (waypoint 없음) → skip
+        const midPoints = path.slice(1, -1)
+        const scaledWaypoints: Waypoint[] = midPoints.map((p) => ({
+          x: cx + (p.x - cx) * factor,
+          y: cy + (p.y - cy) * factor,
+        }))
+        cableUpdates.push({ cableId: c.id, waypoints: scaledWaypoints })
+      }
+
       const res = await saveNodePositions(projectId, changes)
       if (!res.ok) {
         toast.error(res.error ?? '배율 변경 실패')
         return
       }
-      toast.success(`시설 거리 ${factor}배 변경 완료`)
+      // 케이블 waypoints 일괄 저장 (실패해도 시설 좌표는 유지)
+      let wpFailed = 0
+      for (const cu of cableUpdates) {
+        const wpRes = await saveCableWaypoints(projectId, cu.cableId, cu.waypoints)
+        if (!wpRes.ok) wpFailed++
+      }
+      const msg =
+        wpFailed === 0
+          ? `시설 거리 ${factor}배 변경 완료 (시설 ${changes.length}, 케이블 ${cableUpdates.length})`
+          : `시설 거리 ${factor}배 변경 — 시설 ${changes.length}, 케이블 ${cableUpdates.length - wpFailed}/${cableUpdates.length} 성공`
+      if (wpFailed === 0) toast.success(msg)
+      else toast.warning(msg)
       router.refresh()
     } finally {
       setScaling(false)
