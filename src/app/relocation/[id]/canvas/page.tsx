@@ -99,6 +99,7 @@ export default async function RelocationCanvasPage({
               label_dx: f.label_dx ?? 0,
               label_dy: f.label_dy ?? 0,
               install_order: f.install_order ?? null,
+              created_by: f.created_by ?? null,
             }))}
             cables={cables.map((c) => ({
               id: c.id,
@@ -112,6 +113,7 @@ export default async function RelocationCanvasPage({
               mapWaypoints: Array.isArray(c.map_waypoints) ? c.map_waypoints : [],
               total_length: c.total_length,
               end_distance: c.end_distance,
+              created_by: c.created_by ?? null,
             }))}
             editable={true}
             facilityMasters={facilityMasters}
@@ -120,6 +122,7 @@ export default async function RelocationCanvasPage({
             facilityMaterials={facilityMaterials}
             circuits={circuits}
             coreAssignments={assignments}
+            myEmployeeId={me.id}
           />
         </HighlightProvider>
       </div>

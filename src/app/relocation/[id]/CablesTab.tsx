@@ -37,6 +37,7 @@ export type CableRow = {
   total_length: number | null
   end_distance: number | null
   notes: string | null
+  created_by: string | null
 }
 
 type FacilityMini = {

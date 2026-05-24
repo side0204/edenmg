@@ -36,6 +36,7 @@ export type FacilityRow = {
   label_dx: number
   label_dy: number
   install_order: number | null
+  created_by: string | null
 }
 
 // 함체일 때 보여줄 기본 권장 함체 규격 (참고용 — 폼에는 직접 추천 표시)

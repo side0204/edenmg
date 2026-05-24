@@ -105,7 +105,7 @@ export async function importRelocationFacilitiesCsv(
     return fail('필수 헤더 「종류」「이름」 이 필요합니다')
   }
 
-  const { supabase } = await requireMember()
+  const { supabase, me } = await requireMember()
 
   // 시설 번호 카운터 (프로젝트 × 종류)
   const { data: seqRows } = await supabase
@@ -167,6 +167,7 @@ export async function importRelocationFacilitiesCsv(
       lng,
       notes: getCell(r, cols['비고']) || null,
       is_marked: false,
+      created_by: me.id,
     })
     if (error) {
       errors.push({ row: i + 1, message: '추가 실패: ' + error.message })
@@ -221,7 +222,7 @@ export async function importRelocationCablesCsv(
     if (cols[k] < 0) return fail(`필수 헤더 「${k}」 이 필요합니다`)
   }
 
-  const { supabase } = await requireMember()
+  const { supabase, me } = await requireMember()
 
   // 시설 이름 → id (이름 중복이면 null = 모호)
   const { data: facRows } = await supabase
@@ -307,6 +308,7 @@ export async function importRelocationCablesCsv(
       installation_type: (instRaw as CableInstallationType) || null,
       total_length: totalLength,
       notes: getCell(r, cols['비고']) || null,
+      created_by: me.id,
     })
     if (error) {
       const friendly =

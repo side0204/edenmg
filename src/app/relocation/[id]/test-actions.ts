@@ -123,7 +123,7 @@ export async function seedTestFacilities(formData: FormData): Promise<void> {
     redirect('/relocation?err=' + encodeURIComponent('프로젝트 id 가 없습니다'))
   }
 
-  const { supabase } = await requireMember()
+  const { supabase, me } = await requireMember()
 
   const center = await decideSeedCenter(supabase, projectId)
 
@@ -158,6 +158,7 @@ export async function seedTestFacilities(formData: FormData): Promise<void> {
             entry.type === '함체_가공형' || entry.type === '함체_관로형'
               ? '36C'
               : null,
+          created_by: me.id,
         })
         .select('id')
         .single()
@@ -229,6 +230,7 @@ export async function seedTestFacilities(formData: FormData): Promise<void> {
         cable_code: `T-${Math.random().toString(36).slice(2, 6).toUpperCase()}`,
         installation_type: '가공',
         notes: `${TEST_MARKER} 테스트 자동 생성`,
+        created_by: me.id,
       })
       .select('id')
       .single()

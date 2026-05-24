@@ -183,7 +183,7 @@ export async function createFacility(formData: FormData) {
     )
   }
 
-  const { supabase } = await requireMember()
+  const { supabase, me } = await requireMember()
 
   // 동시성 안전망: race 시 unique 충돌 → 1회 재시도
   let attempt = 0
@@ -208,6 +208,7 @@ export async function createFacility(formData: FormData) {
         work_window_start: parsed.work_window_start,
         work_window_end: parsed.work_window_end,
         install_status: parsed.install_status,
+        created_by: me.id,
       })
 
       if (!error) {
@@ -335,7 +336,7 @@ export async function createFacilityAtPosition(input: {
     return { ok: false, error: '부모 시설은 MOFD·OJC·국사내장비만 가질 수 있습니다' }
   }
 
-  const { supabase } = await requireMember()
+  const { supabase, me } = await requireMember()
 
   // 동시성 안전망: race 시 unique 충돌 → 1회 재시도
   let attempt = 0
@@ -364,6 +365,7 @@ export async function createFacilityAtPosition(input: {
             input.install_status && isInstallStatus(input.install_status)
               ? input.install_status
               : 'new',
+          created_by: me.id,
         })
         .select('id')
         .maybeSingle()
@@ -735,7 +737,7 @@ export async function createFacilityAtLatLng(input: {
     return { ok: false, error: '부모 시설은 MOFD·OJC·국사내장비만 가질 수 있습니다' }
   }
 
-  const { supabase } = await requireMember()
+  const { supabase, me } = await requireMember()
 
   let attempt = 0
   let lastErr: string | null = null
@@ -767,6 +769,7 @@ export async function createFacilityAtLatLng(input: {
             input.install_status && isInstallStatus(input.install_status)
               ? input.install_status
               : 'new',
+          created_by: me.id,
         })
         .select('id')
         .maybeSingle()

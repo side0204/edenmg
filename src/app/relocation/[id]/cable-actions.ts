@@ -133,7 +133,7 @@ export async function createCable(formData: FormData) {
     redirect(`/relocation/${projectId}?tab=cables&err=` + encodeURIComponent(parsed))
   }
 
-  const { supabase } = await requireMember()
+  const { supabase, me } = await requireMember()
 
   // 신설인데 cable_code 가 비어있으면 자동 생성
   let cableCode = parsed.cable_code
@@ -168,6 +168,7 @@ export async function createCable(formData: FormData) {
       cable_code: cableCode,
       installation_type: parsed.installation_type,
       notes: parsed.notes,
+      created_by: me.id,
     })
 
     if (!error) {
@@ -256,7 +257,7 @@ export async function createCableFromCanvas(input: {
   const notes = (input.notes ?? '').trim() || null
   const userCableCode = (input.cable_code ?? '').trim()
 
-  const { supabase } = await requireMember()
+  const { supabase, me } = await requireMember()
 
   let cableCode = userCableCode
   if (!cableCode) {
@@ -287,6 +288,7 @@ export async function createCableFromCanvas(input: {
       installation_type,
       total_length,
       notes,
+      created_by: me.id,
     })
 
     if (!error) {

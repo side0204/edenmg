@@ -38,7 +38,7 @@ export async function seedTestData(formData: FormData) {
   const projectId = String(formData.get('project_id') ?? '').trim()
   if (!projectId) redirect('/relocation?err=' + encodeURIComponent('프로젝트 id 가 없습니다'))
 
-  const { supabase } = await requireMember()
+  const { supabase, me } = await requireMember()
 
   // 이미 데이터가 있으면 시드 차단
   const { count: existingFacilities } = await supabase
@@ -90,6 +90,7 @@ export async function seedTestData(formData: FormData) {
       name: s.name,
       install_address: s.install_address ?? null,
       closure_spec: s.closure_spec ?? null,
+      created_by: me.id,
     }
   })
 
@@ -158,6 +159,7 @@ export async function seedTestData(formData: FormData) {
       status: c.status,
       cable_code: code,
       route_type: c.route_type ?? null,
+      created_by: me.id,
     }
   })
 

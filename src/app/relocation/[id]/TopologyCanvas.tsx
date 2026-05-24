@@ -138,6 +138,7 @@ type FacilityNode = {
   label_dx: number
   label_dy: number
   install_order: number | null
+  created_by: string | null  // employees.id — 본인 작업분 필터링용
 }
 
 // 경로점 — x/y 는 도식 캔버스 좌표, lat/lng 는 지도 모드 GPS 좌표(Phase 4),
@@ -163,6 +164,7 @@ type CableEdge = {
   mapWaypoints: Waypoint[]   // 지도 모드 경로점 (lat/lng)
   total_length: number | null
   end_distance: number | null
+  created_by: string | null  // employees.id — 본인 작업분 필터링용
 }
 
 // 시설 신규 배치 대기 — 도식 모드는 캔버스 픽셀(xy), 지도 모드는 GPS 좌표(latlng)
@@ -447,6 +449,7 @@ export default function TopologyCanvas({
   facilityMaterials,
   circuits,
   coreAssignments,
+  myEmployeeId,
   initialCanvasSize,
   tabPanel,
   tabPanelDefaultOpen,
@@ -461,6 +464,9 @@ export default function TopologyCanvas({
   facilityMaterials?: FacilityMaterialRow[]
   circuits?: FaultSearchCircuit[]
   coreAssignments?: CanvasCoreAssignment[]
+  // 본인 employees.id — 케이블 정렬·그래프 자동 배치 시 본인 작업분만 적용용.
+  //   다중 작업 시 다른 사람 시설 위치가 안 틀어지게.
+  myEmployeeId?: string | null
   // 캔버스 표시 영역 시작 크기 — 전용 캔버스 라우트는 'tall' 로 크게 연다.
   initialCanvasSize?: 'compact' | 'normal' | 'tall' | 'fullscreen'
   // 지장이설 탭 메뉴(시설·케이블·회선·...) — 캔버스 위 오버레이로 표시.
@@ -1278,19 +1284,46 @@ export default function TopologyCanvas({
   //   시설끼리 가까이 배치. 설계 초기 또는 시설 많은 프로젝트 재정리 시 사용.
   const onGraphLayout = async () => {
     if (graphLayouting) return
+    // 적용 범위 결정 — 다중 작업 시 다른 사람 시설 위치가 안 틀어지게:
+    //   1) 「선택」 도구가 켜져 있고 선택된 시설이 있으면 → 그 시설들만
+    //   2) 그 외 → 본인이 등록한 시설(created_by === myEmployeeId) 만
+    //   양 끝이 모두 「범위 안」인 케이블만 그래프 입력에 포함.
+    let inScope: (f: FacilityNode) => boolean
+    let scopeLabel = ''
+    if (selectTool && selectedIds.size > 0) {
+      inScope = (f) => selectedIds.has(f.id)
+      scopeLabel = `선택된 시설 ${selectedIds.size}개`
+    } else if (myEmployeeId) {
+      inScope = (f) => f.created_by === myEmployeeId
+      const cnt = facilities.filter(inScope).length
+      if (cnt === 0) {
+        toast.info('본인이 등록한 시설이 없습니다 (선택 도구로 범위를 지정하거나 시설을 등록하세요)')
+        return
+      }
+      scopeLabel = `본인 등록 시설 ${cnt}개`
+    } else {
+      toast.error('적용 범위를 판단할 수 없습니다 (로그인 정보 누락)')
+      return
+    }
+
     if (
       !confirm(
-        '모든 시설 위치를 케이블 그래프 기반으로 자동 재배치합니다.\n' +
-          '※ 기존 수동 배치 + 케이블 경로점(배율 freeze 결과 포함) 도 모두 삭제됩니다.\n' +
+        `${scopeLabel} 위치를 케이블 그래프 기반으로 자동 재배치합니다.\n` +
+          '※ 범위 안 시설 사이 케이블 경로점도 함께 reset 됩니다.\n' +
           '계속하시겠습니까?',
       )
     )
       return
     setGraphLayouting(true)
     try {
+      const scopedFacilities = facilities.filter(inScope)
+      const scopedFacIds = new Set(scopedFacilities.map((f) => f.id))
+      const scopedCables = cables.filter(
+        (c) => scopedFacIds.has(c.from_facility_id) && scopedFacIds.has(c.to_facility_id),
+      )
       const positions = graphAwareLayout(
-        facilities.map((f) => ({ id: f.id })),
-        cables.map((c) => ({
+        scopedFacilities.map((f) => ({ id: f.id })),
+        scopedCables.map((c) => ({
           from_facility_id: c.from_facility_id,
           to_facility_id: c.to_facility_id,
         })),
@@ -1305,12 +1338,10 @@ export default function TopologyCanvas({
         toast.error(res.error ?? '자동 배치 저장에 실패했습니다')
         return
       }
-      // 케이블 경로점 일괄 clear — 시설 새 위치로 자동 라우팅 재적용.
-      //   (2026-05-24 owner 보고) 배율 freeze 된 waypoint 가 옛 시설 좌표 기준이라
-      //   새 시설 위치에서 매우 멀리 늘어남. 그래프 재배치 시 함께 reset.
+      // 케이블 경로점 일괄 clear — 범위 안 케이블만. 다른 사람 케이블 경로점 보존.
       let wpCleared = 0
       let wpFailed = 0
-      for (const c of cables) {
+      for (const c of scopedCables) {
         const cur = (mode === 'map' ? c.mapWaypoints : c.waypoints) ?? []
         if (cur.length === 0) continue
         const clr = await saveCableWaypoints(projectId, c.id, [])
@@ -1434,16 +1465,40 @@ export default function TopologyCanvas({
   //   snap. 결과를 saveNodePositions 로 DB 에 일괄 저장.
   const onCableSnap = async () => {
     if (snapping) return
-    if (!confirm('케이블 각도(수직/수평/45°)에 맞춰 시설 위치를 자동 재배치합니다. 계속하시겠습니까?')) return
+    // 적용 범위 — onGraphLayout 과 동일 규칙.
+    let inScope: (f: FacilityNode) => boolean
+    let scopeLabel = ''
+    if (selectTool && selectedIds.size > 0) {
+      inScope = (f) => selectedIds.has(f.id)
+      scopeLabel = `선택된 시설 ${selectedIds.size}개`
+    } else if (myEmployeeId) {
+      inScope = (f) => f.created_by === myEmployeeId
+      const cnt = facilities.filter(inScope).length
+      if (cnt === 0) {
+        toast.info('본인이 등록한 시설이 없습니다 (선택 도구로 범위를 지정하거나 시설을 등록하세요)')
+        return
+      }
+      scopeLabel = `본인 등록 시설 ${cnt}개`
+    } else {
+      toast.error('적용 범위를 판단할 수 없습니다 (로그인 정보 누락)')
+      return
+    }
+    if (!confirm(`${scopeLabel} 위치를 케이블 각도(V/H/45°)에 맞춰 재배치합니다. 계속하시겠습니까?`)) return
     setSnapping(true)
     try {
+      const scopedFacilities = facilities.filter(inScope)
+      const scopedFacIds = new Set(scopedFacilities.map((f) => f.id))
+      // 양 끝이 모두 범위 안인 케이블만 — 정렬 기준이 그 케이블의 방향.
+      const scopedCables = cables.filter(
+        (c) => scopedFacIds.has(c.from_facility_id) && scopedFacIds.has(c.to_facility_id),
+      )
       // 현재 표시 위치 → Map. 드래그 오프셋(localPositions) 도 반영된 effectivePositions 사용.
       const posMap = new Map<string, { x: number; y: number }>()
-      for (const f of facilities) {
+      for (const f of scopedFacilities) {
         const p = effectivePositions[f.id]
         if (p) posMap.set(f.id, { x: p.x, y: p.y })
       }
-      const changes = snapPositionsToCableDirections(facilities, cables, posMap)
+      const changes = snapPositionsToCableDirections(scopedFacilities, scopedCables, posMap)
       if (changes.length === 0) {
         toast.info('이미 모든 케이블이 V/H/45° 로 정렬되어 있습니다')
         return
