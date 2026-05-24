@@ -100,6 +100,7 @@ export default function FacilityInfoPanel({
   stations,
   cableCount,
   installNo,
+  position,
   taskTypes,
   tasks,
   materials,
@@ -114,6 +115,8 @@ export default function FacilityInfoPanel({
   cableCount: number
   // 시설명 앞 설치 순번 배지 번호 — 배지 대상이 아니면 null
   installNo: number | null
+  // 캔버스 좌표 (효과 위치 = drag offset + DB x_hint/y_hint). 진단용 좌표 표시.
+  position?: { x: number; y: number } | null
   taskTypes: TaskTypeOption[]
   tasks: FacilityTaskItem[]
   materials: FacilityMaterialItem[]
@@ -421,6 +424,11 @@ export default function FacilityInfoPanel({
             </span>
           </p>
           <p className="mt-0.5">연결 케이블 {cableCount}개</p>
+          {position && (
+            <p className="mt-0.5 font-mono text-[10px] text-slate-500">
+              좌표 ({Math.round(position.x)}, {Math.round(position.y)})
+            </p>
+          )}
         </div>
 
         {/* 기본 정보 편집 */}

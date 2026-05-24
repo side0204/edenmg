@@ -4715,6 +4715,7 @@ export default function TopologyCanvas({
                   }))}
                 cableCount={facilityCableCount.get(f.id) ?? 0}
                 installNo={installNoByFacility.get(f.id) ?? null}
+                position={effectivePositions[f.id] ?? null}
                 taskTypes={taskTypes ?? []}
                 tasks={(facilityTasks ?? []).filter((t) => t.facility_id === f.id)}
                 materials={(facilityMaterials ?? []).filter(
