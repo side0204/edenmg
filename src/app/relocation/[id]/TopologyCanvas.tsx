@@ -2155,18 +2155,39 @@ export default function TopologyCanvas({
       // pathsWithOverlap 가 cores 우선 재배정 후 path 와 잔여 평행 이동 offset 둘 다 제공.
       const path = pathsWithOverlap.paths.get(c.id)
       if (!path || path.length < 2) return []
+
+      // 도형 가장자리 trim — 시설 중심 path[0]/path[end] 를 도형 반경만큼 안쪽 점으로 이동.
+      //   (2026-05-24 owner 보고) 시설 도형 위에 cable_code 마커·라벨이 그려져서 케이블이
+      //   가려짐 → 도형과 케이블 사이 빈 공간 보임. 도형 가장자리에서 시작·도착하면
+      //   마커·라벨이 도형 안에 있고 케이블은 도형 밖에서 도형 외곽에 직접 닿음.
+      //   NODE_RADIUS=14 — 접속함체 원 반지름. 다른 도형 (마름모·박스) 도 평균 11~15 이라 14 통일.
+      const NODE_RADIUS = 14
+      const trimEdge = (start: Waypoint, next: Waypoint): Waypoint => {
+        const dx = next.x - start.x
+        const dy = next.y - start.y
+        const d = Math.hypot(dx, dy)
+        if (d <= NODE_RADIUS) return start
+        return {
+          x: start.x + dx * (NODE_RADIUS / d),
+          y: start.y + dy * (NODE_RADIUS / d),
+        }
+      }
+      const trimmed: Waypoint[] =
+        path.length === 2
+          ? [trimEdge(path[0], path[1]), trimEdge(path[1], path[0])]
+          : [trimEdge(path[0], path[1]), ...path.slice(1, -1), trimEdge(path[path.length - 1], path[path.length - 2])]
+
       const fromPt = path[0]
       const toPt = path[path.length - 1]
-
       const offset = cableOffsets.get(c.id) ?? 0
-      if (offset === 0) return path
+      if (offset === 0) return trimmed
       const overallDx = toPt.x - fromPt.x
       const overallDy = toPt.y - fromPt.y
       const len = Math.hypot(overallDx, overallDy) || 1
       const nx = -overallDy / len
       const ny = overallDx / len
 
-      return path.map((p) => ({ x: p.x + nx * offset, y: p.y + ny * offset }))
+      return trimmed.map((p) => ({ x: p.x + nx * offset, y: p.y + ny * offset }))
     },
     [pathsWithOverlap, cableOffsets],
   )
