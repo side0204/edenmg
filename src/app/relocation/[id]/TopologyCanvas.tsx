@@ -1839,16 +1839,21 @@ export default function TopologyCanvas({
         const fromForRoute = anchor?.from ?? fromPt
         const toForRoute = anchor?.to ?? toPt
 
+        // obstacles — 다른 시설 + from·to 시설도 포함.
+        //   (2026-05-24) owner 보고: 우회 path 가 도착 시설 옆 도형 영역으로 지나가서 시각 충돌.
+        //   from/to 시설의 segment 끝점(t≈0,1)은 자연히 가까움 → t>0.05 && t<0.95 가 제외.
+        //   중간 segment 가 from/to 시설 옆을 지나가면 페널티 (도형 영역 침범).
         const obstacles: { cx: number; cy: number }[] = []
-        for (const [oid, opos] of Object.entries(effectivePositions)) {
-          if (oid === c.from_facility_id || oid === c.to_facility_id) continue
+        for (const [, opos] of Object.entries(effectivePositions)) {
           obstacles.push({
             cx: opos.x + halfW,
             cy: opos.y + halfH - 10,
           })
         }
 
-        const CROSS_CLEAR = 50
+        // CROSS_CLEAR 50 → 80 — 시설 도형 크기 NODE_SIZE.width=90 기준.
+        //   50 px 떨어진 segment 는 도형 옆을 살짝 지나가는 정도 → 시각 충돌 가능.
+        const CROSS_CLEAR = 80
         const distPointToSeg = (
           p: { x: number; y: number },
           a: { x: number; y: number },
