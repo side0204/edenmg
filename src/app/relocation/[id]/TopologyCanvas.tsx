@@ -777,6 +777,32 @@ export default function TopologyCanvas({
   // 띄울 때 규격으로 prefill.
   const [cableTool, setCableTool] = useState<CableSpec | null>(null)
 
+  // 선택 도구 — 도식 모드 전용. 빈 영역 드래그로 사각 범위 안 시설 다중 선택.
+  //   선택 후 선택된 시설 중 하나 드래그 = 선택 전체 같은 delta 로 이동 (그룹 이동).
+  //   addTool / cableTool 과 상호 배타. 2026-05-24 owner 요청.
+  const [selectTool, setSelectTool] = useState(false)
+  const [selectedIds, setSelectedIds] = useState<Set<string>>(() => new Set())
+  // 사각 선택 드래그 — SVG 좌표계 (viewport 변환된 좌표). 진행 중에만 ref → null 아님.
+  const marqueeRef = useRef<{
+    startX: number
+    startY: number
+    hasMoved: boolean
+  } | null>(null)
+  // 진행 중 marquee 사각형 — 렌더용. ref 와 동기화.
+  const [marquee, setMarquee] = useState<{
+    x: number
+    y: number
+    w: number
+    h: number
+  } | null>(null)
+  // 그룹 드래그 — selectedIds 중 하나를 드래그하면 모든 선택 시설의 시작 좌표 캐시.
+  //   delta 만큼 평행 이동 후 onPointerUp 에서 saveNodePositions 일괄 호출.
+  const groupDragRef = useRef<{
+    anchorId: string  // 사용자가 잡은 시설
+    startPositions: Map<string, { x: number; y: number }>
+    hasMoved: boolean
+  } | null>(null)
+
   // LGU+ 표준 범례 모달
   const [legendOpen, setLegendOpen] = useState(false)
 
@@ -829,6 +855,20 @@ export default function TopologyCanvas({
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
   }, [canvasSize])
+
+  // 선택 도구 ON 시 ESC 로 해제 + 선택 비움 (다중 선택 흐름 빠른 취소)
+  useEffect(() => {
+    if (!selectTool) return
+    function onKey(e: KeyboardEvent) {
+      if (e.key === 'Escape') {
+        setSelectTool(false)
+        setSelectedIds(new Set())
+        setMarquee(null)
+      }
+    }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  }, [selectTool])
 
   // 카테고리별 펼침 상태 — 처음엔 「국사」·「접속함체」만 펼침
   const [openCategories, setOpenCategories] = useState<Record<ClosureCategory, boolean>>({
@@ -2465,6 +2505,21 @@ export default function TopologyCanvas({
     const { x, y } = toSvgCoord(e.clientX, e.clientY)
     const pos = effectivePositions[id]
     if (!pos) return
+    // 그룹 드래그 — 다중 선택 상태에서 선택된 시설 중 하나를 잡으면 전체를 같이 이동.
+    //   도식 모드 + 좌클릭 + 잡은 시설이 selectedIds 에 포함 + 2 개 이상 선택일 때만.
+    if (
+      mode === 'schematic' &&
+      e.button === 0 &&
+      selectedIds.has(id) &&
+      selectedIds.size > 1
+    ) {
+      const startPositions = new Map<string, { x: number; y: number }>()
+      for (const sid of selectedIds) {
+        const p = effectivePositions[sid]
+        if (p) startPositions.set(sid, { x: p.x, y: p.y })
+      }
+      groupDragRef.current = { anchorId: id, startPositions, hasMoved: false }
+    }
     interactionRef.current = {
       id,
       button: e.button,
@@ -2509,6 +2564,14 @@ export default function TopologyCanvas({
     if (e.target !== svgRef.current) return
     const svg = svgRef.current
     if (!svg) return
+    // 선택 도구 ON — pan 대신 marquee(사각 범위 선택) 시작
+    if (selectTool && e.button === 0) {
+      const { x, y } = toSvgCoord(e.clientX, e.clientY)
+      marqueeRef.current = { startX: x, startY: y, hasMoved: false }
+      setMarquee({ x, y, w: 0, h: 0 })
+      svg.setPointerCapture(e.pointerId)
+      return
+    }
     const rect = svg.getBoundingClientRect()
     if (rect.width === 0 || rect.height === 0) return
     panRef.current = {
@@ -2535,7 +2598,33 @@ export default function TopologyCanvas({
       if (!ir.hasMoved) {
         ir.hasMoved = true
         setDragging(ir.id)
-        setSelectedId(null)
+        // 단일 선택은 드래그 시 해제. 그룹 드래그(다중) 중에는 selectedIds 유지.
+        if (!groupDragRef.current) setSelectedId(null)
+      }
+      // 그룹 드래그 — anchor 의 시작 좌표 + delta 로 모든 선택 시설을 동일 delta 이동.
+      //   스냅은 anchor 만 적용 → 같은 delta 로 나머지 보정. 케이블도 자동 따라감.
+      const gd = groupDragRef.current
+      if (gd) {
+        gd.hasMoved = true
+        const anchorStart = gd.startPositions.get(gd.anchorId)
+        if (!anchorStart) return
+        // anchor 의 새 위치 (스냅 적용)
+        let anchorNew = { x: x - ir.offsetX, y: y - ir.offsetY }
+        if (ir.button === 0) {
+          const snapped = snapToFacilities(anchorNew, gd.anchorId)
+          anchorNew = snapped.pos
+          setSnapGuide(snapped.guide)
+        }
+        const gdx = anchorNew.x - anchorStart.x
+        const gdy = anchorNew.y - anchorStart.y
+        setPositions((prev) => {
+          const next = { ...prev }
+          for (const [sid, sStart] of gd.startPositions.entries()) {
+            next[sid] = { x: sStart.x + gdx, y: sStart.y + gdy }
+          }
+          return next
+        })
+        return
       }
       let np = { x: x - ir.offsetX, y: y - ir.offsetY }
       // 지도 모드는 mapDragPos(임시 픽셀)에, 도식 모드는 positions(영구 레이아웃)에 기록
@@ -2611,6 +2700,22 @@ export default function TopologyCanvas({
       })
       return
     }
+    // 2.5) marquee(사각 범위 선택) 진행 중
+    const mq = marqueeRef.current
+    if (mq) {
+      const { x, y } = toSvgCoord(e.clientX, e.clientY)
+      const dx = x - mq.startX
+      const dy = y - mq.startY
+      if (!mq.hasMoved && Math.hypot(dx, dy) < DRAG_THRESHOLD) return
+      mq.hasMoved = true
+      setMarquee({
+        x: Math.min(mq.startX, x),
+        y: Math.min(mq.startY, y),
+        w: Math.abs(dx),
+        h: Math.abs(dy),
+      })
+      return
+    }
     // 3) 빈 영역 pan 진행 중
     const pan = panRef.current
     if (pan) {
@@ -2631,8 +2736,24 @@ export default function TopologyCanvas({
     // 1) 노드 드래그 마무리
     const ir = interactionRef.current
     if (ir) {
+      const gd = groupDragRef.current
       interactionRef.current = null
+      groupDragRef.current = null
       setSnapGuide(null)
+      if (ir.hasMoved && gd) {
+        // 그룹 드래그 일괄 저장 — 모든 선택 시설의 새 좌표 한 번에 push
+        setDragging(null)
+        const updates: { id: string; x: number; y: number }[] = []
+        for (const sid of gd.startPositions.keys()) {
+          const p = effectivePositions[sid]
+          if (p) updates.push({ id: sid, x: p.x, y: p.y })
+        }
+        if (updates.length > 0) {
+          const result = await saveNodePositions(projectId, updates)
+          if (!result.ok) toast.error(result.error)
+        }
+        return
+      }
       if (ir.hasMoved) {
         setDragging(null)
         const pos = effectivePositions[ir.id]
@@ -2710,6 +2831,35 @@ export default function TopologyCanvas({
         )
         if (!result.ok) toast.error(result.error)
       }
+      return
+    }
+    // 2.5) marquee 마무리 — 사각 범위 안 시설 모두 selectedIds 에 담음
+    const mq = marqueeRef.current
+    if (mq) {
+      marqueeRef.current = null
+      if (mq.hasMoved && marquee) {
+        const x0 = marquee.x
+        const y0 = marquee.y
+        const x1 = marquee.x + marquee.w
+        const y1 = marquee.y + marquee.h
+        const halfW = NODE_SIZE.width / 2
+        const halfH = NODE_SIZE.height / 2
+        const hit = new Set<string>()
+        for (const f of facilities) {
+          const pos = effectivePositions[f.id]
+          if (!pos) continue
+          const cx = pos.x + halfW
+          const cy = pos.y + halfH - 10
+          if (cx >= x0 && cx <= x1 && cy >= y0 && cy <= y1) hit.add(f.id)
+        }
+        setSelectedIds(hit)
+        // 드래그 직후의 click 으로 선택이 즉시 해제되지 않게 flag (pan 과 동일 패턴)
+        recentlyPannedRef.current = true
+      } else {
+        // 빈 클릭 — 선택 해제
+        setSelectedIds(new Set())
+      }
+      setMarquee(null)
       return
     }
     // 3) pan 마무리. 드래그 이동했으면 onCanvasClick 무시 flag
@@ -2942,6 +3092,41 @@ export default function TopologyCanvas({
               {cableTool && (
                 <span className="ml-0.5 rounded bg-emerald-500 px-1 text-[9px] font-semibold text-white">
                   {cableTool}
+                </span>
+              )}
+            </button>
+          )}
+
+          {/* 선택 도구 — 도식 모드 전용. 빈 영역 드래그로 사각 범위 안 시설 다중 선택 후 그룹 이동 */}
+          {editable && mode === 'schematic' && (
+            <button
+              type="button"
+              onClick={() => {
+                const next = !selectTool
+                setSelectTool(next)
+                if (next) {
+                  setAddTool(null)
+                  setCableTool(null)
+                  setToolsCollapsed(true)
+                } else {
+                  // 도구 끄면 선택 해제
+                  setSelectedIds(new Set())
+                  setMarquee(null)
+                }
+              }}
+              className={
+                'mr-1 inline-flex items-center gap-1 rounded-md border px-2 h-7 text-[11px] font-medium ' +
+                (selectTool
+                  ? 'bg-violet-600 text-white border-violet-600'
+                  : 'text-slate-700 border-slate-300 hover:bg-slate-50')
+              }
+              title={selectTool ? '선택 도구 끄기 (Esc)' : '빈 영역 드래그로 시설 다중 선택 후 그룹 이동'}
+            >
+              <Crosshair className="h-3 w-3" />
+              선택
+              {selectTool && selectedIds.size > 0 && (
+                <span className="ml-0.5 rounded bg-white px-1 text-[9px] font-semibold text-violet-700">
+                  {selectedIds.size}
                 </span>
               )}
             </button>
@@ -3524,6 +3709,8 @@ export default function TopologyCanvas({
                                 } else {
                                   setAddTool(t)
                                   setCableTool(null)
+                                  setSelectTool(false)
+                                  setSelectedIds(new Set())
                                   setToolsCollapsed(true)
                                 }
                               }}
@@ -3573,6 +3760,8 @@ export default function TopologyCanvas({
                             } else {
                               setCableTool(s)
                               setAddTool(null)
+                              setSelectTool(false)
+                              setSelectedIds(new Set())
                               setToolsCollapsed(true)
                             }
                           }}
@@ -3757,11 +3946,13 @@ export default function TopologyCanvas({
               cursor:
                 mode === 'map'
                   ? 'default'
-                  : addTool || faultSearchOpen
-                    ? 'crosshair'
-                    : dragging
-                      ? 'grabbing'
-                      : 'grab',
+                  : selectTool
+                    ? 'default'
+                    : addTool || faultSearchOpen
+                      ? 'crosshair'
+                      : dragging
+                        ? 'grabbing'
+                        : 'grab',
               touchAction: 'none',
               // 지도 모드 — SVG 루트는 이벤트 통과(지도 pan/zoom). 시설·케이블 등
               // 클릭 대상 요소만 pointer-events 를 개별로 켠다.
@@ -3907,6 +4098,23 @@ export default function TopologyCanvas({
                 />
               )}
             </g>
+          )}
+
+          {/* 사각 선택(marquee) 진행 중 — 보라 점선 사각 */}
+          {marquee && (marquee.w > 0 || marquee.h > 0) && (
+            <rect
+              x={marquee.x}
+              y={marquee.y}
+              width={marquee.w}
+              height={marquee.h}
+              fill="#8b5cf6"
+              fillOpacity={0.12}
+              stroke="#7c3aed"
+              strokeWidth={1.5}
+              strokeDasharray="6 4"
+              vectorEffect="non-scaling-stroke"
+              style={{ pointerEvents: 'none' }}
+            />
           )}
 
           {/* 케이블 (엣지) — 노드보다 먼저. polyline 경로 (시작·끝 시설 자동 + 중간 waypoint) */}
@@ -4173,6 +4381,7 @@ export default function TopologyCanvas({
               CLOSURE_TYPE_CATEGORY[f.closure_type] === '접속함체' &&
               f.install_status === 'new'
             const isSelected = selectedId === f.id
+            const isMultiSelected = selectedIds.has(f.id)
             const cableCount = facilityCableCount.get(f.id) ?? 0
             const nodeCx = NODE_SIZE.width / 2
             const nodeCy = NODE_SIZE.height / 2 - 10
@@ -4309,6 +4518,19 @@ export default function TopologyCanvas({
                       stroke={SELECTED_COLOR}
                       strokeWidth={2}
                       strokeDasharray="3 3"
+                    />
+                  )}
+                  {/* 다중 선택 강조 — 보라 후광. isSelected 와 동시 표시 안 함 (단일 선택 우선) */}
+                  {!isSelected && isMultiSelected && (
+                    <circle
+                      cx={NODE_SIZE.width / 2}
+                      cy={NODE_SIZE.height / 2 - 10}
+                      r={22}
+                      fill="#8b5cf6"
+                      fillOpacity={0.18}
+                      stroke="#7c3aed"
+                      strokeWidth={2}
+                      strokeDasharray="4 3"
                     />
                   )}
 
