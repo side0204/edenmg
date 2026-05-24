@@ -90,6 +90,21 @@ export default function SketchOverlay({
   const [drawing, setDrawing] = useState<SketchStroke | null>(null)
   // 편집 중인 텍스트 박스 id — null 이면 모두 표시 전용
   const [editingTextId, setEditingTextId] = useState<string | null>(null)
+  // 텍스트 박스 드래그 — 임계값 이상 움직이면 이동, 이하면 click 으로 편집 시작.
+  //   originX/Y = 드래그 시작 시 박스의 x/y · clientStartX/Y = 시작 시 클릭 좌표
+  const textDragRef = useRef<{
+    id: string
+    originX: number
+    originY: number
+    clientStartX: number
+    clientStartY: number
+    moved: boolean
+  } | null>(null)
+  // 최신 texts 참조용 — pointer 핸들러 closure 가 stale 안 되게
+  const textsRef = useRef(texts)
+  useEffect(() => {
+    textsRef.current = texts
+  }, [texts])
 
   // 컨테이너 내부 픽셀 좌표로 변환
   const toLocalPx = useCallback(
@@ -273,20 +288,24 @@ export default function SketchOverlay({
           style={{ pointerEvents: 'none' }}
         />
       )}
-      {/* 텍스트 박스 — SVG 안 HTML (foreignObject). 편집 중인 박스는 input, 그 외엔 정적 표시.
-          요점:
-            - foreignObject 안 HTML 은 xmlns 명시 필요 (일부 브라우저에서 안 박히면 렌더 X)
-            - autoFocus 는 SVG 안에서 신뢰 안 함 → 별도 컴포넌트의 useEffect 로 명시 focus
-            - foreignObject 자체에 충분한 width/height + overflow:visible
-            - wrapper div 가 0폭 안 되게 width/height 명시 + 명시 배경/테두리. */}
+      {/* 텍스트 박스 — SVG 안 HTML (foreignObject). 편집 중인 박스는 textarea, 그 외엔 정적 표시.
+          - 여러 줄 입력 (Enter = 새 줄, Escape/외부 클릭 = 종료)
+          - 정적 모드 드래그 = 이동 (4px 이상), 제자리 클릭 = 편집 시작
+          - autoFocus 는 SVG 안에서 신뢰 안 함 → useEffect 로 명시 focus */}
       {texts.map((t) => {
         const isEditing = editingTextId === t.id
-        // 폭 추정 — 한글 폭 ≈ fontSize × 1.0, 영문 ≈ 0.6. 안전치 0.85.
-        // 빈 박스(편집 시작) 최소 폭 180. 좌우 padding 16px + 테두리 여유.
+        // 줄별 길이로 가장 긴 줄 추정. 빈 줄은 0 카운트.
+        const lines = t.text.split('\n')
+        const maxLineLen = lines.reduce((m, l) => Math.max(m, l.length), 0)
+        // 폭 — 한글 폭 ≈ fontSize × 1.0, 영문 ≈ 0.6. 안전치 0.85.
+        // 편집 시 최소 280 (Enter 안내 들어가는 여유), 표시 시 최소 40.
         const estW = isEditing
-          ? Math.max(220, t.text.length * t.fontSize * 0.85 + 40)
-          : Math.max(40, t.text.length * t.fontSize * 0.85 + 24)
-        const h = t.fontSize + 24
+          ? Math.max(280, maxLineLen * t.fontSize * 0.85 + 40)
+          : Math.max(40, maxLineLen * t.fontSize * 0.85 + 24)
+        // 높이 — 줄 수 × (fontSize × line-height 1.25) + padding
+        const lineH = t.fontSize * 1.25
+        const innerH = Math.max(1, lines.length) * lineH
+        const h = innerH + 24
         return (
           <foreignObject
             key={t.id}
@@ -303,7 +322,7 @@ export default function SketchOverlay({
                 fontSize: t.fontSize,
                 color: t.color,
                 fontWeight: 700,
-                lineHeight: 1,
+                lineHeight: 1.25,
                 width: '100%',
                 height: '100%',
                 userSelect: isEditing ? 'text' : 'none',
@@ -314,32 +333,77 @@ export default function SketchOverlay({
                 <SketchTextEditor
                   initialText={t.text}
                   color={t.color}
+                  onChange={(value) => {
+                    // 라이브 갱신 — 줄 수/길이 변화에 따라 foreignObject 크기 즉시 확장
+                    onTextsChange(
+                      textsRef.current.map((x) =>
+                        x.id === t.id ? { ...x, text: value } : x,
+                      ),
+                    )
+                  }}
                   onFinish={(value) => finishEditingText(t.id, value)}
                 />
               ) : (
                 <div
                   onPointerDown={(e) => {
                     if (!enabled) return
+                    if (e.button !== 0 && e.pointerType === 'mouse') return
                     e.stopPropagation()
-                    setEditingTextId(t.id)
+                    // 드래그 시작 후보 — 임계값 이상 움직이면 이동, 이하면 클릭=편집
+                    textDragRef.current = {
+                      id: t.id,
+                      originX: t.x,
+                      originY: t.y,
+                      clientStartX: e.clientX,
+                      clientStartY: e.clientY,
+                      moved: false,
+                    }
+                    ;(e.currentTarget as HTMLDivElement).setPointerCapture(e.pointerId)
+                  }}
+                  onPointerMove={(e) => {
+                    const drag = textDragRef.current
+                    if (!drag || drag.id !== t.id) return
+                    const dx = e.clientX - drag.clientStartX
+                    const dy = e.clientY - drag.clientStartY
+                    if (!drag.moved && Math.hypot(dx, dy) < 4) return
+                    drag.moved = true
+                    e.stopPropagation()
+                    const newX = drag.originX + dx
+                    const newY = drag.originY + dy
+                    onTextsChange(
+                      textsRef.current.map((x) =>
+                        x.id === t.id ? { ...x, x: newX, y: newY } : x,
+                      ),
+                    )
+                  }}
+                  onPointerUp={(e) => {
+                    const drag = textDragRef.current
+                    if (!drag || drag.id !== t.id) return
+                    textDragRef.current = null
+                    if (!drag.moved) {
+                      // 이동 없이 클릭 — 편집 시작
+                      e.stopPropagation()
+                      setEditingTextId(t.id)
+                    }
                   }}
                   onContextMenu={(e) => {
                     if (!enabled) return
                     e.preventDefault()
                     if (confirm(`텍스트 "${t.text}" 를 삭제하시겠습니까?`)) {
-                      onTextsChange(texts.filter((x) => x.id !== t.id))
+                      onTextsChange(textsRef.current.filter((x) => x.id !== t.id))
                     }
                   }}
-                  title={enabled ? '클릭 = 편집, 우클릭 = 삭제' : undefined}
+                  title={enabled ? '드래그 = 이동, 클릭 = 편집, 우클릭 = 삭제' : undefined}
                   style={{
                     display: 'inline-block',
                     background: 'rgba(255,255,255,0.85)',
                     padding: '4px 10px',
                     borderRadius: 4,
                     border: `1.5px solid ${t.color}`,
-                    cursor: enabled ? 'pointer' : 'default',
-                    whiteSpace: 'nowrap',
+                    cursor: enabled ? 'grab' : 'default',
+                    whiteSpace: 'pre-wrap', // 여러 줄 줄바꿈 유지
                     boxSizing: 'border-box',
+                    touchAction: 'none', // 드래그 중 페이지 스크롤 방지
                   }}
                 >
                   {t.text}
@@ -353,20 +417,22 @@ export default function SketchOverlay({
   )
 }
 
-// 텍스트 편집 input — SVG foreignObject 안에서 mount 시 명시 focus.
+// 텍스트 편집 textarea — SVG foreignObject 안에서 mount 시 명시 focus.
 //   autoFocus 가 SVG 안에서 일관 동작 안 함 → useEffect + ref.focus() 패턴.
+//   여러 줄 입력: Enter = 새 줄. 종료: Escape 또는 외부 클릭(blur).
 function SketchTextEditor({
   initialText,
   color,
+  onChange,
   onFinish,
 }: {
   initialText: string
   color: string
+  onChange: (value: string) => void
   onFinish: (value: string) => void
 }) {
-  const ref = useRef<HTMLInputElement | null>(null)
+  const ref = useRef<HTMLTextAreaElement | null>(null)
   useEffect(() => {
-    // mount 직후 다음 tick 에 focus + select (foreignObject 안 input 안전)
     const id = window.requestAnimationFrame(() => {
       const el = ref.current
       if (el) {
@@ -377,19 +443,16 @@ function SketchTextEditor({
     return () => window.cancelAnimationFrame(id)
   }, [])
   return (
-    <input
+    <textarea
       ref={ref}
-      type="text"
       defaultValue={initialText}
+      onInput={(e) => onChange((e.currentTarget as HTMLTextAreaElement).value)}
       onBlur={(e) => onFinish(e.currentTarget.value)}
       onKeyDown={(e) => {
-        if (e.key === 'Enter') {
-          e.preventDefault()
-          ;(e.currentTarget as HTMLInputElement).blur()
-        }
+        // Enter = 새 줄 (textarea 기본). Escape 만 종료.
         if (e.key === 'Escape') {
           e.preventDefault()
-          ;(e.currentTarget as HTMLInputElement).blur()
+          ;(e.currentTarget as HTMLTextAreaElement).blur()
         }
         e.stopPropagation()
       }}
@@ -400,6 +463,7 @@ function SketchTextEditor({
         fontSize: 'inherit',
         color: 'inherit',
         fontWeight: 'inherit',
+        lineHeight: 'inherit',
         background: 'rgba(255,255,255,0.95)',
         border: `2px dashed ${color}`,
         borderRadius: 4,
@@ -409,6 +473,9 @@ function SketchTextEditor({
         height: '100%',
         boxSizing: 'border-box',
         display: 'block',
+        resize: 'none', // 박스 크기는 줄 수로 자동 (수동 resize 비활성)
+        overflow: 'hidden',
+        whiteSpace: 'pre-wrap',
       }}
     />
   )
