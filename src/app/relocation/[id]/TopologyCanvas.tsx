@@ -1911,18 +1911,30 @@ export default function TopologyCanvas({
         }
         const VDETOUR = halfH + 80
         const HDETOUR = halfW + 80
+        // degenerate detour 방지 (2026-05-24):
+        //   H 케이블 (fromY ≈ toY) 에 H detour 적용 시 wp1=(detourX,fromY), wp2=(detourX,toY)
+        //   가 거의 같은 점이 되어 polyline 이 시각적으로 직선으로 보임 (T-4TLR 케이스).
+        //   같은 식으로 V 케이블 (fromX ≈ toX) 에 V detour 도 degenerate.
+        const isHCable = Math.abs(toForRoute.y - fromForRoute.y) < 15
+        const isVCable = Math.abs(toForRoute.x - fromForRoute.x) < 15
         for (const stepMult of [1, 2, 3]) {
           for (const sign of [-1, 1]) {
-            const detourY = (fromForRoute.y + toForRoute.y) / 2 + sign * VDETOUR * stepMult
-            addCand([
-              { x: fromForRoute.x, y: detourY },
-              { x: toForRoute.x, y: detourY },
-            ])
-            const detourX = (fromForRoute.x + toForRoute.x) / 2 + sign * HDETOUR * stepMult
-            addCand([
-              { x: detourX, y: fromForRoute.y },
-              { x: detourX, y: toForRoute.y },
-            ])
+            // V detour (위/아래 ㄷ자) — V 케이블에는 degenerate 이므로 skip
+            if (!isVCable) {
+              const detourY = (fromForRoute.y + toForRoute.y) / 2 + sign * VDETOUR * stepMult
+              addCand([
+                { x: fromForRoute.x, y: detourY },
+                { x: toForRoute.x, y: detourY },
+              ])
+            }
+            // H detour (좌/우 ㄷ자) — H 케이블에는 degenerate 이므로 skip
+            if (!isHCable) {
+              const detourX = (fromForRoute.x + toForRoute.x) / 2 + sign * HDETOUR * stepMult
+              addCand([
+                { x: detourX, y: fromForRoute.y },
+                { x: detourX, y: toForRoute.y },
+              ])
+            }
           }
         }
 
