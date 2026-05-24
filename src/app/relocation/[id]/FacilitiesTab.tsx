@@ -25,6 +25,7 @@ export type FacilityRow = {
   is_marked: boolean
   mark_note: string | null
   notes: string | null
+  inspection_request: string | null
   x_hint: number | null
   y_hint: number | null
   lat: number | null

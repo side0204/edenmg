@@ -712,6 +712,7 @@ export default async function RelocationProjectPage({
           closure_spec: f.closure_spec,
           install_address: f.install_address,
           notes: f.notes,
+          inspection_request: f.inspection_request ?? null,
           parent_facility_id: f.parent_facility_id,
           is_marked: f.is_marked,
           mark_note: f.mark_note ?? null,

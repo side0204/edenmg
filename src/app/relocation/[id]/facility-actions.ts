@@ -409,6 +409,7 @@ export async function updateFacilityFromCanvas(input: {
   closure_spec: CableSpec | null
   install_address: string | null
   notes: string | null
+  inspection_request: string | null
   parent_facility_id: string | null
   is_marked: boolean
   mark_note: string | null
@@ -429,6 +430,9 @@ export async function updateFacilityFromCanvas(input: {
   }
   const notes = (input.notes ?? '').trim() || null
   if (notes && notes.length > 1000) return { ok: false, error: '비고는 1000자 이하로 입력하세요' }
+  const inspectionRequest = (input.inspection_request ?? '').trim() || null
+  if (inspectionRequest && inspectionRequest.length > 1000)
+    return { ok: false, error: '실사요청은 1000자 이하로 입력하세요' }
 
   // 부모 국사 — 국사 내부 노드(MOFD·OJC·국사내장비)만 가질 수 있음
   const parentId = (input.parent_facility_id ?? '').trim() || null
@@ -473,6 +477,7 @@ export async function updateFacilityFromCanvas(input: {
       closure_spec: input.closure_spec ?? null,
       install_address: installAddress,
       notes,
+      inspection_request: inspectionRequest,
       parent_facility_id: parentId,
       is_marked: !!input.is_marked,
       mark_note: markNote,

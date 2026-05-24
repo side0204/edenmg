@@ -132,6 +132,7 @@ type FacilityNode = {
   closure_spec: CableSpec | null
   install_address: string | null
   notes: string | null
+  inspection_request: string | null
   parent_facility_id: string | null
   is_marked: boolean
   mark_note: string | null
@@ -5243,6 +5244,7 @@ export default function TopologyCanvas({
                   closure_spec: f.closure_spec,
                   install_address: f.install_address,
                   notes: f.notes,
+                  inspection_request: f.inspection_request,
                   parent_facility_id: f.parent_facility_id,
                   is_marked: f.is_marked,
                   mark_note: f.mark_note,

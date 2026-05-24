@@ -47,7 +47,7 @@ export async function loadRelocationCanvasData(
     supabase
       .from('relocation_facilities')
       .select(
-        'id, closure_type, seq_no, name, facility_code, install_address, closure_spec, parent_facility_id, is_marked, mark_note, notes, x_hint, y_hint, lat, lng, work_window_start, work_window_end, created_at, install_status, label_dx, label_dy, install_order, created_by',
+        'id, closure_type, seq_no, name, facility_code, install_address, closure_spec, parent_facility_id, is_marked, mark_note, notes, inspection_request, x_hint, y_hint, lat, lng, work_window_start, work_window_end, created_at, install_status, label_dx, label_dy, install_order, created_by',
       )
       .eq('project_id', projectId)
       .order('closure_type')

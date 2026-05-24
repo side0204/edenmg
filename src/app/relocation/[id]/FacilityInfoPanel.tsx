@@ -63,6 +63,7 @@ export type FacilityPanelData = {
   closure_spec: CableSpec | null
   install_address: string | null
   notes: string | null
+  inspection_request: string | null
   parent_facility_id: string | null
   is_marked: boolean
   mark_note: string | null
@@ -137,6 +138,10 @@ export default function FacilityInfoPanel({
   const [spec, setSpec] = useState<string>(facility.closure_spec ?? '')
   const [address, setAddress] = useState(facility.install_address ?? '')
   const [notes, setNotes] = useState(facility.notes ?? '')
+  // 실사정보 시설 전용 — 실사요청(작업자에게 무엇을 확인할지). 다른 시설엔 미사용.
+  const [inspectionRequest, setInspectionRequest] = useState(
+    facility.inspection_request ?? '',
+  )
   const [parentId, setParentId] = useState<string>(facility.parent_facility_id ?? '')
   const [isMarked, setIsMarked] = useState(facility.is_marked)
   const [markNote, setMarkNote] = useState(facility.mark_note ?? '')
@@ -254,6 +259,9 @@ export default function FacilityInfoPanel({
       closure_spec: isClosure && spec ? (spec as CableSpec) : null,
       install_address: address.trim() || null,
       notes: notes.trim() || null,
+      inspection_request: isInspectionFacility
+        ? inspectionRequest.trim() || null
+        : null,
       parent_facility_id: isInternal && parentId ? parentId : null,
       is_marked: isMarked,
       mark_note: isMarked ? markNote.trim() || null : null,
@@ -486,7 +494,7 @@ export default function FacilityInfoPanel({
             )}
           </div>
 
-          {/* 이름 + 비고 + 저장 */}
+          {/* 이름 + 실사요청 (위) + 실사내용/비고 (아래, 두 배 크기) + 저장 */}
           <div className="space-y-2">
             <div>
               <label className="block text-[11px] font-medium text-slate-600">이름</label>
@@ -499,11 +507,28 @@ export default function FacilityInfoPanel({
               />
             </div>
             <div>
-              <label className="block text-[11px] font-medium text-slate-600">실사 내용 (비고)</label>
+              <label className="block text-[11px] font-medium text-slate-600">
+                실사 요청
+                <span className="ml-1 text-slate-400 font-normal">(작업자에게 확인 요청)</span>
+              </label>
+              <textarea
+                value={inspectionRequest}
+                onChange={(e) => setInspectionRequest(e.target.value)}
+                rows={4}
+                maxLength={1000}
+                placeholder="예) 함체 우측에 신설 분기함 자리가 있는지 확인해 주세요"
+                className="mt-0.5 w-full rounded-md border border-slate-300 px-2 py-1 text-xs resize-none"
+              />
+            </div>
+            <div>
+              <label className="block text-[11px] font-medium text-slate-600">
+                실사 내용
+                <span className="ml-1 text-slate-400 font-normal">(비고)</span>
+              </label>
               <textarea
                 value={notes}
                 onChange={(e) => setNotes(e.target.value)}
-                rows={4}
+                rows={8}
                 maxLength={1000}
                 placeholder="이 위치에서 확인한 실사 내용을 적어주세요"
                 className="mt-0.5 w-full rounded-md border border-slate-300 px-2 py-1 text-xs resize-none"
