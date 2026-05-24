@@ -30,6 +30,7 @@ import {
   Undo2,
   Pencil,
   Type,
+  Save,
 } from 'lucide-react'
 import {
   CABLE_SPEC_VALUES,
@@ -77,6 +78,7 @@ import {
 import LegendPanel from './LegendPanel'
 import RoadviewPanel from './RoadviewPanel'
 import SketchOverlay from './SketchOverlay'
+import FieldInspectionSaveDialog from './FieldInspectionSaveDialog'
 import CableInfoPanel from './CableInfoPanel'
 import FacilityInfoPanel, {
   type TaskTypeOption,
@@ -848,6 +850,8 @@ export default function TopologyCanvas({
     color: '#ef4444', // rose-500
     width: 3,
   })
+  // 실사 저장 다이얼로그 — 시설 선택 + 화면 캡처 (getDisplayMedia) → Storage 업로드
+  const [saveDialogOpen, setSaveDialogOpen] = useState(false)
 
   // 거리뷰 패널 — 지도 모드 우측 컬럼. 시설 선택 또는 지도 클릭 시 그 좌표의 카카오 거리뷰.
   //   roadviewOpen 켜져 있으면 시설/케이블/고장점 패널을 가리고 거리뷰가 표시됨 (상호 배타).
@@ -3741,10 +3745,12 @@ export default function TopologyCanvas({
       </div>
 
       {/* 좌측 시설 목록 + 시설·케이블 추가 사이드바 + SVG 캔버스 — 가로 flex.
-          relative 는 실사 SketchOverlay 가 이 영역 전체를 덮을 수 있게 (지도+거리뷰 통합 그림판). */}
+          relative 는 실사 SketchOverlay 가 이 영역 전체를 덮을 수 있게 (지도+거리뷰 통합 그림판).
+          data-sketch-canvas-region 은 「실사 저장」 캡처 시 잘라낼 영역 anchor. */}
       <div
         className={isFullscreen ? 'relative flex flex-1 min-h-0' : 'relative flex'}
         style={isFullscreen ? undefined : { height: CANVAS_SIZE_HEIGHT[canvasSize] }}
+        data-sketch-canvas-region
       >
         {/* 좌측 시설 목록 — 클릭 시 해당 시설로 캔버스 이동 */}
         {!sidebarCollapsed && (
@@ -5373,6 +5379,15 @@ export default function TopologyCanvas({
               </button>
               <button
                 type="button"
+                onClick={() => setSaveDialogOpen(true)}
+                className="inline-flex items-center gap-1 rounded-md bg-rose-600 px-2 h-7 text-[11px] font-semibold text-white hover:bg-rose-700"
+                title="현재 캔버스 화면을 시설에 저장"
+              >
+                <Save className="h-3 w-3" />
+                시설에 저장
+              </button>
+              <button
+                type="button"
                 onClick={() => setSketchMode(false)}
                 className="inline-flex items-center gap-1 rounded-md border border-slate-300 bg-slate-100 px-2 h-7 text-[11px] font-medium text-slate-700 hover:bg-slate-200"
                 title="실사 끄기"
@@ -5384,6 +5399,37 @@ export default function TopologyCanvas({
           </div>
         )}
       </div>
+
+      {/* 실사 화면 저장 다이얼로그 — 시설 선택 + 화면 캡처(getDisplayMedia) → Storage */}
+      <FieldInspectionSaveDialog
+        open={saveDialogOpen}
+        onClose={() => setSaveDialogOpen(false)}
+        projectId={projectId}
+        facilities={facilities.map((f) => ({
+          id: f.id,
+          closure_type: f.closure_type,
+          seq_no: f.seq_no,
+          name: f.name,
+        }))}
+        preselectedFacilityId={selectedId}
+        onCaptureRunningChange={(running) => {
+          // 캡처 중에는 다이얼로그·도구바·핸들이 PNG 에 안 찍히게 다이얼로그 잠시 가림
+          // (다이얼로그 자체는 onCaptureRunningChange 콜백을 호출하기 직전에 보이지만,
+          //  capture 시점에는 fixed dialog 가 화면 중앙에 있어 캡처에 같이 잡힘 → 가림)
+          if (running) {
+            const el = document.querySelector(
+              '[data-field-inspection-dialog]',
+            ) as HTMLElement | null
+            if (el) el.style.opacity = '0'
+          } else {
+            const el = document.querySelector(
+              '[data-field-inspection-dialog]',
+            ) as HTMLElement | null
+            if (el) el.style.opacity = '1'
+          }
+        }}
+        onSaved={() => router.refresh()}
+      />
 
       {/* 분할 캡처 컨트롤 바 영역 — 캔버스(지도) 아래. MapCaptureGuide 가 portal 로 채운다. */}
       {captureActive && mode === 'map' && mapStatus === 'ready' && (

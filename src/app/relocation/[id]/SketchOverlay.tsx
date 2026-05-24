@@ -273,13 +273,20 @@ export default function SketchOverlay({
           style={{ pointerEvents: 'none' }}
         />
       )}
-      {/* 텍스트 박스 — SVG 안 HTML (foreignObject). 편집 중인 박스는 input, 그 외엔 정적 표시. */}
+      {/* 텍스트 박스 — SVG 안 HTML (foreignObject). 편집 중인 박스는 input, 그 외엔 정적 표시.
+          요점:
+            - foreignObject 안 HTML 은 xmlns 명시 필요 (일부 브라우저에서 안 박히면 렌더 X)
+            - autoFocus 는 SVG 안에서 신뢰 안 함 → 별도 컴포넌트의 useEffect 로 명시 focus
+            - foreignObject 자체에 충분한 width/height + overflow:visible
+            - wrapper div 가 0폭 안 되게 width/height 명시 + 명시 배경/테두리. */}
       {texts.map((t) => {
         const isEditing = editingTextId === t.id
-        // 박스 크기 — 글자 폭 추정 (대충 fontSize × text length × 0.6) + padding.
-        // 빈 박스는 최소 폭 120.
-        const estW = Math.max(120, t.text.length * t.fontSize * 0.65 + 24)
-        const h = t.fontSize + 16
+        // 폭 추정 — 한글 폭 ≈ fontSize × 1.0, 영문 ≈ 0.6. 안전치 0.85.
+        // 빈 박스(편집 시작) 최소 폭 180. 좌우 padding 16px + 테두리 여유.
+        const estW = isEditing
+          ? Math.max(220, t.text.length * t.fontSize * 0.85 + 40)
+          : Math.max(40, t.text.length * t.fontSize * 0.85 + 24)
+        const h = t.fontSize + 24
         return (
           <foreignObject
             key={t.id}
@@ -287,7 +294,7 @@ export default function SketchOverlay({
             y={t.y}
             width={estW}
             height={h}
-            style={{ overflow: 'visible', pointerEvents: enabled ? 'auto' : 'none' }}
+            style={{ overflow: 'visible' }}
           >
             <div
               style={{
@@ -295,45 +302,19 @@ export default function SketchOverlay({
                   'Pretendard, -apple-system, BlinkMacSystemFont, system-ui, sans-serif',
                 fontSize: t.fontSize,
                 color: t.color,
-                fontWeight: 600,
+                fontWeight: 700,
                 lineHeight: 1,
+                width: '100%',
+                height: '100%',
                 userSelect: isEditing ? 'text' : 'none',
                 pointerEvents: enabled ? 'auto' : 'none',
               }}
             >
               {isEditing ? (
-                <input
-                  type="text"
-                  defaultValue={t.text}
-                  autoFocus
-                  onFocus={(e) => e.currentTarget.select()}
-                  onBlur={(e) => finishEditingText(t.id, e.currentTarget.value)}
-                  onKeyDown={(e) => {
-                    if (e.key === 'Enter') {
-                      e.preventDefault()
-                      ;(e.currentTarget as HTMLInputElement).blur()
-                    }
-                    if (e.key === 'Escape') {
-                      e.preventDefault()
-                      ;(e.currentTarget as HTMLInputElement).blur()
-                    }
-                    e.stopPropagation()
-                  }}
-                  onPointerDown={(e) => e.stopPropagation()}
-                  style={{
-                    fontFamily: 'inherit',
-                    fontSize: 'inherit',
-                    color: 'inherit',
-                    fontWeight: 'inherit',
-                    background: 'rgba(255,255,255,0.85)',
-                    border: `1.5px dashed ${t.color}`,
-                    borderRadius: 4,
-                    padding: '4px 8px',
-                    outline: 'none',
-                    minWidth: 100,
-                    width: '100%',
-                    boxSizing: 'border-box',
-                  }}
+                <SketchTextEditor
+                  initialText={t.text}
+                  color={t.color}
+                  onFinish={(value) => finishEditingText(t.id, value)}
                 />
               ) : (
                 <div
@@ -352,11 +333,13 @@ export default function SketchOverlay({
                   title={enabled ? '클릭 = 편집, 우클릭 = 삭제' : undefined}
                   style={{
                     display: 'inline-block',
-                    background: 'rgba(255,255,255,0.7)',
-                    padding: '4px 8px',
+                    background: 'rgba(255,255,255,0.85)',
+                    padding: '4px 10px',
                     borderRadius: 4,
+                    border: `1.5px solid ${t.color}`,
                     cursor: enabled ? 'pointer' : 'default',
                     whiteSpace: 'nowrap',
+                    boxSizing: 'border-box',
                   }}
                 >
                   {t.text}
@@ -367,5 +350,66 @@ export default function SketchOverlay({
         )
       })}
     </svg>
+  )
+}
+
+// 텍스트 편집 input — SVG foreignObject 안에서 mount 시 명시 focus.
+//   autoFocus 가 SVG 안에서 일관 동작 안 함 → useEffect + ref.focus() 패턴.
+function SketchTextEditor({
+  initialText,
+  color,
+  onFinish,
+}: {
+  initialText: string
+  color: string
+  onFinish: (value: string) => void
+}) {
+  const ref = useRef<HTMLInputElement | null>(null)
+  useEffect(() => {
+    // mount 직후 다음 tick 에 focus + select (foreignObject 안 input 안전)
+    const id = window.requestAnimationFrame(() => {
+      const el = ref.current
+      if (el) {
+        el.focus()
+        el.select()
+      }
+    })
+    return () => window.cancelAnimationFrame(id)
+  }, [])
+  return (
+    <input
+      ref={ref}
+      type="text"
+      defaultValue={initialText}
+      onBlur={(e) => onFinish(e.currentTarget.value)}
+      onKeyDown={(e) => {
+        if (e.key === 'Enter') {
+          e.preventDefault()
+          ;(e.currentTarget as HTMLInputElement).blur()
+        }
+        if (e.key === 'Escape') {
+          e.preventDefault()
+          ;(e.currentTarget as HTMLInputElement).blur()
+        }
+        e.stopPropagation()
+      }}
+      onPointerDown={(e) => e.stopPropagation()}
+      onClick={(e) => e.stopPropagation()}
+      style={{
+        fontFamily: 'inherit',
+        fontSize: 'inherit',
+        color: 'inherit',
+        fontWeight: 'inherit',
+        background: 'rgba(255,255,255,0.95)',
+        border: `2px dashed ${color}`,
+        borderRadius: 4,
+        padding: '4px 10px',
+        outline: 'none',
+        width: '100%',
+        height: '100%',
+        boxSizing: 'border-box',
+        display: 'block',
+      }}
+    />
   )
 }

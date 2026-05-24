@@ -1,6 +1,6 @@
 'use client'
 
-import { useMemo, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { toast } from 'sonner'
 import {
   X,
@@ -11,6 +11,7 @@ import {
   Package,
   ChevronLeft,
   ChevronRight,
+  Camera,
 } from 'lucide-react'
 import {
   CABLE_SPEC_VALUES,
@@ -38,6 +39,11 @@ import {
   addFacilityMaterial,
   removeFacilityMaterial,
 } from './facility-task-actions'
+import {
+  listFieldInspections,
+  getFieldInspectionUrls,
+  deleteFieldInspection,
+} from './field-inspection-actions'
 
 // 시설 정보 패널 — 캔버스에서 시설(모든 종류) 선택 시 우측에 표시.
 //   시설의 유일 정식 편집기 (「시설」 탭 폼과 필드를 일치시킴).
@@ -165,6 +171,52 @@ export default function FacilityInfoPanel({
   const [mQty, setMQty] = useState('1')
 
   const [busy, setBusy] = useState(false)
+
+  // 실사 캡처 — facility 변경 시 fetch + signed URL.
+  //   휘발 없음: DB 저장. 갤러리에 amber 「실사내용확인」 배지.
+  type InspectionRow = {
+    id: string
+    image_path: string
+    note: string | null
+    captured_at: string
+  }
+  const [inspections, setInspections] = useState<InspectionRow[]>([])
+  const [inspectionUrls, setInspectionUrls] = useState<Record<string, string>>({})
+  const [previewUrl, setPreviewUrl] = useState<string | null>(null)
+  const [inspectionRefreshSeq, setInspectionRefreshSeq] = useState(0)
+  useEffect(() => {
+    let cancelled = false
+    void (async () => {
+      const rows = (await listFieldInspections(facility.id)) as InspectionRow[]
+      if (cancelled) return
+      setInspections(rows)
+      const paths = rows.map((r) => r.image_path)
+      if (paths.length > 0) {
+        const urls = await getFieldInspectionUrls(paths)
+        if (cancelled) return
+        setInspectionUrls(urls)
+      } else {
+        setInspectionUrls({})
+      }
+    })()
+    return () => {
+      cancelled = true
+    }
+  }, [facility.id, inspectionRefreshSeq])
+
+  async function onDeleteInspection(id: string) {
+    if (!confirm('이 실사 캡처를 삭제하시겠습니까?')) return
+    const fd = new FormData()
+    fd.append('inspection_id', id)
+    fd.append('project_id', projectId)
+    const res = await deleteFieldInspection(fd)
+    if (!res.ok) {
+      toast.error(res.error)
+      return
+    }
+    toast.success('실사 캡처를 삭제했습니다')
+    setInspectionRefreshSeq((n) => n + 1)
+  }
 
   const taskTypeById = useMemo(
     () => new Map(taskTypes.map((t) => [t.id, t])),
@@ -824,6 +876,100 @@ export default function FacilityInfoPanel({
             </div>
           </div>
         </div>
+
+        {/* 실사 내용 — 캔버스 실사 그림+텍스트를 캡처해 저장한 이미지 */}
+        <div className="border-t border-slate-200 pt-2">
+          <p className="flex items-center gap-1 text-[11px] font-bold text-slate-700">
+            <Camera className="h-3.5 w-3.5" />
+            실사 내용
+            {inspections.length > 0 && (
+              <span className="ml-1 rounded-full bg-amber-100 px-1.5 py-0.5 text-[10px] font-semibold text-amber-800">
+                실사내용확인 · {inspections.length}건
+              </span>
+            )}
+          </p>
+          {inspections.length === 0 ? (
+            <p className="mt-1.5 text-[11px] text-slate-400 italic">
+              저장된 실사 캡처 없음
+            </p>
+          ) : (
+            <ul className="mt-1.5 grid grid-cols-2 gap-1.5">
+              {inspections.map((insp) => {
+                const url = inspectionUrls[insp.image_path]
+                const date = new Date(insp.captured_at)
+                const dateStr = `${date.getMonth() + 1}/${date.getDate()} ${String(
+                  date.getHours(),
+                ).padStart(2, '0')}:${String(date.getMinutes()).padStart(2, '0')}`
+                return (
+                  <li
+                    key={insp.id}
+                    className="group relative rounded-md border border-slate-200 overflow-hidden bg-slate-100"
+                  >
+                    {url ? (
+                      <button
+                        type="button"
+                        onClick={() => setPreviewUrl(url)}
+                        className="block w-full"
+                        title={insp.note ?? '클릭하여 크게 보기'}
+                      >
+                        {/* eslint-disable-next-line @next/next/no-img-element */}
+                        <img
+                          src={url}
+                          alt={insp.note ?? '실사 캡처'}
+                          className="w-full h-24 object-cover"
+                        />
+                      </button>
+                    ) : (
+                      <div className="w-full h-24 flex items-center justify-center text-[10px] text-slate-400">
+                        로딩 중…
+                      </div>
+                    )}
+                    <div className="px-1.5 py-1 bg-white">
+                      <p className="text-[10px] text-slate-500">{dateStr}</p>
+                      {insp.note && (
+                        <p className="text-[10px] text-slate-700 truncate" title={insp.note}>
+                          {insp.note}
+                        </p>
+                      )}
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => onDeleteInspection(insp.id)}
+                      className="absolute top-1 right-1 rounded-md bg-white/90 p-1 text-slate-400 opacity-0 group-hover:opacity-100 hover:text-rose-600 transition"
+                      title="삭제"
+                    >
+                      <Trash2 className="h-3 w-3" />
+                    </button>
+                  </li>
+                )
+              })}
+            </ul>
+          )}
+        </div>
+
+        {/* 실사 캡처 크게 보기 — 클릭 시 풀스크린 모달 */}
+        {previewUrl && (
+          <div
+            className="fixed inset-0 z-[70] flex items-center justify-center bg-black/80 p-4 cursor-zoom-out"
+            onClick={() => setPreviewUrl(null)}
+          >
+            {/* eslint-disable-next-line @next/next/no-img-element */}
+            <img
+              src={previewUrl}
+              alt="실사 캡처"
+              className="max-w-full max-h-full rounded-lg shadow-2xl"
+              onClick={(e) => e.stopPropagation()}
+            />
+            <button
+              type="button"
+              onClick={() => setPreviewUrl(null)}
+              className="absolute top-4 right-4 rounded-full bg-white/90 p-2 text-slate-700 hover:bg-white"
+              title="닫기"
+            >
+              <X className="h-5 w-5" />
+            </button>
+          </div>
+        )}
 
       </div>
     </div>

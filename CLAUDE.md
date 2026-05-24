@@ -1070,6 +1070,7 @@ owner 요구: "어느 메뉴를 많이 쓰는지" 페이지 단위 분석. 접�
   - [`0048_page_views.sql`](./supabase/migrations/0048_page_views.sql) — 베타 모니터링: `page_views`(페이지 방문, append-only) + `page_view_summary` 집계 RPC + RLS
   - [`0059_relocation_realtime.sql`](./supabase/migrations/0059_relocation_realtime.sql) — 지장이설 프로젝트 동시 작업: `supabase_realtime` publication 에 relocation_* 테이블 11개 등록 (Realtime 구독 활성화)
   - [`0060_relocation_created_by.sql`](./supabase/migrations/0060_relocation_created_by.sql) — 지장이설 시설·케이블 작성자 추적: `relocation_facilities.created_by` + `relocation_cables.created_by` (employees.id FK, on delete set null). 캔버스의 「케이블 정렬」·「그래프 자동 배치」가 본인 작업분만 재배치하는 데 사용 (선택 도구 활성 시 선택 범위만)
+  - [`0061_relocation_field_inspections.sql`](./supabase/migrations/0061_relocation_field_inspections.sql) — 지장이설 시설별 실사 캡처: `relocation_field_inspections` 테이블 + `relocation-field-inspections` Storage 버킷 (10MB, image/*). 실사(sketch) 모드에서 그린 그림+텍스트를 포함한 화면을 getDisplayMedia 로 캡처해 시설에 첨부. FacilityInfoPanel 에 「실사내용확인 N건」 amber 배지 + 갤러리
 - **외선일보 별도 entity (v2)** — 접속일보와 동일 패턴으로 외선팀 전용 모듈. 외선 작업 특성(케이블 포설구간·전주번호 등)에 맞는 구조 별도 설계.
 - **접속일보 후속 (v2)** — segment-level 작업자 태그, 사진 첨부 + EXIF, 국사·함체 마스터 테이블화, 재접속 이력 조회, 지도 시각화
 - **M3 Phase 2 후속** — 사진 첨부 + EXIF·워터마크 (PRD M3-06), 일보 결재함 통합 (현재는 작업 상세에서 진입), 일반 일보 월별 CSV 리포트
