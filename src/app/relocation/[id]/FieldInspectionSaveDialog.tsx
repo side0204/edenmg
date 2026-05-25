@@ -212,8 +212,19 @@ export default function FieldInspectionSaveDialog({
     setBusy(true)
     runningRef.current = true
     let stream: MediaStream | null = null
+    let roadviewLocked = false
     const video = document.createElement('video')
     try {
+      // 거리뷰 viewpoint 락 — getDisplayMedia 호출 전 활성화.
+      //   배너로 인한 viewport 축소 → Roadview SDK 자동 viewpoint 조정 봉쇄.
+      //   (owner 보고 2026-05-25: 단순 viewpoint 저장·복원 + setViewpoint 만으론
+      //    SDK 가 비동기로 한 번 더 흔드는 경우가 있음. viewpoint_changed 이벤트
+      //    가드로 락 동안 발생하는 모든 변경을 즉시 되돌린다.)
+      try {
+        window.dispatchEvent(new Event('roadview-lock-viewpoint'))
+        roadviewLocked = true
+      } catch {}
+
       // 화면 공유 권한 요청 — 사용자 클릭에서 직접 호출 필수
       setPhase('capturing')
       try {
@@ -339,6 +350,11 @@ export default function FieldInspectionSaveDialog({
       setPhase('idle')
       stream?.getTracks().forEach((t) => t.stop())
       if (video.parentNode) video.parentNode.removeChild(video)
+      if (roadviewLocked) {
+        try {
+          window.dispatchEvent(new Event('roadview-unlock-viewpoint'))
+        } catch {}
+      }
     }
   }
 

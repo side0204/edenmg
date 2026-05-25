@@ -48,40 +48,49 @@ export default function RoadviewPanel({
     }
     return DEFAULT_W
   })
+  // viewpoint 락 — 캡처 동안 SDK 의 자동 viewpoint 조정 봉쇄.
+  //   FieldInspectionSaveDialog 가 캡처 시작 전 window 이벤트로 신호.
+  const lockRef = useRef<{
+    active: boolean
+    vp: kakao.maps.RoadviewViewpoint | null
+    guarding: boolean // setViewpoint 가 또 viewpoint_changed 를 트리거할 때 무한루프 방지
+  }>({ active: false, vp: null, guarding: false })
+
   // 화면 회전·창 크기 변경 시 폭이 viewport - MIN_W 을 넘으면 자동 축소 (지도가 안 보이지 않게)
-  // 추가 (owner 2026-05-25): 「공유 중」 배너로 viewport 축소 시 Roadview SDK 가
-  //   container 높이 변화를 보정하면서 **viewpoint(pan/tilt) 를 자동으로 흔드는**
-  //   현상이 있음 (owner 보고: "마우스로 살짝 위로 끌어올린 것 같이 건물이 위로").
-  //   해결: relayout 전후로 viewpoint·position 을 저장·복원해 SDK 자동 조정 무효화.
+  // 추가 (owner 2026-05-25 두 번째 보고): viewpoint 단순 저장·복원으로는 SDK 가
+  //   비동기로 한 번 더 viewpoint 를 흔드는 케이스를 잡지 못함. viewpoint_changed
+  //   이벤트를 캡처 동안 잡아서 lock 된 viewpoint 로 즉시 되돌린다.
   useEffect(() => {
     function relayoutRoadview() {
       const rv = roadviewRef.current
       if (!rv) return
       try {
-        // 1) 현재 시점·위치 저장
-        const vp = typeof rv.getViewpoint === 'function' ? rv.getViewpoint() : null
-        // 2) layout 재계산 (SDK 가 이때 viewpoint 를 흔들 수 있음)
+        const lock = lockRef.current
+        const vp =
+          lock.active && lock.vp
+            ? lock.vp
+            : typeof rv.getViewpoint === 'function'
+              ? rv.getViewpoint()
+              : null
         rv.relayout()
-        // 3) 다음 프레임에 시점 복원 (relayout 직후 setViewpoint 는 SDK 가 무시하는 경우 있음)
         if (vp) {
-          requestAnimationFrame(() => {
+          // 락 중에는 다중 프레임에서 setViewpoint — SDK 가 늦게 흔드는 케이스 차단
+          const restore = () => {
             try {
+              lock.guarding = true
               rv.setViewpoint(vp)
             } catch {}
-          })
-          // relayout 비동기 케이스 대비 한 번 더
-          setTimeout(() => {
-            try {
-              rv.setViewpoint(vp)
-            } catch {}
-          }, 200)
+          }
+          requestAnimationFrame(restore)
+          setTimeout(restore, 100)
+          setTimeout(restore, 400)
+          setTimeout(restore, 900)
         }
       } catch {}
     }
     function onResize() {
       const vw = window.innerWidth
       setWidth((w) => Math.min(w, Math.max(MIN_W, vw - 200)))
-      // banner 안정화까지 한 박자 + 한번 더 (한 번이 누락되는 케이스 대비)
       requestAnimationFrame(relayoutRoadview)
       setTimeout(relayoutRoadview, 600)
     }
@@ -97,6 +106,50 @@ export default function RoadviewPanel({
     return () => {
       window.removeEventListener('resize', onResize)
       ro?.disconnect()
+    }
+  }, [])
+
+  // viewpoint 락 — window 커스텀 이벤트로 외부에서 활성화·해제.
+  //   캡처 중 SDK 가 viewpoint 를 흔들면 즉시 lock 된 값으로 되돌린다.
+  useEffect(() => {
+    function viewpointGuard() {
+      const lock = lockRef.current
+      const rv = roadviewRef.current
+      if (!lock.active || !lock.vp || !rv) return
+      if (lock.guarding) {
+        // 우리가 부른 setViewpoint 의 echo — 무시
+        lock.guarding = false
+        return
+      }
+      try {
+        lock.guarding = true
+        rv.setViewpoint(lock.vp)
+      } catch {}
+    }
+    function onLock() {
+      const rv = roadviewRef.current
+      if (!rv) return
+      try {
+        const vp = typeof rv.getViewpoint === 'function' ? rv.getViewpoint() : null
+        if (!vp) return
+        lockRef.current = { active: true, vp, guarding: false }
+        kakao.maps.event.addListener(rv, 'viewpoint_changed', viewpointGuard)
+      } catch {}
+    }
+    function onUnlock() {
+      const rv = roadviewRef.current
+      lockRef.current = { active: false, vp: null, guarding: false }
+      if (rv) {
+        try {
+          kakao.maps.event.removeListener(rv, 'viewpoint_changed', viewpointGuard)
+        } catch {}
+      }
+    }
+    window.addEventListener('roadview-lock-viewpoint', onLock)
+    window.addEventListener('roadview-unlock-viewpoint', onUnlock)
+    return () => {
+      window.removeEventListener('roadview-lock-viewpoint', onLock)
+      window.removeEventListener('roadview-unlock-viewpoint', onUnlock)
     }
   }, [])
   const resizeRef = useRef<{ startX: number; startW: number } | null>(null)
