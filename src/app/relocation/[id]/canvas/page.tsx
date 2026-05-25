@@ -10,7 +10,14 @@ import { loadRelocationCanvasData } from '../canvas-data'
 //   프로젝트 페이지의 「넓은 화면으로 열기」 가 새 탭으로 연다.
 //   fixed inset-0 로 화면을 꽉 채워 BottomNav·body 하단 패딩까지 덮는다.
 
-type ProjectMini = { id: string; title: string; client: string }
+type ProjectMini = {
+  id: string
+  title: string
+  client: string
+  category: string | null
+  subscription_id: string | null
+  subscriber_name: string | null
+}
 
 export default async function RelocationCanvasPage({
   params,
@@ -37,7 +44,7 @@ export default async function RelocationCanvasPage({
 
   const { data: pRow } = await supabase
     .from('relocation_projects')
-    .select('id, title, client')
+    .select('id, title, client, category, subscription_id, subscriber_name')
     .eq('id', id)
     .maybeSingle()
   const project = pRow as ProjectMini | null
@@ -76,6 +83,15 @@ export default async function RelocationCanvasPage({
           <TopologyCanvas
             initialCanvasSize="tall"
             projectId={project.id}
+            projectCategory={
+              project.category === '청약' ||
+              project.category === '계획' ||
+              project.category === '지장이설'
+                ? project.category
+                : null
+            }
+            subscriptionId={project.subscription_id ?? null}
+            subscriberName={project.subscriber_name ?? null}
             facilities={facilities.map((f) => ({
               id: f.id,
               closure_type: f.closure_type,

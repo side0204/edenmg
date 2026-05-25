@@ -328,6 +328,175 @@ export async function addCoreAssignmentFromCanvas(input: {
 
 
 /**
+ * 청약 카테고리 전용 — 케이블에 사용코어 입력.
+ *
+ * 동작:
+ *   1) 프로젝트의 subscription_id / subscriber_name 으로 회선을 찾거나 생성.
+ *      (한 청약 프로젝트 = 한 가입자 = 한 회선. 같은 회선에 여러 코어 배정.)
+ *   2) 입력한 코어 번호 각각에 대해 core_assignments 1 행씩 insert.
+ *   3) 이미 사용 중인 코어는 skip + 사유 보고.
+ *
+ * 청약 사양 (owner 2026-05-25):
+ *   - 코어명 = 가입자명 (subscriber_name)
+ *   - 회선 ID = 청약 ID (subscription_id)
+ *   - 도식 모드 전용 — 지도 모드는 기존 흐름 유지
+ */
+export async function addSubscriptionCoresFromCanvas(input: {
+  project_id: string
+  cable_id: string
+  core_numbers: number[]
+}): Promise<
+  | {
+      ok: true
+      created: number
+      skipped: { core: number; reason: string }[]
+      circuit_id: string
+    }
+  | { ok: false; error: string }
+> {
+  if (!input.project_id || !input.cable_id) {
+    return { ok: false, error: '케이블 정보가 없습니다' }
+  }
+  if (!Array.isArray(input.core_numbers) || input.core_numbers.length === 0) {
+    return { ok: false, error: '사용 코어를 1 개 이상 입력하세요' }
+  }
+  // 정수 + 1 이상 + 중복 제거 + 오름차순 정렬
+  const cores = Array.from(
+    new Set(
+      input.core_numbers
+        .map((n) => Math.trunc(n))
+        .filter((n) => Number.isFinite(n) && n >= 1),
+    ),
+  ).sort((a, b) => a - b)
+  if (cores.length === 0) {
+    return { ok: false, error: '사용 코어가 모두 잘못된 값입니다' }
+  }
+
+  const { supabase } = await requireMember()
+
+  // 프로젝트 — 청약 분류 + 가입자명 + 청약ID
+  const { data: pRow } = await supabase
+    .from('relocation_projects')
+    .select('id, category, subscription_id, subscriber_name')
+    .eq('id', input.project_id)
+    .maybeSingle()
+  const project = pRow as
+    | {
+        id: string
+        category: string | null
+        subscription_id: string | null
+        subscriber_name: string | null
+      }
+    | null
+  if (!project) return { ok: false, error: '프로젝트를 찾을 수 없습니다' }
+  if (project.category !== '청약') {
+    return { ok: false, error: '청약 카테고리 프로젝트만 사용할 수 있습니다' }
+  }
+  const subscriptionId = (project.subscription_id ?? '').trim()
+  if (!subscriptionId) {
+    return {
+      ok: false,
+      error: '프로젝트의 청약ID 가 입력되어 있어야 합니다 (편집 폼 확인)',
+    }
+  }
+  const subscriberName = project.subscriber_name?.trim().slice(0, 200) || null
+
+  // 케이블 — 같은 프로젝트인지 + 코어 수 검증
+  const { data: cRow } = await supabase
+    .from('relocation_cables')
+    .select('id, project_id, spec')
+    .eq('id', input.cable_id)
+    .maybeSingle()
+  const cable = cRow as { id: string; project_id: string; spec: string } | null
+  if (!cable || cable.project_id !== input.project_id) {
+    return { ok: false, error: '케이블을 찾을 수 없습니다' }
+  }
+  // 케이블 규격으로 코어 수 산출 — '12C' → 12 / '1C드랍' → 1
+  const specMatch = /^(\d+)C/.exec(cable.spec)
+  const cableCoreCount = specMatch ? Math.max(1, Number(specMatch[1])) : 1
+  const outOfRange = cores.filter((c) => c > cableCoreCount)
+  if (outOfRange.length > 0) {
+    return {
+      ok: false,
+      error: `케이블 규격 ${cable.spec} 의 코어 수(${cableCoreCount})를 넘는 번호: ${outOfRange.join(', ')}`,
+    }
+  }
+
+  // 회선 — 청약ID 로 찾거나 생성
+  let circuitId: string
+  {
+    const { data: existing } = await supabase
+      .from('relocation_circuits')
+      .select('id, subscriber_name')
+      .eq('project_id', input.project_id)
+      .eq('circuit_id', subscriptionId)
+      .maybeSingle()
+    if (existing) {
+      const exRow = existing as { id: string; subscriber_name: string | null }
+      circuitId = exRow.id
+      // 가입자명이 비어 있으면 보완 (프로젝트 수정 후 동기화 효과)
+      if (!exRow.subscriber_name && subscriberName) {
+        await supabase
+          .from('relocation_circuits')
+          .update({ subscriber_name: subscriberName })
+          .eq('id', circuitId)
+      }
+    } else {
+      const { data: created, error: cErr } = await supabase
+        .from('relocation_circuits')
+        .insert({
+          project_id: input.project_id,
+          circuit_id: subscriptionId,
+          subscriber_name: subscriberName,
+          kind: '1코어',
+          status: 'OK',
+        })
+        .select('id')
+        .single()
+      if (cErr || !created) {
+        return {
+          ok: false,
+          error: '회선 생성 실패: ' + (cErr?.message ?? '알 수 없는 오류'),
+        }
+      }
+      circuitId = (created as { id: string }).id
+    }
+  }
+
+  // 코어별 insert — 충돌(중복)은 skip
+  const skipped: { core: number; reason: string }[] = []
+  let created = 0
+  for (const core of cores) {
+    const { error } = await supabase.from('relocation_core_assignments').insert({
+      project_id: input.project_id,
+      circuit_id: circuitId,
+      segment_idx: 0,
+      cable_id: input.cable_id,
+      core_range_start: core,
+      core_range_end: core,
+      lifecycle: 'new',
+      status: null,
+      is_terminal: true, // 청약 = 가입자 종단
+      is_auto_assigned: false,
+      notes: null,
+    })
+    if (error) {
+      const reason =
+        error.message.includes('exclude') || error.code === '23P01'
+          ? '이미 사용 중'
+          : error.message
+      skipped.push({ core, reason })
+    } else {
+      created += 1
+    }
+  }
+
+  revalidatePath(`/relocation/${input.project_id}`)
+  return { ok: true, created, skipped, circuit_id: circuitId }
+}
+
+
+/**
  * 캔버스 케이블 정보 패널에서 코어 배정 삭제 — JSON 결과 반환 (redirect 안 함).
  */
 export async function removeCoreAssignmentFromCanvas(

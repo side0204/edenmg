@@ -81,6 +81,7 @@ import RoadviewPanel from './RoadviewPanel'
 import SketchOverlay from './SketchOverlay'
 import FieldInspectionSaveDialog from './FieldInspectionSaveDialog'
 import CableInfoPanel from './CableInfoPanel'
+import SubscriptionCablePopover from './SubscriptionCablePopover'
 import FacilityInfoPanel, {
   type TaskTypeOption,
   type FacilityTaskItem,
@@ -451,6 +452,9 @@ function firstFreeSlot(occupied: Set<number>): number {
 
 export default function TopologyCanvas({
   projectId,
+  projectCategory,
+  subscriptionId,
+  subscriberName,
   facilities,
   cables,
   editable,
@@ -466,6 +470,13 @@ export default function TopologyCanvas({
   tabPanelDefaultOpen,
 }: {
   projectId: string
+  // 공사 분류 — '청약' 일 때 도식 모드에서 케이블 클릭 시 사용코어 입력 popover 노출.
+  //   '계획'/'지장이설'/null/undefined 는 기존 흐름.
+  projectCategory?: '청약' | '계획' | '지장이설' | null
+  // 청약ID — popover 가 회선 생성에 사용. category='청약' 일 때만 의미 있음.
+  subscriptionId?: string | null
+  // 가입자명 — 회선의 subscriber_name 으로 자동 채움.
+  subscriberName?: string | null
   facilities: FacilityNode[]
   cables: CableEdge[]
   editable: boolean
@@ -839,7 +850,11 @@ export default function TopologyCanvas({
 
   // 정보 패널(케이블·접속함체) 접기 상태 — 캔버스 작업 공간 확보용.
   // 케이블·시설 패널은 동시에 1개만 뜨므로 공유 상태 1개. 선택 바꿔도 유지.
-  const [infoPanelCollapsed, setInfoPanelCollapsed] = useState(false)
+  //   청약 카테고리 (owner 2026-05-25): 케이블 선택 시 정보 패널은 기본 접힘.
+  //     popover 가 사용 코어 입력을 담당. 패널이 필요하면 사용자가 펼침.
+  const [infoPanelCollapsed, setInfoPanelCollapsed] = useState(
+    projectCategory === '청약',
+  )
 
   // 실사(sketch) — 지도/위성/거리뷰 위에 펜으로 그림판처럼 그림.
   //   메모리 휘발 (페이지 떠나면 사라짐). Phase 2 에서 화면 캡처→시설 첨부 저장 예정.
@@ -4842,7 +4857,8 @@ export default function TopologyCanvas({
                     </g>
                   )
                 })()}
-                {/* Phase 5 — 사용 코어 라벨. 도식 모드에서만, 케이블의 from-anchor 쪽에 빨강. */}
+                {/* Phase 5 — 사용 코어 라벨. 도식 모드에서만, 케이블의 from-anchor 쪽에 빨강.
+                    청약 모드에서는 진하게 강조 (가입자 사용 코어를 확실히 드러냄). */}
                 {(() => {
                   if (mode === 'map') return null
                   const coreLabel = coresByCable.get(c.id)
@@ -4861,10 +4877,12 @@ export default function TopologyCanvas({
                   const PERP = 12
                   const lx = fromPt.x + ux * ALONG - uy * PERP
                   const ly = fromPt.y + uy * ALONG + ux * PERP
-                  // 글자 폭 추정해 박스 크기 결정
-                  const fontSize = 9
-                  const padX = 4
-                  const padY = 2
+                  // 청약 모드: 더 크고 진하게 (가입자 사용 코어 강조)
+                  const isSubscriptionCtx = projectCategory === '청약'
+                  const fontSize = isSubscriptionCtx ? 13 : 9
+                  const fontWeight = isSubscriptionCtx ? 800 : 600
+                  const padX = isSubscriptionCtx ? 6 : 4
+                  const padY = isSubscriptionCtx ? 3 : 2
                   const w = estimateTextWidth(coreLabel, fontSize) + padX * 2
                   const h = fontSize + padY * 2
                   return (
@@ -4874,10 +4892,10 @@ export default function TopologyCanvas({
                         y={ly - h / 2}
                         width={w}
                         height={h}
-                        rx={2}
+                        rx={isSubscriptionCtx ? 3 : 2}
                         fill="white"
                         stroke="#dc2626"
-                        strokeWidth={1}
+                        strokeWidth={isSubscriptionCtx ? 1.5 : 1}
                       />
                       <text
                         x={lx}
@@ -4886,7 +4904,7 @@ export default function TopologyCanvas({
                         fill="#dc2626"
                         style={{
                           fontSize,
-                          fontWeight: 600,
+                          fontWeight,
                           fontFamily: LABEL_FONT,
                         }}
                       >
@@ -4895,6 +4913,39 @@ export default function TopologyCanvas({
                     </g>
                   )
                 })()}
+
+                {/* 청약 카테고리 도식 모드 — 선택된 케이블 위에 사용코어 입력 popover */}
+                {projectCategory === '청약' &&
+                  mode === 'schematic' &&
+                  selected &&
+                  (() => {
+                    // 이 케이블의 기존 사용 코어 — popover 에서 중복 경고용
+                    const usedCores = (coreAssignments ?? [])
+                      .filter((a) => a.cable_id === c.id)
+                      .map((a) => a.core_range_start)
+                    // popover 크기 (SVG 좌표) — labelPt 위쪽으로 띄움
+                    const POP_W = 220
+                    const POP_H = 130
+                    return (
+                      <foreignObject
+                        x={labelPt.x - POP_W / 2}
+                        y={labelPt.y - POP_H - 40}
+                        width={POP_W}
+                        height={POP_H}
+                        style={{ overflow: 'visible' }}
+                      >
+                        <SubscriptionCablePopover
+                          projectId={projectId}
+                          cableId={c.id}
+                          cableCode={c.cable_code}
+                          cableSpec={c.spec}
+                          usedCores={usedCores}
+                          onSaved={() => router.refresh()}
+                          onClose={() => setSelectedCableId(null)}
+                        />
+                      </foreignObject>
+                    )
+                  })()}
                 {/* 선택 시 waypoint 핸들 — 드래그 이동 / 우클릭 삭제.
                     지도 모드는 경로점 lat/lng 를 화면으로 투영한 위치에 표시. */}
                 {selected &&

@@ -1090,6 +1090,9 @@ export default async function RelocationProjectPage({
     <div className="px-4 sm:px-6 my-2">
       <TopologyCanvas
         projectId={project.id}
+        projectCategory={projectCategory}
+        subscriptionId={project.subscription_id ?? null}
+        subscriberName={project.subscriber_name ?? null}
         facilities={facilities.map((f) => ({
           id: f.id,
           closure_type: f.closure_type,
