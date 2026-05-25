@@ -171,6 +171,56 @@ async function allocateNextFacilitySeq(
   return nextSeq
 }
 
+/**
+ * 「빈 자리 메우기」 번호 할당 — 같은 project_id × closure_type 에서 살아있는
+ *  seq_no 중 가장 작은 양의 정수 결손값을 반환.
+ *    예: 살아있는 seq_no = [1, 2, 4, 5] → 3 반환
+ *        살아있는 seq_no = [1, 2, 3]    → 4 반환
+ *        살아있는 seq_no = []           → 1 반환
+ *  실사정보 시설은 도면에 일시적으로 배치/삭제하는 경우가 잦아 owner 요청 (2026-05-25).
+ *  다른 시설 종류는 기존 monotonic counter 유지 (도서·기별명세서 등에서 번호 보존 필요).
+ *  안전망: 카운터 last_seq 도 max(현재, 새 번호) 로 갱신 (monotonic 시설과 혼선 방지).
+ */
+async function allocateLowestAvailableSeq(
+  supabase: Awaited<ReturnType<typeof createClient>>,
+  projectId: string,
+  closureType: ClosureType,
+): Promise<number> {
+  const { data: rows } = await supabase
+    .from('relocation_facilities')
+    .select('seq_no')
+    .eq('project_id', projectId)
+    .eq('closure_type', closureType)
+    .order('seq_no')
+
+  const used = new Set(
+    ((rows ?? []) as { seq_no: number }[])
+      .map((r) => r.seq_no)
+      .filter((n) => typeof n === 'number' && n > 0),
+  )
+
+  // 첫 결손값 — 1부터 순차로 검사
+  let nextSeq = 1
+  while (used.has(nextSeq)) nextSeq += 1
+
+  // 카운터 row last_seq 갱신 (max 보존)
+  const { data: counterRow } = await supabase
+    .from('relocation_facility_seq')
+    .select('last_seq')
+    .eq('project_id', projectId)
+    .eq('closure_type', closureType)
+    .maybeSingle()
+  const currentSeq = (counterRow as { last_seq: number } | null)?.last_seq ?? 0
+  const newLastSeq = Math.max(currentSeq, nextSeq)
+  await supabase.from('relocation_facility_seq').upsert({
+    project_id: projectId,
+    closure_type: closureType,
+    last_seq: newLastSeq,
+  })
+
+  return nextSeq
+}
+
 
 export async function createFacility(formData: FormData) {
   const projectId = String(formData.get('project_id') ?? '').trim()
@@ -897,7 +947,9 @@ export async function createInspectionFacility(input: {
   while (attempt < 3) {
     attempt += 1
     try {
-      const seqNo = await allocateNextFacilitySeq(supabase, input.project_id, '실사정보')
+      // owner 요청 (2026-05-25): 실사정보는 삭제된 번호 자리를 메워 재사용 →
+      //   도면에 실사 1개만 있는데 「실사3」 으로 표시되는 문제 방지
+      const seqNo = await allocateLowestAvailableSeq(supabase, input.project_id, '실사정보')
       const name = `실사${seqNo}`
 
       const { data: row, error } = await supabase
