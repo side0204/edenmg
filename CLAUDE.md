@@ -706,6 +706,19 @@ owner 모바일 스크린샷 보고: `/vehicles` 헤더에서 "업무용 차량"
 - **적용 (10개 페이지)**: `/vehicles` · `/admin/employees` · `/admin/sites` · `/admin/facilities` · `/admin/materials` · `/admin/cables` · `/works` · `/works/[id]` · `/requests` · `/vehicles/trips`
 - **신규 페이지 작성 시**: 큰 제목(`text-2xl` 이상) + 우측 버튼 조합이면 처음부터 모바일 stack 패턴으로 시작. mobile_ux_patterns 메모리에 「8. 모바일 헤더 가로 강제」 로 기록.
 
+### ✅ 완료 (공사 설계 목록 — 모바일 카드뷰 + 헤더 정렬 + CSV 내보내기, 2026-05-25)
+
+owner 요구 (테이블 후속): 모바일에서도 보기 편하게 + 후속 작업(헤더 클릭 정렬·CSV).
+
+- **반응형 분기** ([`SubscriptionProjectsTable`](./src/app/relocation/category/[cat]/SubscriptionProjectsTable.tsx)):
+  - **모바일** (`<md`, <768px): 카드 스택 — 제목 + 상태 배지 헤더, 본문은 `dl grid-cols-[5.5rem_1fr]` 로 라벨·값 2열. 빈 값(`—` 안 보임)은 줄 자체 생략. 카드 전체가 Link
+  - **데스크톱** (`>=md`): 기존 테이블 그대로 + 헤더 정렬 추가
+  - 같은 컬럼 prefs (visibility·순서) 양쪽에 적용 — 사용자가 한 번 설정하면 PC·모바일 모두 반영
+- **헤더 정렬**: 컬럼 헤더 클릭 → 1번째 asc, 2번째 desc, 3번째 reset (서버 기본 created_at desc 복귀). `localeCompare(..., 'ko', {numeric: true})` 로 한글·숫자 자연 정렬. 빈 값은 항상 끝으로. 정렬 상태 아이콘 (ArrowUp/Down/UpDown)
+- **CSV 내보내기**: 「CSV」 버튼 (PC: 라벨 + 아이콘, 모바일: 아이콘만) — 현재 보이는 컬럼·검색 결과 그대로 다운로드. UTF-8 BOM + CRLF + RFC 4180 escape. 파일명 `{category}_설계_{YYYY-MM-DD}.csv`
+- **모바일 버튼 컴팩트**: 「컬럼 설정」 텍스트는 `sm:` 이상에서만 노출, 모바일은 아이콘 + 카운트만
+- 페이지 padding: 모바일 `p-3` (기존 p-4 에서 줄임)
+
 ### ✅ 완료 (공사 설계 목록 테이블 + 컬럼 설정 + 검색, 2026-05-25)
 
 owner 요구: 카드 목록 → 게시판형 테이블, 모든 컬럼 표시, 사용자가 컬럼 순서·표시 여부 선택 가능. 검색 기능 추가. 세 카테고리(청약·계획·지장이설) 모두 테이블로.

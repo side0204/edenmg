@@ -2,7 +2,18 @@
 
 import { useEffect, useMemo, useState } from 'react'
 import Link from 'next/link'
-import { ChevronDown, ChevronUp, RotateCcw, Search, Settings2, X } from 'lucide-react'
+import {
+  ArrowDown,
+  ArrowUp,
+  ArrowUpDown,
+  ChevronDown,
+  ChevronUp,
+  Download,
+  RotateCcw,
+  Search,
+  Settings2,
+  X,
+} from 'lucide-react'
 
 /**
  * 공사 설계 — 카테고리별 프로젝트 게시판형 테이블.
@@ -280,6 +291,8 @@ export function SubscriptionProjectsTable({
   const [hydrated, setHydrated] = useState(false)
   const [settingsOpen, setSettingsOpen] = useState(false)
   const [query, setQuery] = useState('')
+  // 정렬 — 헤더 클릭으로 asc/desc 토글, 3번째 클릭 시 reset (서버 기본 정렬 = created_at desc 유지)
+  const [sort, setSort] = useState<{ col: ColumnId; dir: 'asc' | 'desc' } | null>(null)
 
   // SSR/CSR mismatch 회피 — 마운트 후 localStorage 읽기
   useEffect(() => {
@@ -298,11 +311,57 @@ export function SubscriptionProjectsTable({
 
   const filteredRows = useMemo(() => {
     const q = query.trim().toLowerCase()
-    if (!q) return rows
-    return rows.filter((r) =>
-      visibleColumns.some((c) => valueOf(r, c.id).toLowerCase().includes(q)),
-    )
-  }, [rows, visibleColumns, query])
+    const base = q
+      ? rows.filter((r) =>
+          visibleColumns.some((c) => valueOf(r, c.id).toLowerCase().includes(q)),
+        )
+      : rows
+    if (!sort) return base
+    // 정렬 — 날짜·텍스트 모두 문자열 비교 (ISO 날짜는 lexicographic 정렬과 일치)
+    const sorted = [...base].sort((a, b) => {
+      const va = valueOf(a, sort.col)
+      const vb = valueOf(b, sort.col)
+      // 빈 값은 항상 끝으로
+      if (va === '' && vb === '') return 0
+      if (va === '') return 1
+      if (vb === '') return -1
+      const cmp = va.localeCompare(vb, 'ko', { numeric: true })
+      return sort.dir === 'asc' ? cmp : -cmp
+    })
+    return sorted
+  }, [rows, visibleColumns, query, sort])
+
+  const toggleSort = (id: ColumnId) => {
+    setSort((cur) => {
+      if (!cur || cur.col !== id) return { col: id, dir: 'asc' }
+      if (cur.dir === 'asc') return { col: id, dir: 'desc' }
+      return null // 3번째 클릭 = reset
+    })
+  }
+
+  // CSV 다운로드 — 보이는 컬럼만 (UTF-8 BOM + CRLF)
+  const downloadCsv = () => {
+    const escape = (v: string) => {
+      const needs = /[",\r\n]/.test(v)
+      const s = v.replace(/"/g, '""')
+      return needs ? `"${s}"` : s
+    }
+    const header = visibleColumns.map((c) => escape(c.label)).join(',')
+    const body = filteredRows
+      .map((r) => visibleColumns.map((c) => escape(valueOf(r, c.id))).join(','))
+      .join('\r\n')
+    const csv = '﻿' + header + '\r\n' + body
+    const blob = new Blob([csv], { type: 'text/csv;charset=utf-8' })
+    const url = URL.createObjectURL(blob)
+    const a = document.createElement('a')
+    const today = new Date().toISOString().slice(0, 10)
+    a.href = url
+    a.download = `${category}_설계_${today}.csv`
+    document.body.appendChild(a)
+    a.click()
+    document.body.removeChild(a)
+    URL.revokeObjectURL(url)
+  }
 
   const updatePrefs = (next: Prefs) => {
     setPrefs(next)
@@ -357,10 +416,20 @@ export function SubscriptionProjectsTable({
           className="inline-flex items-center gap-1 rounded-lg border border-slate-300 bg-white px-3 py-1.5 text-sm font-medium text-slate-700 hover:bg-slate-50"
         >
           <Settings2 className="h-4 w-4" />
-          컬럼 설정
-          <span className="ml-1 inline-flex items-center rounded bg-slate-100 px-1.5 py-0.5 text-[10px] text-slate-600">
+          <span className="hidden sm:inline">컬럼 설정</span>
+          <span className="inline-flex items-center rounded bg-slate-100 px-1.5 py-0.5 text-[10px] text-slate-600">
             {visibleColumns.length}/{totalForCategory}
           </span>
+        </button>
+        <button
+          type="button"
+          onClick={downloadCsv}
+          disabled={filteredRows.length === 0}
+          className="inline-flex items-center gap-1 rounded-lg border border-slate-300 bg-white px-3 py-1.5 text-sm font-medium text-slate-700 hover:bg-slate-50 disabled:opacity-50 disabled:hover:bg-white"
+          title="현재 보이는 컬럼·검색 결과를 CSV 다운로드"
+        >
+          <Download className="h-4 w-4" />
+          <span className="hidden sm:inline">CSV</span>
         </button>
         <p className="ml-auto text-xs text-slate-500 tabular-nums">
           {hydrated && query ? (
@@ -374,24 +443,104 @@ export function SubscriptionProjectsTable({
         </p>
       </div>
 
-      {/* 테이블 */}
-      <div className="overflow-x-auto rounded-lg border border-slate-200 bg-white">
+      {/* 모바일 카드 뷰 (md 미만) — 같은 컬럼 prefs 적용 */}
+      <div className="md:hidden space-y-2">
+        {filteredRows.length === 0 ? (
+          <p className="rounded-lg border border-slate-200 bg-white px-3 py-8 text-center text-sm text-slate-500">
+            {query
+              ? `'${query}' 로 검색된 결과가 없습니다.`
+              : '등록된 프로젝트가 없습니다.'}
+          </p>
+        ) : (
+          filteredRows.map((row) => {
+            // 첫 컬럼은 카드 제목 — title 이 첫 컬럼이 아닐 수도 있으니 안전하게 분리
+            const titleCol = visibleColumns.find((c) => c.id === 'title')
+            const otherCols = visibleColumns.filter((c) => c.id !== 'title')
+            const cardTitle = titleCol ? row.title : valueOf(row, visibleColumns[0]?.id ?? 'title')
+            return (
+              <Link
+                key={row.id}
+                href={`/relocation/${row.id}`}
+                className="block rounded-lg border border-slate-200 bg-white p-3 active:bg-slate-50"
+              >
+                <div className="flex items-start justify-between gap-2">
+                  <h3 className="text-base font-semibold text-slate-900 line-clamp-2">
+                    {cardTitle}
+                  </h3>
+                  {visibleColumns.some((c) => c.id === 'status') && (
+                    <span
+                      className={
+                        'shrink-0 inline-flex items-center rounded-full px-2 py-0.5 text-xs font-medium ' +
+                        (STATUS_BADGE[row.status] ?? 'bg-slate-100 text-slate-700')
+                      }
+                    >
+                      {row.status}
+                    </span>
+                  )}
+                </div>
+                {otherCols.filter((c) => c.id !== 'status').length > 0 && (
+                  <dl className="mt-2 grid grid-cols-[5.5rem_1fr] gap-x-2 gap-y-1 text-xs">
+                    {otherCols
+                      .filter((c) => c.id !== 'status')
+                      .map((col) => {
+                        const v = valueOf(row, col.id)
+                        if (!v) return null
+                        return (
+                          <div key={col.id} className="contents">
+                            <dt className="text-slate-400 truncate">{col.label}</dt>
+                            <dd className="text-slate-700 break-words">{v}</dd>
+                          </div>
+                        )
+                      })}
+                  </dl>
+                )}
+              </Link>
+            )
+          })
+        )}
+      </div>
+
+      {/* 데스크톱 테이블 (md 이상) */}
+      <div className="hidden md:block overflow-x-auto rounded-lg border border-slate-200 bg-white">
         <table className="min-w-full text-sm">
           <thead className="border-b border-slate-200 bg-slate-50">
             <tr>
-              {visibleColumns.map((col, idx) => (
-                <th
-                  key={col.id}
-                  scope="col"
-                  className={
-                    'px-3 py-2 text-left text-xs font-semibold text-slate-600 whitespace-nowrap ' +
-                    col.width +
-                    (idx === 0 ? ' sticky left-0 bg-slate-50 z-10' : '')
-                  }
-                >
-                  {col.label}
-                </th>
-              ))}
+              {visibleColumns.map((col, idx) => {
+                const isSorted = sort?.col === col.id
+                const SortIcon = !isSorted ? ArrowUpDown : sort!.dir === 'asc' ? ArrowUp : ArrowDown
+                return (
+                  <th
+                    key={col.id}
+                    scope="col"
+                    className={
+                      'px-3 py-2 text-left text-xs font-semibold whitespace-nowrap ' +
+                      col.width +
+                      (idx === 0 ? ' sticky left-0 bg-slate-50 z-10' : '')
+                    }
+                  >
+                    <button
+                      type="button"
+                      onClick={() => toggleSort(col.id)}
+                      className={
+                        'inline-flex items-center gap-1 rounded px-1 -mx-1 py-0.5 hover:bg-slate-100 ' +
+                        (isSorted ? 'text-slate-900' : 'text-slate-600')
+                      }
+                      title={
+                        isSorted
+                          ? `${sort!.dir === 'asc' ? '오름차순' : '내림차순'} 정렬됨 (한번 더 클릭하면 해제)`
+                          : '클릭하면 이 컬럼으로 정렬'
+                      }
+                    >
+                      {col.label}
+                      <SortIcon
+                        className={
+                          'h-3 w-3 ' + (isSorted ? 'text-slate-900' : 'text-slate-300')
+                        }
+                      />
+                    </button>
+                  </th>
+                )
+              })}
             </tr>
           </thead>
           <tbody className="divide-y divide-slate-100">

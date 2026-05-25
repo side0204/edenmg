@@ -143,8 +143,8 @@ export default async function RelocationCategoryListPage({
   const newProjectHref = `/relocation/new?cat=${catRaw}`
 
   return (
-    <main className="min-h-screen p-4 sm:p-6">
-      <div className="mx-auto max-w-[100rem] space-y-5">
+    <main className="min-h-screen p-3 sm:p-6">
+      <div className="mx-auto max-w-[100rem] space-y-4 sm:space-y-5">
         <header className="space-y-3 sm:space-y-0 sm:flex sm:items-center sm:justify-between sm:gap-3">
           <div>
             <Link
