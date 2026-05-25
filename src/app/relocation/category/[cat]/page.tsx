@@ -173,6 +173,52 @@ export default async function RelocationCategoryListPage({
     }
   }
 
+  // 작업 배정 확정 상태 매핑 — 청약 카테고리만, project_id + employee_id 별 confirmed_at
+  //   1) 청약 프로젝트의 linked works 찾기 (relocation_project_id FK)
+  //   2) 그 works 의 work_assignments 가져와 confirmedAt 매핑
+  const confirmedByKey = new Map<string, boolean>() // `${projectId}:${employeeId}` -> confirmed?
+  if (category === '청약' && projects.length > 0) {
+    const projectIds = projects.map((p) => p.id)
+    const { data: workRows } = await supabase
+      .from('works')
+      .select('id, relocation_project_id')
+      .in('relocation_project_id', projectIds)
+    type WorkRow = { id: string; relocation_project_id: string }
+    const works = (workRows ?? []) as WorkRow[]
+    const projByWork = new Map(works.map((w) => [w.id, w.relocation_project_id]))
+    if (works.length > 0) {
+      const workIds = works.map((w) => w.id)
+      const { data: asRows } = await supabase
+        .from('work_assignments')
+        .select('work_id, employee_id, confirmed_at')
+        .in('work_id', workIds)
+      type AsRow = {
+        work_id: string
+        employee_id: string
+        confirmed_at: string | null
+      }
+      for (const a of (asRows ?? []) as AsRow[]) {
+        const pid = projByWork.get(a.work_id)
+        if (!pid) continue
+        confirmedByKey.set(`${pid}:${a.employee_id}`, !!a.confirmed_at)
+      }
+    }
+  }
+
+  function workerEntries(projectId: string, ids: string[]) {
+    return ids
+      .map((id) => {
+        const name = nameById.get(id)
+        if (!name) return null
+        return {
+          id,
+          name,
+          confirmed: confirmedByKey.get(`${projectId}:${id}`) ?? false,
+        }
+      })
+      .filter((v): v is { id: string; name: string; confirmed: boolean } => !!v)
+  }
+
   const rows: RelocationProjectRow[] = projects.map((p) => ({
     id: p.id,
     title: p.title,
@@ -198,12 +244,8 @@ export default async function RelocationCategoryListPage({
     surveyed_at: p.surveyed_at,
     expected_completion_at: p.expected_completion_at,
     completion_at: p.completion_at,
-    outside_worker_names: safeIdArr(p.outside_worker_ids)
-      .map((id) => nameById.get(id))
-      .filter((n): n is string => !!n),
-    splice_worker_names: safeIdArr(p.splice_worker_ids)
-      .map((id) => nameById.get(id))
-      .filter((n): n is string => !!n),
+    outside_workers: workerEntries(p.id, safeIdArr(p.outside_worker_ids)),
+    splice_workers: workerEntries(p.id, safeIdArr(p.splice_worker_ids)),
     designer_name: p.designer_id ? nameById.get(p.designer_id) ?? null : null,
     notes: p.notes,
     created_at: p.created_at,

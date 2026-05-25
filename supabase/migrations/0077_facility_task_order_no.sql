@@ -17,18 +17,19 @@ alter table public.relocation_facility_tasks
   add column if not exists order_no text;
 
 -- 기존 unique constraint 제거 (이름이 다를 수 있어 동적으로)
+--   PL/pgSQL 변수와 pg_constraint.conname 컬럼 충돌 회피 위해 변수명 _name 으로
 do $$
 declare
-  conname text;
+  _name text;
 begin
-  for conname in
-    select conname
+  for _name in
+    select c.conname
       from pg_constraint c
       join pg_class t on t.oid = c.conrelid
      where t.relname = 'relocation_facility_tasks'
        and c.contype = 'u'
   loop
-    execute format('alter table public.relocation_facility_tasks drop constraint if exists %I', conname);
+    execute format('alter table public.relocation_facility_tasks drop constraint if exists %I', _name);
   end loop;
 end$$;
 

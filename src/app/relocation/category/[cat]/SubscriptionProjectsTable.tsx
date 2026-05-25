@@ -1,14 +1,18 @@
 'use client'
 
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { useEffect, useMemo, useRef, useState, useTransition } from 'react'
 import Link from 'next/link'
+import { useRouter } from 'next/navigation'
+import { toast } from 'sonner'
 import {
   ArrowDown,
   ArrowUp,
   ArrowUpDown,
+  Check,
   ChevronDown,
   ChevronUp,
   Download,
+  Loader2,
   Plus,
   RotateCcw,
   Search,
@@ -16,6 +20,88 @@ import {
   X,
 } from 'lucide-react'
 import { saveRelocationListPrefs } from './prefs-actions'
+import { confirmWorkAssignment, cancelWorkAssignment } from '../../actions'
+
+// 작업자 칩 + 확정/취소 버튼 — 청약 목록 외선/접속 작업자 컬럼.
+//   server action 호출 후 router.refresh() 로 최신 상태 반영.
+function WorkerChip({
+  projectId,
+  worker,
+  tone,
+}: {
+  projectId: string
+  worker: { id: string; name: string; confirmed: boolean }
+  tone: 'outside' | 'splice'
+}) {
+  const router = useRouter()
+  const [pending, startTransition] = useTransition()
+  const baseTone =
+    tone === 'splice'
+      ? 'border-blue-200 bg-blue-50'
+      : 'border-orange-200 bg-orange-50'
+
+  const onConfirm = () => {
+    const fd = new FormData()
+    fd.append('project_id', projectId)
+    fd.append('employee_id', worker.id)
+    startTransition(async () => {
+      const r = await confirmWorkAssignment(fd)
+      if (r.ok) {
+        toast.success(`${worker.name} 확정`)
+        router.refresh()
+      } else toast.error(r.error)
+    })
+  }
+  const onCancel = () => {
+    if (!confirm(`${worker.name} 배정을 취소하시겠습니까?`)) return
+    const fd = new FormData()
+    fd.append('project_id', projectId)
+    fd.append('employee_id', worker.id)
+    startTransition(async () => {
+      const r = await cancelWorkAssignment(fd)
+      if (r.ok) {
+        toast.success(`${worker.name} 취소`)
+        router.refresh()
+      } else toast.error(r.error)
+    })
+  }
+
+  return (
+    <span
+      className={`inline-flex items-center gap-1 rounded-full border px-1.5 py-0.5 ${baseTone}`}
+    >
+      <span className="font-medium text-slate-900">{worker.name}</span>
+      <span
+        className={
+          'inline-flex items-center rounded-full px-1 py-0 text-[10px] font-bold ' +
+          (worker.confirmed ? 'bg-emerald-600 text-white' : 'bg-amber-500 text-white')
+        }
+      >
+        {worker.confirmed ? '확정' : '대기'}
+      </span>
+      {!worker.confirmed && (
+        <button
+          type="button"
+          disabled={pending}
+          onClick={onConfirm}
+          className="inline-flex items-center rounded bg-emerald-600 px-1 py-0 text-[10px] font-bold text-white hover:bg-emerald-700 disabled:opacity-50"
+          title="확정"
+        >
+          {pending ? <Loader2 className="h-3 w-3 animate-spin" /> : <Check className="h-3 w-3" />}
+        </button>
+      )}
+      <button
+        type="button"
+        disabled={pending}
+        onClick={onCancel}
+        className="inline-flex items-center rounded border border-rose-300 bg-white px-1 py-0 text-[10px] font-bold text-rose-700 hover:bg-rose-50 disabled:opacity-50"
+        title="취소"
+      >
+        <X className="h-3 w-3" />
+      </button>
+    </span>
+  )
+}
 
 const MAX_SEARCH_INPUTS = 4
 
@@ -70,8 +156,8 @@ export type RelocationProjectRow = {
   surveyed_at: string | null
   expected_completion_at: string | null
   completion_at: string | null
-  outside_worker_names: string[]
-  splice_worker_names: string[]
+  outside_workers: { id: string; name: string; confirmed: boolean }[]
+  splice_workers: { id: string; name: string; confirmed: boolean }[]
   designer_name: string | null
   notes: string | null
   created_at: string
@@ -122,8 +208,8 @@ const ALL_COLUMNS: ColumnDef[] = [
   { id: 'surveyed_at', label: '공사계약일', defaultWidth: 100, defaultVisible: false },
   { id: 'expected_completion_at', label: '준공예정일', defaultWidth: 100, defaultVisible: true },
   { id: 'completion_at', label: '작업완료일', defaultWidth: 100, defaultVisible: true },
-  { id: 'outside_workers', label: '외선 작업자', defaultWidth: 160, defaultVisible: true },
-  { id: 'splice_workers', label: '접속 작업자', defaultWidth: 160, defaultVisible: true },
+  { id: 'outside_workers', label: '외선 작업자', defaultWidth: 280, defaultVisible: true },
+  { id: 'splice_workers', label: '접속 작업자', defaultWidth: 280, defaultVisible: true },
   { id: 'designer', label: '설계자', defaultWidth: 90, defaultVisible: false },
   { id: 'notes', label: '비고', defaultWidth: 200, defaultVisible: false },
   { id: 'created_at', label: '등록일시', defaultWidth: 140, defaultVisible: false },
@@ -228,9 +314,13 @@ function valueOf(row: RelocationProjectRow, col: ColumnId): string {
     case 'completion_at':
       return row.completion_at ?? ''
     case 'outside_workers':
-      return row.outside_worker_names.join(', ')
+      return row.outside_workers
+        .map((w) => `${w.name}${w.confirmed ? '(확정)' : '(대기)'}`)
+        .join(', ')
     case 'splice_workers':
-      return row.splice_worker_names.join(', ')
+      return row.splice_workers
+        .map((w) => `${w.name}${w.confirmed ? '(확정)' : '(대기)'}`)
+        .join(', ')
     case 'designer':
       return row.designer_name ?? ''
     case 'notes':
@@ -264,7 +354,7 @@ function renderCell(row: RelocationProjectRow, col: ColumnId): React.ReactNode {
       return (
         <span
           className={
-            'inline-flex items-center rounded-full px-1.5 py-0.5 text-[10px] font-medium ' +
+            'inline-flex items-center rounded-full px-2 py-0.5 text-[13px] font-medium ' +
             (STATUS_BADGE[row.status] ?? 'bg-slate-100 text-slate-700')
           }
         >
@@ -275,16 +365,24 @@ function renderCell(row: RelocationProjectRow, col: ColumnId): React.ReactNode {
     case 'notes':
       return <span className="line-clamp-2 whitespace-pre-wrap">{valueOf(row, col)}</span>
     case 'outside_workers':
-      return row.outside_worker_names.length === 0 ? (
+      return row.outside_workers.length === 0 ? (
         <span className="text-slate-400">—</span>
       ) : (
-        <span className="text-slate-700">{row.outside_worker_names.join(', ')}</span>
+        <span className="inline-flex flex-wrap gap-1">
+          {row.outside_workers.map((w) => (
+            <WorkerChip key={w.id} projectId={row.id} worker={w} tone="outside" />
+          ))}
+        </span>
       )
     case 'splice_workers':
-      return row.splice_worker_names.length === 0 ? (
+      return row.splice_workers.length === 0 ? (
         <span className="text-slate-400">—</span>
       ) : (
-        <span className="text-slate-700">{row.splice_worker_names.join(', ')}</span>
+        <span className="inline-flex flex-wrap gap-1">
+          {row.splice_workers.map((w) => (
+            <WorkerChip key={w.id} projectId={row.id} worker={w} tone="splice" />
+          ))}
+        </span>
       )
     default: {
       const v = valueOf(row, col)
@@ -893,7 +991,7 @@ export function SubscriptionProjectsTable({
       {/* 데스크톱 테이블 (md 이상) — 컬럼 경계선 + 작은 글자 + resize + 다중 정렬 */}
       <div className="hidden md:block overflow-x-auto rounded-lg border border-slate-200 bg-white">
         <table
-          className="border-collapse text-[11px]"
+          className="border-collapse text-[14px]"
           style={{ tableLayout: 'fixed', width: 'max-content', minWidth: '100%' }}
         >
           <colgroup>
@@ -923,7 +1021,7 @@ export function SubscriptionProjectsTable({
                     onDrop={(e) => onHeaderDrop(e, col.id)}
                     onDragEnd={onHeaderDragEnd}
                     className={
-                      'relative border-r border-slate-200 px-2 py-1.5 text-center text-[10px] font-semibold whitespace-nowrap select-none cursor-grab ' +
+                      'relative border-r border-slate-200 px-2 py-1.5 text-center text-[13px] font-semibold whitespace-nowrap select-none cursor-grab ' +
                       (idx === 0 ? 'sticky left-0 z-10 ' + t.headerBg + ' ' : '') +
                       (isDragging ? 'opacity-50 ' : '') +
                       (isDragOver && dragOverSide === 'before'
@@ -1003,7 +1101,7 @@ export function SubscriptionProjectsTable({
                       <td
                         key={col.id}
                         className={
-                          'border-r border-slate-200 px-2 py-1 align-top overflow-hidden ' +
+                          'border-r border-slate-200 px-2.5 py-1.5 align-top overflow-hidden ' +
                           (idx === 0
                             ? 'sticky left-0 z-10 ' + (isSelected ? rowBg : 'bg-white')
                             : '')

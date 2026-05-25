@@ -45,7 +45,7 @@ import {
 } from '@/lib/relocation'
 import { RelocationWorkerPicker } from '../RelocationWorkerPicker'
 import OrderNoList from '../OrderNoList'
-import WorkAssignmentStatus from '../WorkAssignmentStatus'
+// 확정/취소 버튼은 청약 목록(SubscriptionProjectsTable)으로 이동 (owner 2026-05-25)
 import PhasesTab, { type PhaseRow, type PhaseTaskRow } from './PhasesTab'
 import ExportTab from './ExportTab'
 import SpliceTab, { type SpliceRow } from './SpliceTab'
@@ -235,14 +235,9 @@ export default async function RelocationProjectPage({
   const outsideInitialIds = safeIdArr(project.outside_worker_ids)
   const spliceInitialIds = safeIdArr(project.splice_worker_ids)
 
-  // 연동된 작업관리 row — 헤더에 "작업관리 보기" 링크 노출
+  // 연동된 작업관리 row — 헤더에 "작업관리 보기" 링크 노출.
+  //   확정/취소 버튼은 청약 목록(SubscriptionProjectsTable)으로 옮김 (owner 2026-05-25).
   let linkedWorkId: string | null = null
-  let workAssignmentEntries: {
-    employeeId: string
-    employeeName: string
-    workerType: '외선팀' | '접속팀' | null
-    confirmedAt: string | null
-  }[] = []
   if (isSubscriptionProject) {
     const { data: linkedWork } = await supabase
       .from('works')
@@ -250,36 +245,6 @@ export default async function RelocationProjectPage({
       .eq('relocation_project_id', id)
       .maybeSingle()
     linkedWorkId = ((linkedWork as { id: string } | null) ?? null)?.id ?? null
-
-    // 배정 작업자 현황 — 확정/취소 버튼용
-    if (linkedWorkId) {
-      const { data: asData } = await supabase
-        .from('work_assignments')
-        .select('employee_id, worker_type, confirmed_at')
-        .eq('work_id', linkedWorkId)
-      type AsRow = {
-        employee_id: string
-        worker_type: '외선팀' | '접속팀' | null
-        confirmed_at: string | null
-      }
-      const asRows = (asData ?? []) as AsRow[]
-      if (asRows.length > 0) {
-        const empIds = asRows.map((r) => r.employee_id)
-        const { data: empData } = await supabase
-          .from('employees')
-          .select('id, name')
-          .in('id', empIds)
-        const nameById = new Map(
-          ((empData ?? []) as { id: string; name: string }[]).map((e) => [e.id, e.name]),
-        )
-        workAssignmentEntries = asRows.map((r) => ({
-          employeeId: r.employee_id,
-          employeeName: nameById.get(r.employee_id) ?? '(이름 없음)',
-          workerType: r.worker_type,
-          confirmedAt: r.confirmed_at,
-        }))
-      }
-    }
   }
 
   // 작업자 위치 — 청약 프로젝트 + linkedWork 있을 때만 표시 (15분 신선)
@@ -1055,16 +1020,10 @@ export default async function RelocationProjectPage({
                   </div>
                 </div>
                 <div>
-                  <label className="block text-sm font-medium text-slate-700">배정 작업자 현황</label>
-                  <div className="mt-1 rounded-lg border border-slate-200 bg-slate-50 p-2.5">
-                    <WorkAssignmentStatus projectId={id} assignments={workAssignmentEntries} />
-                  </div>
-                  <p className="mt-1 text-xs text-slate-500">
-                    「확정」 누른 작업자만 작업이 보입니다. 「취소」 는 배정 자체를 제거합니다.
+                  <label className="block text-sm font-medium text-slate-700">작업자배정</label>
+                  <p className="mt-0.5 text-xs text-slate-500">
+                    여기서 추가/제거. 확정·취소는 청약 목록의 작업자 옆 버튼에서.
                   </p>
-                </div>
-                <div>
-                  <label className="block text-sm font-medium text-slate-700">작업자배정 (추가/제거)</label>
                   <div className="mt-1 grid gap-3 sm:grid-cols-2">
                     <div className="rounded-lg border border-slate-200 p-2 bg-orange-50/40">
                       <label className="block text-xs text-orange-700 font-semibold">
