@@ -15,7 +15,8 @@ import { createAdminClient } from '@/lib/supabase/admin'
 //
 // 사이트 메타: GPS accuracy_m 도 같이 저장해 표시 시 신뢰성 표현.
 
-export type WorkerPositionResult =
+// ⚠️ 'use server' 파일은 async function 만 export 가능 — 타입은 비공개로.
+type WorkerPositionResult =
   | { ok: true; recordedAt: string }
   | { ok: false; error: string; reason?: 'not_active' | 'no_employee' | 'db' }
 

@@ -3,11 +3,11 @@
 import { useRef, useState } from 'react'
 import { toast } from 'sonner'
 import { Camera, Image as ImageIcon, Loader2, Plus, X } from 'lucide-react'
+import { uploadFacilityPhoto } from './facility-photo-actions'
 import {
-  uploadFacilityPhoto,
   FACILITY_PHOTO_CATEGORIES,
   type FacilityPhotoCategory,
-} from './facility-photo-actions'
+} from './facility-photo-shared'
 
 // 시설 작업사진 입력 — FacilityTaskPopover 의 「확정」 버튼 아래 + FacilityInfoPanel.
 //   카테고리 선택 → 카메라/갤러리 → 업로드.

@@ -3,28 +3,16 @@
 import { revalidatePath } from 'next/cache'
 import { createClient } from '@/lib/supabase/server'
 import { r2Upload, r2SignedUrls, r2Remove } from '@/lib/r2'
+import { isFacilityPhotoCategory } from './facility-photo-shared'
 
 // 청약 시설별 작업사진 — 마이그 0078.
 //   캔버스 작업내역 popover 「작업사진 입력」 + FacilityInfoPanel 갤러리에서 사용.
 //   카테고리: 전경 / 랙전경 / MOFD / 전주명판 / 접속여장판 / 케이블번호(LOT/제작사) / 기타
+//   ⚠️ 'use server' 파일은 async function 만 export 가능 — 상수·타입은 facility-photo-shared.ts
 
 const BUCKET = 'relocation-facility-photos'
 const MAX_BYTES = 10 * 1024 * 1024
 const ALLOWED_MIME = ['image/png', 'image/jpeg', 'image/webp', 'image/heic']
-
-export const FACILITY_PHOTO_CATEGORIES = [
-  '전경',
-  '랙전경',
-  'MOFD',
-  '전주명판',
-  '접속여장판',
-  '케이블번호(LOT/제작사)',
-  '기타',
-] as const
-export type FacilityPhotoCategory = (typeof FACILITY_PHOTO_CATEGORIES)[number]
-function isCategory(v: string): v is FacilityPhotoCategory {
-  return (FACILITY_PHOTO_CATEGORIES as readonly string[]).includes(v)
-}
 
 type Me = { id: string; company_id: string; is_active: boolean }
 
@@ -63,7 +51,7 @@ function extFromMime(mime: string, originalName?: string): string {
   return 'jpg'
 }
 
-export type UploadFacilityPhotoResult =
+type UploadFacilityPhotoResult =
   | { ok: true; id: string }
   | { ok: false; error: string }
 
@@ -78,7 +66,7 @@ export async function uploadFacilityPhoto(
   if (!projectId || !facilityId) {
     return { ok: false, error: '프로젝트·시설 id 가 없습니다' }
   }
-  if (!isCategory(categoryRaw)) {
+  if (!isFacilityPhotoCategory(categoryRaw)) {
     return { ok: false, error: '카테고리를 선택하세요' }
   }
   if (categoryRaw === '기타' && (!customLabel || customLabel.length === 0)) {
