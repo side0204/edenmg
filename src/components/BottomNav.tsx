@@ -2,7 +2,7 @@
 
 import Link from 'next/link'
 import { usePathname } from 'next/navigation'
-import { Home, Briefcase, Hammer, Package } from 'lucide-react'
+import { Home, Briefcase, ClipboardList, Hammer, Package } from 'lucide-react'
 
 type Tab = {
   href: string
@@ -28,6 +28,12 @@ const TABS: Tab[] = [
     label: '사무',
     icon: Briefcase,
     matchPrefixes: ['/attendance', '/vehicles', '/requests', '/approvals'],
+  },
+  {
+    href: '/relocation',
+    label: '공사설계',
+    icon: ClipboardList,
+    matchPrefixes: ['/relocation'],
   },
   {
     href: '/works',

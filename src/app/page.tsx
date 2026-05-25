@@ -11,7 +11,6 @@ import {
   FileText,
   CalendarDays,
   Package,
-  Network,
   BookOpen,
 } from 'lucide-react'
 import { createClient } from '@/lib/supabase/server'
@@ -828,23 +827,7 @@ export default async function Home() {
       </section>
     ),
 
-    relocation: (
-      <section className="rounded-2xl bg-white shadow-sm border border-slate-200 dark:bg-slate-900 dark:border-slate-800 p-6 space-y-3">
-        <h2 className="flex items-center gap-2 text-base font-semibold text-slate-700 tracking-tight dark:text-slate-300">
-          <Network className="h-5 w-5 text-slate-400" />
-          공사 설계
-        </h2>
-        <p className="text-sm text-slate-500 dark:text-slate-400">
-          모든 공사의 행정도·코어구성도·직선도 설계 (데스크톱 권장).
-        </p>
-        <Link
-          href="/relocation"
-          className="block rounded-lg border border-slate-200 hover:border-slate-900 px-4 py-3 text-base font-medium text-slate-900 dark:border-slate-800 dark:hover:border-slate-100 dark:text-slate-100 text-center"
-        >
-          공사 설계 →
-        </Link>
-      </section>
-    ),
+    // 'relocation' 카드는 BottomNav 「공사설계」 탭으로 이동 (owner 2026-05-25)
 
     admin: isAdmin ? (
       <section className="rounded-2xl bg-white shadow-sm border border-slate-200 dark:bg-slate-900 dark:border-slate-800 p-6 space-y-3">
