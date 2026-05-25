@@ -264,6 +264,15 @@ export default function FieldInspectionSaveDialog({
       //   resize 이벤트 첫 발생 후 + 추가 paint 1-2 프레임 + 안정화 800ms.
       await waitForLayoutSettled()
 
+      // 거리뷰 viewpoint 강제 복원 — 캡처 프레임을 읽기 직전에 한 번 더.
+      //   폴링·이벤트 가드가 다 잡지 못한 SDK 비동기 흔들림 보정.
+      try {
+        window.dispatchEvent(new Event('roadview-restore-now'))
+      } catch {}
+      await nextFrame()
+      await nextFrame()
+      await sleep(150)
+
       // 캔버스 영역(SketchOverlay 가 자리잡은 flex-row)을 잘라낸다.
       //   data-sketch-canvas-region 속성으로 찾음 (TopologyCanvas 가 마크).
       const region = document.querySelector('[data-sketch-canvas-region]') as

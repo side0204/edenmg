@@ -137,9 +137,50 @@ export default function RoadviewPanel({
 
   // viewpoint 락 — window 커스텀 이벤트로 외부에서 활성화·해제.
   //   캡처 중 SDK 가 viewpoint 를 흔들면 rAF 안에서 안전하게 되돌린다 (루프 차단).
+  //
+  // owner 보고 2026-05-25 네 번째: viewpoint_changed 이벤트만으론 SDK 가
+  //   비동기로 흔드는 케이스를 다 못 잡음 → 50ms 폴링 + 직접 setViewpoint
+  //   강제 호출 (roadview-restore-now 이벤트) 조합.
   useEffect(() => {
+    let watchInterval: ReturnType<typeof setInterval> | null = null
+
     function viewpointGuard() {
       scheduleViewpointRestore()
+    }
+    // 폴링 — 50ms 마다 현재 viewpoint 와 락 값을 비교, 차이 나면 즉시 복원.
+    //   이벤트가 안 와도 잡힘. dPan/dTilt > 0.1 deg 면 흔들림으로 간주.
+    function pollAndRestore() {
+      const lock = lockRef.current
+      const rv = roadviewRef.current
+      if (!lock.active || !lock.vp || !rv) return
+      try {
+        const current =
+          typeof rv.getViewpoint === 'function' ? rv.getViewpoint() : null
+        if (!current) return
+        const dPan = Math.abs(current.pan - lock.vp.pan)
+        const dTilt = Math.abs(current.tilt - lock.vp.tilt)
+        const dZoom = Math.abs(current.zoom - lock.vp.zoom)
+        if (dPan < 0.1 && dTilt < 0.1 && dZoom < 0.05) return
+        rv.setViewpoint(lock.vp)
+      } catch {}
+    }
+    // 「지금 즉시 복원」 — 캡처 직전 FieldInspectionSaveDialog 가 부름.
+    //   relayout + setViewpoint 강제 호출 후 한 박자.
+    function onRestoreNow() {
+      const lock = lockRef.current
+      const rv = roadviewRef.current
+      if (!lock.active || !lock.vp || !rv) return
+      try {
+        rv.relayout()
+        rv.setViewpoint(lock.vp)
+      } catch {}
+      requestAnimationFrame(() => {
+        try {
+          if (rv && lockRef.current.active && lockRef.current.vp) {
+            rv.setViewpoint(lockRef.current.vp)
+          }
+        } catch {}
+      })
     }
     function onLock() {
       const rv = roadviewRef.current
@@ -149,6 +190,9 @@ export default function RoadviewPanel({
         if (!vp) return
         lockRef.current = { active: true, vp, pending: false }
         kakao.maps.event.addListener(rv, 'viewpoint_changed', viewpointGuard)
+        // 폴링 시작
+        if (watchInterval) clearInterval(watchInterval)
+        watchInterval = setInterval(pollAndRestore, 50)
       } catch {}
     }
     function onUnlock() {
@@ -159,12 +203,19 @@ export default function RoadviewPanel({
           kakao.maps.event.removeListener(rv, 'viewpoint_changed', viewpointGuard)
         } catch {}
       }
+      if (watchInterval) {
+        clearInterval(watchInterval)
+        watchInterval = null
+      }
     }
     window.addEventListener('roadview-lock-viewpoint', onLock)
     window.addEventListener('roadview-unlock-viewpoint', onUnlock)
+    window.addEventListener('roadview-restore-now', onRestoreNow)
     return () => {
       window.removeEventListener('roadview-lock-viewpoint', onLock)
       window.removeEventListener('roadview-unlock-viewpoint', onUnlock)
+      window.removeEventListener('roadview-restore-now', onRestoreNow)
+      if (watchInterval) clearInterval(watchInterval)
     }
   }, [])
   const resizeRef = useRef<{ startX: number; startW: number } | null>(null)
