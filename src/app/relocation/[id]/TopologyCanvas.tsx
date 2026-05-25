@@ -5018,24 +5018,23 @@ export default function TopologyCanvas({
                   if (mode === 'map') return null
                   const isSubscriptionCtx = projectCategory === '청약'
                   if (isSubscriptionCtx) {
-                    // popover 가 열려있으면 그 자리에 입력창이 있어 라벨 숨김
                     if (subscriptionPopoverCableId === c.id) return null
                     const byRole = coresByCableByRole.get(c.id)
                     if (!byRole) return null
-                    // 케이블 spec 위쪽 — labelPt 위로 띄움. 작업자(빨강) + 설계자(파랑) 두 줄.
-                    const fontSize = 13
+                    // 청약 라벨 — 3배 확대 (owner 2026-05-25). 케이블 spec 가리지 않게 더 위로.
+                    const fontSize = 39
                     const fontWeight = 800
-                    const padX = 6
-                    const padY = 3
+                    const padX = 14
+                    const padY = 8
                     const rows: { label: string; color: string; dashed: boolean }[] = []
                     if (byRole.worker)
                       rows.push({ label: byRole.worker, color: '#dc2626', dashed: false })
                     if (byRole.designer)
                       rows.push({ label: byRole.designer, color: '#2563eb', dashed: true })
                     if (rows.length === 0) return null
-                    // 첫 줄 y — spec 텍스트 위쪽으로 충분히 띄움 (spec 폰트 20, 그 위 26px)
-                    const firstY = labelPt.y - 32
-                    const rowH = fontSize + padY * 2 + 4
+                    // 첫 줄 y — spec 텍스트(20px) 위 충분히 띄움. 큰 박스라 60px 위.
+                    const firstY = labelPt.y - 60
+                    const rowH = fontSize + padY * 2 + 6
                     return (
                       <g pointerEvents="none">
                         {rows.map((row, idx) => {
@@ -5049,11 +5048,11 @@ export default function TopologyCanvas({
                                 y={y - h / 2}
                                 width={w}
                                 height={h}
-                                rx={3}
+                                rx={6}
                                 fill="white"
                                 stroke={row.color}
-                                strokeWidth={1.8}
-                                strokeDasharray={row.dashed ? '4 2' : undefined}
+                                strokeWidth={3}
+                                strokeDasharray={row.dashed ? '10 5' : undefined}
                               />
                               <text
                                 x={labelPt.x}
@@ -5133,19 +5132,27 @@ export default function TopologyCanvas({
                           ? 'preexisting'
                           : 'new') as 'preexisting' | 'new',
                       }))
-                    // popover 크기 (SVG 좌표) — 작은 화면에서도 입력하기 편하게 확대
-                    //   (owner 2026-05-25 — 축소화면 입력 어려움 해결)
-                    //   사용확정/변경 액션 + 기설/신설 토글 추가로 세로 늘림
-                    const POP_W = 380
-                    const POP_H = 320
+                    // popover 크기 — 1.5배 확대 + 글자 크기 키움 (owner 2026-05-25)
+                    //   기본 위치는 케이블 라벨 위쪽 충분히 띄움 — 입력된 선번을 가리지 않게.
+                    //   드래그 헤더로 이동 가능.
+                    const POP_W = 570
+                    const POP_H = 480
+                    // popover 가 cores 라벨 (firstY 위쪽 행) 도 안 가리도록 충분히 위로
+                    const POP_OFFSET_FROM_LABEL = 180
                     const defaultRole: 'designer' | 'worker' =
                       projectDesignerId && myEmployeeId === projectDesignerId
                         ? 'designer'
                         : 'worker'
+                    // 드래그 거리 보정용 svgScale — viewport.width / rect.width
+                    const svgRect = svgRef.current?.getBoundingClientRect()
+                    const svgScale =
+                      svgRect && svgRect.width > 0
+                        ? viewport.width / svgRect.width
+                        : 1
                     return (
                       <foreignObject
                         x={labelPt.x - POP_W / 2}
-                        y={labelPt.y - POP_H - 40}
+                        y={labelPt.y - POP_H - POP_OFFSET_FROM_LABEL}
                         width={POP_W}
                         height={POP_H}
                         style={{ overflow: 'visible' }}
@@ -5157,6 +5164,7 @@ export default function TopologyCanvas({
                           cableSpec={c.spec}
                           cableAssignments={cableAssignments}
                           defaultRole={defaultRole}
+                          svgScale={svgScale}
                           onSaved={() => router.refresh()}
                           onClose={() => setSubscriptionPopoverCableId(null)}
                         />
