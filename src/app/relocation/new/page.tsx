@@ -16,12 +16,20 @@ import {
 // 권한: 회사 직원 누구나.
 // 카테고리는 URL ?cat= 슬러그로 미리 결정 (카테고리 목록에서 진입).
 // 슬러그가 없거나 잘못된 값이면 폼에서 직접 선택.
+//
+// PC (lg+) 에서는 컴팩트 모드 — 폼 한 화면(풀HD 1080) 안에 보이도록
+//   글자/간격을 모바일의 ~3/4 크기로 축소 + 가능한 곳은 2 컬럼 그리드.
 
 type EmployeeMini = {
   id: string
   name: string
   permission: string
 }
+
+// 공통 인풋 스타일 — 폼 안에서 일관되게 재사용
+const INPUT =
+  'mt-1 w-full rounded-lg border border-slate-300 px-3 py-2 text-base lg:text-xs lg:px-2.5 lg:py-1.5 focus:border-slate-900 focus:outline-none focus:ring-1 focus:ring-slate-900'
+const LABEL = 'block text-sm font-medium text-slate-700 lg:text-[11px]'
 
 export default async function NewRelocationProjectPage({
   searchParams,
@@ -68,52 +76,51 @@ export default async function NewRelocationProjectPage({
     ? `${RELOCATION_CATEGORY_LABEL[categoryFromUrl]} 목록`
     : '공사 설계'
 
+  // 카테고리 분기 — 청약은 폼 구조가 다름 (전용 필드 8 개)
+  const isSubscription = categoryFromUrl === '청약'
+  const titleLabel = isSubscription ? '청약명' : '프로젝트 제목'
+
   return (
-    <main className="min-h-screen p-4 sm:p-6">
-      <div className="mx-auto max-w-2xl space-y-5">
-        <header>
+    <main className="min-h-screen p-4 sm:p-6 lg:p-4">
+      <div className="mx-auto max-w-2xl lg:max-w-4xl space-y-5 lg:space-y-2">
+        <header className="lg:space-y-0.5">
           <Link
             href={backHref}
-            className="inline-flex items-center gap-1 text-sm text-slate-500 hover:text-slate-900"
+            className="inline-flex items-center gap-1 text-sm lg:text-xs text-slate-500 hover:text-slate-900"
           >
-            <ChevronLeft className="h-4 w-4" />
+            <ChevronLeft className="h-4 w-4 lg:h-3 lg:w-3" />
             {backLabel}
           </Link>
-          <h1 className="mt-1 text-3xl font-bold text-slate-900 tracking-tight">
+          <h1 className="mt-1 text-3xl lg:text-xl font-bold text-slate-900 tracking-tight">
             새 프로젝트 생성
             {categoryFromUrl && (
-              <span className="ml-2 text-base font-medium text-slate-500">
+              <span className="ml-2 text-base lg:text-xs font-medium text-slate-500">
                 · {RELOCATION_CATEGORY_LABEL[categoryFromUrl]}
               </span>
             )}
           </h1>
-          <p className="mt-1 text-sm text-slate-500">
+          <p className="mt-1 text-sm lg:text-[11px] text-slate-500">
             안건 1건당 1 프로젝트로 등록합니다.
           </p>
         </header>
 
         <form
           action={createProject}
-          className="rounded-2xl bg-white shadow-sm border border-slate-200 p-6 space-y-4"
+          className="rounded-2xl bg-white shadow-sm border border-slate-200 p-6 lg:p-4 space-y-4 lg:space-y-2"
         >
           <div>
-            <label className="block text-sm font-medium text-slate-700">
+            <label className={LABEL}>
               공사 분류 <span className="text-rose-600">*</span>
             </label>
             {categoryFromUrl ? (
               <>
                 <input type="hidden" name="category" value={categoryFromUrl} />
-                <p className="mt-1 inline-flex items-center rounded-lg bg-slate-100 px-3 py-2 text-sm font-medium text-slate-800">
+                <p className="mt-1 inline-flex items-center rounded-lg bg-slate-100 px-3 py-2 lg:px-2.5 lg:py-1 text-sm lg:text-xs font-medium text-slate-800">
                   {RELOCATION_CATEGORY_LABEL[categoryFromUrl]}
                 </p>
               </>
             ) : (
-              <select
-                name="category"
-                required
-                defaultValue="지장이설"
-                className="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2 text-base focus:border-slate-900 focus:outline-none focus:ring-1 focus:ring-slate-900"
-              >
+              <select name="category" required defaultValue="지장이설" className={INPUT}>
                 {RELOCATION_CATEGORY_VALUES.map((c) => (
                   <option key={c} value={c}>
                     {RELOCATION_CATEGORY_LABEL[c]}
@@ -124,91 +131,150 @@ export default async function NewRelocationProjectPage({
           </div>
 
           <div>
-            <label className="block text-sm font-medium text-slate-700">
-              프로젝트 제목 <span className="text-rose-600">*</span>
+            <label className={LABEL}>
+              {titleLabel} <span className="text-rose-600">*</span>
             </label>
-            <input
-              type="text"
-              name="title"
-              required
-              maxLength={200}
-              className="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2 text-base focus:border-slate-900 focus:outline-none focus:ring-1 focus:ring-slate-900"
-            />
+            <input type="text" name="title" required maxLength={200} className={INPUT} />
+          </div>
+
+          {/* ── 청약 카테고리 전용 필드 ── */}
+          {isSubscription && (
+            <>
+              <div className="grid gap-3 lg:gap-2 lg:grid-cols-2">
+                <div>
+                  <label className={LABEL}>청약ID</label>
+                  <input
+                    type="text"
+                    name="subscription_id"
+                    maxLength={100}
+                    className={INPUT}
+                  />
+                </div>
+                <div>
+                  <label className={LABEL}>공사번호</label>
+                  <input
+                    type="text"
+                    name="order_no"
+                    maxLength={100}
+                    className={INPUT}
+                  />
+                </div>
+              </div>
+
+              <div>
+                <label className={LABEL}>가입자명</label>
+                <input
+                  type="text"
+                  name="subscriber_name"
+                  maxLength={100}
+                  className={INPUT}
+                />
+              </div>
+
+              <div>
+                <label className={LABEL}>가입자 주소</label>
+                <input
+                  type="text"
+                  name="subscriber_address"
+                  maxLength={300}
+                  className={INPUT}
+                />
+              </div>
+
+              <div className="grid gap-3 lg:gap-2 lg:grid-cols-2">
+                <div>
+                  <label className={LABEL}>하위국 담당자</label>
+                  <input
+                    type="text"
+                    name="branch_manager"
+                    maxLength={100}
+                    className={INPUT}
+                  />
+                </div>
+                <div>
+                  <label className={LABEL}>하위국 연락처</label>
+                  <input
+                    type="text"
+                    name="branch_contact"
+                    maxLength={100}
+                    className={INPUT}
+                  />
+                </div>
+              </div>
+
+              <div className="grid gap-3 lg:gap-2 lg:grid-cols-2">
+                <div>
+                  <label className={LABEL}>청약일</label>
+                  <input type="date" name="subscribed_at" className={INPUT} />
+                </div>
+                <div>
+                  <label className={LABEL}>개통희망일</label>
+                  <input type="date" name="desired_open_at" className={INPUT} />
+                </div>
+              </div>
+            </>
+          )}
+
+          <div className="grid gap-3 lg:gap-2 lg:grid-cols-2">
+            <div>
+              <label className={LABEL}>지역</label>
+              <input type="text" name="region" maxLength={100} className={INPUT} />
+            </div>
+            <div>
+              <label className={LABEL}>공사계약일</label>
+              <input type="date" name="surveyed_at" className={INPUT} />
+            </div>
+          </div>
+
+          <div className="grid gap-3 lg:gap-2 lg:grid-cols-2">
+            <div>
+              <label className={LABEL}>설계자</label>
+              <select name="designer_id" defaultValue={me.id} className={INPUT}>
+                <option value="">(미지정)</option>
+                {employees.map((e) => (
+                  <option key={e.id} value={e.id}>
+                    {e.name}
+                    {e.id === me.id ? ' (본인)' : ''}
+                  </option>
+                ))}
+              </select>
+              <p className="mt-1 text-xs lg:text-[10px] text-slate-500">
+                기본은 본인. 다른 직원으로 변경 가능.
+              </p>
+            </div>
+            <div>
+              <label className={LABEL}>상태</label>
+              <select name="status" defaultValue="설계중" className={INPUT}>
+                <option value="설계중">설계중</option>
+                <option value="검증중">검증중</option>
+                <option value="확정">확정</option>
+                <option value="시공중">시공중</option>
+                <option value="완료">완료</option>
+                <option value="취소">취소</option>
+              </select>
+            </div>
           </div>
 
           <div>
-            <label className="block text-sm font-medium text-slate-700">지역</label>
-            <input
-              type="text"
-              name="region"
-              maxLength={100}
-              className="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2 text-base focus:border-slate-900 focus:outline-none focus:ring-1 focus:ring-slate-900"
-            />
-          </div>
-
-          <div>
-            <label className="block text-sm font-medium text-slate-700">공사계약일</label>
-            <input
-              type="date"
-              name="surveyed_at"
-              className="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2 text-base focus:border-slate-900 focus:outline-none focus:ring-1 focus:ring-slate-900"
-            />
-          </div>
-
-          <div>
-            <label className="block text-sm font-medium text-slate-700">설계자</label>
-            <select
-              name="designer_id"
-              defaultValue={me.id}
-              className="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2 text-base focus:border-slate-900 focus:outline-none focus:ring-1 focus:ring-slate-900"
-            >
-              <option value="">(미지정)</option>
-              {employees.map((e) => (
-                <option key={e.id} value={e.id}>
-                  {e.name}
-                  {e.id === me.id ? ' (본인)' : ''}
-                </option>
-              ))}
-            </select>
-            <p className="mt-1 text-xs text-slate-500">기본은 본인. 다른 직원으로 변경 가능.</p>
-          </div>
-
-          <div>
-            <label className="block text-sm font-medium text-slate-700">상태</label>
-            <select
-              name="status"
-              defaultValue="설계중"
-              className="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2 text-base focus:border-slate-900 focus:outline-none focus:ring-1 focus:ring-slate-900"
-            >
-              <option value="설계중">설계중</option>
-              <option value="검증중">검증중</option>
-              <option value="확정">확정</option>
-              <option value="시공중">시공중</option>
-              <option value="완료">완료</option>
-              <option value="취소">취소</option>
-            </select>
-          </div>
-
-          <div>
-            <label className="block text-sm font-medium text-slate-700">비고</label>
+            <label className={LABEL}>비고</label>
             <textarea
               name="notes"
               rows={3}
               maxLength={1000}
-              className="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2 text-base focus:border-slate-900 focus:outline-none focus:ring-1 focus:ring-slate-900"
+              className={INPUT + ' lg:!py-1'}
             />
           </div>
 
-          <div className="flex justify-end gap-2 pt-2">
+          <div className="flex justify-end gap-2 pt-2 lg:pt-1">
             <Link
               href={backHref}
-              className="inline-flex items-center rounded-lg border border-slate-300 px-4 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50"
+              className="inline-flex items-center rounded-lg border border-slate-300 px-4 py-2 lg:px-3 lg:py-1.5 text-sm lg:text-xs font-medium text-slate-700 hover:bg-slate-50"
             >
               취소
             </Link>
             <button
               type="submit"
-              className="inline-flex items-center rounded-lg bg-slate-900 px-4 py-2 text-sm font-medium text-white hover:bg-slate-800"
+              className="inline-flex items-center rounded-lg bg-slate-900 px-4 py-2 lg:px-3 lg:py-1.5 text-sm lg:text-xs font-medium text-white hover:bg-slate-800"
             >
               생성
             </button>

@@ -100,6 +100,19 @@ type ProjectFormParsed = {
   designer_id: string | null
   status: string
   notes: string | null
+  // 청약 카테고리 전용 (다른 카테고리는 모두 null 저장)
+  subscription_id: string | null
+  subscriber_name: string | null
+  subscriber_address: string | null
+  branch_contact: string | null
+  branch_manager: string | null
+  subscribed_at: string | null
+  desired_open_at: string | null
+  order_no: string | null
+}
+
+function parseDate(v: string): string | null {
+  return /^\d{4}-\d{2}-\d{2}$/.test(v) ? v : null
 }
 
 function parseProjectForm(formData: FormData): ProjectFormParsed {
@@ -107,14 +120,37 @@ function parseProjectForm(formData: FormData): ProjectFormParsed {
   const categoryRaw = String(formData.get('category') ?? '').trim()
   const category: RelocationCategory = isRelocationCategory(categoryRaw) ? categoryRaw : '지장이설'
   const region = String(formData.get('region') ?? '').trim() || null
-  const surveyedRaw = String(formData.get('surveyed_at') ?? '').trim()
-  const surveyed_at = /^\d{4}-\d{2}-\d{2}$/.test(surveyedRaw) ? surveyedRaw : null
+  const surveyed_at = parseDate(String(formData.get('surveyed_at') ?? '').trim())
   const designerRaw = String(formData.get('designer_id') ?? '').trim()
   const designer_id = designerRaw.length > 0 ? designerRaw : null
   const statusRaw = String(formData.get('status') ?? '').trim()
   const status = statusRaw.length > 0 ? statusRaw : '설계중'
   const notes = String(formData.get('notes') ?? '').trim() || null
-  return { title, category, region, surveyed_at, designer_id, status, notes }
+
+  // 청약 전용 — 청약 카테고리일 때만 폼에서 받음. 그 외 카테고리는 모두 null 로 저장
+  const isSubscription = category === '청약'
+  const pick = (key: string) =>
+    isSubscription ? String(formData.get(key) ?? '').trim() || null : null
+  const pickDate = (key: string) =>
+    isSubscription ? parseDate(String(formData.get(key) ?? '').trim()) : null
+
+  return {
+    title,
+    category,
+    region,
+    surveyed_at,
+    designer_id,
+    status,
+    notes,
+    subscription_id: pick('subscription_id'),
+    subscriber_name: pick('subscriber_name'),
+    subscriber_address: pick('subscriber_address'),
+    branch_contact: pick('branch_contact'),
+    branch_manager: pick('branch_manager'),
+    subscribed_at: pickDate('subscribed_at'),
+    desired_open_at: pickDate('desired_open_at'),
+    order_no: pick('order_no'),
+  }
 }
 
 function validateProject(p: ProjectFormParsed): string | null {

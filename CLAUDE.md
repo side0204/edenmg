@@ -706,6 +706,22 @@ owner 모바일 스크린샷 보고: `/vehicles` 헤더에서 "업무용 차량"
 - **적용 (10개 페이지)**: `/vehicles` · `/admin/employees` · `/admin/sites` · `/admin/facilities` · `/admin/materials` · `/admin/cables` · `/works` · `/works/[id]` · `/requests` · `/vehicles/trips`
 - **신규 페이지 작성 시**: 큰 제목(`text-2xl` 이상) + 우측 버튼 조합이면 처음부터 모바일 stack 패턴으로 시작. mobile_ux_patterns 메모리에 「8. 모바일 헤더 가로 강제」 로 기록.
 
+### ✅ 완료 (청약 카테고리 전용 폼 + PC 컴팩트 모드, 2026-05-25)
+
+owner 요구: 「청약 설계」 새 프로젝트 생성 폼에서 「프로젝트 제목」 → 「청약명」 으로 변경 + 청약 전용 8 필드 (청약ID·가입자명·가입자 주소·하위국 연락처·하위국 담당자·청약일·개통희망일·공사번호) 추가. PC 화면 글자 크기 3/4 축소 + 폼 입력 간격 줄여 풀HD 한 화면에 다 보이도록.
+
+- **마이그** [`0066_relocation_subscription_fields.sql`](./supabase/migrations/0066_relocation_subscription_fields.sql): `relocation_projects` 에 청약 전용 8 컬럼 추가 (subscription_id·subscriber_name·subscriber_address·branch_contact·branch_manager·subscribed_at date·desired_open_at date·order_no). 모두 nullable — 다른 카테고리에서는 미사용. order_no partial 인덱스 (검색 대비)
+- **server action** ([`src/app/relocation/actions.ts`](./src/app/relocation/actions.ts)): `parseProjectForm` 에 청약 8 필드 추가. category !== '청약' 일 때는 모두 null 저장 — 카테고리 변경 시 잔여값 자동 정리. `parseDate` 헬퍼 분리
+- **/relocation/new** ([`src/app/relocation/new/page.tsx`](./src/app/relocation/new/page.tsx)) 재작성:
+  - 청약 카테고리일 때만 8 필드 렌더 (title 직후, 지역 위)
+  - title 라벨 「프로젝트 제목」 → 「청약명」 동적 분기
+  - 청약 필드 레이아웃: 청약ID·공사번호 / 가입자명 / 가입자 주소 / 하위국 담당자·하위국 연락처 / 청약일·개통희망일 (lg+ 2열 그리드)
+  - **PC 컴팩트 모드** (`lg:` 1024px+): 글자 ~3/4 축소 (text-base→text-xs, text-3xl→text-xl), padding 줄임 (py-2→py-1.5, p-6→p-4), 행 간격 축소 (space-y-4→space-y-2), 그리드 2 컬럼화. 모바일은 그대로 (large touch target 유지)
+  - 컨테이너 폭 `max-w-2xl lg:max-w-4xl` — PC 에서 2 컬럼 폭 확보
+  - 공통 `INPUT`·`LABEL` 상수로 스타일 일관성
+- **/relocation/[id]** 편집 폼: 청약 카테고리 프로젝트일 때만 8 필드 노출. title 라벨 「제목」 → 「청약명」 분기. 편집 컴팩트 모드는 미적용 (편집은 자주 안 쓰므로)
+- **계획·지장이설 카테고리**: 변경 없음 — 청약 필드 미노출, 기존 폼 그대로
+
 ### ✅ 완료 (공사 설계로 일반화 + 3 카테고리 허브, 2026-05-25)
 
 owner 요구: 「지장이설 설계」 단일 진입을 「공사 설계」로 일반화. 진입하면 「청약 설계」/「계획 설계」/「지장이설 설계」 3 카테고리로 분기, 각 카테고리 안에서 프로젝트 생성·관리. 모든 공사의 행정도·코어구성도·직선도 설계를 한 모듈에서.
@@ -1089,6 +1105,7 @@ owner 요구: "어느 메뉴를 많이 쓰는지" 페이지 단위 분석. 접�
   - [`0063_relocation_field_inspections_name_alias_fix.sql`](./supabase/migrations/0063_relocation_field_inspections_name_alias_fix.sql) — Storage RLS column shadowing 버그 수정: subquery 안 `split_part(name, ...)` 의 `name` 이 `relocation_facilities.name` (시설명) 으로 잘못 바인딩되던 문제. 헬퍼 함수 `relocation_inspection_facility_id(text)` 도입 + `storage.objects.name` schema-qualify
   - [`0064_relocation_inspection_facility_type.sql`](./supabase/migrations/0064_relocation_inspection_facility_type.sql) — `relocation_closure_type` enum 에 '실사정보' 추가. 캔버스 실사 도구바 「실사정보입력」 버튼으로 임의 위치에 즉시 시설 배치 (이름 자동 「실사{seq}」, 빨간 원 + 흰 'i' + 펄스 후광 도형, 정보 패널은 비고 + 첨부 사진만 표시)
   - [`0065_relocation_project_category.sql`](./supabase/migrations/0065_relocation_project_category.sql) — 공사 설계 카테고리: `relocation_projects.category text not null default '지장이설'` + CHECK(청약·계획·지장이설) + (company_id, category) 인덱스. 「공사 설계」 진입 시 3 카테고리 허브로 분기
+  - [`0066_relocation_subscription_fields.sql`](./supabase/migrations/0066_relocation_subscription_fields.sql) — 청약 카테고리 전용 8 컬럼 (subscription_id·subscriber_name·subscriber_address·branch_contact·branch_manager·subscribed_at·desired_open_at·order_no) + order_no partial 인덱스
 - **외선일보 별도 entity (v2)** — 접속일보와 동일 패턴으로 외선팀 전용 모듈. 외선 작업 특성(케이블 포설구간·전주번호 등)에 맞는 구조 별도 설계.
 - **접속일보 후속 (v2)** — segment-level 작업자 태그, 사진 첨부 + EXIF, 국사·함체 마스터 테이블화, 재접속 이력 조회, 지도 시각화
 - **M3 Phase 2 후속** — 사진 첨부 + EXIF·워터마크 (PRD M3-06), 일보 결재함 통합 (현재는 작업 상세에서 진입), 일반 일보 월별 CSV 리포트

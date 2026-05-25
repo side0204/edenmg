@@ -90,6 +90,15 @@ type ProjectRow = {
   notes: string | null
   created_at: string
   updated_at: string
+  // 청약 카테고리 전용 (다른 카테고리에선 null)
+  subscription_id: string | null
+  subscriber_name: string | null
+  subscriber_address: string | null
+  branch_contact: string | null
+  branch_manager: string | null
+  subscribed_at: string | null
+  desired_open_at: string | null
+  order_no: string | null
 }
 
 type EmployeeMini = { id: string; name: string | null }
@@ -127,7 +136,7 @@ export default async function RelocationProjectPage({
   const { data: pRow } = await supabase
     .from('relocation_projects')
     .select(
-      'id, company_id, title, category, client, region, surveyed_at, designer_id, status, notes, created_at, updated_at',
+      'id, company_id, title, category, client, region, surveyed_at, designer_id, status, notes, created_at, updated_at, subscription_id, subscriber_name, subscriber_address, branch_contact, branch_manager, subscribed_at, desired_open_at, order_no',
     )
     .eq('id', id)
     .maybeSingle()
@@ -139,6 +148,7 @@ export default async function RelocationProjectPage({
     : '지장이설'
   const projectCategorySlug = RELOCATION_CATEGORY_SLUG[projectCategory]
   const projectCategoryLabel = RELOCATION_CATEGORY_LABEL[projectCategory]
+  const isSubscriptionProject = projectCategory === '청약'
 
   // 설계자 이름 · 캔버스 공통 데이터 · 접속 · 스플리터 · 차수 · (조건부) 이전 이력 일괄 병렬.
   //   page.tsx 의 router.refresh 체감 속도를 결정 — 직렬이면 합산 4~5초.
@@ -633,7 +643,9 @@ export default async function RelocationProjectPage({
             </div>
 
             <div>
-              <label className="block text-sm font-medium text-slate-700">제목</label>
+              <label className="block text-sm font-medium text-slate-700">
+                {isSubscriptionProject ? '청약명' : '제목'}
+              </label>
               <input
                 type="text"
                 name="title"
@@ -643,6 +655,95 @@ export default async function RelocationProjectPage({
                 className="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2 text-base"
               />
             </div>
+
+            {isSubscriptionProject && (
+              <>
+                <div className="grid gap-3 sm:grid-cols-2">
+                  <div>
+                    <label className="block text-sm font-medium text-slate-700">청약ID</label>
+                    <input
+                      type="text"
+                      name="subscription_id"
+                      defaultValue={project.subscription_id ?? ''}
+                      maxLength={100}
+                      className="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2 text-base"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-sm font-medium text-slate-700">공사번호</label>
+                    <input
+                      type="text"
+                      name="order_no"
+                      defaultValue={project.order_no ?? ''}
+                      maxLength={100}
+                      className="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2 text-base"
+                    />
+                  </div>
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-slate-700">가입자명</label>
+                  <input
+                    type="text"
+                    name="subscriber_name"
+                    defaultValue={project.subscriber_name ?? ''}
+                    maxLength={100}
+                    className="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2 text-base"
+                  />
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-slate-700">가입자 주소</label>
+                  <input
+                    type="text"
+                    name="subscriber_address"
+                    defaultValue={project.subscriber_address ?? ''}
+                    maxLength={300}
+                    className="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2 text-base"
+                  />
+                </div>
+                <div className="grid gap-3 sm:grid-cols-2">
+                  <div>
+                    <label className="block text-sm font-medium text-slate-700">하위국 담당자</label>
+                    <input
+                      type="text"
+                      name="branch_manager"
+                      defaultValue={project.branch_manager ?? ''}
+                      maxLength={100}
+                      className="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2 text-base"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-sm font-medium text-slate-700">하위국 연락처</label>
+                    <input
+                      type="text"
+                      name="branch_contact"
+                      defaultValue={project.branch_contact ?? ''}
+                      maxLength={100}
+                      className="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2 text-base"
+                    />
+                  </div>
+                </div>
+                <div className="grid gap-3 sm:grid-cols-2">
+                  <div>
+                    <label className="block text-sm font-medium text-slate-700">청약일</label>
+                    <input
+                      type="date"
+                      name="subscribed_at"
+                      defaultValue={project.subscribed_at ?? ''}
+                      className="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2 text-base"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-sm font-medium text-slate-700">개통희망일</label>
+                    <input
+                      type="date"
+                      name="desired_open_at"
+                      defaultValue={project.desired_open_at ?? ''}
+                      className="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2 text-base"
+                    />
+                  </div>
+                </div>
+              </>
+            )}
 
             <div className="grid gap-3 sm:grid-cols-2">
               <div>
