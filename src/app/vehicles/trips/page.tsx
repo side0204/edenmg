@@ -116,26 +116,11 @@ export default async function VehicleTripsPage({
     }
   }
 
-  // ===== 차량·직원 옵션 =================================================
-  const { data: vData } = await supabase
-    .from('vehicles')
-    .select('id, plate_number, name')
-    .order('plate_number', { ascending: true })
-  const vehicles = (vData ?? []) as VehicleOpt[]
-
-  const { data: eData } = await supabase
-    .from('employees')
-    .select('id, name')
-    .eq('company_id', me.company_id)
-    .eq('is_active', true)
-    .order('name', { ascending: true })
-  const employees = (eData ?? []) as EmployeeOpt[]
-
-  // ===== 검색 결과 ======================================================
-  let trips: TripRow[] = []
-  let queryError: string | null = null
+  // ===== 차량·직원·운행 — 3개 쿼리 병렬 =================================
+  // me.company_id 만 의존하는 독립 쿼리들. 직렬 3 → 병렬 1.
+  let tripsQuery: ReturnType<typeof supabase.from> | null = null
   if (startIso && endIsoExclusive) {
-    let query = supabase
+    let q = supabase
       .from('vehicle_trips')
       .select(
         'id, vehicle_id, driver_employee_id, departed_at, returned_at, start_odometer_km, end_odometer_km, purpose, refueled, refuel_amount_krw',
@@ -145,14 +130,34 @@ export default async function VehicleTripsPage({
       .lt('departed_at', endIsoExclusive)
       .order('departed_at', { ascending: false })
       .limit(500)
+    if (vehicleFilter) q = q.eq('vehicle_id', vehicleFilter)
+    if (driverFilter) q = q.eq('driver_employee_id', driverFilter)
+    if (refueledOnly) q = q.eq('refueled', true)
+    tripsQuery = q as unknown as ReturnType<typeof supabase.from>
+  }
 
-    if (vehicleFilter) query = query.eq('vehicle_id', vehicleFilter)
-    if (driverFilter) query = query.eq('driver_employee_id', driverFilter)
-    if (refueledOnly) query = query.eq('refueled', true)
-
-    const { data, error } = await query
-    if (error) queryError = error.message
-    else trips = (data ?? []) as TripRow[]
+  const [vehiclesRes, employeesRes, tripsRes] = await Promise.all([
+    supabase
+      .from('vehicles')
+      .select('id, plate_number, name')
+      .order('plate_number', { ascending: true }),
+    supabase
+      .from('employees')
+      .select('id, name')
+      .eq('company_id', me.company_id)
+      .eq('is_active', true)
+      .order('name', { ascending: true }),
+    tripsQuery
+      ? (tripsQuery as unknown as PromiseLike<{ data: TripRow[] | null; error: { message: string } | null }>)
+      : Promise.resolve({ data: null as TripRow[] | null, error: null as { message: string } | null }),
+  ])
+  const vehicles = (vehiclesRes.data ?? []) as VehicleOpt[]
+  const employees = (employeesRes.data ?? []) as EmployeeOpt[]
+  let trips: TripRow[] = []
+  let queryError: string | null = null
+  if (tripsQuery) {
+    if (tripsRes.error) queryError = tripsRes.error.message
+    else trips = (tripsRes.data ?? []) as TripRow[]
   }
 
   // 매핑 (UI 표시용)

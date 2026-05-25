@@ -70,25 +70,28 @@ export default async function EmployeesPage() {
     notFound()
   }
 
-  const { data, error: listError } = await supabase
-    .from('employees')
-    .select(
-      'id, name, email, phone, permission, position, team, work_type, vehicle_plate, workplace_type, can_manage_works, can_delete_works, can_view_stats, can_manage_stock, is_active, invited_at, accepted_at, resigned_at, created_at',
-    )
-    .is('resigned_at', null) // 퇴사자는 /admin/employees/resigned 별도 페이지
-    .order('created_at', { ascending: false })
+  // 활성 직원 + 퇴사자 카운트 병렬 — 둘 다 me.permission 검증 후 독립 쿼리
+  const [listRes, resignedCountRes] = await Promise.all([
+    supabase
+      .from('employees')
+      .select(
+        'id, name, email, phone, permission, position, team, work_type, vehicle_plate, workplace_type, can_manage_works, can_delete_works, can_view_stats, can_manage_stock, is_active, invited_at, accepted_at, resigned_at, created_at',
+      )
+      .is('resigned_at', null) // 퇴사자는 /admin/employees/resigned 별도 페이지
+      .order('created_at', { ascending: false }),
+    supabase
+      .from('employees')
+      .select('id', { count: 'exact', head: true })
+      .not('resigned_at', 'is', null),
+  ])
+  const { data, error: listError } = listRes
+  const resignedCount = resignedCountRes.count
 
   const all = (data ?? []) as EmployeeRow[]
   // 가입 대기 = accepted_at IS NULL AND auth_user_id 있음 (트리거가 만든 신규 row)
   //   accepted_at NULL + is_active=false 가 표식
   const pending = all.filter((e) => !e.is_active && !e.accepted_at)
   const rows = all.filter((e) => e.is_active || e.accepted_at)
-
-  // 퇴사자 수 (진입점 배지용)
-  const { count: resignedCount } = await supabase
-    .from('employees')
-    .select('id', { count: 'exact', head: true })
-    .not('resigned_at', 'is', null)
 
   return (
     <main className="min-h-screen p-4 sm:p-6">

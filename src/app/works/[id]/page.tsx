@@ -103,32 +103,11 @@ export default async function WorkDetailPage({
   const work = workData as WorkRow | null
   if (!work || work.company_id !== me.company_id) notFound()
 
-  const { data: assignmentsData } = await supabase
-    .from('work_assignments')
-    .select('id, employee_id, worker_type, assigned_start, assigned_end')
-    .eq('work_id', id)
-    .order('assigned_start', { ascending: true, nullsFirst: true })
-  const assignments = (assignmentsData ?? []) as AssignmentRow[]
+  // 병렬 배치를 위한 KST 오늘 날짜
+  const todayKstDate = todayInSeoul()
 
-  // 접속팀 작업 판단: 작업 자체의 worker_type 또는 작업자 중 1명이라도 접속팀이면 true.
-  // (작업의 worker_type 은 폼에서 더 이상 입력 안 받고 작업자별로 지정)
-  const isConnectionTeam =
-    work.worker_type === '접속팀' ||
-    assignments.some((a) => a.worker_type === '접속팀')
-
-  // 일반 일보: 접속팀은 안 씀 (별도 접속일보 사용)
-  const reports: ReportRow[] = []
-  if (!isConnectionTeam) {
-    const { data: reportsData } = await supabase
-      .from('work_daily_reports')
-      .select('id, report_date, author_employee_id, progress, status')
-      .eq('work_id', id)
-      .order('report_date', { ascending: false })
-      .limit(10)
-    reports.push(...((reportsData ?? []) as ReportRow[]))
-  }
-
-  // 접속팀 작업: chain 리스트 + 접속일보 최근 10건
+  // ============== 병렬 배치 A — 작업 기반 독립 쿼리 4건 ==============
+  // 작업 행을 기준으로 서로 의존성 없는 쿼리들을 한꺼번에. 직렬 4 → 병렬 1 압축.
   type ChainSummary = {
     id: string
     name: string | null
@@ -141,57 +120,6 @@ export default async function WorkDetailPage({
     progress: WorkReportProgress
     status: WorkReportStatus
   }
-  let chains: ChainSummary[] = []
-  let connectionReports: ConnReportSummary[] = []
-  if (isConnectionTeam) {
-    const { data: chainData } = await supabase
-      .from('connection_chains')
-      .select('id, name')
-      .eq('work_id', id)
-      .order('position')
-    const chainsRaw = (chainData ?? []) as { id: string; name: string | null }[]
-    if (chainsRaw.length > 0) {
-      const { data: nodeCountData } = await supabase
-        .from('connection_plan_nodes')
-        .select('chain_id')
-        .in('id', []) // dummy, will be replaced
-      // chain 별 node 수: groupBy 대신 한 번에 가져와서 메모리에서 카운트
-      void nodeCountData
-      const { data: allNodes } = await supabase
-        .from('connection_plan_nodes')
-        .select('chain_id')
-        .in(
-          'chain_id',
-          chainsRaw.map((c) => c.id),
-        )
-      const countMap = new Map<string, number>()
-      for (const n of (allNodes ?? []) as { chain_id: string }[]) {
-        countMap.set(n.chain_id, (countMap.get(n.chain_id) ?? 0) + 1)
-      }
-      chains = chainsRaw.map((c) => ({
-        id: c.id,
-        name: c.name,
-        node_count: countMap.get(c.id) ?? 0,
-      }))
-    }
-
-    const { data: crData } = await supabase
-      .from('connection_reports')
-      .select('id, report_date, author_employee_id, progress, status')
-      .eq('work_id', id)
-      .order('report_date', { ascending: false })
-      .limit(10)
-    connectionReports = (crData ?? []) as ConnReportSummary[]
-  }
-
-  // 오늘 작업 체크 — 이 작업의 회사 내 오늘 row 전부
-  const todayKstDate = todayInSeoul()
-  const { data: todayChecksData } = await supabase
-    .from('work_daily_checks')
-    .select('id, employee_id, decision, note, created_at, closed_at')
-    .eq('work_id', id)
-    .eq('check_date', todayKstDate)
-    .order('created_at', { ascending: true })
   type TodayCheckDetail = {
     id: string
     employee_id: string
@@ -200,7 +128,151 @@ export default async function WorkDetailPage({
     created_at: string
     closed_at: string | null
   }
-  const todayChecks = (todayChecksData ?? []) as TodayCheckDetail[]
+  const [assignmentsRes, todayChecksRes, siblingsRes, candidatesRes] =
+    await Promise.all([
+      supabase
+        .from('work_assignments')
+        .select('id, employee_id, worker_type, assigned_start, assigned_end')
+        .eq('work_id', id)
+        .order('assigned_start', { ascending: true, nullsFirst: true }),
+      supabase
+        .from('work_daily_checks')
+        .select('id, employee_id, decision, note, created_at, closed_at')
+        .eq('work_id', id)
+        .eq('check_date', todayKstDate)
+        .order('created_at', { ascending: true }),
+      work.order_id
+        ? supabase
+            .from('works')
+            .select('id, worker_type')
+            .eq('company_id', work.company_id)
+            .eq('order_id', work.order_id)
+        : Promise.resolve({ data: null as { id: string; worker_type: string | null }[] | null }),
+      canManage
+        ? supabase
+            .from('employees')
+            .select('id, name, position, team')
+            .eq('is_active', true)
+            .order('name')
+        : Promise.resolve({
+            data: [] as { id: string; name: string; position: string | null; team: string | null }[],
+          }),
+    ])
+  const assignments = (assignmentsRes.data ?? []) as AssignmentRow[]
+  const todayChecks = (todayChecksRes.data ?? []) as TodayCheckDetail[]
+  const siblings = (siblingsRes.data ?? []) as {
+    id: string
+    worker_type: string | null
+  }[]
+  const candidates = (candidatesRes.data ?? []) as {
+    id: string
+    name: string
+    position: string | null
+    team: string | null
+  }[]
+
+  // 접속팀 작업 판단: 작업 자체의 worker_type 또는 작업자 중 1명이라도 접속팀이면 true.
+  // (작업의 worker_type 은 폼에서 더 이상 입력 안 받고 작업자별로 지정)
+  const isConnectionTeam =
+    work.worker_type === '접속팀' ||
+    assignments.some((a) => a.worker_type === '접속팀')
+
+  // ============== 병렬 배치 B — 일보·진행률 (분기) ==============
+  let reports: ReportRow[] = []
+  let chains: ChainSummary[] = []
+  let connectionReports: ConnReportSummary[] = []
+  let connectionProgress:
+    | { totalCables: number; doneCables: number; ratio: number }
+    | null = null
+  let nonConnReportCount = 0
+
+  if (isConnectionTeam) {
+    // 접속팀: chains + connectionReports 병렬 (각각 work_id 만 의존)
+    const [chainsRes, connReportsRes] = await Promise.all([
+      supabase
+        .from('connection_chains')
+        .select('id, name')
+        .eq('work_id', id)
+        .order('position'),
+      supabase
+        .from('connection_reports')
+        .select('id, report_date, author_employee_id, progress, status')
+        .eq('work_id', id)
+        .order('report_date', { ascending: false })
+        .limit(10),
+    ])
+    const chainsRaw = (chainsRes.data ?? []) as {
+      id: string
+      name: string | null
+    }[]
+    connectionReports = (connReportsRes.data ?? []) as ConnReportSummary[]
+
+    if (chainsRaw.length > 0) {
+      const chainIds = chainsRaw.map((c) => c.id)
+      // node 수 카운트용 전체 nodes + 진행률용 cable nodes 병렬
+      const [allNodesRes, cableNodesRes] = await Promise.all([
+        supabase
+          .from('connection_plan_nodes')
+          .select('chain_id')
+          .in('chain_id', chainIds),
+        supabase
+          .from('connection_plan_nodes')
+          .select('id')
+          .in('chain_id', chainIds)
+          .not('parent_id', 'is', null),
+      ])
+      const countMap = new Map<string, number>()
+      for (const n of (allNodesRes.data ?? []) as { chain_id: string }[]) {
+        countMap.set(n.chain_id, (countMap.get(n.chain_id) ?? 0) + 1)
+      }
+      chains = chainsRaw.map((c) => ({
+        id: c.id,
+        name: c.name,
+        node_count: countMap.get(c.id) ?? 0,
+      }))
+      const cableNodeIds = ((cableNodesRes.data ?? []) as { id: string }[]).map(
+        (n) => n.id,
+      )
+      const totalCables = cableNodeIds.length
+      let doneCables = 0
+      if (totalCables > 0) {
+        const { data: completedSegs } = await supabase
+          .from('connection_report_segments')
+          .select('plan_node_id')
+          .in('plan_node_id', cableNodeIds)
+          .eq('is_completed', true)
+        const doneSet = new Set(
+          ((completedSegs ?? []) as { plan_node_id: string }[]).map(
+            (s) => s.plan_node_id,
+          ),
+        )
+        doneCables = doneSet.size
+      }
+      connectionProgress = {
+        totalCables,
+        doneCables,
+        ratio: totalCables > 0 ? doneCables / totalCables : 0,
+      }
+    } else {
+      connectionProgress = { totalCables: 0, doneCables: 0, ratio: 0 }
+    }
+  } else {
+    // 외선·기타: reports + count 병렬
+    const [reportsRes, countRes] = await Promise.all([
+      supabase
+        .from('work_daily_reports')
+        .select('id, report_date, author_employee_id, progress, status')
+        .eq('work_id', id)
+        .order('report_date', { ascending: false })
+        .limit(10),
+      supabase
+        .from('work_daily_reports')
+        .select('*', { count: 'exact', head: true })
+        .eq('work_id', id),
+    ])
+    reports = (reportsRes.data ?? []) as ReportRow[]
+    nonConnReportCount = countRes.count ?? 0
+  }
 
   // 직원 이름·메타 매핑 — 배정자 + 일보 작성자 + 담당자 + 오늘 체크인자 모두 묶어서 1회 조회
   const employeeIds = new Set<string>()
@@ -258,89 +330,23 @@ export default async function WorkDetailPage({
     (r) => r.author_employee_id === me.id && r.report_date === todayKST,
   )
 
-  // 배정 후보 (활성 직원, 이미 배정된 사람은 제외 안 함 — 다른 기간 추가 배정 가능)
-  let candidates: { id: string; name: string; position: string | null; team: string | null }[] = []
-  if (canManage) {
-    const { data: candidatesData } = await supabase
-      .from('employees')
-      .select('id, name, position, team')
-      .eq('is_active', true)
-      .order('name')
-    candidates = (candidatesData ?? []) as typeof candidates
-  }
+  // ===== 자재·공종 합계 — 병렬 =====
+  // 작업별 (접속팀일 때) + 공사번호별 (siblings 중 접속팀) 한꺼번에.
+  // siblings 는 배치 A 에서 이미 로드됨.
+  const connSiblingIds = siblings
+    .filter((s) => s.worker_type === '접속팀')
+    .map((s) => s.id)
+  const orderSiblingCount = siblings.length
+  const orderConnSiblingCount = connSiblingIds.length
 
-  // ===== 진행률 =====
-  // 접속팀: 완료 cable 수 / 전체 cable 수 (parent_id NOT NULL plan_nodes 기준)
-  // 외선·기타: 누적 일보 건수
-  let connectionProgress: { totalCables: number; doneCables: number; ratio: number } | null = null
-  let nonConnReportCount = 0
-  if (isConnectionTeam) {
-    const { data: chainsData } = await supabase
-      .from('connection_chains')
-      .select('id')
-      .eq('work_id', work.id)
-    const chainIds = ((chainsData ?? []) as { id: string }[]).map((c) => c.id)
-    if (chainIds.length > 0) {
-      const { data: cableNodes } = await supabase
-        .from('connection_plan_nodes')
-        .select('id')
-        .in('chain_id', chainIds)
-        .not('parent_id', 'is', null)
-      const cableNodeIds = ((cableNodes ?? []) as { id: string }[]).map((n) => n.id)
-      const totalCables = cableNodeIds.length
-      let doneCables = 0
-      if (totalCables > 0) {
-        const { data: completedSegs } = await supabase
-          .from('connection_report_segments')
-          .select('plan_node_id')
-          .in('plan_node_id', cableNodeIds)
-          .eq('is_completed', true)
-        const doneSet = new Set(
-          ((completedSegs ?? []) as { plan_node_id: string }[]).map((s) => s.plan_node_id),
-        )
-        doneCables = doneSet.size
-      }
-      connectionProgress = {
-        totalCables,
-        doneCables,
-        ratio: totalCables > 0 ? doneCables / totalCables : 0,
-      }
-    } else {
-      connectionProgress = { totalCables: 0, doneCables: 0, ratio: 0 }
-    }
-  } else {
-    const { count } = await supabase
-      .from('work_daily_reports')
-      .select('*', { count: 'exact', head: true })
-      .eq('work_id', work.id)
-    nonConnReportCount = count ?? 0
-  }
-
-  // ===== 자재·공종 합계 =====
-  // 작업별 합계 — 이 작업이 접속팀이면 자기 일보 집계
-  const workTotals = isConnectionTeam
-    ? await aggregateConnectionTotals(supabase, [work.id])
-    : null
-
-  // 공사번호별 합계 — order_id 가 있고 같은 회사의 같은 order_id 작업이 1개 이상 있을 때.
-  // 형제 작업 중 접속팀만 합산 대상.
-  let orderTotals: typeof workTotals = null
-  let orderSiblingCount = 0
-  let orderConnSiblingCount = 0
-  if (work.order_id) {
-    const { data: siblings } = await supabase
-      .from('works')
-      .select('id, worker_type')
-      .eq('company_id', work.company_id)
-      .eq('order_id', work.order_id)
-    const sibList = (siblings ?? []) as { id: string; worker_type: string | null }[]
-    orderSiblingCount = sibList.length
-    const connIds = sibList.filter((s) => s.worker_type === '접속팀').map((s) => s.id)
-    orderConnSiblingCount = connIds.length
-    if (connIds.length > 0) {
-      orderTotals = await aggregateConnectionTotals(supabase, connIds)
-    }
-  }
+  const [workTotals, orderTotals] = await Promise.all([
+    isConnectionTeam
+      ? aggregateConnectionTotals(supabase, [work.id])
+      : Promise.resolve(null),
+    work.order_id && connSiblingIds.length > 0
+      ? aggregateConnectionTotals(supabase, connSiblingIds)
+      : Promise.resolve(null),
+  ])
 
   return (
     <main className="min-h-screen p-4 sm:p-6">
