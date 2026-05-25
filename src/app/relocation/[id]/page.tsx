@@ -13,7 +13,7 @@ import {
   ExternalLink,
   Upload,
 } from 'lucide-react'
-import { Sparkles, Settings } from 'lucide-react'
+import { Sparkles, Settings, Hammer } from 'lucide-react'
 import { createClient } from '@/lib/supabase/server'
 import { updateProject, deleteProject } from '../actions'
 import FacilitiesTab from './FacilitiesTab'
@@ -41,6 +41,7 @@ import {
   isRelocationCategory,
   type RelocationCategory,
 } from '@/lib/relocation'
+import { RelocationWorkerPicker } from '../RelocationWorkerPicker'
 import PhasesTab, { type PhaseRow, type PhaseTaskRow } from './PhasesTab'
 import ExportTab from './ExportTab'
 import SpliceTab, { type SpliceRow } from './SpliceTab'
@@ -100,8 +101,12 @@ type ProjectRow = {
   desired_open_at: string | null
   order_no: string | null
   expected_completion_at: string | null
+  completion_at: string | null
   outside_workers: string | null
   splice_workers: string | null
+  subcategory: string | null
+  outside_worker_ids: unknown
+  splice_worker_ids: unknown
 }
 
 type EmployeeMini = { id: string; name: string | null }
@@ -139,7 +144,7 @@ export default async function RelocationProjectPage({
   const { data: pRow } = await supabase
     .from('relocation_projects')
     .select(
-      'id, company_id, title, category, client, region, surveyed_at, designer_id, status, notes, created_at, updated_at, subscription_id, subscriber_name, subscriber_address, branch_contact, branch_manager, subscribed_at, desired_open_at, order_no, expected_completion_at, outside_workers, splice_workers',
+      'id, company_id, title, category, client, region, surveyed_at, designer_id, status, notes, created_at, updated_at, subscription_id, subscriber_name, subscriber_address, branch_contact, branch_manager, subscribed_at, desired_open_at, order_no, expected_completion_at, completion_at, outside_workers, splice_workers, subcategory, outside_worker_ids, splice_worker_ids',
     )
     .eq('id', id)
     .maybeSingle()
@@ -152,6 +157,46 @@ export default async function RelocationProjectPage({
   const projectCategorySlug = RELOCATION_CATEGORY_SLUG[projectCategory]
   const projectCategoryLabel = RELOCATION_CATEGORY_LABEL[projectCategory]
   const isSubscriptionProject = projectCategory === '청약'
+
+  // 청약 프로젝트 — 외선/접속 작업자 후보 + 현재 배정된 ID 목록
+  let outsideCandidates: { id: string; name: string; position: string | null; team: string | null; work_type: string | null }[] = []
+  let spliceCandidates: typeof outsideCandidates = []
+  if (isSubscriptionProject) {
+    const { data: emps } = await supabase
+      .from('employees')
+      .select('id, name, position, team, work_type')
+      .eq('company_id', me.company_id)
+      .eq('is_active', true)
+      .in('work_type', ['외선팀', '접속팀'])
+      .order('name')
+    type EmpRow = {
+      id: string
+      name: string
+      position: string | null
+      team: string | null
+      work_type: string | null
+    }
+    const allEmps = (emps ?? []) as EmpRow[]
+    outsideCandidates = allEmps.filter((e) => e.work_type === '외선팀')
+    spliceCandidates = allEmps.filter((e) => e.work_type === '접속팀')
+  }
+  function safeIdArr(v: unknown): string[] {
+    if (!Array.isArray(v)) return []
+    return v.filter((x): x is string => typeof x === 'string')
+  }
+  const outsideInitialIds = safeIdArr(project.outside_worker_ids)
+  const spliceInitialIds = safeIdArr(project.splice_worker_ids)
+
+  // 연동된 작업관리 row — 헤더에 "작업관리 보기" 링크 노출
+  let linkedWorkId: string | null = null
+  if (isSubscriptionProject) {
+    const { data: linkedWork } = await supabase
+      .from('works')
+      .select('id')
+      .eq('relocation_project_id', id)
+      .maybeSingle()
+    linkedWorkId = ((linkedWork as { id: string } | null) ?? null)?.id ?? null
+  }
 
   // 설계자 이름 · 캔버스 공통 데이터 · 접속 · 스플리터 · 차수 · (조건부) 이전 이력 일괄 병렬.
   //   page.tsx 의 router.refresh 체감 속도를 결정 — 직렬이면 합산 4~5초.
@@ -376,6 +421,16 @@ export default async function RelocationProjectPage({
               </p>
             </div>
             <div className="shrink-0 flex items-center gap-2 self-start">
+              {linkedWorkId && (
+                <Link
+                  href={`/works/${linkedWorkId}`}
+                  className="inline-flex items-center gap-1 rounded-lg border border-emerald-300 bg-emerald-50 px-3 py-1.5 text-sm font-medium text-emerald-700 hover:bg-emerald-100"
+                  title="작업관리에서 일보·진행 현황 보기"
+                >
+                  <Hammer className="h-4 w-4" />
+                  작업관리 보기
+                </Link>
+              )}
               <Link
                 href={`/relocation/${id}/import`}
                 className="inline-flex items-center gap-1 rounded-lg border border-slate-300 px-3 py-1.5 text-sm font-medium text-slate-700 hover:bg-slate-50"
@@ -745,7 +800,27 @@ export default async function RelocationProjectPage({
                     />
                   </div>
                 </div>
-                <div className="grid gap-3 sm:grid-cols-2">
+                <div>
+                  <label className="block text-sm font-medium text-slate-700">
+                    청약 분류 <span className="text-rose-600">*</span>
+                  </label>
+                  <select
+                    name="subcategory"
+                    required
+                    defaultValue={project.subcategory ?? ''}
+                    className="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2 text-base"
+                  >
+                    <option value="" disabled>
+                      선택하세요
+                    </option>
+                    {['소호', 'FTTH', '모바일', '전용회선', '다회선', '아파트'].map((s) => (
+                      <option key={s} value={s}>
+                        {s}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+                <div className="grid gap-3 sm:grid-cols-3">
                   <div>
                     <label className="block text-sm font-medium text-slate-700">공사계약일</label>
                     <input
@@ -764,33 +839,50 @@ export default async function RelocationProjectPage({
                       className="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2 text-base"
                     />
                   </div>
+                  <div>
+                    <label className="block text-sm font-medium text-slate-700">작업완료일</label>
+                    <input
+                      type="date"
+                      name="completion_at"
+                      defaultValue={project.completion_at ?? ''}
+                      className="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2 text-base"
+                    />
+                  </div>
                 </div>
                 <div>
                   <label className="block text-sm font-medium text-slate-700">작업자배정</label>
                   <div className="mt-1 grid gap-3 sm:grid-cols-2">
-                    <div>
-                      <label className="block text-xs text-slate-500">외선</label>
-                      <input
-                        type="text"
-                        name="outside_workers"
-                        defaultValue={project.outside_workers ?? ''}
-                        maxLength={300}
-                        placeholder="이름 (콤마로 구분)"
-                        className="mt-0.5 w-full rounded-lg border border-slate-300 px-3 py-2 text-base"
-                      />
+                    <div className="rounded-lg border border-slate-200 p-2 bg-orange-50/40">
+                      <label className="block text-xs text-orange-700 font-semibold">
+                        외선 ({outsideCandidates.length}명 가능)
+                      </label>
+                      <div className="mt-1">
+                        <RelocationWorkerPicker
+                          name="outside_worker_ids"
+                          label="외선"
+                          candidates={outsideCandidates}
+                          initialIds={outsideInitialIds}
+                        />
+                      </div>
                     </div>
-                    <div>
-                      <label className="block text-xs text-slate-500">접속</label>
-                      <input
-                        type="text"
-                        name="splice_workers"
-                        defaultValue={project.splice_workers ?? ''}
-                        maxLength={300}
-                        placeholder="이름 (콤마로 구분)"
-                        className="mt-0.5 w-full rounded-lg border border-slate-300 px-3 py-2 text-base"
-                      />
+                    <div className="rounded-lg border border-slate-200 p-2 bg-blue-50/40">
+                      <label className="block text-xs text-blue-700 font-semibold">
+                        접속 ({spliceCandidates.length}명 가능)
+                      </label>
+                      <div className="mt-1">
+                        <RelocationWorkerPicker
+                          name="splice_worker_ids"
+                          label="접속"
+                          candidates={spliceCandidates}
+                          initialIds={spliceInitialIds}
+                        />
+                      </div>
                     </div>
                   </div>
+                  <p className="mt-1 text-xs text-slate-500">
+                    저장 시 작업관리(/works)에 자동 동기화돼 배정 작업자에게 일보 작성 진입점이
+                    노출됩니다.
+                  </p>
                 </div>
               </>
             )}

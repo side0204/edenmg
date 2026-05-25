@@ -11,6 +11,19 @@ import {
   RELOCATION_CATEGORY_SLUG,
   type RelocationCategory,
 } from '@/lib/relocation'
+import {
+  RelocationWorkerPicker,
+  type RelocationWorkerCandidate,
+} from '../RelocationWorkerPicker'
+
+const SUBSCRIPTION_SUBCATEGORIES = [
+  '소호',
+  'FTTH',
+  '모바일',
+  '전용회선',
+  '다회선',
+  '아파트',
+] as const
 
 // 공사 설계 프로젝트 생성 폼.
 // 권한: 회사 직원 누구나.
@@ -58,15 +71,26 @@ export default async function NewRelocationProjectPage({
     redirect('/?err=' + encodeURIComponent('계정이 활성 상태가 아닙니다'))
   }
 
-  // 설계자 후보 (회사 활성 직원 전체)
+  // 설계자 후보 (회사 활성 직원 전체) + 외선/접속 작업자 후보 (work_type 별)
   const { data: emps } = await supabase
     .from('employees')
-    .select('id, name, permission')
+    .select('id, name, permission, position, team, work_type')
     .eq('company_id', me.company_id)
     .eq('is_active', true)
     .order('name')
 
-  const employees = (emps ?? []) as EmployeeMini[]
+  type EmpRow = EmployeeMini & {
+    position: string | null
+    team: string | null
+    work_type: string | null
+  }
+  const employees = (emps ?? []) as EmpRow[]
+  const outsideCandidates: RelocationWorkerCandidate[] = employees.filter(
+    (e) => e.work_type === '외선팀',
+  )
+  const spliceCandidates: RelocationWorkerCandidate[] = employees.filter(
+    (e) => e.work_type === '접속팀',
+  )
 
   // 카테고리가 결정됐으면 목록으로, 아니면 허브로 돌아감.
   const backHref = categoryFromUrl
@@ -140,6 +164,25 @@ export default async function NewRelocationProjectPage({
           {/* ── 청약 카테고리 전용 필드 ── */}
           {isSubscription && (
             <>
+              <div>
+                <label className={LABEL}>
+                  청약 분류 <span className="text-rose-600">*</span>
+                </label>
+                <select name="subcategory" required defaultValue="" className={INPUT}>
+                  <option value="" disabled>
+                    선택하세요
+                  </option>
+                  {SUBSCRIPTION_SUBCATEGORIES.map((s) => (
+                    <option key={s} value={s}>
+                      {s}
+                    </option>
+                  ))}
+                </select>
+                <p className="mt-0.5 text-xs lg:text-[10px] text-slate-500">
+                  작업관리(작업자 일보)에 자동 연동됨
+                </p>
+              </div>
+
               <div className="grid gap-3 lg:gap-2 lg:grid-cols-2">
                 <div>
                   <label className={LABEL}>청약ID</label>
@@ -213,7 +256,7 @@ export default async function NewRelocationProjectPage({
                 </div>
               </div>
 
-              <div className="grid gap-3 lg:gap-2 lg:grid-cols-2">
+              <div className="grid gap-3 lg:gap-2 lg:grid-cols-3">
                 <div>
                   <label className={LABEL}>공사계약일</label>
                   <input type="date" name="surveyed_at" className={INPUT} />
@@ -222,36 +265,44 @@ export default async function NewRelocationProjectPage({
                   <label className={LABEL}>준공예정일</label>
                   <input type="date" name="expected_completion_at" className={INPUT} />
                 </div>
+                <div>
+                  <label className={LABEL}>작업완료일</label>
+                  <input type="date" name="completion_at" className={INPUT} />
+                </div>
               </div>
 
               <div>
                 <label className={LABEL}>작업자배정</label>
                 <div className="mt-1 grid gap-3 lg:gap-2 lg:grid-cols-2">
-                  <div>
-                    <label className="block text-xs text-slate-500 lg:text-[10px]">
-                      외선
+                  <div className="rounded-lg border border-slate-200 p-2 lg:p-1.5 bg-orange-50/40">
+                    <label className="block text-xs text-orange-700 lg:text-[10px] font-semibold">
+                      외선 ({outsideCandidates.length}명 가능)
                     </label>
-                    <input
-                      type="text"
-                      name="outside_workers"
-                      maxLength={300}
-                      placeholder="이름 (콤마로 구분)"
-                      className={INPUT + ' mt-0.5'}
-                    />
+                    <div className="mt-1">
+                      <RelocationWorkerPicker
+                        name="outside_worker_ids"
+                        label="외선"
+                        candidates={outsideCandidates}
+                      />
+                    </div>
                   </div>
-                  <div>
-                    <label className="block text-xs text-slate-500 lg:text-[10px]">
-                      접속
+                  <div className="rounded-lg border border-slate-200 p-2 lg:p-1.5 bg-blue-50/40">
+                    <label className="block text-xs text-blue-700 lg:text-[10px] font-semibold">
+                      접속 ({spliceCandidates.length}명 가능)
                     </label>
-                    <input
-                      type="text"
-                      name="splice_workers"
-                      maxLength={300}
-                      placeholder="이름 (콤마로 구분)"
-                      className={INPUT + ' mt-0.5'}
-                    />
+                    <div className="mt-1">
+                      <RelocationWorkerPicker
+                        name="splice_worker_ids"
+                        label="접속"
+                        candidates={spliceCandidates}
+                      />
+                    </div>
                   </div>
                 </div>
+                <p className="mt-1 text-xs lg:text-[10px] text-slate-500">
+                  선택한 작업자에게 자동으로 작업관리(/works)에 작업이 생성되어 일보를 작성할 수
+                  있습니다.
+                </p>
               </div>
             </>
           )}

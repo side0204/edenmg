@@ -706,6 +706,31 @@ owner 모바일 스크린샷 보고: `/vehicles` 헤더에서 "업무용 차량"
 - **적용 (10개 페이지)**: `/vehicles` · `/admin/employees` · `/admin/sites` · `/admin/facilities` · `/admin/materials` · `/admin/cables` · `/works` · `/works/[id]` · `/requests` · `/vehicles/trips`
 - **신규 페이지 작성 시**: 큰 제목(`text-2xl` 이상) + 우측 버튼 조합이면 처음부터 모바일 stack 패턴으로 시작. mobile_ux_patterns 메모리에 「8. 모바일 헤더 가로 강제」 로 기록.
 
+### ✅ 완료 (청약 작업관리 연동 + 작업자 picker + 작업완료일, 2026-05-25)
+
+owner 요구 (0067 후속): 「작업완료일」 추가 + 작업자 입력을 외선팀/접속팀 직원 picker 로 + 청약 프로젝트 생성 시 작업관리(`works`) 에 자동 연동 → 배정된 작업자가 일보 작성 시 「설계내역」 보면서 입력.
+
+- **마이그** [`0068_relocation_works_link.sql`](./supabase/migrations/0068_relocation_works_link.sql):
+  - `relocation_projects` 확장: `completion_at date` (작업완료일) + `outside_worker_ids jsonb` + `splice_worker_ids jsonb` + `subcategory text`(청약 sub: 소호/FTTH/모바일/전용회선/다회선/아파트, CHECK)
+  - `works` 역방향 FK: `relocation_project_id uuid` (ON DELETE SET NULL — 산안법 5년 보존) + unique partial index (프로젝트 1:1 work)
+  - jsonb id 배열 GIN 인덱스 2개
+- **공유 picker** ([`src/app/relocation/RelocationWorkerPicker.tsx`](./src/app/relocation/RelocationWorkerPicker.tsx)) — 풀스크린 모달 멀티 선택. 후보는 회사 활성 직원 중 work_type 매치(외선팀/접속팀) 자동 필터. hidden input 에 JSON id 배열. WorkersMultiSelect 와 달리 worker_type 은 picker 별로 고정(외선/접속 따라). 모달 항상 mount + hidden 토글 (모바일 안전 패턴)
+- **server action** ([`src/app/relocation/actions.ts`](./src/app/relocation/actions.ts)):
+  - `parseProjectForm` — 신규 필드 + jsonb id array 파싱 (`parseIdArray` 헬퍼, UUID 검증)
+  - `validateProject` — 청약일 때 subcategory 강제
+  - 신규 `syncLinkedWork()` — 청약 프로젝트 → `works` upsert + `work_assignments` 동기화 (외선→worker_type='외선팀', 접속→'접속팀'). cross-company 차단(회사 직원만), admin client(service role) 로 works·assignments 쓰기 (작성자에게 works 권한 없어도 가능. 같은 회사 자기 청약 프로젝트의 부산물이라 인가 OK). 기존 배정 diff 로 insert/update/delete 동기화
+  - `createProject`/`updateProject` 양쪽에서 호출. 동기화 실패해도 프로젝트 자체는 유지
+- **/relocation/new** — 청약 필드 재배치: 청약 분류(필수 select), 청약ID/공사번호, 가입자명, 가입자 주소, 하위국 담당자/연락처, 청약일/개통희망일, **공사계약일/준공예정일/작업완료일(3열)**, **작업자배정 picker 2 컬럼 (외선 주황·접속 파랑 톤)**. 후보 직원 0명일 때 안내문
+- **/relocation/[id]** 편집 폼: 같은 구조 + initialIds 로 picker pre-select. 헤더 우상단 「작업관리 보기」 emerald 링크 (linkedWorkId 있을 때)
+- **/works/[id]**: 헤더 우상단 「설계내역 보기」 indigo 링크 (`relocation_project_id` 있을 때). 작업자가 일보 작성 전 클릭으로 청약 프로젝트 캔버스 진입
+- **데이터 흐름**:
+  1. 청약 프로젝트 생성 (외선·접속 작업자 선택)
+  2. 자동 `works` row 생성 + `work_assignments` 추가 (worker_type 자동 매핑)
+  3. 배정된 작업자: 홈 「내 작업」 카드 + `/works?mine=1` 에 노출
+  4. 작업자가 작업 카드 탭 → worker_type 에 따라 외선일보/접속일보 폼 직행
+  5. `/works/[id]` 에서 「설계내역 보기」 → 청약 프로젝트 캔버스 → 설계 보면서 일보 작성
+- **기존 free-text 작업자 필드** (`outside_workers`/`splice_workers`): 0067 에서 추가한 컬럼은 그대로 두고 신규 입력은 id 배열 사용. 기존 입력 데이터 보존
+
 ### ✅ 완료 (청약 폼 보강 — 준공예정일·작업자배정, 2026-05-25)
 
 owner 요구 (0066 후속): 청약 카테고리 폼에서 「지역」 제거, 「공사계약일」 옆에 「준공예정일」 추가, 「작업자배정」 외선/접속 구분 입력.
@@ -1117,6 +1142,7 @@ owner 요구: "어느 메뉴를 많이 쓰는지" 페이지 단위 분석. 접�
   - [`0065_relocation_project_category.sql`](./supabase/migrations/0065_relocation_project_category.sql) — 공사 설계 카테고리: `relocation_projects.category text not null default '지장이설'` + CHECK(청약·계획·지장이설) + (company_id, category) 인덱스. 「공사 설계」 진입 시 3 카테고리 허브로 분기
   - [`0066_relocation_subscription_fields.sql`](./supabase/migrations/0066_relocation_subscription_fields.sql) — 청약 카테고리 전용 8 컬럼 (subscription_id·subscriber_name·subscriber_address·branch_contact·branch_manager·subscribed_at·desired_open_at·order_no) + order_no partial 인덱스
   - [`0067_relocation_subscription_fields_v2.sql`](./supabase/migrations/0067_relocation_subscription_fields_v2.sql) — 청약 폼 보강: `expected_completion_at` (준공예정일) + `outside_workers` (외선) + `splice_workers` (접속)
+  - [`0068_relocation_works_link.sql`](./supabase/migrations/0068_relocation_works_link.sql) — 청약 작업관리 연동: `completion_at`·`outside_worker_ids jsonb`·`splice_worker_ids jsonb`·`subcategory`(청약 sub CHECK) + `works.relocation_project_id` 역방향 FK (unique partial). 청약 프로젝트 생성 시 자동 `works` upsert + `work_assignments` 동기화 → 배정 작업자가 일보 작성 진입점 노출
 - **외선일보 별도 entity (v2)** — 접속일보와 동일 패턴으로 외선팀 전용 모듈. 외선 작업 특성(케이블 포설구간·전주번호 등)에 맞는 구조 별도 설계.
 - **접속일보 후속 (v2)** — segment-level 작업자 태그, 사진 첨부 + EXIF, 국사·함체 마스터 테이블화, 재접속 이력 조회, 지도 시각화
 - **M3 Phase 2 후속** — 사진 첨부 + EXIF·워터마크 (PRD M3-06), 일보 결재함 통합 (현재는 작업 상세에서 진입), 일반 일보 월별 CSV 리포트

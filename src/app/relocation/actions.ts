@@ -3,6 +3,7 @@
 import { redirect } from 'next/navigation'
 import { revalidatePath } from 'next/cache'
 import { createClient } from '@/lib/supabase/server'
+import { createAdminClient } from '@/lib/supabase/admin'
 import {
   runVerification,
   type VFacility,
@@ -18,6 +19,40 @@ import {
   RELOCATION_CATEGORY_SLUG,
   type RelocationCategory,
 } from '@/lib/relocation'
+
+// 청약 카테고리에 한해 허용되는 subcategory 값 (works.subcategory enum 미러)
+const SUBSCRIPTION_SUBCATEGORIES = [
+  '소호',
+  'FTTH',
+  '모바일',
+  '전용회선',
+  '다회선',
+  '아파트',
+] as const
+type SubscriptionSubcategory = (typeof SUBSCRIPTION_SUBCATEGORIES)[number]
+function isSubscriptionSubcategory(v: string): v is SubscriptionSubcategory {
+  return (SUBSCRIPTION_SUBCATEGORIES as readonly string[]).includes(v)
+}
+
+function parseIdArray(raw: unknown): string[] {
+  if (!raw) return []
+  // FormData 는 JSON string 으로 전달됨 (picker hidden input)
+  if (typeof raw === 'string') {
+    if (raw.trim().length === 0) return []
+    try {
+      const parsed = JSON.parse(raw)
+      if (Array.isArray(parsed)) {
+        return parsed
+          .filter((v): v is string => typeof v === 'string')
+          .map((v) => v.trim())
+          .filter((v) => /^[0-9a-f-]{36}$/i.test(v))
+      }
+    } catch {
+      return []
+    }
+  }
+  return []
+}
 
 // 지장이설 프로젝트 CRUD — 회사 스코프 + 권한 제한 없음 (사양 § 2-6).
 // 모든 회사 직원이 접근·생성·수정·삭제 가능 (RLS 가 회사 스코프 강제).
@@ -110,8 +145,12 @@ type ProjectFormParsed = {
   desired_open_at: string | null
   order_no: string | null
   expected_completion_at: string | null
+  completion_at: string | null
   outside_workers: string | null
   splice_workers: string | null
+  subcategory: SubscriptionSubcategory | null
+  outside_worker_ids: string[]
+  splice_worker_ids: string[]
 }
 
 function parseDate(v: string): string | null {
@@ -154,15 +193,167 @@ function parseProjectForm(formData: FormData): ProjectFormParsed {
     desired_open_at: pickDate('desired_open_at'),
     order_no: pick('order_no'),
     expected_completion_at: pickDate('expected_completion_at'),
+    completion_at: pickDate('completion_at'),
     outside_workers: pick('outside_workers'),
     splice_workers: pick('splice_workers'),
+    subcategory: (() => {
+      if (!isSubscription) return null
+      const raw = String(formData.get('subcategory') ?? '').trim()
+      return isSubscriptionSubcategory(raw) ? raw : null
+    })(),
+    outside_worker_ids: isSubscription ? parseIdArray(formData.get('outside_worker_ids')) : [],
+    splice_worker_ids: isSubscription ? parseIdArray(formData.get('splice_worker_ids')) : [],
   }
 }
 
 function validateProject(p: ProjectFormParsed): string | null {
   if (!p.title) return '프로젝트 제목을 입력하세요.'
   if (p.title.length > 200) return '제목은 200자 이하로 입력하세요.'
+  // 청약 — 작업 동기화에 subcategory 가 필요해 강제 (works.subcategory CHECK 와 정합)
+  if (p.category === '청약' && !p.subcategory) {
+    return '청약 분류(소호·FTTH·모바일·전용회선·다회선·아파트)를 선택하세요.'
+  }
   return null
+}
+
+/**
+ * 청약 프로젝트 → 작업관리(works) 자동 동기화.
+ *
+ *   1. 청약 프로젝트당 works row 1개 (relocation_project_id 로 1:1 연결)
+ *   2. 외선/접속 작업자 배정도 work_assignments 와 동기화
+ *      - outside_worker_ids → worker_type = '외선팀'
+ *      - splice_worker_ids  → worker_type = '접속팀'
+ *      - 양쪽 모두 회사 직원 id 만 허용 (cross-company 차단)
+ *   3. 작성자에게 works 관리 권한이 없을 수 있으므로 admin client (service role) 사용
+ *      — 같은 회사 직원이 만든 청약 프로젝트의 부산물이라 인가 OK
+ *   4. 청약 아닐 때 / subcategory 없을 때는 skip
+ */
+async function syncLinkedWork(input: {
+  projectId: string
+  companyId: string
+  designerId: string | null
+  parsed: ProjectFormParsed
+}): Promise<void> {
+  const { projectId, companyId, designerId, parsed } = input
+  if (parsed.category !== '청약' || !parsed.subcategory) return
+
+  const admin = createAdminClient()
+
+  // 회사 직원만 배정 가능 — RLS 우회한 admin 이라 cross-company 안전망 직접 검증
+  const allIds = Array.from(
+    new Set([...parsed.outside_worker_ids, ...parsed.splice_worker_ids]),
+  )
+  let validIds = new Set<string>()
+  if (allIds.length > 0) {
+    const { data: empRows } = await admin
+      .from('employees')
+      .select('id')
+      .in('id', allIds)
+      .eq('company_id', companyId)
+    validIds = new Set(((empRows ?? []) as { id: string }[]).map((r) => r.id))
+  }
+  const outsideIds = parsed.outside_worker_ids.filter((id) => validIds.has(id))
+  const spliceIds = parsed.splice_worker_ids.filter((id) => validIds.has(id))
+
+  // works 상태 매핑: 프로젝트 상태와 동기 (간단 매핑)
+  const workStatus: '예정' | '진행중' | '완료' | '취소' =
+    parsed.status === '완료'
+      ? '완료'
+      : parsed.status === '취소'
+        ? '취소'
+        : parsed.status === '시공중'
+          ? '진행중'
+          : '예정'
+
+  const workRow = {
+    company_id: companyId,
+    name: parsed.title,
+    client: 'LGU+',
+    address: parsed.subscriber_address,
+    category: '청약' as const,
+    subcategory: parsed.subcategory,
+    start_date: parsed.surveyed_at,
+    end_date: parsed.expected_completion_at ?? parsed.completion_at,
+    status: workStatus,
+    notes:
+      [
+        parsed.subscriber_name ? `가입자: ${parsed.subscriber_name}` : null,
+        parsed.subscription_id ? `청약ID: ${parsed.subscription_id}` : null,
+        parsed.order_no ? `공사번호: ${parsed.order_no}` : null,
+        parsed.branch_manager
+          ? `하위국: ${parsed.branch_manager}${parsed.branch_contact ? ` (${parsed.branch_contact})` : ''}`
+          : null,
+        parsed.notes,
+      ]
+        .filter(Boolean)
+        .join('\n') || null,
+    assignee_employee_id: designerId,
+    relocation_project_id: projectId,
+    worker_type: null,
+    worker_type_custom: null,
+  }
+
+  // upsert by relocation_project_id (unique partial index 가 한 row 보장)
+  const { data: existing } = await admin
+    .from('works')
+    .select('id')
+    .eq('relocation_project_id', projectId)
+    .maybeSingle()
+
+  let workId: string
+  if (existing) {
+    workId = (existing as { id: string }).id
+    await admin.from('works').update(workRow).eq('id', workId)
+  } else {
+    const { data: inserted } = await admin
+      .from('works')
+      .insert(workRow)
+      .select('id')
+      .single()
+    workId = (inserted as { id: string }).id
+  }
+
+  // 배정 동기화 — 기존 배정 vs 신규 outsideIds ∪ spliceIds 차집합 계산
+  const desired = new Map<string, '외선팀' | '접속팀'>()
+  for (const id of outsideIds) desired.set(id, '외선팀')
+  for (const id of spliceIds) desired.set(id, '접속팀') // 외선·접속 중복 시 접속 우선
+
+  const { data: existingAssignsData } = await admin
+    .from('work_assignments')
+    .select('id, employee_id, worker_type')
+    .eq('work_id', workId)
+  type ExAssign = { id: string; employee_id: string; worker_type: string | null }
+  const existingAssigns = (existingAssignsData ?? []) as ExAssign[]
+  const existingByEmp = new Map(existingAssigns.map((a) => [a.employee_id, a]))
+
+  // 추가/유지/타입 변경
+  const upsertRows: {
+    work_id: string
+    employee_id: string
+    worker_type: '외선팀' | '접속팀'
+  }[] = []
+  for (const [empId, wt] of desired) {
+    const cur = existingByEmp.get(empId)
+    if (!cur) {
+      upsertRows.push({ work_id: workId, employee_id: empId, worker_type: wt })
+    } else if (cur.worker_type !== wt) {
+      await admin
+        .from('work_assignments')
+        .update({ worker_type: wt })
+        .eq('id', cur.id)
+    }
+  }
+  if (upsertRows.length > 0) {
+    await admin.from('work_assignments').insert(upsertRows)
+  }
+
+  // 삭제 — desired 에 없는 기존 배정 제거
+  const removeIds = existingAssigns
+    .filter((a) => !desired.has(a.employee_id))
+    .map((a) => a.id)
+  if (removeIds.length > 0) {
+    await admin.from('work_assignments').delete().in('id', removeIds)
+  }
 }
 
 
@@ -195,8 +386,22 @@ export async function createProject(formData: FormData) {
     )
   }
 
+  // 청약: 작업관리(works) 자동 동기화 — 배정 작업자에게 작업이 보이게
+  try {
+    await syncLinkedWork({
+      projectId: inserted!.id,
+      companyId: me.company_id,
+      designerId,
+      parsed,
+    })
+  } catch (e) {
+    // 동기화 실패해도 프로젝트 생성 자체는 유지 — 상세 페이지에서 재시도 안내
+    console.error('syncLinkedWork failed on create', e)
+  }
+
   revalidatePath('/relocation')
   revalidatePath(`/relocation/category/${slug}`)
+  revalidatePath('/works')
   redirect(
     `/relocation/${inserted!.id}?ok=` +
       encodeURIComponent(`'${parsed.title}' 프로젝트를 생성했습니다`),
@@ -232,10 +437,31 @@ export async function updateProject(formData: FormData) {
     redirect(`/relocation/${id}?err=` + encodeURIComponent('수정 실패: ' + error.message))
   }
 
+  // 업데이트 후 다시 fetch 해 designer_id·company_id 확보 (parsed 에 designer_id 만 있고 null 가능)
+  const { data: refreshed } = await supabase
+    .from('relocation_projects')
+    .select('id, company_id, designer_id')
+    .eq('id', id)
+    .maybeSingle()
+  if (refreshed) {
+    const r = refreshed as { company_id: string; designer_id: string | null }
+    try {
+      await syncLinkedWork({
+        projectId: id,
+        companyId: r.company_id,
+        designerId: r.designer_id,
+        parsed,
+      })
+    } catch (e) {
+      console.error('syncLinkedWork failed on update', e)
+    }
+  }
+
   const slug = RELOCATION_CATEGORY_SLUG[parsed.category]
   revalidatePath('/relocation')
   revalidatePath(`/relocation/category/${slug}`)
   revalidatePath(`/relocation/${id}`)
+  revalidatePath('/works')
   redirect(`/relocation/${id}?ok=` + encodeURIComponent('프로젝트 정보를 수정했습니다'))
 }
 

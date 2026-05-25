@@ -44,6 +44,7 @@ type WorkRow = {
   notes: string | null
   instructions: string | null
   is_active: boolean
+  relocation_project_id: string | null
 }
 
 type ReportRow = {
@@ -95,7 +96,7 @@ export default async function WorkDetailPage({
   const { data: workData } = await supabase
     .from('works')
     .select(
-      'id, company_id, name, client, address, category, subcategory, order_id, worker_type, worker_type_custom, assignee_employee_id, expected_volume, start_date, end_date, status, notes, instructions, is_active',
+      'id, company_id, name, client, address, category, subcategory, order_id, worker_type, worker_type_custom, assignee_employee_id, expected_volume, start_date, end_date, status, notes, instructions, is_active, relocation_project_id',
     )
     .eq('id', id)
     .maybeSingle()
@@ -361,15 +362,27 @@ export default async function WorkDetailPage({
               {work.client && <span className="ml-1.5">· {work.client}</span>}
             </p>
           </div>
-          {canManage && (
-            <Link
-              href={`/works/${work.id}/edit`}
-              className="shrink-0 inline-flex items-center gap-1 rounded-lg border border-slate-300 px-3 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50"
-            >
-              <Pencil className="h-4 w-4" />
-              수정
-            </Link>
-          )}
+          <div className="shrink-0 flex items-center gap-2">
+            {work.relocation_project_id && (
+              <Link
+                href={`/relocation/${work.relocation_project_id}`}
+                className="inline-flex items-center gap-1 rounded-lg border border-indigo-300 bg-indigo-50 px-3 py-2 text-sm font-medium text-indigo-700 hover:bg-indigo-100"
+                title="공사 설계 — 행정도·코어구성도·직선도 보기"
+              >
+                <Cable className="h-4 w-4" />
+                설계내역 보기
+              </Link>
+            )}
+            {canManage && (
+              <Link
+                href={`/works/${work.id}/edit`}
+                className="inline-flex items-center gap-1 rounded-lg border border-slate-300 px-3 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50"
+              >
+                <Pencil className="h-4 w-4" />
+                수정
+              </Link>
+            )}
+          </div>
         </header>
 
         <InstructionsBanner instructions={work.instructions} />
