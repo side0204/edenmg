@@ -547,12 +547,18 @@ export async function updateFacilityFromCanvas(input: {
 /**
  * 캔버스에서 시설명 라벨을 마우스로 끌어 옮긴 offset(px) 저장.
  * redirect 안 함 — JSON 결과 반환 (캔버스 컨텍스트 유지).
+ *
+ * mode (2026-05-25 owner): 도식·지도 모드별 별도 컬럼.
+ *   - 'schematic' → label_dx / label_dy
+ *   - 'map'       → label_dx_map / label_dy_map
+ *   한 모드에서 옮긴 위치가 다른 모드를 흔들지 않게.
  */
 export async function saveFacilityLabelOffset(
   projectId: string,
   facilityId: string,
   dx: number,
   dy: number,
+  mode: 'schematic' | 'map' = 'schematic',
 ): Promise<{ ok: true } | { ok: false; error: string }> {
   if (!projectId || !facilityId) return { ok: false, error: '대상이 올바르지 않습니다' }
 
@@ -563,9 +569,13 @@ export async function saveFacilityLabelOffset(
 
   const { supabase } = await requireMember()
 
+  const update =
+    mode === 'map'
+      ? { label_dx_map: clamp(dx), label_dy_map: clamp(dy) }
+      : { label_dx: clamp(dx), label_dy: clamp(dy) }
   const { error } = await supabase
     .from('relocation_facilities')
-    .update({ label_dx: clamp(dx), label_dy: clamp(dy) })
+    .update(update)
     .eq('id', facilityId)
     .eq('project_id', projectId) // RLS 보강
 

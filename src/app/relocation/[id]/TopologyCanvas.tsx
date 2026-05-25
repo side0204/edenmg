@@ -146,6 +146,8 @@ type FacilityNode = {
   install_status: string
   label_dx: number
   label_dy: number
+  label_dx_map: number
+  label_dy_map: number
   install_order: number | null
   created_by: string | null  // employees.id — 본인 작업분 필터링용
 }
@@ -728,6 +730,7 @@ export default function TopologyCanvas({
 
   // 자동 캡처용 시설 라벨 데이터 — 캡처 후 또렷한 벡터로 다시 그릴 때 사용.
   //   MapAutoCapture 에 안정적 참조로 넘긴다 (매 렌더 새 배열이면 내부 useMemo 가 깨짐).
+  //   지도 자동 캡처라 지도 모드 전용 라벨 offset 사용 (도식·지도 분리됨).
   const captureFacilities = useMemo(
     () =>
       facilities.map((f) => ({
@@ -739,8 +742,8 @@ export default function TopologyCanvas({
           CLOSURE_TYPE_CATEGORY[f.closure_type] === '접속함체' &&
           f.install_status === 'new',
         installNo: installNoByFacility.get(f.id) ?? null,
-        labelDx: f.label_dx,
-        labelDy: f.label_dy,
+        labelDx: f.label_dx_map,
+        labelDy: f.label_dy_map,
       })),
     [facilities, installNoByFacility],
   )
@@ -3240,6 +3243,7 @@ export default function TopologyCanvas({
             ld.id,
             off.dx,
             off.dy,
+            mode === 'map' ? 'map' : 'schematic',
           )
           if (!result.ok) toast.error(result.error)
         }
@@ -4967,9 +4971,11 @@ export default function TopologyCanvas({
               estimateTextWidth(labelDispName, facNameFont) +
                 (installNoByFacility.get(f.id) ? facNameFont * 1.9 : 0),
             )
+            // 라벨 offset 은 도식·지도 모드별 별도 컬럼 — 한 모드에서 옮긴
+            // 위치가 다른 모드를 흔들지 않게 (owner 2026-05-25).
             const labelOff = labelOffsets[f.id] ?? {
-              dx: f.label_dx,
-              dy: f.label_dy,
+              dx: mode === 'map' ? f.label_dx_map : f.label_dx,
+              dy: mode === 'map' ? f.label_dy_map : f.label_dy,
             }
             // 라벨이 시설에서 멀어지면 연결선(leader) — 어느 시설 라벨인지 표시.
             //   선은 라벨 박스 가장자리에서 멈춰 글자 위를 지나지 않게 한다.

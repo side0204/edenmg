@@ -36,6 +36,8 @@ export type FacilityRow = {
   install_status: string
   label_dx: number
   label_dy: number
+  label_dx_map: number
+  label_dy_map: number
   install_order: number | null
   created_by: string | null
 }

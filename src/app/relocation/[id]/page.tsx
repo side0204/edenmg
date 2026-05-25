@@ -1113,6 +1113,8 @@ export default async function RelocationProjectPage({
           install_status: f.install_status ?? 'new',
           label_dx: f.label_dx ?? 0,
           label_dy: f.label_dy ?? 0,
+          label_dx_map: f.label_dx_map ?? 0,
+          label_dy_map: f.label_dy_map ?? 0,
           install_order: f.install_order ?? null,
           created_by: f.created_by ?? null,
         }))}
