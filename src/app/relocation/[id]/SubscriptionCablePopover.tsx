@@ -252,15 +252,15 @@ export default function SubscriptionCablePopover({
           style={{ cursor: 'move', touchAction: 'none' }}
         >
           <div className="min-w-0 flex items-center gap-2">
-            <GripHorizontal className="h-4 w-4 text-slate-400 shrink-0" />
+            <GripHorizontal className="h-5 w-5 text-slate-400 shrink-0" />
             <div className="min-w-0">
-              <p className={`text-lg font-extrabold ${titleColor} leading-tight`}>
+              <p className={`text-2xl font-extrabold ${titleColor} leading-tight`}>
                 사용 코어 입력
-                <span className="ml-2 text-sm font-bold">
+                <span className="ml-2 text-lg font-bold">
                   ({isDesigner ? '설계자 · 기별 미반영' : '작업자 · 기별 반영'})
                 </span>
               </p>
-              <p className="text-base font-semibold text-slate-700 truncate">
+              <p className="text-lg font-semibold text-slate-700 truncate">
                 {cableCode} · {cableSpec} (1~{maxCore})
               </p>
             </div>
@@ -278,7 +278,7 @@ export default function SubscriptionCablePopover({
         <div className="flex-1 min-h-0 overflow-y-auto px-4 py-3 space-y-3">
           {showWorkerDecision && (
             <div className="rounded-md border-2 border-blue-400 bg-blue-50/70 p-3 space-y-2">
-              <p className="text-base font-bold text-blue-700">
+              <p className="text-lg font-bold text-blue-700">
                 설계자 입력 신설 선번:{' '}
                 <span className="font-mono text-blue-900">{designerNewCores.join(', ')}</span>
               </p>
@@ -287,7 +287,7 @@ export default function SubscriptionCablePopover({
                   type="button"
                   onClick={onWorkerConfirm}
                   disabled={busy}
-                  className="inline-flex items-center justify-center gap-1 rounded-md bg-emerald-600 hover:bg-emerald-700 px-3 py-2 text-base font-extrabold text-white disabled:bg-slate-300"
+                  className="inline-flex items-center justify-center gap-1.5 rounded-md bg-emerald-600 hover:bg-emerald-700 px-3 py-2.5 text-lg font-extrabold text-white disabled:bg-slate-300"
                 >
                   <CheckCircle2 className="h-5 w-5" />
                   사용 확정
@@ -296,7 +296,7 @@ export default function SubscriptionCablePopover({
                   type="button"
                   onClick={onWorkerChange}
                   disabled={busy}
-                  className="inline-flex items-center justify-center gap-1 rounded-md bg-amber-600 hover:bg-amber-700 px-3 py-2 text-base font-extrabold text-white disabled:bg-slate-300"
+                  className="inline-flex items-center justify-center gap-1.5 rounded-md bg-amber-600 hover:bg-amber-700 px-3 py-2.5 text-lg font-extrabold text-white disabled:bg-slate-300"
                 >
                   <Pencil className="h-5 w-5" />
                   변경
@@ -306,13 +306,13 @@ export default function SubscriptionCablePopover({
           )}
 
           {defaultRole === 'designer' && (
-            <div className="flex items-center gap-1 rounded-md bg-slate-100 p-0.5">
+            <div className="flex items-center gap-1 rounded-md bg-slate-100 p-1">
               <button
                 type="button"
                 onClick={() => setLifecycle('new')}
                 disabled={busy}
                 className={
-                  'flex-1 rounded px-3 py-1.5 text-sm font-bold ' +
+                  'flex-1 rounded px-3 py-2 text-lg font-bold ' +
                   (lifecycle === 'new'
                     ? 'bg-white text-blue-700 shadow'
                     : 'text-slate-500')
@@ -325,7 +325,7 @@ export default function SubscriptionCablePopover({
                 onClick={() => setLifecycle('preexisting')}
                 disabled={busy}
                 className={
-                  'flex-1 rounded px-3 py-1.5 text-sm font-bold ' +
+                  'flex-1 rounded px-3 py-2 text-lg font-bold ' +
                   (lifecycle === 'preexisting'
                     ? 'bg-white text-slate-700 shadow'
                     : 'text-slate-500')
@@ -343,7 +343,7 @@ export default function SubscriptionCablePopover({
             placeholder="예: 1,2,3 또는 1-3"
             autoFocus
             disabled={busy}
-            className={`w-full rounded-md border-2 border-slate-300 px-3 py-2.5 text-xl font-mono font-bold text-slate-900 focus:outline-none focus:ring-2 ${focusRing} disabled:bg-slate-100`}
+            className={`w-full rounded-md border-2 border-slate-300 px-3 py-2.5 text-2xl font-mono font-bold text-slate-900 focus:outline-none focus:ring-2 ${focusRing} disabled:bg-slate-100`}
             onKeyDown={(e) => {
               if (e.key === 'Enter' && valid) {
                 e.preventDefault()
@@ -363,22 +363,22 @@ export default function SubscriptionCablePopover({
                 disabled={busy}
                 className="h-5 w-5 rounded border-slate-300"
               />
-              <span className="text-sm font-semibold text-slate-700">
+              <span className="text-lg font-semibold text-slate-700">
                 작업자용으로 저장 (기별 반영)
               </span>
             </label>
           )}
           {usedCores.length > 0 && (
-            <p className="text-sm font-medium text-slate-600">
+            <p className="text-lg font-medium text-slate-600">
               이미 사용:{' '}
               <span className="font-mono font-bold text-slate-900">{usedCores.join(', ')}</span>
             </p>
           )}
           {parsed.errors.length > 0 && (
-            <p className="text-sm font-semibold text-rose-700">{parsed.errors[0]}</p>
+            <p className="text-lg font-semibold text-rose-700">{parsed.errors[0]}</p>
           )}
           {duplicates.length > 0 && (
-            <p className="text-sm font-semibold text-amber-700">
+            <p className="text-lg font-semibold text-amber-700">
               중복(스킵 예정):{' '}
               <span className="font-mono font-bold">{duplicates.join(', ')}</span>
             </p>
@@ -387,9 +387,9 @@ export default function SubscriptionCablePopover({
             type="button"
             onClick={onSave}
             disabled={!valid || busy}
-            className={`w-full inline-flex items-center justify-center gap-2 rounded-md ${saveBg} px-4 py-3 text-lg font-extrabold text-white disabled:bg-slate-300 disabled:cursor-not-allowed`}
+            className={`w-full inline-flex items-center justify-center gap-2 rounded-md ${saveBg} px-4 py-3 text-xl font-extrabold text-white disabled:bg-slate-300 disabled:cursor-not-allowed`}
           >
-            {busy ? <Loader2 className="h-5 w-5 animate-spin" /> : <Save className="h-5 w-5" />}
+            {busy ? <Loader2 className="h-6 w-6 animate-spin" /> : <Save className="h-6 w-6" />}
             저장
           </button>
         </div>
