@@ -1923,7 +1923,26 @@ export default function TopologyCanvas({
       }
       const d = new Date()
       const p = (n: number) => String(n).padStart(2, '0')
-      const fileName = `지장이설_도식_${d.getFullYear()}${p(d.getMonth() + 1)}${p(d.getDate())}_${p(d.getHours())}${p(d.getMinutes())}.png`
+      const dateStr = `${d.getFullYear()}${p(d.getMonth() + 1)}${p(d.getDate())}`
+      const timeStr = `${p(d.getHours())}${p(d.getMinutes())}`
+      // 파일명 규칙 (owner 2026-05-25):
+      //   - 청약: 청약ID_가입자명_YYYYMMDD.png
+      //   - 그 외: 지장이설_도식_YYYYMMDD_HHmm.png (기존)
+      //   파일 시스템 금지 문자(\/:*?"<>|) 는 _ 로 치환.
+      const sanitize = (s: string): string =>
+        s.replace(/[\\/:*?"<>|]/g, '_').replace(/\s+/g, '').trim()
+      let fileName: string
+      if (
+        projectCategory === '청약' &&
+        subscriptionId &&
+        subscriberName
+      ) {
+        fileName = `${sanitize(subscriptionId)}_${sanitize(subscriberName)}_${dateStr}.png`
+      } else if (projectCategory === '청약' && subscriptionId) {
+        fileName = `${sanitize(subscriptionId)}_${dateStr}.png`
+      } else {
+        fileName = `지장이설_도식_${dateStr}_${timeStr}.png`
+      }
       await exportSchematicPng(svg, box, fileName)
       toast.success('도식을 PNG 이미지로 내보냈습니다')
     } catch (e) {
