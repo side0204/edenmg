@@ -5021,20 +5021,20 @@ export default function TopologyCanvas({
                     if (subscriptionPopoverCableId === c.id) return null
                     const byRole = coresByCableByRole.get(c.id)
                     if (!byRole) return null
-                    // 청약 라벨 — 3배 확대 (owner 2026-05-25). 케이블 spec 가리지 않게 더 위로.
-                    const fontSize = 39
+                    // 청약 라벨 — owner 2026-05-25 추가 조정: 0.7배 축소 (39→27), 더 위로.
+                    const fontSize = 27
                     const fontWeight = 800
-                    const padX = 14
-                    const padY = 8
+                    const padX = 10
+                    const padY = 6
                     const rows: { label: string; color: string; dashed: boolean }[] = []
                     if (byRole.worker)
                       rows.push({ label: byRole.worker, color: '#dc2626', dashed: false })
                     if (byRole.designer)
                       rows.push({ label: byRole.designer, color: '#2563eb', dashed: true })
                     if (rows.length === 0) return null
-                    // 첫 줄 y — spec 텍스트(20px) 위 충분히 띄움. 큰 박스라 60px 위.
-                    const firstY = labelPt.y - 60
-                    const rowH = fontSize + padY * 2 + 6
+                    // 첫 줄 y — 36C(spec, 20px) 위쪽 충분히 띄움. 80px 위.
+                    const firstY = labelPt.y - 80
+                    const rowH = fontSize + padY * 2 + 4
                     return (
                       <g pointerEvents="none">
                         {rows.map((row, idx) => {
@@ -5048,11 +5048,11 @@ export default function TopologyCanvas({
                                 y={y - h / 2}
                                 width={w}
                                 height={h}
-                                rx={6}
+                                rx={4}
                                 fill="white"
                                 stroke={row.color}
-                                strokeWidth={3}
-                                strokeDasharray={row.dashed ? '10 5' : undefined}
+                                strokeWidth={2.2}
+                                strokeDasharray={row.dashed ? '7 4' : undefined}
                               />
                               <text
                                 x={labelPt.x}
