@@ -1577,11 +1577,12 @@ export default function TopologyCanvas({
 
   // 도식 모드 — 캔버스를 PNG 이미지로 내보내기.
   const [exporting, setExporting] = useState(false)
-  // 내보내는 순간에만 SVG 좌상단에 그릴 범례 (시설·케이블)
+  // 내보내는 순간에만 SVG 상단에 가로 배치로 그릴 범례 (시설·케이블)
   const [exportLegend, setExportLegend] = useState<{
     items: LegendItem[]
     x: number
     y: number
+    width: number
   } | null>(null)
 
   const [snapping, setSnapping] = useState(false)
@@ -1860,17 +1861,34 @@ export default function TopologyCanvas({
           })
         }
       }
+      // 케이블 범례 — owner 결정 2026-05-25: 실제 사용된 (status + installation_type)
+      //   조합을 모두 표시. 예: 「기설(지중)」, 「기설(가공)」, 「신설(지중)」.
+      //   같은 조합은 중복 제거. 라벨에 설치구분 포함.
       const cabItems: LegendItem[] = []
+      const seenCableKeys = new Set<string>()
       for (const st of CABLE_STATUS_VALUES) {
-        const rep = cables.find((c) => c.status === st)
-        if (!rep) continue
-        cabItems.push({
-          kind: 'cable',
-          spec: rep.spec,
-          status: st,
-          installationType: rep.installation_type,
-          label: CABLE_STATUS_LABEL[st],
-        })
+        const ofStatus = cables.filter((c) => c.status === st)
+        if (ofStatus.length === 0) continue
+        // installation_type 별로 그룹
+        const byInstall = new Map<string, typeof ofStatus[number]>()
+        for (const c of ofStatus) {
+          const k = c.installation_type ?? '(미지정)'
+          if (!byInstall.has(k)) byInstall.set(k, c)
+        }
+        for (const [installKey, rep] of byInstall.entries()) {
+          const dedupKey = `${st}|${installKey}`
+          if (seenCableKeys.has(dedupKey)) continue
+          seenCableKeys.add(dedupKey)
+          const installSuffix =
+            rep.installation_type ? `(${rep.installation_type})` : ''
+          cabItems.push({
+            kind: 'cable',
+            spec: rep.spec,
+            status: st,
+            installationType: rep.installation_type,
+            label: `${CABLE_STATUS_LABEL[st]}${installSuffix}`,
+          })
+        }
       }
       if (cutover.cables.size > 0) {
         cabItems.push({ kind: 'cutover', label: '기설 케이블 절단 절체' })
@@ -1882,8 +1900,23 @@ export default function TopologyCanvas({
         legendItems.push({ kind: 'header', label: '케이블' }, ...cabItems)
       }
       if (legendItems.length > 0) {
-        setExportLegend({ items: legendItems, x: box.x + 30, y: box.y + 30 })
-        // 범례가 DOM 에 반영될 때까지 대기
+        // 가로 배치 범례 — 박스 위쪽 영역. 시설 라벨이 잘리지 않게.
+        //   (owner 2026-05-25 — 기존 좌측 세로 배치는 여백 부족으로 라벨 절단)
+        // 박스 위쪽으로 LEGEND_AREA_H 만큼 추가 확보.
+        const LEGEND_AREA_H = 180
+        const LEGEND_PAD = 40
+        box = {
+          x: box.x,
+          y: box.y - LEGEND_AREA_H,
+          width: box.width,
+          height: box.height + LEGEND_AREA_H,
+        }
+        setExportLegend({
+          items: legendItems,
+          x: box.x + LEGEND_PAD,
+          y: box.y + LEGEND_PAD,
+          width: box.width - LEGEND_PAD * 2,
+        })
         await new Promise<void>((r) =>
           requestAnimationFrame(() => requestAnimationFrame(() => r())),
         )
@@ -5682,12 +5715,13 @@ export default function TopologyCanvas({
               )
             })()}
 
-            {/* 도식 내보내기용 범례 — 내보내는 순간에만 좌상단에 표시 */}
+            {/* 도식 내보내기용 범례 — 내보내는 순간에만 상단에 가로로 표시 */}
             {exportLegend && (
               <ExportLegend
                 items={exportLegend.items}
                 x={exportLegend.x}
                 y={exportLegend.y}
+                width={exportLegend.width}
               />
             )}
           </svg>
@@ -6740,48 +6774,72 @@ type LegendItem =
     }
   | { kind: 'cutover'; label: string }
 
-// 도식 내보내기용 범례 — 도식에 포함된 시설·케이블을 좌상단에 작은 표로.
-//   내보내는 순간에만 SVG 에 렌더된다 (편집 중에는 안 보임).
+// 도식 내보내기용 범례 — 도식 상단에 가로 배치 (owner 2026-05-25).
+//   기존 좌측 세로 배치 → 시설 라벨이 잘려서, 위쪽 전체 폭으로 배치.
+//   섹션(시설/케이블)이 그룹 헤더로 구분되고, 항목은 자동 줄바꿈 (보통 3 줄 이내).
 function ExportLegend({
   items,
   x,
   y,
+  width,
 }: {
   items: LegendItem[]
   x: number
   y: number
+  width: number
 }) {
-  const HEAD_H = 40 // 제목 영역
-  const ITEM_H = 36
-  const HEADER_H = 30 // 섹션 소제목 행
-  const PAD_B = 12
-  const ICON_AREA = 56
-  const FONT = 14
-  const HEADER_FONT = 12
-  const ICON_SCALE = 0.44
+  const TITLE_FONT = 22
+  const HEADER_FONT = 16
+  const FONT = 16
+  const ICON_W = 50
+  const ICON_TEXT_GAP = 6
+  const ITEM_GAP_X = 18
+  const ROW_GAP_Y = 6
+  const ROW_H = 36
+  const PAD_X = 18
+  const PAD_TOP = 38 // 제목 아래 첫 줄 시작
+  const PAD_BOTTOM = 14
+  const TITLE_GAP_X = 16
+  const HEADER_GAP_X = 16
+  const ICON_SCALE = 0.5
 
-  const itemLabelW = Math.max(
-    0,
-    ...items
-      .filter((it) => it.kind !== 'header')
-      .map((it) => estimateTextWidth(it.label, FONT)),
-  )
-  const headerLabelW = Math.max(
-    0,
-    ...items
-      .filter((it) => it.kind === 'header')
-      .map((it) => estimateTextWidth(it.label, HEADER_FONT)),
-  )
-  const W = Math.max(170, ICON_AREA + itemLabelW + 20, headerLabelW + 32)
+  // 「범례」 타이틀 폭
+  const titleW = estimateTextWidth('범례', TITLE_FONT) + TITLE_GAP_X
 
-  let cursor = HEAD_H
-  const rows = items.map((it) => {
-    const h = it.kind === 'header' ? HEADER_H : ITEM_H
-    const rowY = cursor
-    cursor += h
-    return { it, rowY, h }
-  })
-  const H = cursor + PAD_B
+  // 항목별 폭 산출
+  function itemWidth(it: LegendItem): number {
+    if (it.kind === 'header') {
+      return estimateTextWidth(it.label, HEADER_FONT) + HEADER_GAP_X
+    }
+    return ICON_W + ICON_TEXT_GAP + estimateTextWidth(it.label, FONT)
+  }
+
+  // 한 줄에 가능한 폭 = width - PAD_X*2 - titleW (첫 줄은 타이틀 차지, 둘째 이상은 전체)
+  // 단순화: 모든 줄이 동일하게 width - PAD_X*2 안에 들어가도록.
+  // 첫 줄은 타이틀 다음부터 시작.
+  const availW = Math.max(200, width - PAD_X * 2)
+  const firstRowAvailW = Math.max(200, availW - titleW)
+
+  // 행 분할 — items 순서대로 채워나감. 행 사이에 group header 는 같이 묶어 표시.
+  type Placed = { it: LegendItem; w: number }
+  const rows: Placed[][] = [[]]
+  let curRowWidth = 0
+  let curRowAvail = firstRowAvailW
+  for (const it of items) {
+    const w = itemWidth(it)
+    const need = curRowWidth === 0 ? w : ITEM_GAP_X + w
+    if (curRowWidth + need > curRowAvail && rows[rows.length - 1].length > 0) {
+      // 다음 줄
+      rows.push([])
+      curRowWidth = 0
+      curRowAvail = availW
+    }
+    rows[rows.length - 1].push({ it, w })
+    curRowWidth += need
+  }
+
+  const H = PAD_TOP + rows.length * ROW_H + (rows.length - 1) * ROW_GAP_Y + PAD_BOTTOM
+  const W = width
 
   return (
     <g transform={`translate(${x}, ${y})`} pointerEvents="none">
@@ -6795,88 +6853,113 @@ function ExportLegend({
         stroke="#94a3b8"
         strokeWidth={1.5}
       />
+      {/* 「범례」 타이틀 — 좌상단 */}
       <text
-        x={16}
-        y={27}
+        x={PAD_X}
+        y={PAD_TOP - 6}
         fill="#0f172a"
-        style={{ fontSize: 17, fontWeight: 700, fontFamily: LABEL_FONT }}
+        style={{ fontSize: TITLE_FONT, fontWeight: 800, fontFamily: LABEL_FONT }}
       >
         범례
       </text>
-      {rows.map(({ it, rowY, h }, i) => {
-        const cy = rowY + h / 2
-        if (it.kind === 'header') {
-          return (
-            <text
-              key={i}
-              x={14}
-              y={cy + HEADER_FONT * 0.36}
-              fill="#64748b"
-              style={{ fontSize: HEADER_FONT, fontWeight: 700, fontFamily: LABEL_FONT }}
-            >
-              {it.label}
-            </text>
-          )
-        }
-        const iconCx = ICON_AREA / 2
+      {/* 행별 렌더 */}
+      {rows.map((row, ri) => {
+        const cy = PAD_TOP + ri * (ROW_H + ROW_GAP_Y) + ROW_H / 2
+        // 첫 줄은 타이틀 다음부터 시작
+        let cursorX = ri === 0 ? PAD_X + titleW : PAD_X
         return (
-          <g key={i}>
-            {it.kind === 'facility' && (
-              <g
-                transform={`translate(${iconCx - (NODE_SIZE.width / 2) * ICON_SCALE}, ${cy - (NODE_SIZE.height / 2 - 10) * ICON_SCALE}) scale(${ICON_SCALE})`}
-              >
-                <FacilityShape
-                  closureType={it.closureType}
-                  isNew={it.installStatus !== 'existing'}
-                  installStatus={it.installStatus}
-                />
-              </g>
-            )}
-            {it.kind === 'cable' &&
-              (() => {
-                const s = edgeStyle(it.spec, it.status, it.installationType)
+          <g key={ri}>
+            {row.map(({ it, w }, ii) => {
+              const startX = cursorX
+              cursorX += w + ITEM_GAP_X
+              if (it.kind === 'header') {
                 return (
-                  <line
-                    x1={8}
-                    y1={cy}
-                    x2={ICON_AREA - 8}
-                    y2={cy}
-                    stroke={s.stroke}
-                    strokeWidth={s.width}
-                    strokeDasharray={s.dash}
-                    opacity={s.opacity}
-                    strokeLinecap="round"
-                  />
+                  <g key={ii}>
+                    <rect
+                      x={startX - 6}
+                      y={cy - 12}
+                      width={w}
+                      height={24}
+                      rx={4}
+                      fill="#f1f5f9"
+                    />
+                    <text
+                      x={startX}
+                      y={cy + HEADER_FONT * 0.36}
+                      fill="#475569"
+                      style={{
+                        fontSize: HEADER_FONT,
+                        fontWeight: 700,
+                        fontFamily: LABEL_FONT,
+                      }}
+                    >
+                      {it.label}
+                    </text>
+                  </g>
                 )
-              })()}
-            {it.kind === 'cutover' && (
-              <>
-                <line
-                  x1={8}
-                  y1={cy}
-                  x2={ICON_AREA - 8}
-                  y2={cy}
-                  stroke="#111827"
-                  strokeWidth={3.4}
-                  strokeLinecap="round"
-                />
-                <polygon
-                  points={burstPoints(iconCx, cy)}
-                  fill="#dc2626"
-                  stroke="white"
-                  strokeWidth={1.5}
-                  strokeLinejoin="round"
-                />
-              </>
-            )}
-            <text
-              x={ICON_AREA}
-              y={cy + FONT * 0.36}
-              fill="#1e293b"
-              style={{ fontSize: FONT, fontFamily: LABEL_FONT }}
-            >
-              {it.label}
-            </text>
+              }
+              const iconCx = startX + ICON_W / 2
+              return (
+                <g key={ii}>
+                  {it.kind === 'facility' && (
+                    <g
+                      transform={`translate(${iconCx - (NODE_SIZE.width / 2) * ICON_SCALE}, ${cy - (NODE_SIZE.height / 2 - 10) * ICON_SCALE}) scale(${ICON_SCALE})`}
+                    >
+                      <FacilityShape
+                        closureType={it.closureType}
+                        isNew={it.installStatus !== 'existing'}
+                        installStatus={it.installStatus}
+                      />
+                    </g>
+                  )}
+                  {it.kind === 'cable' &&
+                    (() => {
+                      const s = edgeStyle(it.spec, it.status, it.installationType)
+                      return (
+                        <line
+                          x1={startX + 4}
+                          y1={cy}
+                          x2={startX + ICON_W - 4}
+                          y2={cy}
+                          stroke={s.stroke}
+                          strokeWidth={s.width}
+                          strokeDasharray={s.dash}
+                          opacity={s.opacity}
+                          strokeLinecap="round"
+                        />
+                      )
+                    })()}
+                  {it.kind === 'cutover' && (
+                    <>
+                      <line
+                        x1={startX + 4}
+                        y1={cy}
+                        x2={startX + ICON_W - 4}
+                        y2={cy}
+                        stroke="#111827"
+                        strokeWidth={3.4}
+                        strokeLinecap="round"
+                      />
+                      <polygon
+                        points={burstPoints(iconCx, cy)}
+                        fill="#dc2626"
+                        stroke="white"
+                        strokeWidth={1.5}
+                        strokeLinejoin="round"
+                      />
+                    </>
+                  )}
+                  <text
+                    x={startX + ICON_W + ICON_TEXT_GAP}
+                    y={cy + FONT * 0.36}
+                    fill="#1e293b"
+                    style={{ fontSize: FONT, fontFamily: LABEL_FONT }}
+                  >
+                    {it.label}
+                  </text>
+                </g>
+              )
+            })}
           </g>
         )
       })}
