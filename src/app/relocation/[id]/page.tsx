@@ -74,6 +74,44 @@ const TABS: { id: TabId; label: string; icon: typeof Cable }[] = [
   { id: 'export', label: '내보내기', icon: Download },
 ]
 
+// 카테고리별 권장 테마 (목록 페이지와 동일 톤 — 일관성)
+type DetailTheme = {
+  pageBg: string
+  headerAccent: string // border-l-4 + color
+  tabActive: string // active tab bg
+  navBg: string // sticky tab bar bg (반투명)
+}
+const CATEGORY_DETAIL_THEME: Record<RelocationCategory, DetailTheme> = {
+  청약: {
+    pageBg: 'bg-emerald-50/30',
+    headerAccent: 'border-l-4 border-emerald-500',
+    tabActive: 'bg-emerald-600 text-white',
+    navBg: 'bg-emerald-50/80',
+  },
+  계획: {
+    pageBg: 'bg-blue-50/30',
+    headerAccent: 'border-l-4 border-blue-500',
+    tabActive: 'bg-blue-600 text-white',
+    navBg: 'bg-blue-50/80',
+  },
+  지장이설: {
+    pageBg: 'bg-amber-50/30',
+    headerAccent: 'border-l-4 border-amber-500',
+    tabActive: 'bg-amber-600 text-white',
+    navBg: 'bg-amber-50/80',
+  },
+}
+
+// 프로젝트 상태별 배지 색
+const PROJECT_STATUS_BADGE: Record<string, string> = {
+  설계중: 'bg-slate-100 text-slate-700 border border-slate-200',
+  검증중: 'bg-amber-100 text-amber-800 border border-amber-200',
+  확정: 'bg-blue-100 text-blue-800 border border-blue-200',
+  시공중: 'bg-emerald-100 text-emerald-800 border border-emerald-200',
+  완료: 'bg-indigo-100 text-indigo-800 border border-indigo-200',
+  취소: 'bg-rose-100 text-rose-700 border border-rose-200',
+}
+
 function isTabId(v: string): v is TabId {
   return TABS.some((t) => t.id === v)
 }
@@ -401,7 +439,12 @@ export default async function RelocationProjectPage({
 
   const topPanel = (
     <div className="mx-auto max-w-6xl px-4 sm:px-6 pt-3 sm:pt-4 space-y-3 lg:space-y-2">
-      <header>
+      <header
+        className={
+          'rounded-xl bg-white px-3 py-2.5 lg:px-4 lg:py-3 shadow-sm ' +
+          CATEGORY_DETAIL_THEME[projectCategory].headerAccent
+        }
+      >
           <Link
             href={`/relocation/category/${projectCategorySlug}`}
             className="inline-flex items-center gap-1 text-xs lg:text-[11px] text-slate-500 hover:text-slate-900"
@@ -447,7 +490,13 @@ export default async function RelocationProjectPage({
                 <ExternalLink className="h-3 w-3" />
                 넓은 화면으로 열기
               </Link>
-              <span className="inline-flex items-center rounded-full bg-slate-900 px-2 py-0.5 text-xs font-medium text-white">
+              <span
+                className={
+                  'inline-flex items-center rounded-full px-2 py-0.5 text-xs font-medium ' +
+                  (PROJECT_STATUS_BADGE[project.status] ??
+                    'bg-slate-100 text-slate-700 border border-slate-200')
+                }
+              >
                 {project.status}
               </span>
             </div>
@@ -485,8 +534,13 @@ export default async function RelocationProjectPage({
 
   const tabPanel = (
     <div className="mx-auto max-w-6xl px-4 sm:px-6 space-y-5 py-3">
-        {/* 탭 바 */}
-        <nav className="sticky top-0 z-10 -mx-4 sm:-mx-6 bg-slate-50/80 backdrop-blur border-b border-slate-200">
+        {/* 탭 바 — 카테고리 색 적용 (active = 카테고리 컬러) */}
+        <nav
+          className={
+            'sticky top-0 z-10 -mx-4 sm:-mx-6 backdrop-blur border-b border-slate-200 ' +
+            CATEGORY_DETAIL_THEME[projectCategory].navBg
+          }
+        >
           <div className="mx-auto max-w-6xl px-4 sm:px-6 flex overflow-x-auto gap-1 py-2">
             {TABS.map((t) => {
               const Icon = t.icon
@@ -498,7 +552,9 @@ export default async function RelocationProjectPage({
                   href={`/relocation/${id}?tab=${t.id}`}
                   className={
                     'inline-flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-sm font-medium shrink-0 ' +
-                    (active ? 'bg-slate-900 text-white' : 'text-slate-600 hover:bg-slate-200')
+                    (active
+                      ? CATEGORY_DETAIL_THEME[projectCategory].tabActive
+                      : 'text-slate-600 hover:bg-white/60')
                   }
                 >
                   <Icon className="h-4 w-4" />
@@ -1073,7 +1129,7 @@ export default async function RelocationProjectPage({
   )
 
   return (
-    <main className="min-h-screen pb-6">
+    <main className={'min-h-screen pb-6 ' + CATEGORY_DETAIL_THEME[projectCategory].pageBg}>
       <HighlightProvider>
         <RealtimeSync projectId={id} selfEmployeeId={me.id} selfName={me.name} />
         <div className="mx-auto max-w-6xl px-4 pt-3 sm:px-6">
