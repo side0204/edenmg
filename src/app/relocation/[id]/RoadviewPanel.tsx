@@ -49,15 +49,33 @@ export default function RoadviewPanel({
     return DEFAULT_W
   })
   // 화면 회전·창 크기 변경 시 폭이 viewport - MIN_W 을 넘으면 자동 축소 (지도가 안 보이지 않게)
-  // 추가 (owner 2026-05-25): 화면 공유 「공유 중」 배너로 인한 viewport 축소 시
-  //   Roadview SDK 가 내부 캔버스를 재배치하지 않아 panorama 가 어긋남.
-  //   resize 후 relayout() 명시 호출 + ResizeObserver 로 컨테이너 크기 변화도 감지.
+  // 추가 (owner 2026-05-25): 「공유 중」 배너로 viewport 축소 시 Roadview SDK 가
+  //   container 높이 변화를 보정하면서 **viewpoint(pan/tilt) 를 자동으로 흔드는**
+  //   현상이 있음 (owner 보고: "마우스로 살짝 위로 끌어올린 것 같이 건물이 위로").
+  //   해결: relayout 전후로 viewpoint·position 을 저장·복원해 SDK 자동 조정 무효화.
   useEffect(() => {
     function relayoutRoadview() {
       const rv = roadviewRef.current
       if (!rv) return
       try {
+        // 1) 현재 시점·위치 저장
+        const vp = typeof rv.getViewpoint === 'function' ? rv.getViewpoint() : null
+        // 2) layout 재계산 (SDK 가 이때 viewpoint 를 흔들 수 있음)
         rv.relayout()
+        // 3) 다음 프레임에 시점 복원 (relayout 직후 setViewpoint 는 SDK 가 무시하는 경우 있음)
+        if (vp) {
+          requestAnimationFrame(() => {
+            try {
+              rv.setViewpoint(vp)
+            } catch {}
+          })
+          // relayout 비동기 케이스 대비 한 번 더
+          setTimeout(() => {
+            try {
+              rv.setViewpoint(vp)
+            } catch {}
+          }, 200)
+        }
       } catch {}
     }
     function onResize() {

@@ -68,11 +68,20 @@ declare namespace kakao.maps {
 
   // ===== Roadview (거리뷰) =================================================
   // Roadview = panorama 표시 객체 · RoadviewClient = 좌표 ↔ panorama 검색
+  interface RoadviewViewpoint {
+    pan: number
+    tilt: number
+    zoom: number
+  }
   class Roadview {
     constructor(container: HTMLElement)
     // panorama 표시. position 은 거리뷰의 「관점 위치」 (panoId 가 있는 도로 위 좌표).
     setPanoId(panoId: number, position: LatLng): void
     relayout(): void
+    // 시점(pan/tilt/zoom). relayout 전후 저장·복원해 「공유 중」 배너 layout shift 시
+    //   SDK 의 viewpoint 자동 흔들림 방지 (owner 2026-05-25).
+    getViewpoint(): RoadviewViewpoint
+    setViewpoint(viewpoint: RoadviewViewpoint): void
   }
   class RoadviewClient {
     constructor()
