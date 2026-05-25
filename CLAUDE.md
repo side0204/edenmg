@@ -706,6 +706,16 @@ owner 모바일 스크린샷 보고: `/vehicles` 헤더에서 "업무용 차량"
 - **적용 (10개 페이지)**: `/vehicles` · `/admin/employees` · `/admin/sites` · `/admin/facilities` · `/admin/materials` · `/admin/cables` · `/works` · `/works/[id]` · `/requests` · `/vehicles/trips`
 - **신규 페이지 작성 시**: 큰 제목(`text-2xl` 이상) + 우측 버튼 조합이면 처음부터 모바일 stack 패턴으로 시작. mobile_ux_patterns 메모리에 「8. 모바일 헤더 가로 강제」 로 기록.
 
+### ✅ 완료 (청약 폼 보강 — 준공예정일·작업자배정, 2026-05-25)
+
+owner 요구 (0066 후속): 청약 카테고리 폼에서 「지역」 제거, 「공사계약일」 옆에 「준공예정일」 추가, 「작업자배정」 외선/접속 구분 입력.
+
+- **마이그** [`0067_relocation_subscription_fields_v2.sql`](./supabase/migrations/0067_relocation_subscription_fields_v2.sql): `expected_completion_at date` (준공예정일) + `outside_workers text` (외선 작업자) + `splice_workers text` (접속 작업자). 모두 nullable
+- **server action** ([`src/app/relocation/actions.ts`](./src/app/relocation/actions.ts)): `parseProjectForm` 에 3 필드 추가. 청약 외 카테고리는 null 저장
+- **/relocation/new** + **/relocation/[id]** (편집): 청약 카테고리 분기 — 청약 폼에서 「지역」 row 숨기고, 공사계약일·준공예정일 2 열 + 작업자배정(외선·접속) 2 열 추가. 계획·지장이설 카테고리는 지역+공사계약일 그대로
+- **작업자 입력 방식**: 자유 텍스트 (콤마 구분). 풀 employee picker 는 추후 — MVP 우선
+- **「지역」 DB 컬럼**: 그대로 유지. 청약 외 카테고리 + 기존 청약 데이터 보존
+
 ### ✅ 완료 (청약 카테고리 전용 폼 + PC 컴팩트 모드, 2026-05-25)
 
 owner 요구: 「청약 설계」 새 프로젝트 생성 폼에서 「프로젝트 제목」 → 「청약명」 으로 변경 + 청약 전용 8 필드 (청약ID·가입자명·가입자 주소·하위국 연락처·하위국 담당자·청약일·개통희망일·공사번호) 추가. PC 화면 글자 크기 3/4 축소 + 폼 입력 간격 줄여 풀HD 한 화면에 다 보이도록.
@@ -1106,6 +1116,7 @@ owner 요구: "어느 메뉴를 많이 쓰는지" 페이지 단위 분석. 접�
   - [`0064_relocation_inspection_facility_type.sql`](./supabase/migrations/0064_relocation_inspection_facility_type.sql) — `relocation_closure_type` enum 에 '실사정보' 추가. 캔버스 실사 도구바 「실사정보입력」 버튼으로 임의 위치에 즉시 시설 배치 (이름 자동 「실사{seq}」, 빨간 원 + 흰 'i' + 펄스 후광 도형, 정보 패널은 비고 + 첨부 사진만 표시)
   - [`0065_relocation_project_category.sql`](./supabase/migrations/0065_relocation_project_category.sql) — 공사 설계 카테고리: `relocation_projects.category text not null default '지장이설'` + CHECK(청약·계획·지장이설) + (company_id, category) 인덱스. 「공사 설계」 진입 시 3 카테고리 허브로 분기
   - [`0066_relocation_subscription_fields.sql`](./supabase/migrations/0066_relocation_subscription_fields.sql) — 청약 카테고리 전용 8 컬럼 (subscription_id·subscriber_name·subscriber_address·branch_contact·branch_manager·subscribed_at·desired_open_at·order_no) + order_no partial 인덱스
+  - [`0067_relocation_subscription_fields_v2.sql`](./supabase/migrations/0067_relocation_subscription_fields_v2.sql) — 청약 폼 보강: `expected_completion_at` (준공예정일) + `outside_workers` (외선) + `splice_workers` (접속)
 - **외선일보 별도 entity (v2)** — 접속일보와 동일 패턴으로 외선팀 전용 모듈. 외선 작업 특성(케이블 포설구간·전주번호 등)에 맞는 구조 별도 설계.
 - **접속일보 후속 (v2)** — segment-level 작업자 태그, 사진 첨부 + EXIF, 국사·함체 마스터 테이블화, 재접속 이력 조회, 지도 시각화
 - **M3 Phase 2 후속** — 사진 첨부 + EXIF·워터마크 (PRD M3-06), 일보 결재함 통합 (현재는 작업 상세에서 진입), 일반 일보 월별 CSV 리포트

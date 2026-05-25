@@ -109,6 +109,9 @@ type ProjectFormParsed = {
   subscribed_at: string | null
   desired_open_at: string | null
   order_no: string | null
+  expected_completion_at: string | null
+  outside_workers: string | null
+  splice_workers: string | null
 }
 
 function parseDate(v: string): string | null {
@@ -150,6 +153,9 @@ function parseProjectForm(formData: FormData): ProjectFormParsed {
     subscribed_at: pickDate('subscribed_at'),
     desired_open_at: pickDate('desired_open_at'),
     order_no: pick('order_no'),
+    expected_completion_at: pickDate('expected_completion_at'),
+    outside_workers: pick('outside_workers'),
+    splice_workers: pick('splice_workers'),
   }
 }
 

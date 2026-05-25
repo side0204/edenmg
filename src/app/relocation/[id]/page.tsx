@@ -99,6 +99,9 @@ type ProjectRow = {
   subscribed_at: string | null
   desired_open_at: string | null
   order_no: string | null
+  expected_completion_at: string | null
+  outside_workers: string | null
+  splice_workers: string | null
 }
 
 type EmployeeMini = { id: string; name: string | null }
@@ -136,7 +139,7 @@ export default async function RelocationProjectPage({
   const { data: pRow } = await supabase
     .from('relocation_projects')
     .select(
-      'id, company_id, title, category, client, region, surveyed_at, designer_id, status, notes, created_at, updated_at, subscription_id, subscriber_name, subscriber_address, branch_contact, branch_manager, subscribed_at, desired_open_at, order_no',
+      'id, company_id, title, category, client, region, surveyed_at, designer_id, status, notes, created_at, updated_at, subscription_id, subscriber_name, subscriber_address, branch_contact, branch_manager, subscribed_at, desired_open_at, order_no, expected_completion_at, outside_workers, splice_workers',
     )
     .eq('id', id)
     .maybeSingle()
@@ -742,30 +745,80 @@ export default async function RelocationProjectPage({
                     />
                   </div>
                 </div>
+                <div className="grid gap-3 sm:grid-cols-2">
+                  <div>
+                    <label className="block text-sm font-medium text-slate-700">공사계약일</label>
+                    <input
+                      type="date"
+                      name="surveyed_at"
+                      defaultValue={project.surveyed_at ?? ''}
+                      className="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2 text-base"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-sm font-medium text-slate-700">준공예정일</label>
+                    <input
+                      type="date"
+                      name="expected_completion_at"
+                      defaultValue={project.expected_completion_at ?? ''}
+                      className="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2 text-base"
+                    />
+                  </div>
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-slate-700">작업자배정</label>
+                  <div className="mt-1 grid gap-3 sm:grid-cols-2">
+                    <div>
+                      <label className="block text-xs text-slate-500">외선</label>
+                      <input
+                        type="text"
+                        name="outside_workers"
+                        defaultValue={project.outside_workers ?? ''}
+                        maxLength={300}
+                        placeholder="이름 (콤마로 구분)"
+                        className="mt-0.5 w-full rounded-lg border border-slate-300 px-3 py-2 text-base"
+                      />
+                    </div>
+                    <div>
+                      <label className="block text-xs text-slate-500">접속</label>
+                      <input
+                        type="text"
+                        name="splice_workers"
+                        defaultValue={project.splice_workers ?? ''}
+                        maxLength={300}
+                        placeholder="이름 (콤마로 구분)"
+                        className="mt-0.5 w-full rounded-lg border border-slate-300 px-3 py-2 text-base"
+                      />
+                    </div>
+                  </div>
+                </div>
               </>
             )}
 
-            <div className="grid gap-3 sm:grid-cols-2">
-              <div>
-                <label className="block text-sm font-medium text-slate-700">지역</label>
-                <input
-                  type="text"
-                  name="region"
-                  defaultValue={project.region ?? ''}
-                  maxLength={100}
-                  className="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2 text-base"
-                />
+            {/* 계획·지장이설 카테고리: 지역 + 공사계약일 */}
+            {!isSubscriptionProject && (
+              <div className="grid gap-3 sm:grid-cols-2">
+                <div>
+                  <label className="block text-sm font-medium text-slate-700">지역</label>
+                  <input
+                    type="text"
+                    name="region"
+                    defaultValue={project.region ?? ''}
+                    maxLength={100}
+                    className="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2 text-base"
+                  />
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-slate-700">공사계약일</label>
+                  <input
+                    type="date"
+                    name="surveyed_at"
+                    defaultValue={project.surveyed_at ?? ''}
+                    className="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2 text-base"
+                  />
+                </div>
               </div>
-              <div>
-                <label className="block text-sm font-medium text-slate-700">공사계약일</label>
-                <input
-                  type="date"
-                  name="surveyed_at"
-                  defaultValue={project.surveyed_at ?? ''}
-                  className="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2 text-base"
-                />
-              </div>
-            </div>
+            )}
 
             <div>
               <label className="block text-sm font-medium text-slate-700">상태</label>

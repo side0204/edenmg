@@ -212,19 +212,63 @@ export default async function NewRelocationProjectPage({
                   <input type="date" name="desired_open_at" className={INPUT} />
                 </div>
               </div>
+
+              <div className="grid gap-3 lg:gap-2 lg:grid-cols-2">
+                <div>
+                  <label className={LABEL}>공사계약일</label>
+                  <input type="date" name="surveyed_at" className={INPUT} />
+                </div>
+                <div>
+                  <label className={LABEL}>준공예정일</label>
+                  <input type="date" name="expected_completion_at" className={INPUT} />
+                </div>
+              </div>
+
+              <div>
+                <label className={LABEL}>작업자배정</label>
+                <div className="mt-1 grid gap-3 lg:gap-2 lg:grid-cols-2">
+                  <div>
+                    <label className="block text-xs text-slate-500 lg:text-[10px]">
+                      외선
+                    </label>
+                    <input
+                      type="text"
+                      name="outside_workers"
+                      maxLength={300}
+                      placeholder="이름 (콤마로 구분)"
+                      className={INPUT + ' mt-0.5'}
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-xs text-slate-500 lg:text-[10px]">
+                      접속
+                    </label>
+                    <input
+                      type="text"
+                      name="splice_workers"
+                      maxLength={300}
+                      placeholder="이름 (콤마로 구분)"
+                      className={INPUT + ' mt-0.5'}
+                    />
+                  </div>
+                </div>
+              </div>
             </>
           )}
 
-          <div className="grid gap-3 lg:gap-2 lg:grid-cols-2">
-            <div>
-              <label className={LABEL}>지역</label>
-              <input type="text" name="region" maxLength={100} className={INPUT} />
+          {/* 계획·지장이설 카테고리: 지역 + 공사계약일 */}
+          {!isSubscription && (
+            <div className="grid gap-3 lg:gap-2 lg:grid-cols-2">
+              <div>
+                <label className={LABEL}>지역</label>
+                <input type="text" name="region" maxLength={100} className={INPUT} />
+              </div>
+              <div>
+                <label className={LABEL}>공사계약일</label>
+                <input type="date" name="surveyed_at" className={INPUT} />
+              </div>
             </div>
-            <div>
-              <label className={LABEL}>공사계약일</label>
-              <input type="date" name="surveyed_at" className={INPUT} />
-            </div>
-          </div>
+          )}
 
           <div className="grid gap-3 lg:gap-2 lg:grid-cols-2">
             <div>
