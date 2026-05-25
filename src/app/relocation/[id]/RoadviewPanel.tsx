@@ -49,13 +49,37 @@ export default function RoadviewPanel({
     return DEFAULT_W
   })
   // 화면 회전·창 크기 변경 시 폭이 viewport - MIN_W 을 넘으면 자동 축소 (지도가 안 보이지 않게)
+  // 추가 (owner 2026-05-25): 화면 공유 「공유 중」 배너로 인한 viewport 축소 시
+  //   Roadview SDK 가 내부 캔버스를 재배치하지 않아 panorama 가 어긋남.
+  //   resize 후 relayout() 명시 호출 + ResizeObserver 로 컨테이너 크기 변화도 감지.
   useEffect(() => {
+    function relayoutRoadview() {
+      const rv = roadviewRef.current
+      if (!rv) return
+      try {
+        rv.relayout()
+      } catch {}
+    }
     function onResize() {
       const vw = window.innerWidth
       setWidth((w) => Math.min(w, Math.max(MIN_W, vw - 200)))
+      // banner 안정화까지 한 박자 + 한번 더 (한 번이 누락되는 케이스 대비)
+      requestAnimationFrame(relayoutRoadview)
+      setTimeout(relayoutRoadview, 600)
     }
     window.addEventListener('resize', onResize)
-    return () => window.removeEventListener('resize', onResize)
+    // 컨테이너 크기 직접 감지 — width state 변화나 부모 layout shift 시 모두 잡힘
+    let ro: ResizeObserver | null = null
+    if (typeof ResizeObserver !== 'undefined' && containerRef.current) {
+      ro = new ResizeObserver(() => {
+        requestAnimationFrame(relayoutRoadview)
+      })
+      ro.observe(containerRef.current)
+    }
+    return () => {
+      window.removeEventListener('resize', onResize)
+      ro?.disconnect()
+    }
   }, [])
   const resizeRef = useRef<{ startX: number; startW: number } | null>(null)
 
