@@ -50,41 +50,68 @@ export default function RoadviewPanel({
   })
   // viewpoint 락 — 캡처 동안 SDK 의 자동 viewpoint 조정 봉쇄.
   //   FieldInspectionSaveDialog 가 캡처 시작 전 window 이벤트로 신호.
+  // 무한 루프 방지 (owner 보고 2026-05-25 세 번째 — 페이지 응답없음):
+  //   SDK 가 한 번의 setViewpoint 에 대해 viewpoint_changed 를 여러 번 발화하면
+  //   guarding flag 가 동기적으로 false 가 되어 다시 setViewpoint → 다시 이벤트 →
+  //   동기 루프. **rAF 코얼레싱 + 목표값 도달 시 no-op** 로 루프 자체를 차단.
   const lockRef = useRef<{
     active: boolean
     vp: kakao.maps.RoadviewViewpoint | null
-    guarding: boolean // setViewpoint 가 또 viewpoint_changed 를 트리거할 때 무한루프 방지
-  }>({ active: false, vp: null, guarding: false })
+    pending: boolean
+  }>({ active: false, vp: null, pending: false })
+
+  // 락 활성 시 목표 viewpoint 로 복원 — rAF 안에서 한 번만, 이미 목표면 no-op
+  function scheduleViewpointRestore() {
+    const lock = lockRef.current
+    if (!lock.active || !lock.vp || lock.pending) return
+    lock.pending = true
+    requestAnimationFrame(() => {
+      lock.pending = false
+      const cur = lockRef.current
+      if (!cur.active || !cur.vp) return
+      const rv = roadviewRef.current
+      if (!rv) return
+      try {
+        const current =
+          typeof rv.getViewpoint === 'function' ? rv.getViewpoint() : null
+        if (!current) return
+        const dPan = Math.abs(current.pan - cur.vp.pan)
+        const dTilt = Math.abs(current.tilt - cur.vp.tilt)
+        const dZoom = Math.abs(current.zoom - cur.vp.zoom)
+        // 이미 목표 → setViewpoint 호출 안 함 (루프 방지)
+        if (dPan < 0.1 && dTilt < 0.1 && dZoom < 0.05) return
+        rv.setViewpoint(cur.vp)
+      } catch {}
+    })
+  }
 
   // 화면 회전·창 크기 변경 시 폭이 viewport - MIN_W 을 넘으면 자동 축소 (지도가 안 보이지 않게)
-  // 추가 (owner 2026-05-25 두 번째 보고): viewpoint 단순 저장·복원으로는 SDK 가
-  //   비동기로 한 번 더 viewpoint 를 흔드는 케이스를 잡지 못함. viewpoint_changed
-  //   이벤트를 캡처 동안 잡아서 lock 된 viewpoint 로 즉시 되돌린다.
+  // 추가 (owner 2026-05-25): 「공유 중」 배너로 viewport 축소 시 Roadview SDK 가
+  //   container 높이 변화를 보정하면서 viewpoint(pan/tilt) 를 자동으로 흔드는
+  //   현상이 있음. 락 활성 중에는 scheduleViewpointRestore 로 안전하게 되돌림.
   useEffect(() => {
     function relayoutRoadview() {
       const rv = roadviewRef.current
       if (!rv) return
       try {
         const lock = lockRef.current
-        const vp =
-          lock.active && lock.vp
-            ? lock.vp
-            : typeof rv.getViewpoint === 'function'
-              ? rv.getViewpoint()
-              : null
+        // 락 없을 땐 단순 저장·복원 1회 (rAF). 락 있을 땐 scheduleViewpointRestore 가 처리.
+        const savedVp =
+          !lock.active && typeof rv.getViewpoint === 'function'
+            ? rv.getViewpoint()
+            : null
         rv.relayout()
-        if (vp) {
-          // 락 중에는 다중 프레임에서 setViewpoint — SDK 가 늦게 흔드는 케이스 차단
-          const restore = () => {
+        if (lock.active) {
+          scheduleViewpointRestore()
+          // SDK 가 늦게 흔드는 케이스 대비 — 한 박자 + 두 박자 후 다시 시도
+          setTimeout(scheduleViewpointRestore, 200)
+          setTimeout(scheduleViewpointRestore, 700)
+        } else if (savedVp) {
+          requestAnimationFrame(() => {
             try {
-              lock.guarding = true
-              rv.setViewpoint(vp)
+              rv.setViewpoint(savedVp)
             } catch {}
-          }
-          requestAnimationFrame(restore)
-          setTimeout(restore, 100)
-          setTimeout(restore, 400)
-          setTimeout(restore, 900)
+          })
         }
       } catch {}
     }
@@ -95,7 +122,6 @@ export default function RoadviewPanel({
       setTimeout(relayoutRoadview, 600)
     }
     window.addEventListener('resize', onResize)
-    // 컨테이너 크기 직접 감지 — width state 변화나 부모 layout shift 시 모두 잡힘
     let ro: ResizeObserver | null = null
     if (typeof ResizeObserver !== 'undefined' && containerRef.current) {
       ro = new ResizeObserver(() => {
@@ -110,21 +136,10 @@ export default function RoadviewPanel({
   }, [])
 
   // viewpoint 락 — window 커스텀 이벤트로 외부에서 활성화·해제.
-  //   캡처 중 SDK 가 viewpoint 를 흔들면 즉시 lock 된 값으로 되돌린다.
+  //   캡처 중 SDK 가 viewpoint 를 흔들면 rAF 안에서 안전하게 되돌린다 (루프 차단).
   useEffect(() => {
     function viewpointGuard() {
-      const lock = lockRef.current
-      const rv = roadviewRef.current
-      if (!lock.active || !lock.vp || !rv) return
-      if (lock.guarding) {
-        // 우리가 부른 setViewpoint 의 echo — 무시
-        lock.guarding = false
-        return
-      }
-      try {
-        lock.guarding = true
-        rv.setViewpoint(lock.vp)
-      } catch {}
+      scheduleViewpointRestore()
     }
     function onLock() {
       const rv = roadviewRef.current
@@ -132,13 +147,13 @@ export default function RoadviewPanel({
       try {
         const vp = typeof rv.getViewpoint === 'function' ? rv.getViewpoint() : null
         if (!vp) return
-        lockRef.current = { active: true, vp, guarding: false }
+        lockRef.current = { active: true, vp, pending: false }
         kakao.maps.event.addListener(rv, 'viewpoint_changed', viewpointGuard)
       } catch {}
     }
     function onUnlock() {
       const rv = roadviewRef.current
-      lockRef.current = { active: false, vp: null, guarding: false }
+      lockRef.current = { active: false, vp: null, pending: false }
       if (rv) {
         try {
           kakao.maps.event.removeListener(rv, 'viewpoint_changed', viewpointGuard)
