@@ -311,6 +311,32 @@ export function SubscriptionProjectsTable({
     rowHover: 'hover:bg-slate-50',
     cardBorder: '',
   }
+  // 카테고리별 선택 행 강조 색 (hover 보다 진한 톤 + 좌측 인디케이터)
+  const selectedRowBg: Record<Cat, string> = {
+    청약: 'bg-emerald-100/80',
+    계획: 'bg-blue-100/80',
+    지장이설: 'bg-amber-100/80',
+  }
+  const selectedIndicator: Record<Cat, string> = {
+    청약: 'shadow-[inset_3px_0_0_0_rgb(16,185,129)]',
+    계획: 'shadow-[inset_3px_0_0_0_rgb(59,130,246)]',
+    지장이설: 'shadow-[inset_3px_0_0_0_rgb(245,158,11)]',
+  }
+  // 마지막 선택 행 — 디테일 보고 돌아와도 어떤 행을 봤는지 보이게 sessionStorage 에 저장
+  const [selectedRowId, setSelectedRowId] = useState<string | null>(null)
+  useEffect(() => {
+    if (typeof window === 'undefined') return
+    try {
+      const saved = window.sessionStorage.getItem(`relocation:selected:${category}`)
+      if (saved) setSelectedRowId(saved)
+    } catch {}
+  }, [category])
+  const recordSelection = (id: string) => {
+    setSelectedRowId(id)
+    try {
+      window.sessionStorage.setItem(`relocation:selected:${category}`, id)
+    } catch {}
+  }
   const [prefs, setPrefs] = useState<Prefs>(() => normalizePrefs(category, initialPrefs))
   const [settingsOpen, setSettingsOpen] = useState(false)
   // 다중 검색 (최대 4개, AND 필터). 각 entry 는 컬럼 선택 + 텍스트 OR 날짜 from~to.
@@ -815,9 +841,12 @@ export function SubscriptionProjectsTable({
               <Link
                 key={row.id}
                 href={`/relocation/${row.id}`}
+                onClick={() => recordSelection(row.id)}
                 className={
-                  'block rounded-lg border border-slate-200 bg-white p-3 active:bg-slate-50 ' +
-                  t.cardBorder
+                  'block rounded-lg border p-3 active:bg-slate-50 ' +
+                  (selectedRowId === row.id
+                    ? `border-slate-300 ${selectedRowBg[category]} ${selectedIndicator[category]}`
+                    : 'border-slate-200 bg-white ' + t.cardBorder)
                 }
               >
                 <div className="flex items-start justify-between gap-2">
@@ -953,21 +982,35 @@ export function SubscriptionProjectsTable({
                 </td>
               </tr>
             ) : (
-              filteredRows.map((row) => (
-                <tr key={row.id} className={'border-t border-slate-100 ' + t.rowHover}>
-                  {visibleColumns.map((col, idx) => (
-                    <td
-                      key={col.id}
-                      className={
-                        'border-r border-slate-200 px-2 py-1 align-top overflow-hidden ' +
-                        (idx === 0 ? 'sticky left-0 bg-white z-10' : '')
-                      }
-                    >
-                      {renderCell(row, col.id)}
-                    </td>
-                  ))}
-                </tr>
-              ))
+              filteredRows.map((row) => {
+                const isSelected = selectedRowId === row.id
+                const rowBg = isSelected ? selectedRowBg[category] : ''
+                return (
+                  <tr
+                    key={row.id}
+                    onClick={() => recordSelection(row.id)}
+                    className={
+                      'border-t border-slate-100 cursor-pointer ' +
+                      t.rowHover +
+                      (isSelected ? ' ' + rowBg + ' ' + selectedIndicator[category] : '')
+                    }
+                  >
+                    {visibleColumns.map((col, idx) => (
+                      <td
+                        key={col.id}
+                        className={
+                          'border-r border-slate-200 px-2 py-1 align-top overflow-hidden ' +
+                          (idx === 0
+                            ? 'sticky left-0 z-10 ' + (isSelected ? rowBg : 'bg-white')
+                            : '')
+                        }
+                      >
+                        {renderCell(row, col.id)}
+                      </td>
+                    ))}
+                  </tr>
+                )
+              })
             )}
           </tbody>
         </table>
