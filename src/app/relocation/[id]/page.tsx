@@ -674,15 +674,25 @@ export default async function RelocationProjectPage({
 
   const bottomPanel = (
     <div className="mx-auto max-w-6xl px-4 sm:px-6">
-        {/* 프로젝트 메타 편집 + 삭제 */}
+        {/* 프로젝트 메타 편집 + 삭제 — PC(lg+) 에서는 컴팩트 모드 (글자·간격 축소) */}
         <details className="rounded-2xl bg-white shadow-sm border border-slate-200">
-          <summary className="flex cursor-pointer list-none items-center gap-2 rounded-2xl px-6 py-4 text-base font-semibold tracking-tight text-slate-900 hover:bg-slate-50">
-            <Settings className="h-4 w-4 text-slate-500" />
+          <summary className="flex cursor-pointer list-none items-center gap-2 rounded-2xl px-6 py-4 lg:px-4 lg:py-2.5 text-base lg:text-sm font-semibold tracking-tight text-slate-900 hover:bg-slate-50">
+            <Settings className="h-4 w-4 lg:h-3.5 lg:w-3.5 text-slate-500" />
             프로젝트 정보·설정
           </summary>
-          <div className="space-y-4 px-6 pb-6">
+          <div className="space-y-4 lg:space-y-2 px-6 pb-6 lg:px-4 lg:pb-3">
 
-          <form action={updateProject} className="space-y-3">
+          {/* lg+ 에서 descendant 글자·padding 일괄 축소 (arbitrary variant) */}
+          <form
+            action={updateProject}
+            className="space-y-3 lg:space-y-1.5
+              lg:[&_label]:text-[11px]
+              lg:[&_input]:text-xs lg:[&_input]:py-1 lg:[&_input]:px-2 lg:[&_input]:mt-0.5
+              lg:[&_select]:text-xs lg:[&_select]:py-1 lg:[&_select]:px-2 lg:[&_select]:mt-0.5
+              lg:[&_textarea]:text-xs lg:[&_textarea]:py-1 lg:[&_textarea]:px-2 lg:[&_textarea]:mt-0.5
+              lg:[&_p]:text-[10px]
+              lg:[&_.grid]:gap-2"
+          >
             <input type="hidden" name="id" value={project.id} />
 
             <div>
