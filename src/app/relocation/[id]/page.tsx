@@ -34,6 +34,13 @@ import RealtimeSync from './RealtimeSync'
 import { loadRelocationCanvasData } from './canvas-data'
 import VerifyTab from './VerifyTab'
 import { runVerification } from '@/lib/relocation-verify'
+import {
+  RELOCATION_CATEGORY_LABEL,
+  RELOCATION_CATEGORY_SLUG,
+  RELOCATION_CATEGORY_VALUES,
+  isRelocationCategory,
+  type RelocationCategory,
+} from '@/lib/relocation'
 import PhasesTab, { type PhaseRow, type PhaseTaskRow } from './PhasesTab'
 import ExportTab from './ExportTab'
 import SpliceTab, { type SpliceRow } from './SpliceTab'
@@ -74,6 +81,7 @@ type ProjectRow = {
   id: string
   company_id: string
   title: string
+  category: string
   client: string
   region: string | null
   surveyed_at: string | null
@@ -119,12 +127,18 @@ export default async function RelocationProjectPage({
   const { data: pRow } = await supabase
     .from('relocation_projects')
     .select(
-      'id, company_id, title, client, region, surveyed_at, designer_id, status, notes, created_at, updated_at',
+      'id, company_id, title, category, client, region, surveyed_at, designer_id, status, notes, created_at, updated_at',
     )
     .eq('id', id)
     .maybeSingle()
   const project = pRow as ProjectRow | null
   if (!project) notFound()
+
+  const projectCategory: RelocationCategory = isRelocationCategory(project.category)
+    ? project.category
+    : '지장이설'
+  const projectCategorySlug = RELOCATION_CATEGORY_SLUG[projectCategory]
+  const projectCategoryLabel = RELOCATION_CATEGORY_LABEL[projectCategory]
 
   // 설계자 이름 · 캔버스 공통 데이터 · 접속 · 스플리터 · 차수 · (조건부) 이전 이력 일괄 병렬.
   //   page.tsx 의 router.refresh 체감 속도를 결정 — 직렬이면 합산 4~5초.
@@ -331,11 +345,11 @@ export default async function RelocationProjectPage({
     <div className="mx-auto max-w-6xl px-4 sm:px-6 pt-4 sm:pt-6 space-y-5">
       <header>
           <Link
-            href="/relocation"
+            href={`/relocation/category/${projectCategorySlug}`}
             className="inline-flex items-center gap-1 text-sm text-slate-500 hover:text-slate-900"
           >
             <ChevronLeft className="h-4 w-4" />
-            지장이설 목록
+            {projectCategoryLabel} 목록
           </Link>
           <div className="mt-1 space-y-2 sm:space-y-0 sm:flex sm:items-start sm:justify-between sm:gap-3">
             <div className="min-w-0">
@@ -343,7 +357,7 @@ export default async function RelocationProjectPage({
                 {project.title}
               </h1>
               <p className="mt-1 text-sm text-slate-500">
-                {project.client} · {project.region ?? '지역 미정'}
+                {projectCategoryLabel} · {project.client} · {project.region ?? '지역 미정'}
                 {project.surveyed_at && ` · 계약 ${project.surveyed_at}`}
                 {designerName && ` · 설계자 ${designerName}`}
               </p>
@@ -602,6 +616,21 @@ export default async function RelocationProjectPage({
 
           <form action={updateProject} className="space-y-3">
             <input type="hidden" name="id" value={project.id} />
+
+            <div>
+              <label className="block text-sm font-medium text-slate-700">공사 분류</label>
+              <select
+                name="category"
+                defaultValue={projectCategory}
+                className="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2 text-base"
+              >
+                {RELOCATION_CATEGORY_VALUES.map((c) => (
+                  <option key={c} value={c}>
+                    {RELOCATION_CATEGORY_LABEL[c]}
+                  </option>
+                ))}
+              </select>
+            </div>
 
             <div>
               <label className="block text-sm font-medium text-slate-700">제목</label>

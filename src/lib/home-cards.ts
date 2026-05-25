@@ -42,7 +42,7 @@ export const HOME_CARD_LABEL: Record<HomeCardId, string> = {
   approvals: '결재',
   annual_leave: '내 연차 잔여',
   leaves: '휴가·외근 현황',
-  relocation: '지장이설 설계',
+  relocation: '공사 설계',
   admin: '관리 메뉴',
   reports: '리포트',
 }
@@ -57,7 +57,7 @@ export const HOME_CARD_DESCRIPTION: Record<HomeCardId, string> = {
   approvals: '내 신청 + 결재함 (본사 직원만 노출 대상)',
   annual_leave: '본인 연차 잔여·사용 (입사일 등록 시 노출)',
   leaves: '회사 직원 오늘 휴가·외근 현황',
-  relocation: 'LGU+ 광케이블 지장이설 코어구성도·직선도 설계 (데스크톱 권장)',
+  relocation: '모든 공사의 행정도·코어구성도·직선도 설계 (데스크톱 권장)',
   admin: '직원·현장·마스터·리포트 관리 (관리자만 노출 대상)',
   reports: '월별 리포트 (팀장 권한자 노출 대상)',
 }

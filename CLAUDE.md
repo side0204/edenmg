@@ -706,6 +706,20 @@ owner 모바일 스크린샷 보고: `/vehicles` 헤더에서 "업무용 차량"
 - **적용 (10개 페이지)**: `/vehicles` · `/admin/employees` · `/admin/sites` · `/admin/facilities` · `/admin/materials` · `/admin/cables` · `/works` · `/works/[id]` · `/requests` · `/vehicles/trips`
 - **신규 페이지 작성 시**: 큰 제목(`text-2xl` 이상) + 우측 버튼 조합이면 처음부터 모바일 stack 패턴으로 시작. mobile_ux_patterns 메모리에 「8. 모바일 헤더 가로 강제」 로 기록.
 
+### ✅ 완료 (공사 설계로 일반화 + 3 카테고리 허브, 2026-05-25)
+
+owner 요구: 「지장이설 설계」 단일 진입을 「공사 설계」로 일반화. 진입하면 「청약 설계」/「계획 설계」/「지장이설 설계」 3 카테고리로 분기, 각 카테고리 안에서 프로젝트 생성·관리. 모든 공사의 행정도·코어구성도·직선도 설계를 한 모듈에서.
+
+- **마이그** [`0065_relocation_project_category.sql`](./supabase/migrations/0065_relocation_project_category.sql): `relocation_projects.category text not null default '지장이설'` + CHECK(청약·계획·지장이설) + (company_id, category) 인덱스. 기존 row 는 `'지장이설'` backfill
+- **공통 lib** ([`src/lib/relocation.ts`](./src/lib/relocation.ts)): `RelocationCategory`/`RelocationCategorySlug` type, `RELOCATION_CATEGORY_VALUES`·`_SLUG`·`_FROM_SLUG`·`_LABEL`·`_DESCRIPTION` 상수. 슬러그 ASCII (`subscription`/`planning`/`relocation`) — 한글 URL 인코딩 회피
+- **홈 카드** ([`src/lib/home-cards.ts`](./src/lib/home-cards.ts) + [`src/app/page.tsx`](./src/app/page.tsx)): 라벨 「지장이설 설계」 → 「공사 설계」, 설명 「모든 공사의 행정도·코어구성도·직선도 설계 (데스크톱 권장)」
+- **/relocation** ([`src/app/relocation/page.tsx`](./src/app/relocation/page.tsx)): 기존 프로젝트 목록 → **3 카테고리 허브**. 카테고리별 진입 카드 (emerald/blue/amber 톤 + 카운트 배지). 더 이상 프로젝트 등록 버튼 없음 (목록 페이지에서만)
+- **/relocation/category/[cat]** (신규 [`src/app/relocation/category/[cat]/page.tsx`](./src/app/relocation/category/[cat]/page.tsx)): 카테고리별 프로젝트 목록. 헤더 좌측 「공사 설계」 back link, 우측 「+ 프로젝트 생성」(카테고리 prefilled URL). 빈 목록은 EmptyState
+- **/relocation/new** ([`src/app/relocation/new/page.tsx`](./src/app/relocation/new/page.tsx)): `?cat=` 슬러그 쿼리 파라미터 수용. 카테고리 결정 시 hidden field + 회색 박스로 잠금, 미결정 시 select 노출. back link 도 카테고리 슬러그에 맞춰 동적
+- **server action** ([`src/app/relocation/actions.ts`](./src/app/relocation/actions.ts)): `parseProjectForm` 에 `category` 검증 + insert/update 반영. `createProject` 실패 시 `/relocation/new?cat=...` 로 돌아옴. `deleteProject` 는 삭제 전 카테고리 조회 후 `/relocation/category/[slug]` 로 redirect. `updateProject` 가 카테고리도 갱신
+- **/relocation/[id]** ([`src/app/relocation/[id]/page.tsx`](./src/app/relocation/[id]/page.tsx)): 프로젝트 fetch 에 `category` 추가, back link 가 「{카테고리 라벨} 목록」 (`/relocation/category/[slug]`), 헤더 sub 라인에 카테고리 라벨 prefix, 프로젝트 정보·설정 폼에 「공사 분류」 select 추가
+- **/admin/activity** [`pathSection`](./src/app/admin/activity/page.tsx): `/relocation` 메뉴 라벨 「지장이설」 → 「공사 설계」
+
 ### 🚧 진행 중 (지장이설 자동화 모듈, 2026-05-19 시작)
 
 LGU+ 협력사 본업 — 광케이블 지장이설 코어구성도·직선도 설계 자동화. 설계자가 시설·케이블을 입력하면 시스템이 기설 코어 보존을 최우선으로 자동 코어 배정 + 검증 + 차수 분할 + 시각화까지 처리. 기존 모듈과 **완전 독립**.
@@ -1074,6 +1088,7 @@ owner 요구: "어느 메뉴를 많이 쓰는지" 페이지 단위 분석. 접�
   - [`0062_relocation_field_inspections_storage_fix.sql`](./supabase/migrations/0062_relocation_field_inspections_storage_fix.sql) — 실사 캡처 Storage RLS 단순화 (0061 의 JOIN + current_employee 호출 제거, 시설 RLS 가 회사 스코프 자동 보장)
   - [`0063_relocation_field_inspections_name_alias_fix.sql`](./supabase/migrations/0063_relocation_field_inspections_name_alias_fix.sql) — Storage RLS column shadowing 버그 수정: subquery 안 `split_part(name, ...)` 의 `name` 이 `relocation_facilities.name` (시설명) 으로 잘못 바인딩되던 문제. 헬퍼 함수 `relocation_inspection_facility_id(text)` 도입 + `storage.objects.name` schema-qualify
   - [`0064_relocation_inspection_facility_type.sql`](./supabase/migrations/0064_relocation_inspection_facility_type.sql) — `relocation_closure_type` enum 에 '실사정보' 추가. 캔버스 실사 도구바 「실사정보입력」 버튼으로 임의 위치에 즉시 시설 배치 (이름 자동 「실사{seq}」, 빨간 원 + 흰 'i' + 펄스 후광 도형, 정보 패널은 비고 + 첨부 사진만 표시)
+  - [`0065_relocation_project_category.sql`](./supabase/migrations/0065_relocation_project_category.sql) — 공사 설계 카테고리: `relocation_projects.category text not null default '지장이설'` + CHECK(청약·계획·지장이설) + (company_id, category) 인덱스. 「공사 설계」 진입 시 3 카테고리 허브로 분기
 - **외선일보 별도 entity (v2)** — 접속일보와 동일 패턴으로 외선팀 전용 모듈. 외선 작업 특성(케이블 포설구간·전주번호 등)에 맞는 구조 별도 설계.
 - **접속일보 후속 (v2)** — segment-level 작업자 태그, 사진 첨부 + EXIF, 국사·함체 마스터 테이블화, 재접속 이력 조회, 지도 시각화
 - **M3 Phase 2 후속** — 사진 첨부 + EXIF·워터마크 (PRD M3-06), 일보 결재함 통합 (현재는 작업 상세에서 진입), 일반 일보 월별 CSV 리포트

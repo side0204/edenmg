@@ -13,6 +13,11 @@ import {
   type VSplitter,
   type VFacilityTask,
 } from '@/lib/relocation-verify'
+import {
+  isRelocationCategory,
+  RELOCATION_CATEGORY_SLUG,
+  type RelocationCategory,
+} from '@/lib/relocation'
 
 // 지장이설 프로젝트 CRUD — 회사 스코프 + 권한 제한 없음 (사양 § 2-6).
 // 모든 회사 직원이 접근·생성·수정·삭제 가능 (RLS 가 회사 스코프 강제).
@@ -89,6 +94,7 @@ async function projectRedCount(
 
 type ProjectFormParsed = {
   title: string
+  category: RelocationCategory
   region: string | null
   surveyed_at: string | null // YYYY-MM-DD
   designer_id: string | null
@@ -98,6 +104,8 @@ type ProjectFormParsed = {
 
 function parseProjectForm(formData: FormData): ProjectFormParsed {
   const title = String(formData.get('title') ?? '').trim()
+  const categoryRaw = String(formData.get('category') ?? '').trim()
+  const category: RelocationCategory = isRelocationCategory(categoryRaw) ? categoryRaw : '지장이설'
   const region = String(formData.get('region') ?? '').trim() || null
   const surveyedRaw = String(formData.get('surveyed_at') ?? '').trim()
   const surveyed_at = /^\d{4}-\d{2}-\d{2}$/.test(surveyedRaw) ? surveyedRaw : null
@@ -106,7 +114,7 @@ function parseProjectForm(formData: FormData): ProjectFormParsed {
   const statusRaw = String(formData.get('status') ?? '').trim()
   const status = statusRaw.length > 0 ? statusRaw : '설계중'
   const notes = String(formData.get('notes') ?? '').trim() || null
-  return { title, region, surveyed_at, designer_id, status, notes }
+  return { title, category, region, surveyed_at, designer_id, status, notes }
 }
 
 function validateProject(p: ProjectFormParsed): string | null {
@@ -118,8 +126,11 @@ function validateProject(p: ProjectFormParsed): string | null {
 
 export async function createProject(formData: FormData) {
   const parsed = parseProjectForm(formData)
+  const slug = RELOCATION_CATEGORY_SLUG[parsed.category]
   const errMsg = validateProject(parsed)
-  if (errMsg) redirect('/relocation/new?err=' + encodeURIComponent(errMsg))
+  if (errMsg) {
+    redirect(`/relocation/new?cat=${slug}&err=` + encodeURIComponent(errMsg))
+  }
 
   const { supabase, me } = await requireMember()
 
@@ -137,10 +148,13 @@ export async function createProject(formData: FormData) {
     .single()
 
   if (error) {
-    redirect('/relocation/new?err=' + encodeURIComponent('등록 실패: ' + error.message))
+    redirect(
+      `/relocation/new?cat=${slug}&err=` + encodeURIComponent('등록 실패: ' + error.message),
+    )
   }
 
   revalidatePath('/relocation')
+  revalidatePath(`/relocation/category/${slug}`)
   redirect(
     `/relocation/${inserted!.id}?ok=` +
       encodeURIComponent(`'${parsed.title}' 프로젝트를 생성했습니다`),
@@ -176,7 +190,9 @@ export async function updateProject(formData: FormData) {
     redirect(`/relocation/${id}?err=` + encodeURIComponent('수정 실패: ' + error.message))
   }
 
+  const slug = RELOCATION_CATEGORY_SLUG[parsed.category]
   revalidatePath('/relocation')
+  revalidatePath(`/relocation/category/${slug}`)
   revalidatePath(`/relocation/${id}`)
   redirect(`/relocation/${id}?ok=` + encodeURIComponent('프로젝트 정보를 수정했습니다'))
 }
@@ -187,11 +203,24 @@ export async function deleteProject(formData: FormData) {
   if (!id) redirect('/relocation?err=' + encodeURIComponent('프로젝트 id 가 없습니다'))
 
   const { supabase } = await requireMember()
+
+  // 삭제 전 카테고리 조회 — 삭제 후 같은 카테고리 목록으로 이동
+  const { data: pRow } = await supabase
+    .from('relocation_projects')
+    .select('category')
+    .eq('id', id)
+    .maybeSingle()
+  const cat = (pRow as { category: string } | null)?.category ?? '지장이설'
+  const slug = isRelocationCategory(cat) ? RELOCATION_CATEGORY_SLUG[cat] : 'relocation'
+
   const { error } = await supabase.from('relocation_projects').delete().eq('id', id)
   if (error) {
     redirect(`/relocation/${id}?err=` + encodeURIComponent('삭제 실패: ' + error.message))
   }
 
   revalidatePath('/relocation')
-  redirect('/relocation?ok=' + encodeURIComponent('프로젝트를 삭제했습니다'))
+  revalidatePath(`/relocation/category/${slug}`)
+  redirect(
+    `/relocation/category/${slug}?ok=` + encodeURIComponent('프로젝트를 삭제했습니다'),
+  )
 }

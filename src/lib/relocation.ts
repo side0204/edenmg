@@ -733,3 +733,49 @@ export function formatNewCableCode(projectId: string, seq: number): string {
 
 export { CABLE_SPEC_VALUES }
 export type { CableSpec }
+
+
+// ===== 공사 설계 — 프로젝트 카테고리 ===================================
+// owner 2026-05-25: 「공사 설계」 진입 시 청약 / 계획 / 지장이설 3 카테고리로 분기.
+//   카테고리 안에서 프로젝트를 생성·관리. URL 슬러그는 ASCII 사용.
+
+export type RelocationCategory = '청약' | '계획' | '지장이설'
+export type RelocationCategorySlug = 'subscription' | 'planning' | 'relocation'
+
+export const RELOCATION_CATEGORY_VALUES: readonly RelocationCategory[] = [
+  '청약',
+  '계획',
+  '지장이설',
+]
+
+export const RELOCATION_CATEGORY_SLUG: Record<RelocationCategory, RelocationCategorySlug> = {
+  청약: 'subscription',
+  계획: 'planning',
+  지장이설: 'relocation',
+}
+
+export const RELOCATION_CATEGORY_FROM_SLUG: Record<RelocationCategorySlug, RelocationCategory> = {
+  subscription: '청약',
+  planning: '계획',
+  relocation: '지장이설',
+}
+
+export const RELOCATION_CATEGORY_LABEL: Record<RelocationCategory, string> = {
+  청약: '청약 설계',
+  계획: '계획 설계',
+  지장이설: '지장이설 설계',
+}
+
+export const RELOCATION_CATEGORY_DESCRIPTION: Record<RelocationCategory, string> = {
+  청약: '소호·FTTH·모바일·전용회선·다회선·아파트 청약 공사 설계',
+  계획: '망보강·코어분산·이원화 계획 공사 설계',
+  지장이설: '도로공사 등 LGU+ 광케이블 지장이설 설계',
+}
+
+export function isRelocationCategorySlug(v: string): v is RelocationCategorySlug {
+  return v === 'subscription' || v === 'planning' || v === 'relocation'
+}
+
+export function isRelocationCategory(v: string): v is RelocationCategory {
+  return v === '청약' || v === '계획' || v === '지장이설'
+}

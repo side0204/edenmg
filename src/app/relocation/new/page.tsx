@@ -3,9 +3,19 @@ import { redirect } from 'next/navigation'
 import { ChevronLeft } from 'lucide-react'
 import { createClient } from '@/lib/supabase/server'
 import { createProject } from '../actions'
+import {
+  isRelocationCategorySlug,
+  RELOCATION_CATEGORY_FROM_SLUG,
+  RELOCATION_CATEGORY_LABEL,
+  RELOCATION_CATEGORY_VALUES,
+  RELOCATION_CATEGORY_SLUG,
+  type RelocationCategory,
+} from '@/lib/relocation'
 
-// 지장이설 프로젝트 생성 폼
-// 권한: 회사 직원 누구나
+// 공사 설계 프로젝트 생성 폼.
+// 권한: 회사 직원 누구나.
+// 카테고리는 URL ?cat= 슬러그로 미리 결정 (카테고리 목록에서 진입).
+// 슬러그가 없거나 잘못된 값이면 폼에서 직접 선택.
 
 type EmployeeMini = {
   id: string
@@ -13,7 +23,17 @@ type EmployeeMini = {
   permission: string
 }
 
-export default async function NewRelocationProjectPage() {
+export default async function NewRelocationProjectPage({
+  searchParams,
+}: {
+  searchParams: Promise<{ cat?: string }>
+}) {
+  const { cat: catRaw } = await searchParams
+  const categoryFromUrl: RelocationCategory | null =
+    catRaw && isRelocationCategorySlug(catRaw)
+      ? RELOCATION_CATEGORY_FROM_SLUG[catRaw]
+      : null
+
   const supabase = await createClient()
   const {
     data: { user },
@@ -40,22 +60,35 @@ export default async function NewRelocationProjectPage() {
 
   const employees = (emps ?? []) as EmployeeMini[]
 
+  // 카테고리가 결정됐으면 목록으로, 아니면 허브로 돌아감.
+  const backHref = categoryFromUrl
+    ? `/relocation/category/${RELOCATION_CATEGORY_SLUG[categoryFromUrl]}`
+    : '/relocation'
+  const backLabel = categoryFromUrl
+    ? `${RELOCATION_CATEGORY_LABEL[categoryFromUrl]} 목록`
+    : '공사 설계'
+
   return (
     <main className="min-h-screen p-4 sm:p-6">
       <div className="mx-auto max-w-2xl space-y-5">
         <header>
           <Link
-            href="/relocation"
+            href={backHref}
             className="inline-flex items-center gap-1 text-sm text-slate-500 hover:text-slate-900"
           >
             <ChevronLeft className="h-4 w-4" />
-            지장이설 목록
+            {backLabel}
           </Link>
           <h1 className="mt-1 text-3xl font-bold text-slate-900 tracking-tight">
             새 프로젝트 생성
+            {categoryFromUrl && (
+              <span className="ml-2 text-base font-medium text-slate-500">
+                · {RELOCATION_CATEGORY_LABEL[categoryFromUrl]}
+              </span>
+            )}
           </h1>
           <p className="mt-1 text-sm text-slate-500">
-            현장 답사 후 안건 1건당 1 프로젝트로 등록합니다.
+            안건 1건당 1 프로젝트로 등록합니다.
           </p>
         </header>
 
@@ -63,6 +96,33 @@ export default async function NewRelocationProjectPage() {
           action={createProject}
           className="rounded-2xl bg-white shadow-sm border border-slate-200 p-6 space-y-4"
         >
+          <div>
+            <label className="block text-sm font-medium text-slate-700">
+              공사 분류 <span className="text-rose-600">*</span>
+            </label>
+            {categoryFromUrl ? (
+              <>
+                <input type="hidden" name="category" value={categoryFromUrl} />
+                <p className="mt-1 inline-flex items-center rounded-lg bg-slate-100 px-3 py-2 text-sm font-medium text-slate-800">
+                  {RELOCATION_CATEGORY_LABEL[categoryFromUrl]}
+                </p>
+              </>
+            ) : (
+              <select
+                name="category"
+                required
+                defaultValue="지장이설"
+                className="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2 text-base focus:border-slate-900 focus:outline-none focus:ring-1 focus:ring-slate-900"
+              >
+                {RELOCATION_CATEGORY_VALUES.map((c) => (
+                  <option key={c} value={c}>
+                    {RELOCATION_CATEGORY_LABEL[c]}
+                  </option>
+                ))}
+              </select>
+            )}
+          </div>
+
           <div>
             <label className="block text-sm font-medium text-slate-700">
               프로젝트 제목 <span className="text-rose-600">*</span>
@@ -141,7 +201,7 @@ export default async function NewRelocationProjectPage() {
 
           <div className="flex justify-end gap-2 pt-2">
             <Link
-              href="/relocation"
+              href={backHref}
               className="inline-flex items-center rounded-lg border border-slate-300 px-4 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50"
             >
               취소
