@@ -861,10 +861,12 @@ export default function TopologyCanvas({
 
   const [selectedId, setSelectedId] = useState<string | null>(null)
   // 시설 「작업내역입력」 popover — 청약 모드 전용. 시설 선택과 별도 토글.
-  //   selectedId 변경 시 자동 동기화. popover X 누르면 시설 정보 패널은 유지.
+  //   시설 선택 시 popover 열림. popover 안 클릭으로 잘못 닫히는 것 방지 위해
+  //   selectedId 가 null 로 바뀌어도(deselect) popover 는 자체 X 버튼으로만 닫힘.
+  //   다른 시설로 바뀌면 popover 도 그 시설로 이동.
   const [facilityTaskPopoverId, setFacilityTaskPopoverId] = useState<string | null>(null)
   useEffect(() => {
-    setFacilityTaskPopoverId(selectedId)
+    if (selectedId) setFacilityTaskPopoverId(selectedId)
   }, [selectedId])
   const [pendingConnection, setPendingConnection] = useState<
     { fromId: string; toId: string } | null
@@ -5648,6 +5650,12 @@ export default function TopologyCanvas({
                         width={POP_W}
                         height={POP_H}
                         style={{ overflow: 'visible' }}
+                        // popover 안 클릭이 시설 <g> 의 onPointerDown 으로 bubble 되면
+                        //   interactionRef 가 잡히고 pointerup 시 handleNodeClick → 선택 해제 → popover 닫힘.
+                        //   pointerdown/up/click 모두 여기서 차단.
+                        onPointerDown={(e) => e.stopPropagation()}
+                        onPointerUp={(e) => e.stopPropagation()}
+                        onClick={(e) => e.stopPropagation()}
                       >
                         <FacilityTaskPopover
                           projectId={projectId}
