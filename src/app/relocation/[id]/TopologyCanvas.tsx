@@ -5133,12 +5133,12 @@ export default function TopologyCanvas({
                           : 'new') as 'preexisting' | 'new',
                       }))
                     // popover 크기 — 1.5배 확대 + 글자 크기 키움 (owner 2026-05-25)
-                    //   기본 위치는 케이블 라벨 위쪽 충분히 띄움 — 입력된 선번을 가리지 않게.
-                    //   드래그 헤더로 이동 가능.
+                    //   기본 위치: 36C(케이블 spec) 바로 위, 사용선번 라벨이 있던 자리.
+                    //   어차피 popover 열리면 사용선번 라벨이 숨겨지므로 그 위치가 자연스러움
+                    //   (owner 2026-05-25 추가). 드래그 헤더로 이동 가능.
                     const POP_W = 570
                     const POP_H = 480
-                    // popover 가 cores 라벨 (firstY 위쪽 행) 도 안 가리도록 충분히 위로
-                    const POP_OFFSET_FROM_LABEL = 180
+                    const POP_OFFSET_FROM_LABEL = 30
                     const defaultRole: 'designer' | 'worker' =
                       projectDesignerId && myEmployeeId === projectDesignerId
                         ? 'designer'
