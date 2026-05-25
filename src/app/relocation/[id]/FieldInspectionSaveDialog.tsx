@@ -37,6 +37,43 @@ function sleep(ms: number): Promise<void> {
   return new Promise((r) => setTimeout(r, ms))
 }
 
+// 다음 paint 까지 대기 (rAF 1회)
+function nextFrame(): Promise<void> {
+  return new Promise((r) => requestAnimationFrame(() => r()))
+}
+
+/**
+ * 화면 공유 시작 후 「공유 중」 배너로 인한 layout shift 가 안정될 때까지 대기.
+ *
+ *   브라우저 banner 가 viewport 상단을 잡아먹어 페이지가 ~30~40px 밀리면서
+ *   `resize` 이벤트가 발생하고 (KakaoMap 도 이걸 받아 tile 을 재배치),
+ *   SketchOverlay 좌표 재계산, SVG 재페인트가 일어난다. 시점이 어긋나면
+ *   캡처된 video 프레임과 region.getBoundingClientRect() 값이 안 맞아
+ *   그리기 위치가 어긋난 듯 보임.
+ *
+ *   동작:
+ *     1. resize 이벤트 한 번 발생할 때까지 대기 (최대 500ms)
+ *     2. 추가 paint 2 프레임 + 800ms 안정화
+ *   resize 가 안 와도 (가끔 발생 안 함) sleep 만으로 충분히 settled.
+ */
+async function waitForLayoutSettled(): Promise<void> {
+  await new Promise<void>((resolve) => {
+    let done = false
+    const finish = () => {
+      if (done) return
+      done = true
+      window.removeEventListener('resize', finish)
+      resolve()
+    }
+    window.addEventListener('resize', finish, { once: true, passive: true })
+    setTimeout(finish, 500) // resize 가 안 오면 fallback
+  })
+  // 추가 paint 2 프레임 + 안정화
+  await nextFrame()
+  await nextFrame()
+  await sleep(800)
+}
+
 // HTMLCanvas 의 일부 영역을 잘라 새 canvas 로 반환
 function cropCanvas(
   src: HTMLCanvasElement | HTMLVideoElement,
@@ -209,8 +246,12 @@ export default function FieldInspectionSaveDialog({
       for (let i = 0; i < 60 && video.videoWidth === 0; i++) await sleep(50)
       if (video.videoWidth === 0) throw new Error('화면 영상을 받지 못했습니다')
 
-      // 안정화 프레임 대기 (브라우저 렌더 완료)
-      await sleep(200)
+      // 안정화 대기 (owner 2026-05-25 보고):
+      //   브라우저 「공유 중」 배너가 viewport 상단을 잡아먹어 페이지 콘텐츠가
+      //   ~30~40px 아래로 밀리는데, layout 재계산 + KakaoMap 내부 타일 재배치 +
+      //   SketchOverlay 좌표 재계산 모두 완료될 때까지 길게 기다린다.
+      //   resize 이벤트 첫 발생 후 + 추가 paint 1-2 프레임 + 안정화 800ms.
+      await waitForLayoutSettled()
 
       // 캔버스 영역(SketchOverlay 가 자리잡은 flex-row)을 잘라낸다.
       //   data-sketch-canvas-region 속성으로 찾음 (TopologyCanvas 가 마크).
