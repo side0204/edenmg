@@ -738,15 +738,34 @@ export default async function RelocationProjectPage({
                     />
                   </div>
                 </div>
-                <div>
-                  <label className="block text-sm font-medium text-slate-700">가입자명</label>
-                  <input
-                    type="text"
-                    name="subscriber_name"
-                    defaultValue={project.subscriber_name ?? ''}
-                    maxLength={100}
-                    className="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2 text-base"
-                  />
+                <div className="grid gap-3 sm:grid-cols-2">
+                  <div>
+                    <label className="block text-sm font-medium text-slate-700">가입자명</label>
+                    <input
+                      type="text"
+                      name="subscriber_name"
+                      defaultValue={project.subscriber_name ?? ''}
+                      maxLength={100}
+                      className="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2 text-base"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-sm font-medium text-slate-700">지역</label>
+                    <select
+                      name="region"
+                      defaultValue={project.region ?? ''}
+                      className="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2 text-base"
+                    >
+                      <option value="">(선택 없음)</option>
+                      <option value="시흥시">시흥시</option>
+                      <option value="남동구">남동구</option>
+                      <option value="기타">기타</option>
+                      {project.region &&
+                        !['시흥시', '남동구', '기타'].includes(project.region) && (
+                          <option value={project.region}>{project.region} (기존)</option>
+                        )}
+                    </select>
+                  </div>
                 </div>
                 <div>
                   <label className="block text-sm font-medium text-slate-700">가입자 주소</label>

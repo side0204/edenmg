@@ -204,14 +204,25 @@ export default async function NewRelocationProjectPage({
                 </div>
               </div>
 
-              <div>
-                <label className={LABEL}>가입자명</label>
-                <input
-                  type="text"
-                  name="subscriber_name"
-                  maxLength={100}
-                  className={INPUT}
-                />
+              <div className="grid gap-3 lg:gap-2 lg:grid-cols-2">
+                <div>
+                  <label className={LABEL}>가입자명</label>
+                  <input
+                    type="text"
+                    name="subscriber_name"
+                    maxLength={100}
+                    className={INPUT}
+                  />
+                </div>
+                <div>
+                  <label className={LABEL}>지역</label>
+                  <select name="region" defaultValue="" className={INPUT}>
+                    <option value="">(선택 없음)</option>
+                    <option value="시흥시">시흥시</option>
+                    <option value="남동구">남동구</option>
+                    <option value="기타">기타</option>
+                  </select>
+                </div>
               </div>
 
               <div>
