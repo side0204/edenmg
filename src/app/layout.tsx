@@ -70,7 +70,7 @@ export default async function RootLayout({
           position="bottom-center"
           richColors
           closeButton
-          duration={3500}
+          duration={1750}
           offset={{ bottom: 'calc(5rem + env(safe-area-inset-bottom))' }}
           toastOptions={{
             classNames: {
