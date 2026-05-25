@@ -19,24 +19,25 @@ export default function CollapsibleLayout({
 }: {
   topPanel: React.ReactNode
   canvas: React.ReactNode
-  bottomPanel: React.ReactNode
+  bottomPanel?: React.ReactNode
   // 하단 패널(탭 콘텐츠) 기본 접힘 여부.
   //   URL 에 ?tab= 이 있으면(탭·진행단계 클릭) 펼친 채로 시작 — 매번 다시 펼치는 수고 제거.
   bottomDefaultCollapsed?: boolean
 }) {
+  const hasBottomPanel = bottomPanel != null && bottomPanel !== false
   // 기본값 접힘 — 설계 화면 진입 시 캔버스에 바로 집중 (owner 요청).
   //   도식·지도 모드 공통 (CollapsibleLayout 이 두 모드를 모두 감쌈).
   const [topCollapsed, setTopCollapsed] = useState(true)
   const [bottomCollapsed, setBottomCollapsed] = useState(bottomDefaultCollapsed)
 
-  const focused = topCollapsed && bottomCollapsed
+  const focused = topCollapsed && (!hasBottomPanel || bottomCollapsed)
   const toggleFocus = () => {
     if (focused) {
       setTopCollapsed(false)
-      setBottomCollapsed(false)
+      if (hasBottomPanel) setBottomCollapsed(false)
     } else {
       setTopCollapsed(true)
-      setBottomCollapsed(true)
+      if (hasBottomPanel) setBottomCollapsed(true)
     }
   }
 
@@ -68,29 +69,32 @@ export default function CollapsibleLayout({
 
       {canvas}
 
-      {/* 하단 토글 stripe — 캔버스와 하단 패널 사이 */}
-      <div className="mx-auto max-w-6xl px-4 sm:px-6">
-        <button
-          type="button"
-          onClick={() => setBottomCollapsed((v) => !v)}
-          className="w-full inline-flex items-center justify-center gap-1 py-1 text-[11px] font-medium text-slate-400 hover:text-slate-700 hover:bg-slate-100/70 rounded transition"
-          title={bottomCollapsed ? '하단 영역 펼치기' : '하단 영역 접기'}
-        >
-          {bottomCollapsed ? (
-            <>
-              <ChevronUp className="h-3 w-3" />
-              하단 펼치기
-            </>
-          ) : (
-            <>
-              <ChevronDown className="h-3 w-3" />
-              하단 접기
-            </>
-          )}
-        </button>
-      </div>
-
-      {!bottomCollapsed && bottomPanel}
+      {hasBottomPanel && (
+        <>
+          {/* 하단 토글 stripe — 캔버스와 하단 패널 사이 */}
+          <div className="mx-auto max-w-6xl px-4 sm:px-6">
+            <button
+              type="button"
+              onClick={() => setBottomCollapsed((v) => !v)}
+              className="w-full inline-flex items-center justify-center gap-1 py-1 text-[11px] font-medium text-slate-400 hover:text-slate-700 hover:bg-slate-100/70 rounded transition"
+              title={bottomCollapsed ? '하단 영역 펼치기' : '하단 영역 접기'}
+            >
+              {bottomCollapsed ? (
+                <>
+                  <ChevronUp className="h-3 w-3" />
+                  하단 펼치기
+                </>
+              ) : (
+                <>
+                  <ChevronDown className="h-3 w-3" />
+                  하단 접기
+                </>
+              )}
+            </button>
+          </div>
+          {!bottomCollapsed && bottomPanel}
+        </>
+      )}
 
       {/* 집중 모드 floating 토글 — 페이지 어디서나 한 번 클릭으로 상하 동시 접기/펼치기.
           z-30 — fullscreen 캔버스 (z-40) 보다 낮아 fullscreen 진입 시 가려짐 (의도). */}

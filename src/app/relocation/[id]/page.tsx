@@ -400,21 +400,21 @@ export default async function RelocationProjectPage({
   }
 
   const topPanel = (
-    <div className="mx-auto max-w-6xl px-4 sm:px-6 pt-4 sm:pt-6 space-y-5">
+    <div className="mx-auto max-w-6xl px-4 sm:px-6 pt-3 sm:pt-4 space-y-3 lg:space-y-2">
       <header>
           <Link
             href={`/relocation/category/${projectCategorySlug}`}
-            className="inline-flex items-center gap-1 text-sm text-slate-500 hover:text-slate-900"
+            className="inline-flex items-center gap-1 text-xs lg:text-[11px] text-slate-500 hover:text-slate-900"
           >
-            <ChevronLeft className="h-4 w-4" />
+            <ChevronLeft className="h-3.5 w-3.5" />
             {projectCategoryLabel} 목록
           </Link>
           <div className="mt-1 space-y-2 sm:space-y-0 sm:flex sm:items-start sm:justify-between sm:gap-3">
             <div className="min-w-0">
-              <h1 className="text-3xl font-bold text-slate-900 tracking-tight break-keep">
+              <h1 className="text-xl lg:text-lg font-bold text-slate-900 tracking-tight break-keep">
                 {project.title}
               </h1>
-              <p className="mt-1 text-sm text-slate-500">
+              <p className="mt-0.5 text-xs lg:text-[11px] text-slate-500">
                 {projectCategoryLabel} · {project.client} · {project.region ?? '지역 미정'}
                 {project.surveyed_at && ` · 계약 ${project.surveyed_at}`}
                 {designerName && ` · 설계자 ${designerName}`}
@@ -453,8 +453,8 @@ export default async function RelocationProjectPage({
           </div>
         </header>
 
-        {/* 빈 프로젝트에 시드 데이터 채우기 안내 (실제 LGU+ 임포트 구현 전 임시) */}
-        {facilities.length === 0 && (
+        {/* 빈 프로젝트에 시드 데이터 채우기 안내 — 지장이설 카테고리에서만 (실제 LGU+ 임포트 구현 전 임시) */}
+        {facilities.length === 0 && projectCategory === '지장이설' && (
           <section className="rounded-2xl border border-amber-200 bg-amber-50 p-4">
             <div className="space-y-2 sm:space-y-0 sm:flex sm:items-center sm:justify-between sm:gap-3">
               <div className="min-w-0">
@@ -478,6 +478,7 @@ export default async function RelocationProjectPage({
           </section>
         )}
 
+        <ProjectInfoSettings />
     </div>
   )
 
@@ -672,9 +673,11 @@ export default async function RelocationProjectPage({
     </div>
   )
 
-  const bottomPanel = (
-    <div className="mx-auto max-w-6xl px-4 sm:px-6">
-        {/* 프로젝트 메타 편집 + 삭제 — PC(lg+) 에서는 컴팩트 모드 (글자·간격 축소) */}
+  // 프로젝트 정보·설정 — 2026-05-25 owner 요청으로 하단 → 상단 이동
+  //   function 선언은 함수 본문 안에서 hoisted → topPanel JSX 가 먼저 와도 OK
+  function ProjectInfoSettings() {
+    if (!project) return null // 안전 가드 — 페이지가 이미 notFound 처리, 닫힌 클로저 TS 좁히기용
+    return (
         <details className="rounded-2xl bg-white shadow-sm border border-slate-200">
           <summary className="flex cursor-pointer list-none items-center gap-2 rounded-2xl px-6 py-4 lg:px-4 lg:py-2.5 text-base lg:text-sm font-semibold tracking-tight text-slate-900 hover:bg-slate-50">
             <Settings className="h-4 w-4 lg:h-3.5 lg:w-3.5 text-slate-500" />
@@ -1007,8 +1010,8 @@ export default async function RelocationProjectPage({
           </details>
           </div>
         </details>
-    </div>
-  )
+    )
+  }
 
   const canvasPanel = (
     <div className="px-4 sm:px-6 my-2">
@@ -1075,11 +1078,7 @@ export default async function RelocationProjectPage({
         <div className="mx-auto max-w-6xl px-4 pt-3 sm:px-6">
           <ProgressStepBar projectId={id} steps={steps} currentTab={tab} />
         </div>
-        <CollapsibleLayout
-          topPanel={topPanel}
-          canvas={canvasPanel}
-          bottomPanel={bottomPanel}
-        />
+        <CollapsibleLayout topPanel={topPanel} canvas={canvasPanel} />
       </HighlightProvider>
     </main>
   )
