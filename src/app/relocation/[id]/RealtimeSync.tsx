@@ -23,21 +23,15 @@ import { useRouter } from 'next/navigation'
 import { createClient } from '@/lib/supabase/client'
 import { Users } from 'lucide-react'
 
-// 프로젝트 단위로 구독할 테이블 — 모두 project_id 컬럼 보유.
-// 자식 테이블(splitter_ports/phase_tasks/task_pairs/migration_circuits) 은 부모 변경으로
-// 자연스럽게 refresh 가 일어나 굳이 등록 안 함 (이벤트 노이즈 축소).
+// 프로젝트 단위로 구독할 테이블 — 캔버스 동시 작업에 정말 필요한 핵심만.
+// (2026-05-25 축소: 11 → 4) 다른 사람이 차수·자재·직선도 등 별도 탭 작업 중일 때
+// 캔버스가 새로고침되면 편집 흐름이 끊기는 문제 + WAL 폴링·router.refresh() 부하 ↓.
+// 빠진 테이블 변경은 본인이 해당 탭 진입할 때 자연스럽게 최신화됨.
 const RELOCATION_TABLES = [
-  'relocation_projects',
-  'relocation_facilities',
-  'relocation_cables',
-  'relocation_circuits',
-  'relocation_core_assignments',
-  'relocation_splices',
-  'relocation_splitters',
-  'relocation_facility_tasks',
-  'relocation_facility_materials',
-  'relocation_phases',
-  'relocation_migrations',
+  'relocation_facilities',       // 시설 드래그·추가·삭제·종류 변경
+  'relocation_cables',           // 케이블 연결·waypoint·삭제
+  'relocation_core_assignments', // 회선·코어·종단 표시
+  'relocation_circuits',         // 회선 추가·이름 변경
 ] as const
 
 type PresencePayload = {
@@ -70,12 +64,14 @@ export default function RealtimeSync({
         console.log('[RealtimeSync] event', eventInfo)
       }
       if (refreshTimer) clearTimeout(refreshTimer)
+      // 500ms debounce — auto-assign 등 일괄 변경(30+ 이벤트) 안정화 + 빠른 연속
+      // 드래그·waypoint 편집 시 router.refresh() 빈도 ↓ (편집 끊김 회피).
       refreshTimer = setTimeout(() => {
         // eslint-disable-next-line no-console
         console.log('[RealtimeSync] router.refresh()')
         router.refresh()
         refreshTimer = null
-      }, 200)
+      }, 500)
     }
 
     ;(async () => {
@@ -102,16 +98,16 @@ export default function RealtimeSync({
       })
       channelRef = channel
 
-      // 1) DB 변경 구독 — relocation_* 테이블 중 project_id 필드가 있는 것 전부.
-      //    relocation_projects 는 id 가 project_id 역할 → 별도 필터.
+      // 1) DB 변경 구독 — 모두 project_id 컬럼 보유.
       for (const table of RELOCATION_TABLES) {
-        const filter =
-          table === 'relocation_projects'
-            ? `id=eq.${projectId}`
-            : `project_id=eq.${projectId}`
         channel.on(
           'postgres_changes',
-          { event: '*', schema: 'public', table, filter },
+          {
+            event: '*',
+            schema: 'public',
+            table,
+            filter: `project_id=eq.${projectId}`,
+          },
           (payload) => {
             const p = payload as { table?: string; eventType?: string }
             scheduleRefresh({
