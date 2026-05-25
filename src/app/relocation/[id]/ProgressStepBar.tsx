@@ -27,15 +27,51 @@ const STEP_HINT: Record<string, string> = {
   export: '기별명세서를 내보내세요',
 }
 
+type StepBarTheme = {
+  current: string // 현재 단계 동그라미
+  currentLabel: string // 현재 단계 라벨
+  activeRing: string // 현재 탭 ring
+  link: string // "다음 할 일" 링크 색
+}
+const CATEGORY_STEP_THEME: Record<string, StepBarTheme> = {
+  청약: {
+    current: 'bg-emerald-600 text-white',
+    currentLabel: 'font-semibold text-emerald-700',
+    activeRing: 'bg-emerald-50 ring-1 ring-emerald-300',
+    link: 'text-emerald-700',
+  },
+  계획: {
+    current: 'bg-blue-600 text-white',
+    currentLabel: 'font-semibold text-blue-700',
+    activeRing: 'bg-blue-50 ring-1 ring-blue-300',
+    link: 'text-blue-700',
+  },
+  지장이설: {
+    current: 'bg-amber-600 text-white',
+    currentLabel: 'font-semibold text-amber-700',
+    activeRing: 'bg-amber-50 ring-1 ring-amber-300',
+    link: 'text-amber-700',
+  },
+}
+const FALLBACK_THEME: StepBarTheme = {
+  current: 'bg-slate-900 text-white',
+  currentLabel: 'font-semibold text-slate-900',
+  activeRing: 'bg-slate-100 ring-1 ring-slate-300',
+  link: 'text-slate-700',
+}
+
 export default function ProgressStepBar({
   projectId,
   steps,
   currentTab,
+  category,
 }: {
   projectId: string
   steps: ProgressStep[]
   currentTab: string
+  category?: string
 }) {
+  const theme = (category && CATEGORY_STEP_THEME[category]) || FALLBACK_THEME
   const [collapsed, setCollapsed] = useState(false)
 
   // 현재 할 일 = 빨강 경고 단계 우선, 없으면 첫 미완료 단계
@@ -60,7 +96,7 @@ export default function ProgressStepBar({
                 href={`/relocation/${projectId}?tab=${nextStep.tab}`}
                 className={
                   'font-semibold underline-offset-2 hover:underline ' +
-                  (nextStep.warn ? 'text-rose-600' : 'text-slate-700')
+                  (nextStep.warn ? 'text-rose-600' : theme.link)
                 }
               >
                 {nextStep.label}
@@ -104,14 +140,14 @@ export default function ProgressStepBar({
               : state === 'done'
                 ? 'bg-emerald-600 text-white'
                 : state === 'current'
-                  ? 'bg-slate-900 text-white'
+                  ? theme.current
                   : 'border border-slate-300 text-slate-400'
             const labelCls = warn
               ? 'font-semibold text-rose-700'
               : state === 'done'
                 ? 'text-emerald-700'
                 : state === 'current'
-                  ? 'font-semibold text-slate-900'
+                  ? theme.currentLabel
                   : 'text-slate-400'
 
             return (
@@ -128,7 +164,7 @@ export default function ProgressStepBar({
                   href={`/relocation/${projectId}?tab=${step.tab}`}
                   className={
                     'inline-flex shrink-0 items-center gap-1.5 rounded-lg px-2 py-1 transition hover:bg-slate-50 ' +
-                    (isActiveTab ? 'bg-slate-100 ring-1 ring-slate-300' : '')
+                    (isActiveTab ? theme.activeRing : '')
                   }
                 >
                   <span
@@ -174,7 +210,7 @@ export default function ProgressStepBar({
             href={`/relocation/${projectId}?tab=${nextStep.tab}`}
             className={
               'font-semibold underline-offset-2 hover:underline ' +
-              (nextStep.warn ? 'text-rose-600' : 'text-slate-700')
+              (nextStep.warn ? 'text-rose-600' : theme.link)
             }
           >
             {nextStep.label}

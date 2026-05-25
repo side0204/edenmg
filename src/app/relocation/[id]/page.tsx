@@ -1070,8 +1070,68 @@ export default async function RelocationProjectPage({
     )
   }
 
+  // 빈 캔버스 안내 — 시설 0개일 때 캔버스 위에 카테고리 색 안내 카드
+  const EmptyCanvasGuide = facilities.length === 0 ? (
+    <div className="mx-auto max-w-6xl mb-2">
+      <div
+        className={
+          'rounded-xl border-2 border-dashed p-5 lg:p-6 text-center ' +
+          (projectCategory === '청약'
+            ? 'border-emerald-300 bg-emerald-50/60'
+            : projectCategory === '계획'
+              ? 'border-blue-300 bg-blue-50/60'
+              : 'border-amber-300 bg-amber-50/60')
+        }
+      >
+        <div
+          className={
+            'mx-auto inline-flex h-12 w-12 items-center justify-center rounded-full ' +
+            (projectCategory === '청약'
+              ? 'bg-emerald-100 text-emerald-700'
+              : projectCategory === '계획'
+                ? 'bg-blue-100 text-blue-700'
+                : 'bg-amber-100 text-amber-700')
+          }
+        >
+          <Network className="h-6 w-6" />
+        </div>
+        <h3 className="mt-2 text-base font-semibold text-slate-900">
+          시설부터 등록해주세요
+        </h3>
+        <p className="mx-auto mt-1 max-w-md text-xs text-slate-600">
+          캔버스 위에 국사·맨홀·함체·가입자시설을 배치하고 케이블로 잇는 순서로 설계합니다.
+          좌측 도구바의 「+ 시설」 또는 캔버스 빈 공간을 클릭하세요.
+        </p>
+        <div className="mt-3 flex flex-wrap items-center justify-center gap-2">
+          <Link
+            href={`/relocation/${id}?tab=facilities`}
+            className={
+              'inline-flex items-center gap-1 rounded-md px-3 py-1.5 text-xs font-semibold text-white ' +
+              (projectCategory === '청약'
+                ? 'bg-emerald-600 hover:bg-emerald-700'
+                : projectCategory === '계획'
+                  ? 'bg-blue-600 hover:bg-blue-700'
+                  : 'bg-amber-600 hover:bg-amber-700')
+            }
+          >
+            <Network className="h-3.5 w-3.5" />
+            시설 탭으로 이동
+          </Link>
+          <Link
+            href={`/relocation/${id}/import`}
+            className="inline-flex items-center gap-1 rounded-md border border-slate-300 bg-white px-3 py-1.5 text-xs font-medium text-slate-700 hover:bg-slate-50"
+          >
+            <Upload className="h-3.5 w-3.5" />
+            CSV 가져오기
+          </Link>
+        </div>
+      </div>
+    </div>
+  ) : null
+
   const canvasPanel = (
     <div className="px-4 sm:px-6 my-2">
+      {EmptyCanvasGuide}
       <TopologyCanvas
         projectId={project.id}
         facilities={facilities.map((f) => ({
@@ -1133,7 +1193,12 @@ export default async function RelocationProjectPage({
       <HighlightProvider>
         <RealtimeSync projectId={id} selfEmployeeId={me.id} selfName={me.name} />
         <div className="mx-auto max-w-6xl px-4 pt-3 sm:px-6">
-          <ProgressStepBar projectId={id} steps={steps} currentTab={tab} />
+          <ProgressStepBar
+            projectId={id}
+            steps={steps}
+            currentTab={tab}
+            category={projectCategory}
+          />
         </div>
         <CollapsibleLayout topPanel={topPanel} canvas={canvasPanel} />
       </HighlightProvider>
