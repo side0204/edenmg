@@ -240,12 +240,17 @@ export default function SpliceTab({
             </section>
           )}
 
-          {/* 접속 추가 */}
-          <section className="border border-slate-200 rounded-xl p-4 bg-white space-y-3">
-            <h4 className="flex items-center gap-1 text-sm font-semibold text-slate-700">
+          {/* 접속 추가 — 헤더 클릭으로 접기/펼치기 */}
+          <details
+            open
+            className="group border border-slate-200 rounded-xl bg-white [&[open]>summary>.chev]:rotate-180"
+          >
+            <summary className="flex cursor-pointer list-none items-center gap-2 rounded-xl px-4 py-3 text-sm font-semibold text-slate-700 hover:bg-slate-50">
               <Plus className="h-4 w-4" />
-              접속 추가
-            </h4>
+              <span className="flex-1">접속 추가</span>
+              <span className="chev text-slate-400 transition-transform">▾</span>
+            </summary>
+            <div className="px-4 pb-4">
             {connectedCables.length === 0 ? (
               <p className="text-sm text-slate-500 italic">
                 이 시설에 연결된 케이블이 없습니다. 케이블을 먼저 등록하세요.
@@ -341,7 +346,8 @@ export default function SpliceTab({
                 </div>
               </>
             )}
-          </section>
+            </div>
+          </details>
         </>
       )}
     </div>

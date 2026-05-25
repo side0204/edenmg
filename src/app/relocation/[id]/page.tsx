@@ -196,6 +196,11 @@ export default async function RelocationProjectPage({
   const projectCategoryLabel = RELOCATION_CATEGORY_LABEL[projectCategory]
   const isSubscriptionProject = projectCategory === '청약'
 
+  // 카테고리별 사용 불가 탭 — 청약·계획은 차수·철거이설 미노출. URL 로 직접 진입 시 facilities 폴백.
+  const tabAllowedForCategory =
+    projectCategory === '지장이설' || (tab !== 'phases' && tab !== 'migrations')
+  const effectiveTab: TabId = tabAllowedForCategory ? tab : 'facilities'
+
   // 청약 프로젝트 — 외선/접속 작업자 후보 + 현재 배정된 ID 목록
   let outsideCandidates: { id: string; name: string; position: string | null; team: string | null; work_type: string | null }[] = []
   let spliceCandidates: typeof outsideCandidates = []
@@ -413,12 +418,17 @@ export default async function RelocationProjectPage({
             ? `주의 ${verifyResult.yellowCount}`
             : undefined,
     },
-    {
-      tab: 'phases',
-      label: '차수',
-      done: phases.length > 0,
-      detail: phases.length > 0 ? `${phases.length}차수` : undefined,
-    },
+    // 차수는 지장이설 전용
+    ...(projectCategory === '지장이설'
+      ? [
+          {
+            tab: 'phases' as const,
+            label: '차수',
+            done: phases.length > 0,
+            detail: phases.length > 0 ? `${phases.length}차수` : undefined,
+          },
+        ]
+      : []),
     {
       tab: 'export',
       label: '내보내기',
@@ -532,6 +542,12 @@ export default async function RelocationProjectPage({
     </div>
   )
 
+  // 카테고리별 탭 필터링 — 청약·계획은 차수·철거이설 미사용 (지장이설 전용)
+  const visibleTabs =
+    projectCategory === '지장이설'
+      ? TABS
+      : TABS.filter((t) => t.id !== 'phases' && t.id !== 'migrations')
+
   const tabPanel = (
     <div className="mx-auto max-w-6xl px-4 sm:px-6 space-y-5 py-3">
         {/* 탭 바 — 카테고리 색 적용 (active = 카테고리 컬러) */}
@@ -542,9 +558,9 @@ export default async function RelocationProjectPage({
           }
         >
           <div className="mx-auto max-w-6xl px-4 sm:px-6 flex overflow-x-auto gap-1 py-2">
-            {TABS.map((t) => {
+            {visibleTabs.map((t) => {
               const Icon = t.icon
-              const active = tab === t.id
+              const active = effectiveTab === t.id
               const badge = tabBadges[t.id]
               return (
                 <Link
@@ -584,16 +600,16 @@ export default async function RelocationProjectPage({
         {/* 탭 콘텐츠 — 시설 목록은 「시설」 탭과 캔버스 좌측 사이드바에 있으므로 별도 패널 제거 */}
         <section>
           <div className="rounded-2xl bg-white shadow-sm border border-slate-200 p-4 sm:p-6 min-w-0">
-            {tab === 'facilities' && (
+            {effectiveTab === 'facilities' && (
               <FacilitiesTab projectId={project.id} facilities={facilities} />
             )}
-            {tab === 'cables' && (
+            {effectiveTab === 'cables' && (
               <CablesTab projectId={project.id} cables={cables} facilities={facilities} />
             )}
-            {tab === 'circuits' && (
+            {effectiveTab === 'circuits' && (
               <CircuitsTab projectId={project.id} circuits={circuits} />
             )}
-            {tab === 'cores' && (
+            {effectiveTab === 'cores' && (
               <CoresTab
                 projectId={project.id}
                 assignments={assignments}
@@ -612,7 +628,7 @@ export default async function RelocationProjectPage({
                 })}
               />
             )}
-            {tab === 'migrations' && (
+            {effectiveTab === 'migrations' && (
               <MigrationsTab
                 projectId={project.id}
                 cables={cables.map((c) => ({
@@ -649,10 +665,10 @@ export default async function RelocationProjectPage({
                 selectedFromCableId={selectedFromCableId}
               />
             )}
-            {tab === 'verify' && (
+            {effectiveTab === 'verify' && (
               <VerifyTab result={verifyResult} facilityCount={facilities.length} />
             )}
-            {tab === 'phases' && (
+            {effectiveTab === 'phases' && (
               <PhasesTab
                 projectId={project.id}
                 phases={phases}
@@ -667,7 +683,7 @@ export default async function RelocationProjectPage({
                 }))}
               />
             )}
-            {tab === 'export' && (
+            {effectiveTab === 'export' && (
               <ExportTab
                 projectId={project.id}
                 facilities={facilities.map((f) => ({
@@ -706,7 +722,7 @@ export default async function RelocationProjectPage({
                 coreAssignmentCount={assignments.length}
               />
             )}
-            {tab === 'splice' && (
+            {effectiveTab === 'splice' && (
               <SpliceTab
                 projectId={project.id}
                 facilities={facilities.map((f) => ({
@@ -1136,7 +1152,7 @@ export default async function RelocationProjectPage({
           <ProgressStepBar
             projectId={id}
             steps={steps}
-            currentTab={tab}
+            currentTab={effectiveTab}
             category={projectCategory}
           />
         </div>
