@@ -2814,6 +2814,57 @@ export default function TopologyCanvas({
     if (!result.ok) toast.error(result.error)
   }
 
+  // 멀티터치 핀치 시도 — 자식 (시설/라벨/케이블/waypoint) pointerdown 핸들러도
+  //   호출. 첫 손가락이 시설 위에 떨어진 상태에서 두 번째 손가락이 어디든 떨어지면
+  //   pinch zoom 시작해야 한다. 자식이 stopPropagation 하므로 SVG 핸들러까지 안 오니
+  //   각 자식이 직접 등록·검사한다 (owner 보고 2026-05-25 — 모바일 핀치 안 됨).
+  //   반환값 true = pinch 시작됨 → 자식 핸들러는 abort 해야 함.
+  const tryStartPinchFromChild = (e: React.PointerEvent): boolean => {
+    if (mode === 'map') return false
+    if (e.pointerType !== 'touch') return false
+    const svg = svgRef.current
+    if (!svg) return false
+    activeTouchesRef.current.set(e.pointerId, { x: e.clientX, y: e.clientY })
+    if (activeTouchesRef.current.size < 2) return false
+    // 두 번째 손가락 도착 — 핀치 시작. 모든 진행 중 드래그 취소.
+    panRef.current = null
+    marqueeRef.current = null
+    setMarquee(null)
+    labelDragRef.current = null
+    waypointDragRef.current = null
+    groupDragRef.current = null
+    interactionRef.current = null
+    setDragging(null)
+    const rect = svg.getBoundingClientRect()
+    if (rect.width === 0 || rect.height === 0) return false
+    const _ctm = svg.getScreenCTM()
+    const _inv = _ctm?.inverse()
+    const screenToSvgX = _inv?.a ?? viewport.width / rect.width
+    const screenToSvgY = _inv?.d ?? viewport.height / rect.height
+    const pts = Array.from(activeTouchesRef.current.values())
+    const dx = pts[1].x - pts[0].x
+    const dy = pts[1].y - pts[0].y
+    pinchRef.current = {
+      startDist: Math.hypot(dx, dy) || 1,
+      startMidX: (pts[0].x + pts[1].x) / 2,
+      startMidY: (pts[0].y + pts[1].y) / 2,
+      startVx: viewport.x,
+      startVy: viewport.y,
+      startVw: viewport.width,
+      startVh: viewport.height,
+      rectLeft: rect.left,
+      rectTop: rect.top,
+      rectWidth: rect.width,
+      rectHeight: rect.height,
+      screenToSvgX,
+      screenToSvgY,
+    }
+    try {
+      svg.setPointerCapture(e.pointerId)
+    } catch {}
+    return true
+  }
+
   // waypoint 드래그 시작
   const onWaypointPointerDown = (
     e: React.PointerEvent<SVGCircleElement>,
@@ -2821,6 +2872,8 @@ export default function TopologyCanvas({
     index: number,
   ) => {
     if (!editable) return
+    // 멀티터치 두 번째 손가락이면 pinch 시작 + drag setup abort
+    if (tryStartPinchFromChild(e)) return
     e.stopPropagation()
     const { x, y } = toSvgCoord(e.clientX, e.clientY)
     const wp = effectiveWaypoints(cableId)[index]
@@ -2843,6 +2896,8 @@ export default function TopologyCanvas({
 
   const onPointerDown = (e: React.PointerEvent<SVGGElement>, id: string) => {
     if (!editable) return
+    // 멀티터치 두 번째 손가락이면 pinch 시작 + drag setup abort
+    if (tryStartPinchFromChild(e)) return
     // 도식·지도 모드 공통 — pointer 캡처로 드래그. 지도 모드도 동일 (Phase 2).
     e.stopPropagation()
     const { x, y } = toSvgCoord(e.clientX, e.clientY)
@@ -2893,6 +2948,7 @@ export default function TopologyCanvas({
     curDy: number,
   ) => {
     if (!editable) return
+    if (tryStartPinchFromChild(e)) return
     e.stopPropagation()
     const { x, y } = toSvgCoord(e.clientX, e.clientY)
     labelDragRef.current = {
