@@ -34,8 +34,14 @@ export default function RoadviewPanel({
   onToggleCollapse,
 }: Props) {
   const containerRef = useRef<HTMLDivElement | null>(null)
+  const panelRef = useRef<HTMLDivElement | null>(null)
   const roadviewRef = useRef<kakao.maps.Roadview | null>(null)
   const clientRef = useRef<kakao.maps.RoadviewClient | null>(null)
+  // 캡처 동안 컨테이너 크기 잠금용 — onLock/onUnlock 에서 사용
+  const dimsLockRef = useRef<{
+    panel: { width: string; height: string; minHeight: string; flexShrink: string } | null
+    container: { width: string; height: string } | null
+  }>({ panel: null, container: null })
   const [noPano, setNoPano] = useState(false)
   // 초기 폭 — 화면 폭 기반. 모바일은 작게 시작 (지도 가리지 않도록).
   //   useState 초기화 함수에서 한 번만 계산 (SSR 안전: window 가드).
@@ -186,13 +192,44 @@ export default function RoadviewPanel({
       const rv = roadviewRef.current
       if (!rv) return
       try {
+        // 1) 컨테이너 크기를 현재 px 로 잠금 — SDK 가 resize 를 감지 못 하게.
+        //    근본 원인: 「공유 중」 배너로 viewport 가 ~40px 축소되면 panel/container
+        //    가 따라 줄어들고, SDK 는 새 캔버스 크기로 panorama 를 재투영해서 같은
+        //    viewpoint 라도 건물 픽셀 위치가 달라짐. 캔버스 크기 자체를 고정하면
+        //    재투영이 안 일어남.
+        const panel = panelRef.current
+        if (panel) {
+          const r = panel.getBoundingClientRect()
+          dimsLockRef.current.panel = {
+            width: panel.style.width,
+            height: panel.style.height,
+            minHeight: panel.style.minHeight,
+            flexShrink: panel.style.flexShrink,
+          }
+          panel.style.width = `${r.width}px`
+          panel.style.height = `${r.height}px`
+          panel.style.minHeight = `${r.height}px`
+          panel.style.flexShrink = '0'
+        }
+        const container = containerRef.current
+        if (container) {
+          const r = container.getBoundingClientRect()
+          dimsLockRef.current.container = {
+            width: container.style.width,
+            height: container.style.height,
+          }
+          container.style.width = `${r.width}px`
+          container.style.height = `${r.height}px`
+        }
+
+        // 2) viewpoint 저장 + 이벤트 가드 + 폴링 (재투영이 일어나는 다른 경로 대비)
         const vp = typeof rv.getViewpoint === 'function' ? rv.getViewpoint() : null
-        if (!vp) return
-        lockRef.current = { active: true, vp, pending: false }
-        kakao.maps.event.addListener(rv, 'viewpoint_changed', viewpointGuard)
-        // 폴링 시작
-        if (watchInterval) clearInterval(watchInterval)
-        watchInterval = setInterval(pollAndRestore, 50)
+        if (vp) {
+          lockRef.current = { active: true, vp, pending: false }
+          kakao.maps.event.addListener(rv, 'viewpoint_changed', viewpointGuard)
+          if (watchInterval) clearInterval(watchInterval)
+          watchInterval = setInterval(pollAndRestore, 50)
+        }
       } catch {}
     }
     function onUnlock() {
@@ -207,6 +244,26 @@ export default function RoadviewPanel({
         clearInterval(watchInterval)
         watchInterval = null
       }
+      // 컨테이너 크기 잠금 해제
+      try {
+        const panel = panelRef.current
+        const savedPanel = dimsLockRef.current.panel
+        if (panel && savedPanel) {
+          panel.style.width = savedPanel.width
+          panel.style.height = savedPanel.height
+          panel.style.minHeight = savedPanel.minHeight
+          panel.style.flexShrink = savedPanel.flexShrink
+        }
+        const container = containerRef.current
+        const savedContainer = dimsLockRef.current.container
+        if (container && savedContainer) {
+          container.style.width = savedContainer.width
+          container.style.height = savedContainer.height
+        }
+        dimsLockRef.current = { panel: null, container: null }
+        // 해제 후엔 SDK 에 새 크기 알림
+        if (rv) rv.relayout()
+      } catch {}
     }
     window.addEventListener('roadview-lock-viewpoint', onLock)
     window.addEventListener('roadview-unlock-viewpoint', onUnlock)
@@ -300,6 +357,8 @@ export default function RoadviewPanel({
 
   return (
     <div
+      ref={panelRef}
+      data-roadview-panel-root
       className="relative shrink-0 border-l border-slate-300 bg-white flex flex-col min-h-0"
       style={{ width }}
     >
