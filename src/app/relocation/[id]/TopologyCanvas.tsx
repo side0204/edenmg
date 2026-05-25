@@ -2856,36 +2856,35 @@ export default function TopologyCanvas({
     // 지도 모드 — pan 은 카카오맵이 직접 처리 (SVG 루트 pointer-events:none)
     if (mode === 'map') return
     if (interactionRef.current) return  // 노드 드래그 중이면 무시 (이론상 도달 안 함)
-    // SVG 배경을 직접 누른 경우만 pan. 케이블 선·라벨 위에서 누르면 pan 시작 안 함
-    // — setPointerCapture 가 케이블 click 이벤트를 SVG 로 가로채는 것을 방지.
-    if (e.target !== svgRef.current) return
+
     const svg = svgRef.current
     if (!svg) return
-    // 선택 도구 ON — pan 대신 marquee(사각 범위 선택) 시작
-    if (selectTool && e.button === 0) {
-      const { x, y } = toSvgCoord(e.clientX, e.clientY)
-      marqueeRef.current = { startX: x, startY: y, hasMoved: false }
-      setMarquee({ x, y, w: 0, h: 0 })
-      svg.setPointerCapture(e.pointerId)
-      return
-    }
     const rect = svg.getBoundingClientRect()
     if (rect.width === 0 || rect.height === 0) return
-    // CTM 역행렬로 screen px → SVG unit 정확한 비율 계산.
-    //   SVG 의 preserveAspectRatio 기본값 'xMidYMid meet' 은 viewBox 와 rect 의
-    //   aspect ratio 가 다를 때 letterbox 와 함께 uniform scale 적용한다.
-    //   기존 viewport.width/rect.width 같은 단순 비율은 letterbox 보정 안 되어 한 축이 느리거나 빠름.
-    //   getScreenCTM().inverse().a / .d 가 실제 적용된 scale 이라 정확.
-    const _ctm = svg.getScreenCTM()
-    const _inv = _ctm?.inverse()
-    const screenToSvgX = _inv?.a ?? viewport.width / rect.width
-    const screenToSvgY = _inv?.d ?? viewport.height / rect.height
-    // 멀티터치 — touch 만 추적 (마우스는 단일 입력이라 무의미)
+
+    // === 멀티터치 — 손가락이 어디 떨어지든 SVG 루트가 받음 (bubble) ===
+    // 두 번째 손가락이 시설/케이블 위에 떨어져도 핀치 zoom 이 동작해야 함.
+    // (owner 보고 2026-05-25 — 한 손가락이라도 시설 위면 pinch 안 됐던 버그)
     if (e.pointerType === 'touch') {
       activeTouchesRef.current.set(e.pointerId, { x: e.clientX, y: e.clientY })
       if (activeTouchesRef.current.size === 2) {
-        // 두 번째 손가락 도착 → 핀치 시작 (진행 중인 pan 취소)
+        // 두 번째 손가락 도착 → 핀치 시작. 진행 중인 모든 다른 드래그 취소.
+        //   pan/marquee 뿐 아니라 시설 드래그·라벨 드래그·waypoint 드래그·그룹 드래그
+        //   모두 중단. 그렇지 않으면 한 손가락이 라벨/시설을 움직이면서 다른 손가락이
+        //   pinch 를 시도해 「선택영역과 화면확대영역 차이」 가 생김 (owner 2026-05-25).
         panRef.current = null
+        marqueeRef.current = null
+        setMarquee(null)
+        labelDragRef.current = null
+        waypointDragRef.current = null
+        groupDragRef.current = null
+        interactionRef.current = null
+        setDragging(null)
+        // CTM 기반 screen→SVG 비율
+        const _ctm = svg.getScreenCTM()
+        const _inv = _ctm?.inverse()
+        const screenToSvgX = _inv?.a ?? viewport.width / rect.width
+        const screenToSvgY = _inv?.d ?? viewport.height / rect.height
         const pts = Array.from(activeTouchesRef.current.values())
         const dx = pts[1].x - pts[0].x
         const dy = pts[1].y - pts[0].y
@@ -2901,13 +2900,37 @@ export default function TopologyCanvas({
           rectTop: rect.top,
           rectWidth: rect.width,
           rectHeight: rect.height,
-          // CTM 기반 screen→SVG 비율 (letterbox 보정)
           screenToSvgX,
           screenToSvgY,
         }
+        // 두 번째 손가락도 SVG 가 캡처해 후속 move/up 이 안 새도록.
+        try {
+          svg.setPointerCapture(e.pointerId)
+        } catch {}
         return
       }
     }
+
+    // SVG 배경을 직접 누른 경우만 pan/marquee. 케이블·라벨·시설 위에서 누르면 시작 안 함
+    // — setPointerCapture 가 케이블 click 이벤트를 SVG 로 가로채는 것을 방지.
+    if (e.target !== svgRef.current) return
+    // 선택 도구 ON — pan 대신 marquee(사각 범위 선택) 시작
+    if (selectTool && e.button === 0) {
+      const { x, y } = toSvgCoord(e.clientX, e.clientY)
+      marqueeRef.current = { startX: x, startY: y, hasMoved: false }
+      setMarquee({ x, y, w: 0, h: 0 })
+      svg.setPointerCapture(e.pointerId)
+      return
+    }
+    // CTM 역행렬로 screen px → SVG unit 정확한 비율 계산.
+    //   SVG 의 preserveAspectRatio 기본값 'xMidYMid meet' 은 viewBox 와 rect 의
+    //   aspect ratio 가 다를 때 letterbox 와 함께 uniform scale 적용한다.
+    //   기존 viewport.width/rect.width 같은 단순 비율은 letterbox 보정 안 되어 한 축이 느리거나 빠름.
+    //   getScreenCTM().inverse().a / .d 가 실제 적용된 scale 이라 정확.
+    const _ctm = svg.getScreenCTM()
+    const _inv = _ctm?.inverse()
+    const screenToSvgX = _inv?.a ?? viewport.width / rect.width
+    const screenToSvgY = _inv?.d ?? viewport.height / rect.height
     panRef.current = {
       startClientX: e.clientX,
       startClientY: e.clientY,
@@ -3263,17 +3286,13 @@ export default function TopologyCanvas({
           if (!result.ok) {
             toast.error(result.error)
           } else {
-            // 저장 성공 — 로컬 override 제거. 이제 SVG 가 DB 의 해당 모드 컬럼에서
-            // 값을 읽어 표시 (다른 모드로 전환해도 그 모드의 offset 만 적용).
-            //   이걸 안 하면 한쪽 모드에서 드래그한 offset 이 다른 모드 라벨에도
-            //   계속 적용돼 보임 (owner 보고 2026-05-25).
-            //   router.refresh() 가 새 facilities props 를 받아오므로 자연스럽게
-            //   labelOffsets 우선순위가 사라짐.
-            setLabelOffsets((prev) => {
-              const next = { ...prev }
-              delete next[ld.id]
-              return next
-            })
+            // 저장 성공 — 로컬 override 를 일부러 그대로 둠.
+            //   - 이걸 즉시 지우면 router.refresh() 가 새 데이터 받기 전 한 프레임 동안
+            //     SVG 가 stale prop (옛 위치) 로 폴백 → 라벨이 "원위치로 갔다가 새 위치로"
+            //     깜박이는 현상이 생김 (owner 보고 2026-05-25 — 편집 중인 모드에서 발생).
+            //   - 다른 모드 라벨까지 안 새도록 정리는 「모드 전환 시」 setLabelOffsets({})
+            //     에서 일괄 처리 (도식↔지도 토글 핸들러).
+            //   - router.refresh() 만 호출해 다른 패널·배지·합계가 새 데이터를 받게 함.
             router.refresh()
           }
         }
