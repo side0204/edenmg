@@ -122,6 +122,8 @@ export type CanvasCoreAssignment = {
   core_range_end: number
   lifecycle: CoreLifecycle
   is_terminal: boolean
+  // 입력 주체 — 'designer'(설계 계획·기별 미반영) / 'worker'(실시공·기별 반영)
+  entered_role: 'designer' | 'worker'
 }
 
 type FacilityNode = {
@@ -455,6 +457,7 @@ export default function TopologyCanvas({
   projectCategory,
   subscriptionId,
   subscriberName,
+  projectDesignerId,
   facilities,
   cables,
   editable,
@@ -477,6 +480,9 @@ export default function TopologyCanvas({
   subscriptionId?: string | null
   // 가입자명 — 회선의 subscriber_name 으로 자동 채움.
   subscriberName?: string | null
+  // 프로젝트의 설계자 employee.id — popover 의 entered_role 기본값 판정
+  //   (current user.id === designerId 면 'designer', 아니면 'worker')
+  projectDesignerId?: string | null
   facilities: FacilityNode[]
   cables: CableEdge[]
   editable: boolean
@@ -608,6 +614,16 @@ export default function TopologyCanvas({
   //   selectedCableId: 현재 경로 편집 중인 케이블
   //   cableWaypoints: 로컬 override (서버 저장 전 부드러운 드래그용 — positions 와 같은 패턴)
   const [selectedCableId, setSelectedCableId] = useState<string | null>(null)
+  // 청약 popover 가시 상태 — selectedCableId 와 별개로 X 닫기 가능.
+  //   selectedCableId 변경 시 자동으로 따라가지만, popover X 누르면 popover 만 닫힘.
+  //   (owner 2026-05-25 — popover 닫기로 정보 패널까지 사라지지 않게)
+  const [subscriptionPopoverCableId, setSubscriptionPopoverCableId] = useState<
+    string | null
+  >(null)
+  useEffect(() => {
+    // 선택 케이블 바뀌면 popover 도 동기화 — 새 케이블 클릭 시 자동으로 popover 열림.
+    setSubscriptionPopoverCableId(selectedCableId)
+  }, [selectedCableId])
   const [cableWaypoints, setCableWaypoints] = useState<Record<string, Waypoint[]>>({})
   const waypointDragRef = useRef<{
     cableId: string
@@ -770,7 +786,9 @@ export default function TopologyCanvas({
 
   // Phase 5 (2026-05-23) — 케이블별 사용 코어 라벨 문자열.
   //   "1~24" (연속) · "5,8,15,17" (불연속) · "1~6,12~18" (혼합) 자동 포맷.
-  //   접속함체 결선도 표현용. 도식 모드에서 케이블 anchor 근처에 표시.
+  //   접속함체 결선도 표현용. 도식 모드에서 케이블 spec 위쪽에 표시.
+  // 청약 모드 (owner 2026-05-25): 설계자/작업자 entered_role 별로 분리 라벨.
+  //   기존 단일 coresByCable 외에 coresByCableByRole 도 노출.
   const coresByCable = useMemo(() => {
     const collect = new Map<string, number[]>()
     for (const a of coreAssignments ?? []) {
@@ -795,6 +813,44 @@ export default function TopologyCanvas({
       }
       parts.push(runStart === runEnd ? `${runStart}` : `${runStart}~${runEnd}`)
       result.set(cableId, parts.join(','))
+    }
+    return result
+  }, [coreAssignments])
+
+  // 청약 — 역할별 라벨 (designer / worker). 케이블 위에 두 줄로 표시.
+  const coresByCableByRole = useMemo(() => {
+    const collectD = new Map<string, number[]>()
+    const collectW = new Map<string, number[]>()
+    for (const a of coreAssignments ?? []) {
+      const target = a.entered_role === 'designer' ? collectD : collectW
+      if (!target.has(a.cable_id)) target.set(a.cable_id, [])
+      target.get(a.cable_id)!.push(a.core_range_start)
+    }
+    function format(cores: number[]): string {
+      const sorted = [...new Set(cores)].sort((a, b) => a - b)
+      if (sorted.length === 0) return ''
+      const parts: string[] = []
+      let runStart = sorted[0]
+      let runEnd = sorted[0]
+      for (let i = 1; i < sorted.length; i++) {
+        if (sorted[i] === runEnd + 1) {
+          runEnd = sorted[i]
+        } else {
+          parts.push(runStart === runEnd ? `${runStart}` : `${runStart}~${runEnd}`)
+          runStart = sorted[i]
+          runEnd = sorted[i]
+        }
+      }
+      parts.push(runStart === runEnd ? `${runStart}` : `${runStart}~${runEnd}`)
+      return parts.join(',')
+    }
+    const result = new Map<string, { designer: string; worker: string }>()
+    const allIds = new Set([...collectD.keys(), ...collectW.keys()])
+    for (const cableId of allIds) {
+      result.set(cableId, {
+        designer: format(collectD.get(cableId) ?? []),
+        worker: format(collectW.get(cableId) ?? []),
+      })
     }
     return result
   }, [coreAssignments])
@@ -4895,13 +4951,69 @@ export default function TopologyCanvas({
                     </g>
                   )
                 })()}
-                {/* Phase 5 — 사용 코어 라벨. 도식 모드에서만, 케이블의 from-anchor 쪽에 빨강.
-                    청약 모드에서는 진하게 강조 (가입자 사용 코어를 확실히 드러냄). */}
+                {/* 사용 코어 라벨 — 도식 모드 전용.
+                    청약: 케이블 spec 위쪽 (popover 자리). 역할별(설계자 파랑·작업자 빨강) 분리.
+                          popover 가 열려있으면 가려지므로 숨김.
+                    그 외: 기존 from-anchor 빨간 박스 (Phase 5 동작 유지). */}
                 {(() => {
                   if (mode === 'map') return null
+                  const isSubscriptionCtx = projectCategory === '청약'
+                  if (isSubscriptionCtx) {
+                    // popover 가 열려있으면 그 자리에 입력창이 있어 라벨 숨김
+                    if (subscriptionPopoverCableId === c.id) return null
+                    const byRole = coresByCableByRole.get(c.id)
+                    if (!byRole) return null
+                    // 케이블 spec 위쪽 — labelPt 위로 띄움. 작업자(빨강) + 설계자(파랑) 두 줄.
+                    const fontSize = 13
+                    const fontWeight = 800
+                    const padX = 6
+                    const padY = 3
+                    const rows: { label: string; color: string; dashed: boolean }[] = []
+                    if (byRole.worker)
+                      rows.push({ label: byRole.worker, color: '#dc2626', dashed: false })
+                    if (byRole.designer)
+                      rows.push({ label: byRole.designer, color: '#2563eb', dashed: true })
+                    if (rows.length === 0) return null
+                    // 첫 줄 y — spec 텍스트 위쪽으로 충분히 띄움 (spec 폰트 20, 그 위 26px)
+                    const firstY = labelPt.y - 32
+                    const rowH = fontSize + padY * 2 + 4
+                    return (
+                      <g pointerEvents="none">
+                        {rows.map((row, idx) => {
+                          const w = estimateTextWidth(row.label, fontSize) + padX * 2
+                          const h = fontSize + padY * 2
+                          const y = firstY - idx * rowH
+                          return (
+                            <g key={idx}>
+                              <rect
+                                x={labelPt.x - w / 2}
+                                y={y - h / 2}
+                                width={w}
+                                height={h}
+                                rx={3}
+                                fill="white"
+                                stroke={row.color}
+                                strokeWidth={1.8}
+                                strokeDasharray={row.dashed ? '4 2' : undefined}
+                              />
+                              <text
+                                x={labelPt.x}
+                                y={y + fontSize * 0.35}
+                                textAnchor="middle"
+                                fill={row.color}
+                                style={{ fontSize, fontWeight, fontFamily: LABEL_FONT }}
+                              >
+                                {row.label}
+                              </text>
+                            </g>
+                          )
+                        })}
+                      </g>
+                    )
+                  }
+                  // 비-청약 (지장이설/계획) — 기존 from-anchor 동작 유지
                   const coreLabel = coresByCable.get(c.id)
                   if (!coreLabel) return null
-                  // pts[0] = from anchor, pts[1] = 다음 점 (waypoint 또는 to anchor)
                   if (pts.length < 2) return null
                   const fromPt = pts[0]
                   const nextPt = pts[1]
@@ -4910,17 +5022,14 @@ export default function TopologyCanvas({
                   const len = Math.hypot(dx, dy) || 1
                   const ux = dx / len
                   const uy = dy / len
-                  // 케이블 따라 35px 들어간 위치 + 수직 12px 오프셋 (선 위에 안 겹치게)
                   const ALONG = 35
                   const PERP = 12
                   const lx = fromPt.x + ux * ALONG - uy * PERP
                   const ly = fromPt.y + uy * ALONG + ux * PERP
-                  // 청약 모드: 더 크고 진하게 (가입자 사용 코어 강조)
-                  const isSubscriptionCtx = projectCategory === '청약'
-                  const fontSize = isSubscriptionCtx ? 13 : 9
-                  const fontWeight = isSubscriptionCtx ? 800 : 600
-                  const padX = isSubscriptionCtx ? 6 : 4
-                  const padY = isSubscriptionCtx ? 3 : 2
+                  const fontSize = 9
+                  const fontWeight = 600
+                  const padX = 4
+                  const padY = 2
                   const w = estimateTextWidth(coreLabel, fontSize) + padX * 2
                   const h = fontSize + padY * 2
                   return (
@@ -4930,21 +5039,17 @@ export default function TopologyCanvas({
                         y={ly - h / 2}
                         width={w}
                         height={h}
-                        rx={isSubscriptionCtx ? 3 : 2}
+                        rx={2}
                         fill="white"
                         stroke="#dc2626"
-                        strokeWidth={isSubscriptionCtx ? 1.5 : 1}
+                        strokeWidth={1}
                       />
                       <text
                         x={lx}
                         y={ly + fontSize * 0.35}
                         textAnchor="middle"
                         fill="#dc2626"
-                        style={{
-                          fontSize,
-                          fontWeight,
-                          fontFamily: LABEL_FONT,
-                        }}
+                        style={{ fontSize, fontWeight, fontFamily: LABEL_FONT }}
                       >
                         {coreLabel}
                       </text>
@@ -4952,18 +5057,25 @@ export default function TopologyCanvas({
                   )
                 })()}
 
-                {/* 청약 카테고리 도식 모드 — 선택된 케이블 위에 사용코어 입력 popover */}
+                {/* 청약 카테고리 도식 모드 — 선택된 케이블 위에 사용코어 입력 popover.
+                    selectedCableId 와 별개로 subscriptionPopoverCableId 가 통제 →
+                    popover X 만 누르면 popover 만 닫히고 정보 패널은 유지됨. */}
                 {projectCategory === '청약' &&
                   mode === 'schematic' &&
-                  selected &&
+                  subscriptionPopoverCableId === c.id &&
                   (() => {
                     // 이 케이블의 기존 사용 코어 — popover 에서 중복 경고용
                     const usedCores = (coreAssignments ?? [])
                       .filter((a) => a.cable_id === c.id)
                       .map((a) => a.core_range_start)
-                    // popover 크기 (SVG 좌표) — labelPt 위쪽으로 띄움
-                    const POP_W = 220
-                    const POP_H = 130
+                    // popover 크기 (SVG 좌표) — 작은 화면에서도 입력하기 편하게 확대
+                    //   (owner 2026-05-25 — 축소화면 입력 어려움 해결)
+                    const POP_W = 360
+                    const POP_H = 230
+                    const defaultRole: 'designer' | 'worker' =
+                      projectDesignerId && myEmployeeId === projectDesignerId
+                        ? 'designer'
+                        : 'worker'
                     return (
                       <foreignObject
                         x={labelPt.x - POP_W / 2}
@@ -4978,8 +5090,9 @@ export default function TopologyCanvas({
                           cableCode={c.cable_code}
                           cableSpec={c.spec}
                           usedCores={usedCores}
+                          defaultRole={defaultRole}
                           onSaved={() => router.refresh()}
-                          onClose={() => setSelectedCableId(null)}
+                          onClose={() => setSubscriptionPopoverCableId(null)}
                         />
                       </foreignObject>
                     )

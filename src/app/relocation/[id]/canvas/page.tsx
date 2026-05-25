@@ -17,6 +17,7 @@ type ProjectMini = {
   category: string | null
   subscription_id: string | null
   subscriber_name: string | null
+  designer_id: string | null
 }
 
 export default async function RelocationCanvasPage({
@@ -44,7 +45,7 @@ export default async function RelocationCanvasPage({
 
   const { data: pRow } = await supabase
     .from('relocation_projects')
-    .select('id, title, client, category, subscription_id, subscriber_name')
+    .select('id, title, client, category, subscription_id, subscriber_name, designer_id')
     .eq('id', id)
     .maybeSingle()
   const project = pRow as ProjectMini | null
@@ -92,6 +93,7 @@ export default async function RelocationCanvasPage({
             }
             subscriptionId={project.subscription_id ?? null}
             subscriberName={project.subscriber_name ?? null}
+            projectDesignerId={project.designer_id ?? null}
             facilities={facilities.map((f) => ({
               id: f.id,
               closure_type: f.closure_type,

@@ -28,6 +28,8 @@ export type CoreAssignmentRow = {
   is_terminal: boolean
   is_auto_assigned: boolean
   notes: string | null
+  // 청약: 'designer'(설계 계획·기별 미반영) / 'worker'(실시공·기별 반영). 기존 데이터는 'worker' default.
+  entered_role: 'designer' | 'worker'
 }
 
 type CableMini = {

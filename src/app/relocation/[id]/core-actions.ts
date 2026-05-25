@@ -345,12 +345,16 @@ export async function addSubscriptionCoresFromCanvas(input: {
   project_id: string
   cable_id: string
   core_numbers: number[]
+  // 'designer' = 설계 계획 (기별 미반영) / 'worker' = 실시공 (기별 반영)
+  // 미지정 시 현재 로그인 사용자가 프로젝트 designer 이면 'designer', 그 외 'worker'.
+  entered_role?: 'designer' | 'worker'
 }): Promise<
   | {
       ok: true
       created: number
       skipped: { core: number; reason: string }[]
       circuit_id: string
+      entered_role: 'designer' | 'worker'
     }
   | { ok: false; error: string }
 > {
@@ -372,12 +376,12 @@ export async function addSubscriptionCoresFromCanvas(input: {
     return { ok: false, error: '사용 코어가 모두 잘못된 값입니다' }
   }
 
-  const { supabase } = await requireMember()
+  const { supabase, me } = await requireMember()
 
-  // 프로젝트 — 청약 분류 + 가입자명 + 청약ID
+  // 프로젝트 — 청약 분류 + 가입자명 + 청약ID + 설계자 (entered_role 기본값 판정용)
   const { data: pRow } = await supabase
     .from('relocation_projects')
-    .select('id, category, subscription_id, subscriber_name')
+    .select('id, category, subscription_id, subscriber_name, designer_id')
     .eq('id', input.project_id)
     .maybeSingle()
   const project = pRow as
@@ -386,6 +390,7 @@ export async function addSubscriptionCoresFromCanvas(input: {
         category: string | null
         subscription_id: string | null
         subscriber_name: string | null
+        designer_id: string | null
       }
     | null
   if (!project) return { ok: false, error: '프로젝트를 찾을 수 없습니다' }
@@ -400,6 +405,11 @@ export async function addSubscriptionCoresFromCanvas(input: {
     }
   }
   const subscriberName = project.subscriber_name?.trim().slice(0, 200) || null
+
+  // 입력 주체 — 명시 지정 우선, 없으면 현재 사용자가 프로젝트 designer 면 'designer' 아니면 'worker'
+  const enteredRole: 'designer' | 'worker' =
+    input.entered_role ??
+    (project.designer_id === me.id ? 'designer' : 'worker')
 
   // 케이블 — 같은 프로젝트인지 + 코어 수 검증
   const { data: cRow } = await supabase
@@ -479,6 +489,7 @@ export async function addSubscriptionCoresFromCanvas(input: {
       is_terminal: true, // 청약 = 가입자 종단
       is_auto_assigned: false,
       notes: null,
+      entered_role: enteredRole,
     })
     if (error) {
       const reason =
@@ -492,7 +503,7 @@ export async function addSubscriptionCoresFromCanvas(input: {
   }
 
   revalidatePath(`/relocation/${input.project_id}`)
-  return { ok: true, created, skipped, circuit_id: circuitId }
+  return { ok: true, created, skipped, circuit_id: circuitId, entered_role: enteredRole }
 }
 
 

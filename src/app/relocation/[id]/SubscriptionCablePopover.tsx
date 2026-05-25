@@ -7,22 +7,29 @@ import { addSubscriptionCoresFromCanvas } from './core-actions'
 import { cableSpecCoreCount, type CableSpec } from '@/lib/relocation'
 
 // 청약 카테고리 도식 모드 전용 — 케이블 위 floating 입력창.
-//   케이블 선택 → 캔버스 위에 작은 카드 띄움 → 사용 코어 입력 → Save.
+//   케이블 선택 → 캔버스 위에 카드 띄움 → 사용 코어 입력 → Save.
 //   server action 이 프로젝트의 청약ID + 가입자명으로 회선을 자동 생성/재사용 후
 //   입력한 코어 번호 각각에 대해 core_assignment 1 행씩 생성.
+//
+// 입력 주체 (entered_role) — owner 결정 2026-05-25:
+//   - designer = 설계자. 기별명세서·정산에 반영 안 됨 (계획 단계).
+//   - worker   = 작업자. 기별명세서·정산에 반영 (실시공 결과).
+//   기본값은 현재 로그인 사용자가 프로젝트 designer 면 'designer', 아니면 'worker'.
+//   설계자는 popover 안에서 「작업자용으로 저장」 토글로 override 가능.
 
 export type SubscriptionCablePopoverProps = {
   projectId: string
   cableId: string
   cableCode: string
   cableSpec: string
-  // 이 케이블에 이미 배정된 코어 번호 — 중복 입력 시 빨강 경고
+  // 이 케이블에 이미 배정된 코어 — 중복 입력 시 경고
   usedCores: number[]
+  // 현재 사용자의 기본 역할 — 'designer'(프로젝트 designer 본인) / 'worker'(그 외)
+  defaultRole: 'designer' | 'worker'
   onSaved: () => void
   onClose: () => void
 }
 
-// 사용자 입력 "1,2,3" 또는 "1-3" → 정수 배열
 function parseCores(input: string, maxCore: number): { cores: number[]; errors: string[] } {
   const errors: string[] = []
   const cores: number[] = []
@@ -56,7 +63,6 @@ function parseCores(input: string, maxCore: number): { cores: number[]; errors: 
       cores.push(n)
     }
   }
-  // 중복 제거 + 정렬
   return { cores: Array.from(new Set(cores)).sort((a, b) => a - b), errors }
 }
 
@@ -66,22 +72,27 @@ export default function SubscriptionCablePopover({
   cableCode,
   cableSpec,
   usedCores,
+  defaultRole,
   onSaved,
   onClose,
 }: SubscriptionCablePopoverProps) {
-  // cableSpec 은 DB enum 이라 런타임에 CableSpec 보장 — cast 안전.
   const maxCore = cableSpecCoreCount(cableSpec as CableSpec) || 1
   const [input, setInput] = useState('')
   const [busy, setBusy] = useState(false)
+  // 설계자가 「작업자용으로 저장」 체크하면 entered_role = 'worker' override
+  const [saveAsWorker, setSaveAsWorker] = useState(false)
   const usedSet = useMemo(() => new Set(usedCores), [usedCores])
 
   const parsed = useMemo(() => parseCores(input, maxCore), [input, maxCore])
   const duplicates = parsed.cores.filter((c) => usedSet.has(c))
   const valid = parsed.cores.length > 0 && parsed.errors.length === 0
 
+  // 실제 저장 역할 — 설계자 + saveAsWorker 토글 시 worker. 그 외 defaultRole.
+  const effectiveRole: 'designer' | 'worker' =
+    defaultRole === 'designer' && saveAsWorker ? 'worker' : defaultRole
+
   async function onSave() {
     if (!valid || busy) return
-    // 이미 사용 중인 코어는 빼고 보냄 — server action 에서 한 번 더 detect 하지만 깔끔하게 전처리
     const toSubmit = parsed.cores.filter((c) => !usedSet.has(c))
     if (toSubmit.length === 0) {
       toast.info('이미 모두 배정된 코어입니다')
@@ -92,45 +103,58 @@ export default function SubscriptionCablePopover({
       project_id: projectId,
       cable_id: cableId,
       core_numbers: toSubmit,
+      entered_role: effectiveRole,
     })
     setBusy(false)
     if (!result.ok) {
       toast.error(result.error)
       return
     }
+    const roleLabel = result.entered_role === 'designer' ? '설계자 입력' : '작업자 입력'
     if (result.skipped.length > 0) {
       toast.warning(
-        `${result.created}개 배정 / ${result.skipped.length}개 스킵: ` +
+        `${roleLabel} ${result.created}개 / ${result.skipped.length}개 스킵: ` +
           result.skipped.map((s) => `${s.core}(${s.reason})`).join(', '),
       )
     } else {
-      toast.success(`사용 코어 ${result.created}개를 배정했습니다`)
+      toast.success(`${roleLabel} 코어 ${result.created}개를 배정했습니다`)
     }
     setInput('')
     onSaved()
   }
 
+  // 색상 — 설계자(blue)·작업자(rose) 명확 구분
+  const isDesigner = effectiveRole === 'designer'
+  const borderColor = isDesigner ? 'border-blue-500' : 'border-rose-500'
+  const headerBg = isDesigner ? 'bg-blue-50' : 'bg-rose-50'
+  const titleColor = isDesigner ? 'text-blue-700' : 'text-rose-700'
+  const focusRing = isDesigner ? 'focus:border-blue-500 focus:ring-blue-300' : 'focus:border-rose-500 focus:ring-rose-300'
+  const saveBg = isDesigner ? 'bg-blue-600 hover:bg-blue-700' : 'bg-rose-600 hover:bg-rose-700'
+
   return (
-    <div className="w-full h-full overflow-hidden rounded-lg border-2 border-rose-500 bg-white shadow-xl">
-      <div className="flex items-center justify-between border-b border-slate-200 bg-rose-50/60 px-2 py-1">
+    <div className={`w-full h-full overflow-hidden rounded-lg border-2 ${borderColor} bg-white shadow-2xl`}>
+      <div className={`flex items-center justify-between border-b border-slate-200 ${headerBg} px-3 py-2`}>
         <div className="min-w-0">
-          <p className="text-[11px] font-bold text-rose-700 truncate">
+          <p className={`text-sm font-extrabold ${titleColor}`}>
             사용 코어 입력
+            <span className="ml-2 text-[11px] font-bold">
+              ({isDesigner ? '설계자 · 기별 미반영' : '작업자 · 기별 반영'})
+            </span>
           </p>
-          <p className="text-[10px] text-slate-500 truncate">
+          <p className="text-xs font-semibold text-slate-700 truncate">
             {cableCode} · {cableSpec} (1~{maxCore})
           </p>
         </div>
         <button
           type="button"
           onClick={onClose}
-          className="shrink-0 text-slate-400 hover:text-slate-900"
+          className="shrink-0 text-slate-500 hover:text-slate-900 ml-2"
           aria-label="닫기"
         >
-          <X className="h-3.5 w-3.5" />
+          <X className="h-5 w-5" />
         </button>
       </div>
-      <div className="px-2 py-1.5 space-y-1.5">
+      <div className="px-3 py-2.5 space-y-2">
         <input
           type="text"
           value={input}
@@ -138,7 +162,7 @@ export default function SubscriptionCablePopover({
           placeholder="예: 1,2,3 또는 1-3"
           autoFocus
           disabled={busy}
-          className="w-full rounded-md border border-slate-300 px-2 py-1 text-xs font-mono focus:border-rose-500 focus:outline-none focus:ring-1 focus:ring-rose-300 disabled:bg-slate-100"
+          className={`w-full rounded-md border-2 border-slate-300 px-3 py-2 text-base font-mono font-semibold text-slate-900 focus:outline-none focus:ring-2 ${focusRing} disabled:bg-slate-100`}
           onKeyDown={(e) => {
             if (e.key === 'Enter' && valid) {
               e.preventDefault()
@@ -149,30 +173,46 @@ export default function SubscriptionCablePopover({
             }
           }}
         />
+        {defaultRole === 'designer' && (
+          <label className="flex items-center gap-1.5 cursor-pointer">
+            <input
+              type="checkbox"
+              checked={saveAsWorker}
+              onChange={(e) => setSaveAsWorker(e.target.checked)}
+              disabled={busy}
+              className="h-4 w-4 rounded border-slate-300"
+            />
+            <span className="text-xs font-semibold text-slate-700">
+              작업자용으로 저장 (기별 반영)
+            </span>
+          </label>
+        )}
         {usedCores.length > 0 && (
-          <p className="text-[10px] text-slate-500">
+          <p className="text-xs font-medium text-slate-600">
             이미 사용:{' '}
-            <span className="font-mono">{usedCores.slice().sort((a, b) => a - b).join(', ')}</span>
+            <span className="font-mono font-bold text-slate-900">
+              {usedCores.slice().sort((a, b) => a - b).join(', ')}
+            </span>
           </p>
         )}
         {parsed.errors.length > 0 && (
-          <p className="text-[10px] text-rose-600">{parsed.errors[0]}</p>
+          <p className="text-xs font-semibold text-rose-700">{parsed.errors[0]}</p>
         )}
         {duplicates.length > 0 && (
-          <p className="text-[10px] text-amber-700">
-            중복(스킵 예정): <span className="font-mono">{duplicates.join(', ')}</span>
+          <p className="text-xs font-semibold text-amber-700">
+            중복(스킵 예정): <span className="font-mono font-bold">{duplicates.join(', ')}</span>
           </p>
         )}
         <button
           type="button"
           onClick={onSave}
           disabled={!valid || busy}
-          className="w-full inline-flex items-center justify-center gap-1 rounded-md bg-rose-600 px-2 py-1 text-[11px] font-bold text-white hover:bg-rose-700 disabled:bg-slate-300 disabled:cursor-not-allowed"
+          className={`w-full inline-flex items-center justify-center gap-1.5 rounded-md ${saveBg} px-3 py-2 text-sm font-extrabold text-white disabled:bg-slate-300 disabled:cursor-not-allowed`}
         >
           {busy ? (
-            <Loader2 className="h-3 w-3 animate-spin" />
+            <Loader2 className="h-4 w-4 animate-spin" />
           ) : (
-            <Save className="h-3 w-3" />
+            <Save className="h-4 w-4" />
           )}
           저장
         </button>

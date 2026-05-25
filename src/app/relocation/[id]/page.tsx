@@ -1093,6 +1093,7 @@ export default async function RelocationProjectPage({
         projectCategory={projectCategory}
         subscriptionId={project.subscription_id ?? null}
         subscriberName={project.subscriber_name ?? null}
+        projectDesignerId={project.designer_id ?? null}
         facilities={facilities.map((f) => ({
           id: f.id,
           closure_type: f.closure_type,

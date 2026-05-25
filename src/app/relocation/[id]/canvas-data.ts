@@ -101,7 +101,7 @@ export async function loadRelocationCanvasData(
     supabase
       .from('relocation_core_assignments')
       .select(
-        'id, circuit_id, segment_idx, cable_id, core_range_start, core_range_end, lifecycle, status, is_terminal, is_auto_assigned, notes',
+        'id, circuit_id, segment_idx, cable_id, core_range_start, core_range_end, lifecycle, status, is_terminal, is_auto_assigned, notes, entered_role',
       )
       .eq('project_id', projectId)
       .order('cable_id')
