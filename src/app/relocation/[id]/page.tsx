@@ -415,38 +415,39 @@ export default async function RelocationProjectPage({
                 {project.title}
               </h1>
               <p className="mt-0.5 text-xs lg:text-[11px] text-slate-500">
-                {projectCategoryLabel} · {project.client} · {project.region ?? '지역 미정'}
+                {projectCategoryLabel}
+                {project.region && ` · ${project.region}`}
                 {project.surveyed_at && ` · 계약 ${project.surveyed_at}`}
                 {designerName && ` · 설계자 ${designerName}`}
               </p>
             </div>
-            <div className="shrink-0 flex items-center gap-2 self-start">
+            <div className="shrink-0 flex flex-wrap items-center gap-1.5 self-start">
               {linkedWorkId && (
                 <Link
                   href={`/works/${linkedWorkId}`}
-                  className="inline-flex items-center gap-1 rounded-lg border border-emerald-300 bg-emerald-50 px-3 py-1.5 text-sm font-medium text-emerald-700 hover:bg-emerald-100"
+                  className="inline-flex items-center gap-1 rounded-md border border-emerald-300 bg-emerald-50 px-2 py-1 text-xs font-medium text-emerald-700 hover:bg-emerald-100"
                   title="작업관리에서 일보·진행 현황 보기"
                 >
-                  <Hammer className="h-4 w-4" />
+                  <Hammer className="h-3 w-3" />
                   작업관리 보기
                 </Link>
               )}
               <Link
                 href={`/relocation/${id}/import`}
-                className="inline-flex items-center gap-1 rounded-lg border border-slate-300 px-3 py-1.5 text-sm font-medium text-slate-700 hover:bg-slate-50"
+                className="inline-flex items-center gap-1 rounded-md border border-slate-300 px-2 py-1 text-xs font-medium text-slate-700 hover:bg-slate-50"
               >
-                <Upload className="h-4 w-4" />
+                <Upload className="h-3 w-3" />
                 데이터 가져오기
               </Link>
               <Link
                 href={`/relocation/${id}/canvas`}
                 target="_blank"
-                className="inline-flex items-center gap-1 rounded-lg border border-slate-300 px-3 py-1.5 text-sm font-medium text-slate-700 hover:bg-slate-50"
+                className="inline-flex items-center gap-1 rounded-md border border-slate-300 px-2 py-1 text-xs font-medium text-slate-700 hover:bg-slate-50"
               >
-                <ExternalLink className="h-4 w-4" />
+                <ExternalLink className="h-3 w-3" />
                 넓은 화면으로 열기
               </Link>
-              <span className="inline-flex items-center rounded-full bg-slate-900 px-3 py-1 text-sm font-medium text-white">
+              <span className="inline-flex items-center rounded-full bg-slate-900 px-2 py-0.5 text-xs font-medium text-white">
                 {project.status}
               </span>
             </div>
