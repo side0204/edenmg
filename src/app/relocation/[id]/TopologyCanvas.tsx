@@ -82,6 +82,7 @@ import SketchOverlay from './SketchOverlay'
 import FieldInspectionSaveDialog from './FieldInspectionSaveDialog'
 import CableInfoPanel from './CableInfoPanel'
 import SubscriptionCablePopover from './SubscriptionCablePopover'
+import FacilityTaskPopover from './FacilityTaskPopover'
 import FacilityInfoPanel, {
   type TaskTypeOption,
   type FacilityTaskItem,
@@ -859,6 +860,12 @@ export default function TopologyCanvas({
   }, [coreAssignments])
 
   const [selectedId, setSelectedId] = useState<string | null>(null)
+  // 시설 「작업내역입력」 popover — 청약 모드 전용. 시설 선택과 별도 토글.
+  //   selectedId 변경 시 자동 동기화. popover X 누르면 시설 정보 패널은 유지.
+  const [facilityTaskPopoverId, setFacilityTaskPopoverId] = useState<string | null>(null)
+  useEffect(() => {
+    setFacilityTaskPopoverId(selectedId)
+  }, [selectedId])
   const [pendingConnection, setPendingConnection] = useState<
     { fromId: string; toId: string } | null
   >(null)
@@ -5620,6 +5627,41 @@ export default function TopologyCanvas({
                 )}
                 </g>
                 </g>
+                {/* 청약 도식 모드 — 시설 「작업내역입력」 popover */}
+                {projectCategory === '청약' &&
+                  mode === 'schematic' &&
+                  facilityTaskPopoverId === f.id &&
+                  (() => {
+                    const POP_W = 480
+                    const POP_H = 460
+                    const POP_OFFSET_FROM_NODE = 40
+                    const svgRect = svgRef.current?.getBoundingClientRect()
+                    const popSvgScale =
+                      svgRect && svgRect.width > 0
+                        ? viewport.width / svgRect.width
+                        : 1
+                    // 시설 노드 위쪽으로 띄움 (라벨 안 가리는 적당한 위치)
+                    return (
+                      <foreignObject
+                        x={nodeCx - POP_W / 2}
+                        y={-POP_H - POP_OFFSET_FROM_NODE}
+                        width={POP_W}
+                        height={POP_H}
+                        style={{ overflow: 'visible' }}
+                      >
+                        <FacilityTaskPopover
+                          projectId={projectId}
+                          facilityId={f.id}
+                          facilityCode={code}
+                          facilityName={f.name}
+                          taskTypes={taskTypes ?? []}
+                          svgScale={popSvgScale}
+                          onSaved={() => router.refresh()}
+                          onClose={() => setFacilityTaskPopoverId(null)}
+                        />
+                      </foreignObject>
+                    )
+                  })()}
               </g>
             )
           })}

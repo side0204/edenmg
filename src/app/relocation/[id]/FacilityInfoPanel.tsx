@@ -83,6 +83,7 @@ export type FacilityStationOption = {
 export type TaskTypeOption = {
   id: string
   name: string
+  code: string | null
   unit_label: string
   standard_minutes_per_unit: number
 }

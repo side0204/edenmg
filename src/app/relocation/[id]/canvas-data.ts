@@ -80,7 +80,7 @@ export async function loadRelocationCanvasData(
     // 공종 마스터 (회사 단위) — 캔버스 접속함체 패널의 공종 드롭다운
     supabase
       .from('relocation_task_type_master')
-      .select('id, name, unit_label, standard_minutes_per_unit')
+      .select('id, name, code, unit_label, standard_minutes_per_unit')
       .eq('company_id', companyId)
       .eq('is_active', true)
       .order('position'),
