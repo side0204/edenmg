@@ -58,6 +58,7 @@ type RawProjectRow = {
   region: string | null
   subscription_id: string | null
   order_no: string | null
+  order_nos: unknown
   subscriber_name: string | null
   subscriber_address: string | null
   branch_manager: string | null
@@ -145,7 +146,7 @@ export default async function RelocationCategoryListPage({
   const { data: rawRows, error: listError } = await supabase
     .from('relocation_projects')
     .select(
-      'id, title, status, category, subcategory, region, subscription_id, order_no, subscriber_name, subscriber_address, branch_manager, branch_contact, subscribed_at, desired_open_at, surveyed_at, expected_completion_at, completion_at, outside_worker_ids, splice_worker_ids, designer_id, notes, created_at',
+      'id, title, status, category, subcategory, region, subscription_id, order_no, order_nos, subscriber_name, subscriber_address, branch_manager, branch_contact, subscribed_at, desired_open_at, surveyed_at, expected_completion_at, completion_at, outside_worker_ids, splice_worker_ids, designer_id, notes, created_at',
     )
     .eq('company_id', me.company_id)
     .eq('category', category)
@@ -183,6 +184,11 @@ export default async function RelocationCategoryListPage({
     region: p.region,
     subscription_id: p.subscription_id,
     order_no: p.order_no,
+    order_nos: Array.isArray(p.order_nos)
+      ? (p.order_nos as unknown[]).filter(
+          (v): v is string => typeof v === 'string',
+        )
+      : [],
     subscriber_name: p.subscriber_name,
     subscriber_address: p.subscriber_address,
     branch_manager: p.branch_manager,

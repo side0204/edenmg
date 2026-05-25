@@ -472,6 +472,8 @@ export default function TopologyCanvas({
   initialCanvasSize,
   tabPanel,
   tabPanelDefaultOpen,
+  initialFocusIds,
+  workerPositions,
 }: {
   projectId: string
   // 공사 분류 — '청약' 일 때 도식 모드에서 케이블 클릭 시 사용코어 입력 popover 노출.
@@ -502,6 +504,19 @@ export default function TopologyCanvas({
   //   page.tsx 에서 탭 내비+콘텐츠를 넘긴다. 전용 캔버스 라우트는 안 넘김.
   tabPanel?: ReactNode
   tabPanelDefaultOpen?: boolean
+  // 확대보기 — 캔버스 라우트가 ?focus=id1,id2,... 받아 그 시설들에 fit 하게 viewport 조정.
+  //   지도 밀집 영역 확대 보기용 (메인 캔버스 「더보기 > 확대보기」 에서 새 탭).
+  initialFocusIds?: string[]
+  // 작업자 위치 — 지도 모드에서 본인 외 작업자 위치 표시 (활성 작업 중).
+  //   각 시설 반경 1km 안에 있는 위치만 노출.
+  workerPositions?: {
+    employeeId: string
+    employeeName: string
+    lat: number
+    lng: number
+    accuracyM: number | null
+    lastSeenAt: string
+  }[]
 }) {
   const router = useRouter()
 
@@ -1370,6 +1385,7 @@ export default function TopologyCanvas({
   // 지도 첫 준비 시 1회 — 시설 GPS 범위로 자동 fit + setMinLevel(0) 시도.
   //   카카오 SDK 가 일부 지역에 level 0 타일을 제공하면 마우스 휠 줌으로 한 단계 더
   //   확대 가능. 미지원 지역은 silent fail — 기존 level 1 클램프 유지.
+  // initialFocusIds 가 있으면 그 시설들에만 fit (확대보기 새 탭).
   const initialFitDoneRef = useRef(false)
   useEffect(() => {
     if (mapStatus !== 'ready' || initialFitDoneRef.current) return
@@ -1381,8 +1397,32 @@ export default function TopologyCanvas({
         // SDK 가 0 을 거부하면 무시 — 기본 최소(1) 유지
       }
     }
+    if (initialFocusIds && initialFocusIds.length > 0) {
+      const focusSet = new Set(initialFocusIds)
+      const withGps = facilities.filter(
+        (f): f is FacilityNode & { lat: number; lng: number } =>
+          focusSet.has(f.id) && f.lat != null && f.lng != null,
+      )
+      if (withGps.length > 0 && kakaoMap) {
+        if (withGps.length === 1) {
+          kakaoMap.setCenter(new kakao.maps.LatLng(withGps[0].lat, withGps[0].lng))
+          kakaoMap.setLevel(Math.max(0, 2 - MAP_FIT_ZOOM_IN_STEPS))
+        } else {
+          const bounds = new kakao.maps.LatLngBounds()
+          for (const f of withGps) bounds.extend(new kakao.maps.LatLng(f.lat, f.lng))
+          kakaoMap.setBounds(bounds)
+          if (MAP_FIT_ZOOM_IN_STEPS > 0) {
+            kakaoMap.setLevel(Math.max(0, kakaoMap.getLevel() - MAP_FIT_ZOOM_IN_STEPS))
+          }
+        }
+        setMapBaseLevel(kakaoMap.getLevel())
+        // 시설 강조: selectedIds 에 넣어서 확대보기에서 어떤 시설을 본 건지 표시
+        setSelectedIds(new Set(initialFocusIds))
+        return
+      }
+    }
     fitMapToFacilities()
-  }, [mapStatus, fitMapToFacilities, kakaoMap])
+  }, [mapStatus, fitMapToFacilities, kakaoMap, initialFocusIds, facilities])
 
   // 지도 타일 종류 (roadmap/hybrid) 동기화 — 토글 시 카카오 setMapTypeId.
   //   첫 ready 시점에도 명시 적용 (기본은 roadmap 이지만 SDK 가 바꾼 적 있을 수 있음).
@@ -4183,6 +4223,45 @@ export default function TopologyCanvas({
                 <BookOpen className="h-3.5 w-3.5 shrink-0" />
                 표준 범례
               </button>
+              {/* 고장점 검색 — 자주 안 써서 더보기로 이동 (2026-05-25). 활성 상태는 violet 강조 */}
+              <button
+                type="button"
+                onClick={toggleFaultSearch}
+                className={
+                  'w-full text-left rounded-md px-2 py-1.5 text-[11px] font-medium inline-flex items-center gap-2 ' +
+                  (faultSearchOpen
+                    ? 'bg-violet-600 text-white'
+                    : 'text-slate-700 hover:bg-slate-50')
+                }
+              >
+                <Crosshair className="h-3.5 w-3.5 shrink-0" />
+                고장점 검색 {faultSearchOpen && '· 켜짐'}
+              </button>
+              {/* 지도 모드 — 「확대보기」 별도 캔버스 (새 탭). 시설 밀집 영역 확대 보기용 */}
+              {mode === 'map' && (
+                <button
+                  type="button"
+                  onClick={() => {
+                    // 선택된 시설이 있으면 focus 파라미터 추가 — canvas 페이지가 그 시설들에 맞춰 fit
+                    const ids = Array.from(selectedIds)
+                    const url =
+                      ids.length > 0
+                        ? `/relocation/${projectId}/canvas?focus=${ids.join(',')}`
+                        : `/relocation/${projectId}/canvas`
+                    window.open(url, '_blank', 'noopener')
+                  }}
+                  className="w-full text-left rounded-md px-2 py-1.5 text-[11px] font-medium text-slate-700 hover:bg-slate-50 inline-flex items-center gap-2"
+                  title="별도 캔버스 (새 탭) 에서 확대해서 보기"
+                >
+                  <ZoomIn className="h-3.5 w-3.5 shrink-0" />
+                  확대보기 (새 탭)
+                  {selectedIds.size > 0 && (
+                    <span className="ml-auto inline-flex items-center justify-center rounded-full bg-emerald-100 px-1.5 text-[10px] text-emerald-700">
+                      {selectedIds.size}
+                    </span>
+                  )}
+                </button>
+              )}
               {tabPanel && (
                 <button
                   type="button"
@@ -4274,19 +4353,17 @@ export default function TopologyCanvas({
             </div>
           )}
 
-          <button
-            type="button"
-            onClick={toggleFaultSearch}
-            className={
-              'ml-1 inline-flex items-center gap-1 rounded-md px-2 h-7 text-[11px] font-medium border ' +
-              (faultSearchOpen
-                ? 'bg-violet-600 text-white border-violet-600'
-                : 'border-slate-300 text-slate-700 hover:bg-slate-50')
-            }
-          >
-            <Crosshair className="h-3 w-3" />
-            고장점 검색
-          </button>
+          {/* 고장점 검색 — 더보기 메뉴로 이동 (자주 안 써서). 활성 상태일 때만 도구바에 표시 */}
+          {faultSearchOpen && (
+            <button
+              type="button"
+              onClick={toggleFaultSearch}
+              className="ml-1 inline-flex items-center gap-1 rounded-md px-2 h-7 text-[11px] font-medium border bg-violet-600 text-white border-violet-600"
+            >
+              <Crosshair className="h-3 w-3" />
+              고장점 검색 끄기
+            </button>
+          )}
 
           {isFullscreen && (
             <button
@@ -5673,6 +5750,119 @@ export default function TopologyCanvas({
               </g>
             )
           })}
+
+          {/* 작업자 위치 — 지도 모드 + GPS 가 있는 시설 반경 1km 안인 워커만.
+              앞에 워치를 시작한 작업자의 최신 위치(30초 간격). 본인 회사 작업자 모두 표시.
+              파란 원 + 이름 라벨. 마지막 갱신 15분 초과면 흐리게. */}
+          {mode === 'map' &&
+            workerPositions &&
+            workerPositions.length > 0 &&
+            kakaoMap &&
+            (() => {
+              // 시설 GPS 좌표 사전 추출 (Haversine 1km 필터에 사용)
+              const facWithGps = facilities.filter(
+                (f): f is FacilityNode & { lat: number; lng: number } =>
+                  f.lat != null && f.lng != null,
+              )
+              if (facWithGps.length === 0) return null
+
+              // Haversine 거리 (m) — 평면 근사 (한국 위도 기준 충분히 정확)
+              const distM = (
+                lat1: number,
+                lng1: number,
+                lat2: number,
+                lng2: number,
+              ) => {
+                const R = 6_371_000
+                const toRad = (d: number) => (d * Math.PI) / 180
+                const dLat = toRad(lat2 - lat1)
+                const dLng = toRad(lng2 - lng1)
+                const a =
+                  Math.sin(dLat / 2) ** 2 +
+                  Math.cos(toRad(lat1)) *
+                    Math.cos(toRad(lat2)) *
+                    Math.sin(dLng / 2) ** 2
+                return 2 * R * Math.asin(Math.min(1, Math.sqrt(a)))
+              }
+              const RADIUS_M = 1_000
+              const STALE_MS = 15 * 60 * 1_000 // 15분
+              const nowMs = Date.now()
+              const proj = kakaoMap.getProjection()
+
+              return workerPositions
+                .map((w) => {
+                  // 시설 반경 1km 안에 있어야 표시
+                  const nearAny = facWithGps.some(
+                    (f) => distM(f.lat, f.lng, w.lat, w.lng) <= RADIUS_M,
+                  )
+                  if (!nearAny) return null
+                  const pt = proj.containerPointFromCoords(
+                    new kakao.maps.LatLng(w.lat, w.lng),
+                  )
+                  const ageMs = nowMs - new Date(w.lastSeenAt).getTime()
+                  const stale = ageMs > STALE_MS
+                  return (
+                    <g
+                      key={`wp-${w.employeeId}`}
+                      transform={`translate(${pt.x},${pt.y})`}
+                      pointerEvents="none"
+                      style={{ opacity: stale ? 0.45 : 1 }}
+                    >
+                      {/* GPS accuracy 반경 (참고용. 너무 크면 안 그림) */}
+                      {w.accuracyM && w.accuracyM < 100 && (() => {
+                        // accuracy 를 화면 픽셀로 변환 — proj 가 m/px 직접 안 줘서
+                        //   근사: 1도 ≈ 111km. 위도 1도 = 111km, 같은 줌의 px/도 비율로.
+                        const ll1 = proj.containerPointFromCoords(
+                          new kakao.maps.LatLng(w.lat, w.lng),
+                        )
+                        const ll2 = proj.containerPointFromCoords(
+                          new kakao.maps.LatLng(w.lat + 0.0001, w.lng),
+                        )
+                        const pxPerMeter =
+                          Math.abs(ll1.y - ll2.y) / 11.13 // 0.0001° ≈ 11.13m
+                        const r = Math.min(40, w.accuracyM * pxPerMeter)
+                        return (
+                          <circle
+                            r={r}
+                            fill="#3b82f6"
+                            fillOpacity={0.12}
+                            stroke="#3b82f6"
+                            strokeWidth={0.5}
+                            strokeDasharray="2 2"
+                          />
+                        )
+                      })()}
+                      {/* 외곽 펄스 */}
+                      <circle r={12} fill="#3b82f6" fillOpacity={0.25} />
+                      {/* 본체 */}
+                      <circle
+                        r={7}
+                        fill="#3b82f6"
+                        stroke="white"
+                        strokeWidth={2}
+                      />
+                      {/* 이름 라벨 — 외곽선 + 진한 배경 */}
+                      <text
+                        x={0}
+                        y={-16}
+                        textAnchor="middle"
+                        fill="#1e3a8a"
+                        stroke="white"
+                        strokeWidth={3}
+                        paintOrder="stroke"
+                        style={{
+                          fontSize: 11,
+                          fontFamily: 'Pretendard, system-ui, sans-serif',
+                          fontWeight: 700,
+                        }}
+                      >
+                        {w.employeeName}
+                      </text>
+                    </g>
+                  )
+                })
+                .filter((v): v is React.JSX.Element => v != null)
+            })()}
 
           {/* 절단 절체 마크 — 폭발 모양 + 「절단 절체」 글자를 해당 케이블에.
               시설 노드보다 위 레이어에 그려 분기수 배지에 안 가린다.

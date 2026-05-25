@@ -28,6 +28,8 @@ import MigrationsTab, {
 import { HighlightProvider } from './HighlightContext'
 import { seedTestData } from './seed-actions'
 import TopologyCanvas from './TopologyCanvas'
+import WorkerPositionTracker from './WorkerPositionTracker'
+import { isWorkerActiveOnProject } from './worker-position-actions'
 import CollapsibleLayout from './CollapsibleLayout'
 import ProgressStepBar, { type ProgressStep } from './ProgressStepBar'
 import RealtimeSync from './RealtimeSync'
@@ -42,6 +44,8 @@ import {
   type RelocationCategory,
 } from '@/lib/relocation'
 import { RelocationWorkerPicker } from '../RelocationWorkerPicker'
+import OrderNoList from '../OrderNoList'
+import WorkAssignmentStatus from '../WorkAssignmentStatus'
 import PhasesTab, { type PhaseRow, type PhaseTaskRow } from './PhasesTab'
 import ExportTab from './ExportTab'
 import SpliceTab, { type SpliceRow } from './SpliceTab'
@@ -138,6 +142,7 @@ type ProjectRow = {
   subscribed_at: string | null
   desired_open_at: string | null
   order_no: string | null
+  order_nos: unknown
   expected_completion_at: string | null
   completion_at: string | null
   outside_workers: string | null
@@ -182,7 +187,7 @@ export default async function RelocationProjectPage({
   const { data: pRow } = await supabase
     .from('relocation_projects')
     .select(
-      'id, company_id, title, category, client, region, surveyed_at, designer_id, status, notes, created_at, updated_at, subscription_id, subscriber_name, subscriber_address, branch_contact, branch_manager, subscribed_at, desired_open_at, order_no, expected_completion_at, completion_at, outside_workers, splice_workers, subcategory, outside_worker_ids, splice_worker_ids',
+      'id, company_id, title, category, client, region, surveyed_at, designer_id, status, notes, created_at, updated_at, subscription_id, subscriber_name, subscriber_address, branch_contact, branch_manager, subscribed_at, desired_open_at, order_no, order_nos, expected_completion_at, completion_at, outside_workers, splice_workers, subcategory, outside_worker_ids, splice_worker_ids',
     )
     .eq('id', id)
     .maybeSingle()
@@ -232,6 +237,12 @@ export default async function RelocationProjectPage({
 
   // 연동된 작업관리 row — 헤더에 "작업관리 보기" 링크 노출
   let linkedWorkId: string | null = null
+  let workAssignmentEntries: {
+    employeeId: string
+    employeeName: string
+    workerType: '외선팀' | '접속팀' | null
+    confirmedAt: string | null
+  }[] = []
   if (isSubscriptionProject) {
     const { data: linkedWork } = await supabase
       .from('works')
@@ -239,6 +250,84 @@ export default async function RelocationProjectPage({
       .eq('relocation_project_id', id)
       .maybeSingle()
     linkedWorkId = ((linkedWork as { id: string } | null) ?? null)?.id ?? null
+
+    // 배정 작업자 현황 — 확정/취소 버튼용
+    if (linkedWorkId) {
+      const { data: asData } = await supabase
+        .from('work_assignments')
+        .select('employee_id, worker_type, confirmed_at')
+        .eq('work_id', linkedWorkId)
+      type AsRow = {
+        employee_id: string
+        worker_type: '외선팀' | '접속팀' | null
+        confirmed_at: string | null
+      }
+      const asRows = (asData ?? []) as AsRow[]
+      if (asRows.length > 0) {
+        const empIds = asRows.map((r) => r.employee_id)
+        const { data: empData } = await supabase
+          .from('employees')
+          .select('id, name')
+          .in('id', empIds)
+        const nameById = new Map(
+          ((empData ?? []) as { id: string; name: string }[]).map((e) => [e.id, e.name]),
+        )
+        workAssignmentEntries = asRows.map((r) => ({
+          employeeId: r.employee_id,
+          employeeName: nameById.get(r.employee_id) ?? '(이름 없음)',
+          workerType: r.worker_type,
+          confirmedAt: r.confirmed_at,
+        }))
+      }
+    }
+  }
+
+  // 작업자 위치 — 청약 프로젝트 + linkedWork 있을 때만 표시 (15분 신선)
+  type WorkerPos = {
+    employeeId: string
+    employeeName: string
+    lat: number
+    lng: number
+    accuracyM: number | null
+    lastSeenAt: string
+  }
+  let workerPositions: WorkerPos[] = []
+  let workerActiveOnProject = false
+  if (isSubscriptionProject) {
+    const cutoff = new Date(Date.now() - 30 * 60 * 1_000).toISOString() // 30분
+    const { data: wpData } = await supabase
+      .from('relocation_worker_positions')
+      .select('employee_id, lat, lng, accuracy_m, last_seen_at')
+      .eq('project_id', id)
+      .gte('last_seen_at', cutoff)
+    type WPRow = {
+      employee_id: string
+      lat: number
+      lng: number
+      accuracy_m: number | null
+      last_seen_at: string
+    }
+    const rows = (wpData ?? []) as WPRow[]
+    if (rows.length > 0) {
+      const empIds = rows.map((r) => r.employee_id)
+      const { data: empData } = await supabase
+        .from('employees')
+        .select('id, name')
+        .in('id', empIds)
+      const nameById = new Map(
+        ((empData ?? []) as { id: string; name: string }[]).map((e) => [e.id, e.name]),
+      )
+      workerPositions = rows.map((r) => ({
+        employeeId: r.employee_id,
+        employeeName: nameById.get(r.employee_id) ?? '(직원)',
+        lat: r.lat,
+        lng: r.lng,
+        accuracyM: r.accuracy_m,
+        lastSeenAt: r.last_seen_at,
+      }))
+    }
+    // 본인이 이 프로젝트에서 활성인지 (현재 작업 시작 상태)
+    workerActiveOnProject = await isWorkerActiveOnProject(id)
   }
 
   // 설계자 이름 · 캔버스 공통 데이터 · 접속 · 스플리터 · 차수 · (조건부) 이전 이력 일괄 병렬.
@@ -475,6 +564,12 @@ export default async function RelocationProjectPage({
               </p>
             </div>
             <div className="shrink-0 flex flex-wrap items-center gap-1.5 self-start">
+              {workerActiveOnProject && (
+                <WorkerPositionTracker
+                  projectId={id}
+                  initiallyActive={workerActiveOnProject}
+                />
+              )}
               {linkedWorkId && (
                 <Link
                   href={`/works/${linkedWorkId}`}
@@ -814,14 +909,19 @@ export default async function RelocationProjectPage({
                     />
                   </div>
                   <div>
-                    <label className="block text-sm font-medium text-slate-700">공사번호</label>
-                    <input
-                      type="text"
-                      name="order_no"
-                      defaultValue={project.order_no ?? ''}
-                      maxLength={100}
-                      className="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2 text-base"
+                    <label className="block text-sm font-medium text-slate-700">작업번호</label>
+                    <OrderNoList
+                      initial={(() => {
+                        const raw = project.order_nos
+                        if (Array.isArray(raw))
+                          return raw.filter((v): v is string => typeof v === 'string')
+                        return project.order_no ? [project.order_no] : []
+                      })()}
+                      inputClassName="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2 text-base"
                     />
+                    <p className="mt-0.5 text-xs text-slate-500">
+                      여러 작업번호를 추가할 수 있습니다.
+                    </p>
                   </div>
                 </div>
                 <div className="grid gap-3 sm:grid-cols-2">
@@ -955,7 +1055,16 @@ export default async function RelocationProjectPage({
                   </div>
                 </div>
                 <div>
-                  <label className="block text-sm font-medium text-slate-700">작업자배정</label>
+                  <label className="block text-sm font-medium text-slate-700">배정 작업자 현황</label>
+                  <div className="mt-1 rounded-lg border border-slate-200 bg-slate-50 p-2.5">
+                    <WorkAssignmentStatus projectId={id} assignments={workAssignmentEntries} />
+                  </div>
+                  <p className="mt-1 text-xs text-slate-500">
+                    「확정」 누른 작업자만 작업이 보입니다. 「취소」 는 배정 자체를 제거합니다.
+                  </p>
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-slate-700">작업자배정 (추가/제거)</label>
                   <div className="mt-1 grid gap-3 sm:grid-cols-2">
                     <div className="rounded-lg border border-slate-200 p-2 bg-orange-50/40">
                       <label className="block text-xs text-orange-700 font-semibold">
@@ -1144,6 +1253,7 @@ export default async function RelocationProjectPage({
         circuits={circuits}
         coreAssignments={assignments}
         myEmployeeId={me.id}
+        workerPositions={workerPositions}
         tabPanel={tabPanel}
         tabPanelDefaultOpen={!!tabRaw}
       />

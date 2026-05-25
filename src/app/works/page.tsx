@@ -153,10 +153,12 @@ export default async function WorksPage({
   }
   const myAssignmentByWork = new Map<string, MyAssignment>()
   {
+    // 본인 배정 — 확정된 것(confirmed_at is not null)만. 대기 중 배정은 작업자에게 안 보임.
     const { data: myAssigns } = await supabase
       .from('work_assignments')
       .select('work_id, created_at, worker_type')
       .eq('employee_id', me.id)
+      .not('confirmed_at', 'is', null)
     for (const a of (myAssigns ?? []) as {
       work_id: string
       created_at: string

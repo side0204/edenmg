@@ -209,7 +209,8 @@ export default async function Home() {
       .select(
         'work_id, created_at, works!inner(id, name, category, subcategory, status, order_id, company_id)',
       )
-      .eq('employee_id', employee.id),
+      .eq('employee_id', employee.id)
+      .not('confirmed_at', 'is', null),
     supabase
       .from('work_daily_checks')
       .select('id, work_id, decision, created_at, closed_at')

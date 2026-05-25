@@ -60,6 +60,7 @@ export type RelocationProjectRow = {
   region: string | null
   subscription_id: string | null
   order_no: string | null
+  order_nos: string[]
   subscriber_name: string | null
   subscriber_address: string | null
   branch_manager: string | null
@@ -111,7 +112,7 @@ const ALL_COLUMNS: ColumnDef[] = [
   { id: 'subcategory', label: '청약 분류', defaultWidth: 88, defaultVisible: true },
   { id: 'region', label: '지역', defaultWidth: 120, defaultVisible: true },
   { id: 'subscription_id', label: '청약ID', defaultWidth: 120, defaultVisible: true },
-  { id: 'order_no', label: '공사번호', defaultWidth: 120, defaultVisible: true },
+  { id: 'order_no', label: '작업번호', defaultWidth: 150, defaultVisible: true },
   { id: 'subscriber_name', label: '가입자명', defaultWidth: 100, defaultVisible: true },
   { id: 'subscriber_address', label: '가입자 주소', defaultWidth: 220, defaultVisible: true },
   { id: 'branch_manager', label: '하위국 담당자', defaultWidth: 110, defaultVisible: false },
@@ -204,7 +205,10 @@ function valueOf(row: RelocationProjectRow, col: ColumnId): string {
     case 'subscription_id':
       return row.subscription_id ?? ''
     case 'order_no':
-      return row.order_no ?? ''
+      // 다중 작업번호: order_nos 우선, 없으면 legacy order_no
+      return row.order_nos && row.order_nos.length > 0
+        ? row.order_nos.join(', ')
+        : (row.order_no ?? '')
     case 'subscriber_name':
       return row.subscriber_name ?? ''
     case 'subscriber_address':

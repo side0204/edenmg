@@ -144,6 +144,7 @@ type ProjectFormParsed = {
   subscribed_at: string | null
   desired_open_at: string | null
   order_no: string | null
+  order_nos: string[]
   expected_completion_at: string | null
   completion_at: string | null
   outside_workers: string | null
@@ -191,7 +192,29 @@ function parseProjectForm(formData: FormData): ProjectFormParsed {
     branch_manager: pick('branch_manager'),
     subscribed_at: pickDate('subscribed_at'),
     desired_open_at: pickDate('desired_open_at'),
-    order_no: pick('order_no'),
+    order_no: null, // legacy 단일 컬럼 — 아래 order_nos[0] 으로 backfill (createProject/updateProject 직전)
+    order_nos: isSubscription
+      ? (() => {
+          // 다중 입력 — 「order_no_list」 hidden 에 JSON array string 으로 전달.
+          //   비어있으면 단일 order_no 입력 폴백 (한 칸짜리 폼 호환).
+          const raw = String(formData.get('order_no_list') ?? '').trim()
+          if (raw) {
+            try {
+              const parsed = JSON.parse(raw)
+              if (Array.isArray(parsed)) {
+                return parsed
+                  .map((v) => String(v ?? '').trim())
+                  .filter((v) => v.length > 0 && v.length <= 100)
+                  .slice(0, 50)
+              }
+            } catch {
+              // ignore
+            }
+          }
+          const single = String(formData.get('order_no') ?? '').trim()
+          return single ? [single] : []
+        })()
+      : [],
     expected_completion_at: pickDate('expected_completion_at'),
     completion_at: pickDate('completion_at'),
     outside_workers: pick('outside_workers'),
@@ -279,7 +302,11 @@ async function syncLinkedWork(input: {
       [
         parsed.subscriber_name ? `가입자: ${parsed.subscriber_name}` : null,
         parsed.subscription_id ? `청약ID: ${parsed.subscription_id}` : null,
-        parsed.order_no ? `공사번호: ${parsed.order_no}` : null,
+        parsed.order_nos.length > 0
+          ? `작업번호: ${parsed.order_nos.join(', ')}`
+          : parsed.order_no
+            ? `공사번호: ${parsed.order_no}`
+            : null,
         parsed.branch_manager
           ? `하위국: ${parsed.branch_manager}${parsed.branch_contact ? ` (${parsed.branch_contact})` : ''}`
           : null,
@@ -326,16 +353,23 @@ async function syncLinkedWork(input: {
   const existingAssigns = (existingAssignsData ?? []) as ExAssign[]
   const existingByEmp = new Map(existingAssigns.map((a) => [a.employee_id, a]))
 
-  // 추가/유지/타입 변경
+  // 추가/유지/타입 변경.
+  // 신규 배정은 confirmed_at = null (대기). 「확정」 버튼 누르기 전엔 작업자에게 안 보임.
   const upsertRows: {
     work_id: string
     employee_id: string
     worker_type: '외선팀' | '접속팀'
+    confirmed_at: null
   }[] = []
   for (const [empId, wt] of desired) {
     const cur = existingByEmp.get(empId)
     if (!cur) {
-      upsertRows.push({ work_id: workId, employee_id: empId, worker_type: wt })
+      upsertRows.push({
+        work_id: workId,
+        employee_id: empId,
+        worker_type: wt,
+        confirmed_at: null,
+      })
     } else if (cur.worker_type !== wt) {
       await admin
         .from('work_assignments')
@@ -370,10 +404,14 @@ export async function createProject(formData: FormData) {
   // designer_id 가 비어있으면 본인을 설계자로 자동 설정
   const designerId = parsed.designer_id ?? me.id
 
+  // legacy order_no 컬럼은 order_nos[0] 으로 동기화 (다른 화면들이 아직 단일값 보고 있을 수 있음)
+  const orderNoLegacy = parsed.order_nos[0] ?? null
+
   const { data: inserted, error } = await supabase
     .from('relocation_projects')
     .insert({
       ...parsed,
+      order_no: orderNoLegacy,
       designer_id: designerId,
       company_id: me.company_id,
     })
@@ -432,7 +470,9 @@ export async function updateProject(formData: FormData) {
     }
   }
 
-  const { error } = await supabase.from('relocation_projects').update(parsed).eq('id', id)
+  // legacy order_no 도 동기화 (parsed.order_no 는 null 로 비워뒀음)
+  const updateRow = { ...parsed, order_no: parsed.order_nos[0] ?? null }
+  const { error } = await supabase.from('relocation_projects').update(updateRow).eq('id', id)
   if (error) {
     redirect(`/relocation/${id}?err=` + encodeURIComponent('수정 실패: ' + error.message))
   }
@@ -463,6 +503,117 @@ export async function updateProject(formData: FormData) {
   revalidatePath(`/relocation/${id}`)
   revalidatePath('/works')
   redirect(`/relocation/${id}?ok=` + encodeURIComponent('프로젝트 정보를 수정했습니다'))
+}
+
+
+// ===== 작업 배정 확정/취소 =====================================
+// /relocation/[id] 의 배정 작업자 옆 「확정」/「취소」 버튼.
+//   - 확정: work_assignments.confirmed_at = now(). 작업자에게 작업이 보이게 됨.
+//   - 취소: work_assignments 삭제 + relocation_projects.{outside|splice}_worker_ids 에서 제거.
+// 권한: 회사 직원 누구나 (relocation 모듈은 권한 제한 없음 — RLS 가 회사 스코프 강제).
+// admin client 사용 — work_assignments / works 권한이 없어도 같은 회사 자기 프로젝트의 부산물이라 OK.
+
+export async function confirmWorkAssignment(formData: FormData) {
+  const projectId = String(formData.get('project_id') ?? '').trim()
+  const employeeId = String(formData.get('employee_id') ?? '').trim()
+  if (!projectId || !employeeId) {
+    return { ok: false as const, error: '잘못된 요청입니다' }
+  }
+  const { supabase, me } = await requireMember()
+
+  // 회사 스코프 확인 — 이 프로젝트가 본인 회사 것인지
+  const { data: proj } = await supabase
+    .from('relocation_projects')
+    .select('id, company_id')
+    .eq('id', projectId)
+    .maybeSingle()
+  if (!proj || (proj as { company_id: string }).company_id !== me.company_id) {
+    return { ok: false as const, error: '권한이 없습니다' }
+  }
+
+  const admin = createAdminClient()
+  const { data: workRow } = await admin
+    .from('works')
+    .select('id')
+    .eq('relocation_project_id', projectId)
+    .maybeSingle()
+  if (!workRow) {
+    return {
+      ok: false as const,
+      error: '연동된 작업이 없습니다. 프로젝트를 저장하면 자동 생성됩니다.',
+    }
+  }
+  const workId = (workRow as { id: string }).id
+
+  const { error } = await admin
+    .from('work_assignments')
+    .update({ confirmed_at: new Date().toISOString() })
+    .eq('work_id', workId)
+    .eq('employee_id', employeeId)
+    .is('confirmed_at', null)
+  if (error) return { ok: false as const, error: '확정 실패: ' + error.message }
+
+  revalidatePath(`/relocation/${projectId}`)
+  revalidatePath('/works')
+  return { ok: true as const }
+}
+
+export async function cancelWorkAssignment(formData: FormData) {
+  const projectId = String(formData.get('project_id') ?? '').trim()
+  const employeeId = String(formData.get('employee_id') ?? '').trim()
+  if (!projectId || !employeeId) {
+    return { ok: false as const, error: '잘못된 요청입니다' }
+  }
+  const { supabase, me } = await requireMember()
+
+  // 회사 스코프 + 현재 worker_ids 조회
+  const { data: proj } = await supabase
+    .from('relocation_projects')
+    .select('id, company_id, outside_worker_ids, splice_worker_ids')
+    .eq('id', projectId)
+    .maybeSingle()
+  if (!proj || (proj as { company_id: string }).company_id !== me.company_id) {
+    return { ok: false as const, error: '권한이 없습니다' }
+  }
+  type ProjRow = {
+    company_id: string
+    outside_worker_ids: unknown
+    splice_worker_ids: unknown
+  }
+  const p = proj as ProjRow
+  const filterOut = (raw: unknown): string[] => {
+    const arr = Array.isArray(raw) ? raw.filter((v): v is string => typeof v === 'string') : []
+    return arr.filter((id) => id !== employeeId)
+  }
+  const nextOutside = filterOut(p.outside_worker_ids)
+  const nextSplice = filterOut(p.splice_worker_ids)
+
+  // 프로젝트의 worker_ids 갱신 (relocation_projects RLS = 회사 직원 누구나)
+  const { error: updErr } = await supabase
+    .from('relocation_projects')
+    .update({ outside_worker_ids: nextOutside, splice_worker_ids: nextSplice })
+    .eq('id', projectId)
+  if (updErr) return { ok: false as const, error: '취소 실패: ' + updErr.message }
+
+  // work_assignments 도 삭제
+  const admin = createAdminClient()
+  const { data: workRow } = await admin
+    .from('works')
+    .select('id')
+    .eq('relocation_project_id', projectId)
+    .maybeSingle()
+  if (workRow) {
+    const workId = (workRow as { id: string }).id
+    await admin
+      .from('work_assignments')
+      .delete()
+      .eq('work_id', workId)
+      .eq('employee_id', employeeId)
+  }
+
+  revalidatePath(`/relocation/${projectId}`)
+  revalidatePath('/works')
+  return { ok: true as const }
 }
 
 

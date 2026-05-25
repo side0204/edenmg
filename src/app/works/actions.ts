@@ -243,8 +243,11 @@ export async function createWork(formData: FormData) {
     redirect('/works/new?err=' + encodeURIComponent('등록 실패: ' + (error?.message ?? '알 수 없음')))
   }
 
-  // 작업자 일괄 배정 — 작업 전체 기간 + 작업자별 worker_type
+  // 작업자 일괄 배정 — 작업 전체 기간 + 작업자별 worker_type.
+  // 관리자가 직접 등록하는 경로라 자동 확정(confirmed_at = now()).
+  // 청약 자동 동기화 경로(syncLinkedWork)만 confirmed_at = null 로 두고 별도 확정 단계를 거침.
   if (workers.length > 0) {
+    const nowIso = new Date().toISOString()
     const { error: assignErr } = await supabase.from('work_assignments').insert(
       workers.map((w) => ({
         work_id: inserted.id,
@@ -252,6 +255,7 @@ export async function createWork(formData: FormData) {
         worker_type: w.worker_type,
         assigned_start: null,
         assigned_end: null,
+        confirmed_at: nowIso,
       })),
     )
     if (assignErr) {
@@ -408,6 +412,8 @@ export async function assignEmployee(formData: FormData) {
     employee_id: employeeId,
     assigned_start: assignedStart,
     assigned_end: assignedEnd,
+    // 관리자 직접 배정 — 자동 확정 (청약 자동 동기화만 confirmed_at=null 로 두고 별도 확정 단계)
+    confirmed_at: new Date().toISOString(),
   })
   if (error) {
     redirect(`/works/${workId}?err=` + encodeURIComponent('배정 실패: ' + error.message))

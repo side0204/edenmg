@@ -22,10 +22,20 @@ type ProjectMini = {
 
 export default async function RelocationCanvasPage({
   params,
+  searchParams,
 }: {
   params: Promise<{ id: string }>
+  searchParams: Promise<{ focus?: string }>
 }) {
   const { id } = await params
+  const { focus: focusRaw } = await searchParams
+  // ?focus=id1,id2,... — 확대보기에서 새 탭으로 열 때 해당 시설들에만 fit
+  const initialFocusIds = focusRaw
+    ? focusRaw
+        .split(',')
+        .map((s) => s.trim())
+        .filter((s) => /^[0-9a-f-]{36}$/i.test(s))
+    : []
 
   const supabase = await createClient()
   const {
@@ -62,6 +72,51 @@ export default async function RelocationCanvasPage({
     assignments,
   } = await loadRelocationCanvasData(id, me.company_id)
 
+  // 작업자 위치 (지도 모드 표시용, 최근 30분)
+  type WorkerPos = {
+    employeeId: string
+    employeeName: string
+    lat: number
+    lng: number
+    accuracyM: number | null
+    lastSeenAt: string
+  }
+  let workerPositions: WorkerPos[] = []
+  {
+    const cutoff = new Date(Date.now() - 30 * 60 * 1_000).toISOString()
+    const { data: wpData } = await supabase
+      .from('relocation_worker_positions')
+      .select('employee_id, lat, lng, accuracy_m, last_seen_at')
+      .eq('project_id', id)
+      .gte('last_seen_at', cutoff)
+    type WPRow = {
+      employee_id: string
+      lat: number
+      lng: number
+      accuracy_m: number | null
+      last_seen_at: string
+    }
+    const rows = (wpData ?? []) as WPRow[]
+    if (rows.length > 0) {
+      const empIds = rows.map((r) => r.employee_id)
+      const { data: empData } = await supabase
+        .from('employees')
+        .select('id, name')
+        .in('id', empIds)
+      const nameById = new Map(
+        ((empData ?? []) as { id: string; name: string }[]).map((e) => [e.id, e.name]),
+      )
+      workerPositions = rows.map((r) => ({
+        employeeId: r.employee_id,
+        employeeName: nameById.get(r.employee_id) ?? '(직원)',
+        lat: r.lat,
+        lng: r.lng,
+        accuracyM: r.accuracy_m,
+        lastSeenAt: r.last_seen_at,
+      }))
+    }
+  }
+
   return (
     <main className="min-h-screen bg-slate-50">
       <header className="sticky top-0 z-20 flex items-center justify-between gap-3 border-b border-slate-200 bg-white px-4 py-2">
@@ -83,6 +138,7 @@ export default async function RelocationCanvasPage({
         <HighlightProvider>
           <TopologyCanvas
             initialCanvasSize="tall"
+            initialFocusIds={initialFocusIds.length > 0 ? initialFocusIds : undefined}
             projectId={project.id}
             projectCategory={
               project.category === '청약' ||
@@ -144,6 +200,7 @@ export default async function RelocationCanvasPage({
             circuits={circuits}
             coreAssignments={assignments}
             myEmployeeId={me.id}
+            workerPositions={workerPositions}
           />
         </HighlightProvider>
       </div>

@@ -39,11 +39,12 @@ export async function startDailyChecks(formData: FormData) {
 
   const today = todayInSeoul()
 
-  // 본인 배정된 작업만, 미완료(완료/취소 아님) 인 것만 통과
+  // 본인 배정된 작업만, 확정된 배정(confirmed_at) + 미완료(완료/취소 아님) 인 것만 통과
   const { data: validRows } = await supabase
     .from('work_assignments')
     .select('work_id, works!inner(id, status, company_id)')
     .eq('employee_id', me.id)
+    .not('confirmed_at', 'is', null)
     .in('work_id', workIds)
 
   type Joined = { work_id: string; works: { id: string; status: string; company_id: string } }

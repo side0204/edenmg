@@ -15,6 +15,7 @@ import {
   RelocationWorkerPicker,
   type RelocationWorkerCandidate,
 } from '../RelocationWorkerPicker'
+import OrderNoList from '../OrderNoList'
 
 const SUBSCRIPTION_SUBCATEGORIES = [
   '소호',
@@ -194,13 +195,11 @@ export default async function NewRelocationProjectPage({
                   />
                 </div>
                 <div>
-                  <label className={LABEL}>공사번호</label>
-                  <input
-                    type="text"
-                    name="order_no"
-                    maxLength={100}
-                    className={INPUT}
-                  />
+                  <label className={LABEL}>작업번호</label>
+                  <OrderNoList inputClassName={INPUT} />
+                  <p className="mt-0.5 text-xs lg:text-[10px] text-slate-500">
+                    여러 작업번호를 추가할 수 있습니다.
+                  </p>
                 </div>
               </div>
 
