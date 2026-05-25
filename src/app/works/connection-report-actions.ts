@@ -14,6 +14,7 @@ import {
   type ConnectionTaskType,
   type WorkReportProgress,
 } from '@/lib/connection'
+import { r2Upload, r2SignedUrl, r2SignedUrls, r2Remove } from '@/lib/r2'
 
 type Permission = 'worker' | 'team_member' | 'team_leader' | 'admin'
 
@@ -707,11 +708,11 @@ export async function uploadConnectionPhoto(formData: FormData): Promise<UploadR
   await ensureAuthorPending(supabase, me, reportId, workId)
 
   const path = buildPhotoPath(reportId, file.name)
-  const { error: upErr } = await supabase.storage
-    .from(PHOTO_BUCKET)
-    .upload(path, file, { contentType: file.type, upsert: false })
-  if (upErr) {
-    return { ok: false, error: `업로드 실패: ${upErr.message}` }
+  // R2 업로드 — 권한은 ensureAuthorPending() 에서 이미 확인됨
+  const body = new Uint8Array(await file.arrayBuffer())
+  const up = await r2Upload(PHOTO_BUCKET, path, body, file.type)
+  if (!up.ok) {
+    return { ok: false, error: `업로드 실패: ${up.error}` }
   }
 
   const { error: insErr } = await supabase.from('connection_report_photos').insert({
@@ -726,8 +727,8 @@ export async function uploadConnectionPhoto(formData: FormData): Promise<UploadR
     uploaded_by: me.id,
   })
   if (insErr) {
-    // Storage 에는 올라갔지만 DB row 없음 → 고아 파일 방지로 즉시 삭제 시도
-    await supabase.storage.from(PHOTO_BUCKET).remove([path])
+    // R2 에는 올라갔지만 DB row 없음 → 고아 파일 방지로 즉시 삭제 시도
+    await r2Remove(PHOTO_BUCKET, [path])
     return { ok: false, error: `메타 저장 실패: ${insErr.message}` }
   }
 
@@ -771,8 +772,8 @@ export async function removeConnectionPhoto(formData: FormData) {
     )
   }
 
-  // Storage 정리 (실패해도 본문 진행)
-  await supabase.storage.from(PHOTO_BUCKET).remove([photo.path])
+  // R2 정리 (실패해도 본문 진행)
+  await r2Remove(PHOTO_BUCKET, [photo.path])
 
   revalidatePath(`/works/${workId}/connection-reports/${reportId}`)
   redirect(
@@ -782,31 +783,22 @@ export async function removeConnectionPhoto(formData: FormData) {
 }
 
 // 다운로드용 signedUrl. 5분짜리. 서버 컴포넌트에서 호출.
+//   참고: server action 호출자가 RLS 로 권한 확인 후 path 를 넘기는 흐름이라
+//         signed URL 발급 자체는 권한 무관 (path 알면 5분간 누구나 접근 가능 — 짧은 만료가 안전망).
 export async function getConnectionPhotoUrl(
   path: string,
   filename: string,
 ): Promise<string | null> {
-  const supabase = await createClient()
-  const { data, error } = await supabase.storage
-    .from(PHOTO_BUCKET)
-    .createSignedUrl(path, 60 * 5, { download: filename })
-  if (error || !data?.signedUrl) return null
-  return data.signedUrl
+  try {
+    return await r2SignedUrl(PHOTO_BUCKET, path, 60 * 5, filename)
+  } catch {
+    return null
+  }
 }
 
-// 인라인 표시용 (download 옵션 없이 signedUrl)
+// 인라인 표시용 (download 옵션 없이 signedUrl, 30분)
 export async function getConnectionPhotoViewUrls(
   paths: string[],
 ): Promise<Map<string, string>> {
-  const supabase = await createClient()
-  const result = new Map<string, string>()
-  if (paths.length === 0) return result
-  const { data } = await supabase.storage
-    .from(PHOTO_BUCKET)
-    .createSignedUrls(paths, 60 * 30) // 30분
-  if (!data) return result
-  for (const item of data) {
-    if (item.signedUrl && item.path) result.set(item.path, item.signedUrl)
-  }
-  return result
+  return await r2SignedUrls(PHOTO_BUCKET, paths, 60 * 30)
 }

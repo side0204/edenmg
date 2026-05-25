@@ -801,6 +801,41 @@ owner 요구: 「청약 설계」 새 프로젝트 생성 폼에서 「프로젝
 - **/relocation/[id]** 편집 폼: 청약 카테고리 프로젝트일 때만 8 필드 노출. title 라벨 「제목」 → 「청약명」 분기. 편집 컴팩트 모드는 미적용 (편집은 자주 안 쓰므로)
 - **계획·지장이설 카테고리**: 변경 없음 — 청약 필드 미노출, 기존 폼 그대로
 
+### ✅ 완료 (Storage 이전 — Supabase → Cloudflare R2, 2026-05-25)
+
+owner 결정사항: 사진 200장/일 누적이 예상돼 Supabase Storage 무료 1GB 가 빠르게 소진. Cloudflare R2 가 egress 무료 + 저장 단가 $0.015/GB·월 로 훨씬 저렴해서 이전.
+
+| 항목 | 결정 | 비고 |
+|---|---|---|
+| **이전 범위** | 3개 버킷 한 번에 | `connection-photos` / `leave-attachments` / `relocation-field-inspections` |
+| **기존 데이터** | 베타라 폐기 OK | Supabase Storage 비우고 R2 로 새 출발 |
+| **signed URL 만료** | 30분 | 기존 Supabase 와 동일 — 안전·재요청 비용 균형 |
+| **권한 모델** | server action 게이트키퍼 | R2 는 service-key 라 RLS 없음. 호출 server action 이 Supabase RLS 로 권한 확인 후 R2 호출 |
+
+- **공통 lib** [`src/lib/r2.ts`](./src/lib/r2.ts) — S3 client 싱글톤(`region: 'auto'`) + helpers:
+  - `r2Upload(bucket, key, body, contentType)` — PutObjectCommand 래핑, 결과 객체 반환
+  - `r2SignedUrl(bucket, key, expiresInSec, downloadFilename?)` — `@aws-sdk/s3-request-presigner` 의 `getSignedUrl`. download 옵션은 `ResponseContentDisposition: attachment; filename*=UTF-8''...`
+  - `r2SignedUrls(bucket, keys[], expiresInSec)` — 병렬 발급 (Supabase 의 createSignedUrls 호환 Map 반환)
+  - `r2Remove(bucket, keys[])` — DeleteObjectCommand 병렬. 실패 swallowing (DB row 삭제 후 정리 시도)
+  - `R2_BUCKETS` 상수 export
+- **server actions 교체** — 3 파일:
+  - [`works/connection-report-actions.ts`](./src/app/works/connection-report-actions.ts) — `uploadConnectionPhoto` / `removeConnectionPhoto` / `getConnectionPhotoUrl` / `getConnectionPhotoViewUrls`
+  - [`requests/actions.ts`](./src/app/requests/actions.ts) — 신청 제출 시 첨부 / `replaceAttachment` / `removeAttachment` / `getAttachmentUrl`
+  - [`relocation/[id]/field-inspection-actions.ts`](./src/app/relocation/[id]/field-inspection-actions.ts) — 시설 실사 캡처 업로드/조회/삭제
+- **권한 동작**:
+  - 업로드: server action 이 기존 RLS 확인 함수(`ensureAuthorPending` 등) 호출 후 R2 PUT
+  - 다운로드: server action 이 Supabase 로 metadata 행 조회(RLS 통과해야 path 반환됨) → R2 signed URL 발급. RLS 우회 못 함
+  - 삭제: server action 이 metadata 행 RLS DELETE 검증 후 R2 DELETE
+- **패키지**: `@aws-sdk/client-s3` + `@aws-sdk/s3-request-presigner`
+- **owner 운영 작업**:
+  1. R2 버킷 3개 생성 (Cloudflare dashboard) ✓
+  2. R2 API Token 발급 (Object Read & Write) ✓
+  3. `.env.local` 에 4개 env 추가: `R2_ACCOUNT_ID`, `R2_ENDPOINT`, `R2_ACCESS_KEY_ID`, `R2_SECRET_ACCESS_KEY`
+  4. Vercel Environment Variables 에도 동일 4개 등록 (Production + Preview)
+  5. 배포 후 사진 업로드/조회/삭제 테스트
+- **마이그**: 없음 (코드 변경만)
+- **남은 정리**: Supabase Storage 의 기존 3개 버킷은 owner 가 베타 종료 시 또는 별도 시점에 수동 비우면 됨 (DB metadata 의 path 만 남아도 R2 가 진실의 원천)
+
 ### ✅ 완료 (공사 설계로 일반화 + 3 카테고리 허브, 2026-05-25)
 
 owner 요구: 「지장이설 설계」 단일 진입을 「공사 설계」로 일반화. 진입하면 「청약 설계」/「계획 설계」/「지장이설 설계」 3 카테고리로 분기, 각 카테고리 안에서 프로젝트 생성·관리. 모든 공사의 행정도·코어구성도·직선도 설계를 한 모듈에서.

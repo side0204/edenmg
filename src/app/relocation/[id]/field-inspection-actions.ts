@@ -2,6 +2,7 @@
 
 import { revalidatePath } from 'next/cache'
 import { createClient } from '@/lib/supabase/server'
+import { r2Upload, r2SignedUrls, r2Remove } from '@/lib/r2'
 
 // 지장이설 — 시설별 실사 내용 캡처 (마이그 0061).
 //   실사 모드에서 그린 그림 + 텍스트를 포함한 화면 캡처를 시설에 첨부.
@@ -103,10 +104,9 @@ export async function saveFieldInspection(
   }
 
   const path = buildPath(facilityId, extFromMime(file.type))
-  const { error: upErr } = await supabase.storage
-    .from(BUCKET)
-    .upload(path, file, { contentType: file.type, upsert: false })
-  if (upErr) return { ok: false, error: '업로드 실패: ' + upErr.message }
+  const body = new Uint8Array(await file.arrayBuffer())
+  const up = await r2Upload(BUCKET, path, body, file.type)
+  if (!up.ok) return { ok: false, error: '업로드 실패: ' + up.error }
 
   const { data: ins, error: insErr } = await supabase
     .from('relocation_field_inspections')
@@ -121,7 +121,7 @@ export async function saveFieldInspection(
     .maybeSingle()
   if (insErr || !ins) {
     // 고아 파일 방지로 즉시 삭제
-    await supabase.storage.from(BUCKET).remove([path])
+    await r2Remove(BUCKET, [path])
     return { ok: false, error: '메타 저장 실패: ' + (insErr?.message ?? '알 수 없음') }
   }
 
@@ -151,20 +151,16 @@ export async function listFieldInspections(facilityId: string) {
 
 /**
  * 인라인 표시용 signedUrl 일괄 발급 (30분).
+ *   권한: 같은 회사 admin/ceo 가 호출. RLS 가 facility 행 접근을 막아주므로
+ *         호출자가 path 를 얻은 시점에 권한 확인 끝.
  */
 export async function getFieldInspectionUrls(
   paths: string[],
 ): Promise<Record<string, string>> {
   const result: Record<string, string> = {}
   if (paths.length === 0) return result
-  const supabase = await createClient()
-  const { data } = await supabase.storage
-    .from(BUCKET)
-    .createSignedUrls(paths, 60 * 30)
-  if (!data) return result
-  for (const item of data) {
-    if (item.signedUrl && item.path) result[item.path] = item.signedUrl
-  }
+  const map = await r2SignedUrls(BUCKET, paths, 60 * 30)
+  for (const [path, url] of map.entries()) result[path] = url
   return result
 }
 
@@ -196,8 +192,8 @@ export async function deleteFieldInspection(
     .eq('id', inspectionId)
   if (delErr) return { ok: false, error: '삭제 실패: ' + delErr.message }
 
-  // Storage 정리 (실패해도 메인 흐름 진행)
-  await supabase.storage.from(BUCKET).remove([insp.image_path])
+  // R2 정리 (실패해도 메인 흐름 진행)
+  await r2Remove(BUCKET, [insp.image_path])
 
   if (projectId) revalidatePath(`/relocation/${projectId}`)
   return { ok: true }

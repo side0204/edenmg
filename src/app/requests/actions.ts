@@ -9,6 +9,8 @@ import {
   LEAVE_TYPE_VALUES,
   type LeaveType,
 } from '@/lib/leave'
+// R2 (S3-compatible) 클라이언트 — 2026-05-25 owner 요청으로 Supabase Storage → R2 이전
+import { r2Upload, r2SignedUrl, r2Remove } from '@/lib/r2'
 
 type Permission = 'worker' | 'team_member' | 'team_leader' | 'admin'
 
@@ -196,17 +198,19 @@ export async function submitRequest(formData: FormData) {
     comment: null,
   })
 
-  // 첨부가 있으면 Storage 업로드 + path 컬럼 업데이트.
-  // Storage 실패 시 신청 자체는 유지하되 상세 페이지에서 재시도 안내.
+  // 첨부가 있으면 R2 업로드 + path 컬럼 업데이트.
+  // R2 실패 시 신청 자체는 유지하되 상세 페이지에서 재시도 안내.
   if (attachment instanceof File) {
     const path = buildAttachmentPath(inserted.id, attachment.name)
-    const { error: upErr } = await supabase.storage
-      .from(ATTACHMENT_BUCKET)
-      .upload(path, attachment, { contentType: attachment.type, upsert: false })
-    if (upErr) {
+    const body = new Uint8Array(await attachment.arrayBuffer())
+    const up = await r2Upload(ATTACHMENT_BUCKET, path, body, attachment.type)
+    if (!up.ok) {
       revalidatePath('/requests')
       revalidatePath('/')
-      redirect(`/requests/${inserted.id}?err=` + encodeURIComponent('신청은 접수됐지만 첨부 업로드에 실패했습니다: ' + upErr.message))
+      redirect(
+        `/requests/${inserted.id}?err=` +
+          encodeURIComponent('신청은 접수됐지만 첨부 업로드에 실패했습니다: ' + up.error),
+      )
     }
     await supabase
       .from('leave_requests')
@@ -253,16 +257,15 @@ export async function replaceAttachment(formData: FormData) {
   }
 
   const path = buildAttachmentPath(lr.id, attachment.name)
-  const { error: upErr } = await supabase.storage
-    .from(ATTACHMENT_BUCKET)
-    .upload(path, attachment, { contentType: attachment.type, upsert: false })
-  if (upErr) {
-    redirect(`/requests/${id}?err=` + encodeURIComponent('업로드 실패: ' + upErr.message))
+  const body = new Uint8Array(await attachment.arrayBuffer())
+  const up = await r2Upload(ATTACHMENT_BUCKET, path, body, attachment.type)
+  if (!up.ok) {
+    redirect(`/requests/${id}?err=` + encodeURIComponent('업로드 실패: ' + up.error))
   }
 
   if (lr.attachment_path && lr.attachment_path !== path) {
     // 이전 파일 정리. 실패해도 본문 흐름은 계속 (orphan 은 v2 에서 정기 청소).
-    await supabase.storage.from(ATTACHMENT_BUCKET).remove([lr.attachment_path])
+    await r2Remove(ATTACHMENT_BUCKET, [lr.attachment_path])
   }
 
   await supabase
@@ -302,7 +305,7 @@ export async function removeAttachment(formData: FormData) {
     redirect(`/requests/${id}?err=` + encodeURIComponent('삭제할 첨부가 없습니다'))
   }
 
-  await supabase.storage.from(ATTACHMENT_BUCKET).remove([lr.attachment_path])
+  await r2Remove(ATTACHMENT_BUCKET, [lr.attachment_path])
   await supabase
     .from('leave_requests')
     .update({ attachment_path: null, attachment_filename: null })
@@ -314,7 +317,8 @@ export async function removeAttachment(formData: FormData) {
 }
 
 // 다운로드 — 신청 상세/결재함 양쪽에서 사용. signedUrl 5분짜리.
-// RLS 가 권한 분기를 담당 (본인 / assigned_foreman / 회사 admin·ceo).
+// 권한: leave_requests RLS 가 권한 분기 (본인 / assigned_foreman / 회사 admin·ceo) —
+//        해당 행에 접근할 수 있어야 attachment_path 가 조회됨.
 export async function getAttachmentUrl(leaveRequestId: string): Promise<{ url: string; filename: string } | null> {
   const supabase = await createClient()
   const { data: row } = await supabase
@@ -324,11 +328,17 @@ export async function getAttachmentUrl(leaveRequestId: string): Promise<{ url: s
     .maybeSingle()
   const lr = row as { attachment_path: string | null; attachment_filename: string | null } | null
   if (!lr?.attachment_path) return null
-  const { data, error } = await supabase.storage
-    .from(ATTACHMENT_BUCKET)
-    .createSignedUrl(lr.attachment_path, 60 * 5, { download: lr.attachment_filename ?? undefined })
-  if (error || !data?.signedUrl) return null
-  return { url: data.signedUrl, filename: lr.attachment_filename ?? '첨부파일' }
+  try {
+    const url = await r2SignedUrl(
+      ATTACHMENT_BUCKET,
+      lr.attachment_path,
+      60 * 5,
+      lr.attachment_filename ?? undefined,
+    )
+    return { url, filename: lr.attachment_filename ?? '첨부파일' }
+  } catch {
+    return null
+  }
 }
 
 export async function cancelRequest(formData: FormData) {
