@@ -746,7 +746,7 @@ export function SubscriptionProjectsTable({
                     onDrop={(e) => onHeaderDrop(e, col.id)}
                     onDragEnd={onHeaderDragEnd}
                     className={
-                      'relative border-r border-slate-200 px-2 py-1.5 text-left text-[10px] font-semibold whitespace-nowrap select-none cursor-grab ' +
+                      'relative border-r border-slate-200 px-2 py-1.5 text-center text-[10px] font-semibold whitespace-nowrap select-none cursor-grab ' +
                       (idx === 0 ? 'sticky left-0 bg-slate-50 z-10 ' : '') +
                       (isDragging ? 'opacity-50 ' : '') +
                       (isDragOver && dragOverSide === 'before'
@@ -761,7 +761,7 @@ export function SubscriptionProjectsTable({
                       type="button"
                       onClick={(e) => toggleSort(col.id, e.shiftKey)}
                       className={
-                        'inline-flex items-center gap-1 rounded px-1 -mx-1 py-0.5 hover:bg-slate-100 max-w-full ' +
+                        'inline-flex items-center justify-center gap-1 rounded px-1 py-0.5 hover:bg-slate-100 w-full ' +
                         (isSorted ? 'text-slate-900' : 'text-slate-600')
                       }
                       title="클릭 = 정렬 / Shift+클릭 = 다중 정렬 추가 / 헤더 드래그 = 순서 변경"
