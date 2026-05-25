@@ -19,6 +19,7 @@
 //   connection-photos             접속일보 사진
 //   leave-attachments             휴가 첨부
 //   relocation-field-inspections  지장이설 실사 캡처
+//   relocation-facility-photos    청약 시설별 작업사진 (마이그 0078)
 
 import {
   S3Client,
@@ -136,4 +137,5 @@ export const R2_BUCKETS = {
   CONNECTION_PHOTOS: 'connection-photos',
   LEAVE_ATTACHMENTS: 'leave-attachments',
   RELOCATION_FIELD_INSPECTIONS: 'relocation-field-inspections',
+  RELOCATION_FACILITY_PHOTOS: 'relocation-facility-photos',
 } as const

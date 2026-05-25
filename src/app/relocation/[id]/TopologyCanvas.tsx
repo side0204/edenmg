@@ -474,6 +474,7 @@ export default function TopologyCanvas({
   tabPanelDefaultOpen,
   initialFocusIds,
   workerPositions,
+  projectOrderNos,
 }: {
   projectId: string
   // 공사 분류 — '청약' 일 때 도식 모드에서 케이블 클릭 시 사용코어 입력 popover 노출.
@@ -517,6 +518,9 @@ export default function TopologyCanvas({
     accuracyM: number | null
     lastSeenAt: string
   }[]
+  // 청약 작업번호 목록 — FacilityTaskPopover 의 작업번호 선택자 후보.
+  //   relocation_projects.order_nos 의 array.
+  projectOrderNos?: string[]
 }) {
   const router = useRouter()
 
@@ -1117,6 +1121,33 @@ export default function TopologyCanvas({
 
   // 광케이블 카테고리 펼침 상태 (시설 카테고리 openCategories 와 별개)
   const [cableCatOpen, setCableCatOpen] = useState(false)
+
+  // 좌측 사이드바 너비 — 드래그로 확장 가능 (긴 시설명도 보이게).
+  //   기본 208px (w-52), 범위 160~640px. 로컬 상태 (세션 단위).
+  const [sidebarWidth, setSidebarWidth] = useState(208)
+  const sidebarResizeRef = useRef<{ startX: number; startW: number } | null>(null)
+  function onSidebarResizeDown(e: React.PointerEvent<HTMLDivElement>) {
+    sidebarResizeRef.current = { startX: e.clientX, startW: sidebarWidth }
+    try {
+      e.currentTarget.setPointerCapture(e.pointerId)
+    } catch {}
+    document.body.style.userSelect = 'none'
+    document.body.style.cursor = 'col-resize'
+  }
+  function onSidebarResizeMove(e: React.PointerEvent<HTMLDivElement>) {
+    const d = sidebarResizeRef.current
+    if (!d) return
+    const next = Math.max(160, Math.min(640, d.startW + (e.clientX - d.startX)))
+    setSidebarWidth(next)
+  }
+  function onSidebarResizeUp(e: React.PointerEvent<HTMLDivElement>) {
+    sidebarResizeRef.current = null
+    try {
+      e.currentTarget.releasePointerCapture(e.pointerId)
+    } catch {}
+    document.body.style.userSelect = ''
+    document.body.style.cursor = ''
+  }
 
   // 좌측 시설 목록 사이드바 — 클릭 시 해당 시설 위치로 캔버스 이동.
   //   기본값 접힘 — 진입 시 캔버스에 바로 집중 (owner 요청).
@@ -4387,9 +4418,13 @@ export default function TopologyCanvas({
         style={isFullscreen ? undefined : { height: CANVAS_SIZE_HEIGHT[canvasSize] }}
         data-sketch-canvas-region
       >
-        {/* 좌측 시설 목록 — 클릭 시 해당 시설로 캔버스 이동 */}
+        {/* 좌측 시설 목록 — 클릭 시 해당 시설로 캔버스 이동.
+            너비 드래그 가능 (긴 시설명 확인용). 범위 160~640px. */}
         {!sidebarCollapsed && (
-          <aside className="w-52 shrink-0 border-r border-slate-200 bg-slate-50 overflow-y-auto">
+          <aside
+            className="shrink-0 border-r border-slate-200 bg-slate-50 overflow-y-auto relative"
+            style={{ width: `${sidebarWidth}px` }}
+          >
             <div className="sticky top-0 z-10 bg-slate-50 px-3 py-2 border-b border-slate-200">
               <div className="flex items-center justify-between">
                 <span className="text-[11px] font-semibold text-slate-600">
@@ -4502,6 +4537,16 @@ export default function TopologyCanvas({
                 })}
               </div>
             )}
+            {/* 드래그 핸들 — 우측 가장자리. pointer-events:none 가 아닌 fixed 폭으로 잡기 쉽게 */}
+            <div
+              onPointerDown={onSidebarResizeDown}
+              onPointerMove={onSidebarResizeMove}
+              onPointerUp={onSidebarResizeUp}
+              onPointerCancel={onSidebarResizeUp}
+              className="absolute top-0 right-0 h-full w-1.5 cursor-col-resize hover:bg-emerald-400/40 active:bg-emerald-500/60 z-20"
+              title="드래그로 폭 조절"
+              style={{ touchAction: 'none' }}
+            />
           </aside>
         )}
 
@@ -5740,6 +5785,7 @@ export default function TopologyCanvas({
                           facilityCode={code}
                           facilityName={f.name}
                           taskTypes={taskTypes ?? []}
+                          orderNos={projectOrderNos ?? []}
                           svgScale={popSvgScale}
                           onSaved={() => router.refresh()}
                           onClose={() => setFacilityTaskPopoverId(null)}

@@ -18,6 +18,8 @@ type ProjectMini = {
   subscription_id: string | null
   subscriber_name: string | null
   designer_id: string | null
+  order_no: string | null
+  order_nos: unknown
 }
 
 export default async function RelocationCanvasPage({
@@ -55,7 +57,9 @@ export default async function RelocationCanvasPage({
 
   const { data: pRow } = await supabase
     .from('relocation_projects')
-    .select('id, title, client, category, subscription_id, subscriber_name, designer_id')
+    .select(
+      'id, title, client, category, subscription_id, subscriber_name, designer_id, order_no, order_nos',
+    )
     .eq('id', id)
     .maybeSingle()
   const project = pRow as ProjectMini | null
@@ -201,6 +205,15 @@ export default async function RelocationCanvasPage({
             coreAssignments={assignments}
             myEmployeeId={me.id}
             workerPositions={workerPositions}
+            projectOrderNos={
+              Array.isArray(project.order_nos)
+                ? (project.order_nos as unknown[]).filter(
+                    (v): v is string => typeof v === 'string',
+                  )
+                : project.order_no
+                  ? [project.order_no]
+                  : []
+            }
           />
         </HighlightProvider>
       </div>

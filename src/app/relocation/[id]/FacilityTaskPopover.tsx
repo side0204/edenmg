@@ -1,9 +1,10 @@
 'use client'
 
-import { useState, useMemo, useRef } from 'react'
+import { useState, useMemo, useRef, useEffect } from 'react'
 import { toast } from 'sonner'
 import { X, Save, Loader2, GripHorizontal, Plus } from 'lucide-react'
 import { addFacilityTaskFromPopover } from './facility-task-actions'
+import FacilityPhotoInput from './FacilityPhotoInput'
 
 // 청약 카테고리 도식 모드 — 시설물 위 floating 「작업내역 입력」 창.
 //   사용코어입력 popover 와 동일한 패턴. 드래그 가능, 큰 글자.
@@ -30,6 +31,9 @@ export type FacilityTaskPopoverProps = {
   facilityCode: string
   facilityName: string
   taskTypes: TaskTypeOption[]
+  // 프로젝트의 작업번호 후보 — 청약에 여러 작업번호가 있을 때 선택.
+  //   비어있으면 작업번호 입력란 자체 미노출 (단일·미부여 프로젝트).
+  orderNos: string[]
   // SVG viewport unit per client pixel — 드래그 거리 보정용
   svgScale: number
   onSaved: () => void
@@ -42,6 +46,7 @@ export default function FacilityTaskPopover({
   facilityCode,
   facilityName,
   taskTypes,
+  orderNos,
   svgScale,
   onSaved,
   onClose,
@@ -53,6 +58,10 @@ export default function FacilityTaskPopover({
   const [manualUnit, setManualUnit] = useState('식')
   const [quantity, setQuantity] = useState('1')
   const [busy, setBusy] = useState(false)
+  // 작업번호 — 단일이면 자동 선택, 여러 개면 사용자가 고름
+  const [orderNo, setOrderNo] = useState<string>(
+    orderNos.length === 1 ? orderNos[0] : '',
+  )
 
   // 드래그
   const [offset, setOffset] = useState({ x: 0, y: 0 })
@@ -96,11 +105,13 @@ export default function FacilityTaskPopover({
     () => taskTypes.find((t) => t.id === pickedId) ?? null,
     [taskTypes, pickedId],
   )
+  const needsOrderNo = orderNos.length > 0
   const valid =
     quantity.length > 0 &&
     Number.isInteger(Number(quantity)) &&
     Number(quantity) >= 1 &&
-    (mode === 'pick' ? !!pickedId : manualName.trim().length > 0)
+    (mode === 'pick' ? !!pickedId : manualName.trim().length > 0) &&
+    (!needsOrderNo || !!orderNo)
 
   async function onSave() {
     if (!valid || busy) return
@@ -113,6 +124,7 @@ export default function FacilityTaskPopover({
       manual_name: mode === 'manual' ? manualName.trim() || null : null,
       manual_unit: mode === 'manual' ? manualUnit.trim() || null : null,
       quantity: Number(quantity),
+      order_no: orderNo || null,
     })
     setBusy(false)
     if (!result.ok) {
@@ -130,8 +142,23 @@ export default function FacilityTaskPopover({
     onSaved()
   }
 
+  // wheel 이벤트 — popover 안 스크롤이 SVG 의 zoom 으로 새지 않도록 차단.
+  //   캔버스 SVG 에 native addEventListener('wheel', ..., {passive:false}) 가 붙어 있어
+  //   React onWheel 의 stopPropagation 만으론 막을 수 없음.
+  //   여기서 native wheel listener 로 stopPropagation — DOM 버블링 자체를 끊는다.
+  //   passive: false 가 필요 (passive 면 stopPropagation 못 함).
+  const wrapperRef = useRef<HTMLDivElement>(null)
+  useEffect(() => {
+    const el = wrapperRef.current
+    if (!el) return
+    const handler = (e: WheelEvent) => e.stopPropagation()
+    el.addEventListener('wheel', handler, { passive: false })
+    return () => el.removeEventListener('wheel', handler)
+  }, [])
+
   return (
     <div
+      ref={wrapperRef}
       style={{
         transform: `translate(${offset.x}px, ${offset.y}px)`,
         width: '100%',
@@ -169,6 +196,38 @@ export default function FacilityTaskPopover({
           </button>
         </div>
         <div className="flex-1 min-h-0 overflow-y-auto px-4 py-3 space-y-3">
+          {/* 작업번호 선택 — 청약에 작업번호가 있을 때만 노출.
+              1개면 자동 prefill, 2개 이상이면 사용자가 골라야 함 */}
+          {orderNos.length > 0 && (
+            <div>
+              <label className="block text-lg font-semibold text-slate-700 mb-1">
+                작업번호 <span className="text-rose-600">*</span>
+              </label>
+              {orderNos.length === 1 ? (
+                <>
+                  <input type="hidden" value={orderNo} />
+                  <p className="inline-flex items-center rounded-md bg-slate-100 px-3 py-2 text-lg font-mono font-bold text-slate-900">
+                    {orderNos[0]}
+                  </p>
+                </>
+              ) : (
+                <select
+                  value={orderNo}
+                  onChange={(e) => setOrderNo(e.target.value)}
+                  disabled={busy}
+                  className="w-full rounded-md border-2 border-slate-300 px-3 py-2.5 text-lg font-mono font-bold bg-white focus:outline-none focus:ring-2 focus:border-emerald-500 focus:ring-emerald-300 disabled:bg-slate-100"
+                >
+                  <option value="">— 선택 —</option>
+                  {orderNos.map((no) => (
+                    <option key={no} value={no}>
+                      {no}
+                    </option>
+                  ))}
+                </select>
+              )}
+            </div>
+          )}
+
           {/* 모드 토글 */}
           <div className="flex items-center gap-1 rounded-md bg-slate-100 p-1">
             <button
@@ -313,6 +372,14 @@ export default function FacilityTaskPopover({
             )}
             확정
           </button>
+
+          {/* 작업사진 입력 — 확정 버튼 아래. 카테고리 선택 후 카메라/갤러리 */}
+          <FacilityPhotoInput
+            projectId={projectId}
+            facilityId={facilityId}
+            onUploaded={onSaved}
+            compact
+          />
         </div>
       </div>
     </div>

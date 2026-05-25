@@ -1254,6 +1254,15 @@ export default async function RelocationProjectPage({
         coreAssignments={assignments}
         myEmployeeId={me.id}
         workerPositions={workerPositions}
+        projectOrderNos={
+          Array.isArray(project.order_nos)
+            ? (project.order_nos as unknown[]).filter(
+                (v): v is string => typeof v === 'string',
+              )
+            : project.order_no
+              ? [project.order_no]
+              : []
+        }
         tabPanel={tabPanel}
         tabPanelDefaultOpen={!!tabRaw}
       />

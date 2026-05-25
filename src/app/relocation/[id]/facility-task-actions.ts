@@ -12,7 +12,12 @@ import { createClient } from '@/lib/supabase/server'
 type ActionResult = { ok: true } | { ok: false; error: string }
 
 async function requireMember(): Promise<
-  | { ok: true; supabase: Awaited<ReturnType<typeof createClient>> }
+  | {
+      ok: true
+      supabase: Awaited<ReturnType<typeof createClient>>
+      employeeId: string
+      companyId: string
+    }
   | { ok: false; error: string }
 > {
   const supabase = await createClient()
@@ -23,13 +28,15 @@ async function requireMember(): Promise<
 
   const { data: meRow } = await supabase
     .from('employees')
-    .select('is_active')
+    .select('id, company_id, is_active')
     .eq('auth_user_id', user.id)
     .maybeSingle()
-  const me = meRow as { is_active: boolean } | null
+  const me = meRow as
+    | { id: string; company_id: string; is_active: boolean }
+    | null
   if (!me || !me.is_active) return { ok: false, error: '계정이 활성 상태가 아닙니다' }
 
-  return { ok: true, supabase }
+  return { ok: true, supabase, employeeId: me.id, companyId: me.company_id }
 }
 
 
@@ -57,19 +64,31 @@ export async function addFacilityTask(input: {
   const auth = await requireMember()
   if (!auth.ok) return auth
 
-  const { error } = await auth.supabase
+  // 마이그 0077 — unique 가 (facility_id, task_type_id, coalesce(order_no, '')) 로 변경.
+  //   info panel 의 add 경로는 order_no 미지정 (null) — select-then-update/insert.
+  const { data: existingRow } = await auth.supabase
     .from('relocation_facility_tasks')
-    .upsert(
-      {
-        project_id: input.project_id,
-        facility_id: input.facility_id,
-        task_type_id: input.task_type_id,
-        quantity: qty,
-      },
-      { onConflict: 'facility_id,task_type_id' },
-    )
+    .select('id')
+    .eq('facility_id', input.facility_id)
+    .eq('task_type_id', input.task_type_id)
+    .is('order_no', null)
+    .maybeSingle()
 
-  if (error) return { ok: false, error: '공종 추가 실패: ' + error.message }
+  if (existingRow) {
+    const { error } = await auth.supabase
+      .from('relocation_facility_tasks')
+      .update({ quantity: qty })
+      .eq('id', (existingRow as { id: string }).id)
+    if (error) return { ok: false, error: '공종 갱신 실패: ' + error.message }
+  } else {
+    const { error } = await auth.supabase.from('relocation_facility_tasks').insert({
+      project_id: input.project_id,
+      facility_id: input.facility_id,
+      task_type_id: input.task_type_id,
+      quantity: qty,
+    })
+    if (error) return { ok: false, error: '공종 추가 실패: ' + error.message }
+  }
 
   revalidatePath(`/relocation/${input.project_id}`)
   return { ok: true }
@@ -94,6 +113,7 @@ export async function addFacilityTaskFromPopover(input: {
   manual_name: string | null
   manual_unit: string | null
   quantity: number
+  order_no: string | null
 }): Promise<ActionResult> {
   if (!input.project_id || !input.facility_id) {
     return { ok: false, error: '대상이 올바르지 않습니다' }
@@ -102,18 +122,14 @@ export async function addFacilityTaskFromPopover(input: {
   if (!Number.isInteger(qty) || qty < 1 || qty > 9999) {
     return { ok: false, error: '수량은 1 이상의 정수로 입력하세요' }
   }
+  const orderNo = (input.order_no ?? '').trim() || null
+  if (orderNo && orderNo.length > 100) {
+    return { ok: false, error: '작업번호는 100자 이하' }
+  }
 
   const auth = await requireMember()
   if (!auth.ok) return auth
-  const { supabase } = auth
-
-  // 현재 사용자의 회사 — 새 공종 생성 시 company_id 로 사용
-  const { data: meRow } = await supabase
-    .from('employees')
-    .select('company_id')
-    .single()
-  const meCompanyId = (meRow as { company_id: string } | null)?.company_id
-  if (!meCompanyId) return { ok: false, error: '회사 정보를 찾을 수 없습니다' }
+  const { supabase, companyId: meCompanyId } = auth
 
   // 시설 — 같은 프로젝트인지 + 종류(접속함체 여부 판정용)
   const { data: facRow } = await supabase
@@ -275,19 +291,35 @@ export async function addFacilityTaskFromPopover(input: {
     }
   }
 
-  // facility_task upsert (facility_id, task_type_id) unique
-  const { error } = await supabase
+  // facility_task — (facility_id, task_type_id, coalesce(order_no, '')) unique
+  //   (마이그 0077). 같은 시설·공종이라도 작업번호 다르면 별도 행.
+  //   coalesce 가 들어가 onConflict 컬럼 타깃이 안 통하므로 select-then-update/insert.
+  const existingQ = supabase
     .from('relocation_facility_tasks')
-    .upsert(
-      {
-        project_id: input.project_id,
-        facility_id: input.facility_id,
-        task_type_id: taskTypeId,
-        quantity: qty,
-      },
-      { onConflict: 'facility_id,task_type_id' },
-    )
-  if (error) return { ok: false, error: '작업내역 저장 실패: ' + error.message }
+    .select('id')
+    .eq('facility_id', input.facility_id)
+    .eq('task_type_id', taskTypeId)
+  const { data: existingRow } = await (orderNo
+    ? existingQ.eq('order_no', orderNo)
+    : existingQ.is('order_no', null)
+  ).maybeSingle()
+
+  if (existingRow) {
+    const { error } = await supabase
+      .from('relocation_facility_tasks')
+      .update({ quantity: qty })
+      .eq('id', (existingRow as { id: string }).id)
+    if (error) return { ok: false, error: '작업내역 갱신 실패: ' + error.message }
+  } else {
+    const { error } = await supabase.from('relocation_facility_tasks').insert({
+      project_id: input.project_id,
+      facility_id: input.facility_id,
+      task_type_id: taskTypeId,
+      quantity: qty,
+      order_no: orderNo,
+    })
+    if (error) return { ok: false, error: '작업내역 저장 실패: ' + error.message }
+  }
 
   revalidatePath(`/relocation/${input.project_id}`)
   return { ok: true }

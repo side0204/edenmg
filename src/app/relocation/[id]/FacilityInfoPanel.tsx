@@ -40,6 +40,12 @@ import {
   removeFacilityMaterial,
 } from './facility-task-actions'
 import {
+  listFacilityPhotos,
+  getFacilityPhotoUrls,
+  deleteFacilityPhoto,
+} from './facility-photo-actions'
+import FacilityPhotoInput from './FacilityPhotoInput'
+import {
   listFieldInspections,
   getFieldInspectionUrls,
   deleteFieldInspection,
@@ -92,6 +98,7 @@ export type FacilityTaskItem = {
   id: string
   task_type_id: string
   quantity: number
+  order_no: string | null
 }
 
 export type FacilityMaterialItem = {
@@ -192,6 +199,21 @@ export default function FacilityInfoPanel({
   const [inspectionUrls, setInspectionUrls] = useState<Record<string, string>>({})
   const [previewUrl, setPreviewUrl] = useState<string | null>(null)
   const [inspectionRefreshSeq, setInspectionRefreshSeq] = useState(0)
+
+  // 작업사진 (마이그 0078) — 카테고리별 사진 갤러리
+  type PhotoRow = {
+    id: string
+    category: string
+    custom_label: string | null
+    image_path: string
+    original_filename: string | null
+    taken_at: string | null
+    created_at: string
+  }
+  const [photos, setPhotos] = useState<PhotoRow[]>([])
+  const [photoUrls, setPhotoUrls] = useState<Record<string, string>>({})
+  const [photoRefreshSeq, setPhotoRefreshSeq] = useState(0)
+
   useEffect(() => {
     let cancelled = false
     void (async () => {
@@ -211,6 +233,39 @@ export default function FacilityInfoPanel({
       cancelled = true
     }
   }, [facility.id, inspectionRefreshSeq])
+
+  useEffect(() => {
+    let cancelled = false
+    void (async () => {
+      const rows = (await listFacilityPhotos(facility.id)) as PhotoRow[]
+      if (cancelled) return
+      setPhotos(rows)
+      const paths = rows.map((r) => r.image_path)
+      if (paths.length > 0) {
+        const urls = await getFacilityPhotoUrls(paths)
+        if (cancelled) return
+        setPhotoUrls(urls)
+      } else {
+        setPhotoUrls({})
+      }
+    })()
+    return () => {
+      cancelled = true
+    }
+  }, [facility.id, photoRefreshSeq])
+
+  async function onDeletePhoto(id: string) {
+    if (!confirm('이 사진을 삭제하시겠습니까?')) return
+    const fd = new FormData()
+    fd.append('photo_id', id)
+    fd.append('project_id', projectId)
+    const r = await deleteFacilityPhoto(fd)
+    if (r.ok) {
+      setPhotoRefreshSeq((v) => v + 1)
+    } else {
+      alert(r.error)
+    }
+  }
 
   async function onDeleteInspection(id: string) {
     if (!confirm('이 실사 캡처를 삭제하시겠습니까?')) return
@@ -933,7 +988,12 @@ export default function FacilityInfoPanel({
                     key={t.id}
                     className="flex items-center gap-1.5 rounded-md bg-slate-50 px-2 py-1 text-[11px]"
                   >
-                    <span className="flex-1 text-slate-700">
+                    {t.order_no && (
+                      <span className="shrink-0 inline-flex items-center rounded bg-emerald-100 text-emerald-700 px-1 py-0.5 text-[10px] font-mono font-bold">
+                        {t.order_no}
+                      </span>
+                    )}
+                    <span className="flex-1 text-slate-700 truncate">
                       {tt?.name ?? '(삭제된 공종)'}
                     </span>
                     <span className="font-semibold text-slate-900">
@@ -1149,6 +1209,85 @@ export default function FacilityInfoPanel({
                     <button
                       type="button"
                       onClick={() => onDeleteInspection(insp.id)}
+                      className="absolute top-1 right-1 rounded-md bg-white/90 p-1 text-slate-400 opacity-0 group-hover:opacity-100 hover:text-rose-600 transition"
+                      title="삭제"
+                    >
+                      <Trash2 className="h-3 w-3" />
+                    </button>
+                  </li>
+                )
+              })}
+            </ul>
+          )}
+        </div>
+
+        {/* 작업사진 — 마이그 0078. 카테고리별로 분류된 시설 작업 사진 갤러리 */}
+        <div className="border-t border-slate-200 pt-2">
+          <p className="flex items-center gap-1 text-[11px] font-bold text-slate-700">
+            <Camera className="h-3.5 w-3.5" />
+            작업사진
+            {photos.length > 0 && (
+              <span className="ml-1 rounded-full bg-emerald-100 px-1.5 py-0.5 text-[10px] font-semibold text-emerald-800">
+                {photos.length}장
+              </span>
+            )}
+          </p>
+          <div className="mt-1.5">
+            <FacilityPhotoInput
+              projectId={projectId}
+              facilityId={facility.id}
+              onUploaded={() => setPhotoRefreshSeq((v) => v + 1)}
+            />
+          </div>
+          {photos.length === 0 ? (
+            <p className="mt-1.5 text-[11px] text-slate-400 italic">
+              등록된 작업사진 없음
+            </p>
+          ) : (
+            <ul className="mt-1.5 grid grid-cols-2 gap-1.5">
+              {photos.map((p) => {
+                const url = photoUrls[p.image_path]
+                const date = new Date(p.taken_at ?? p.created_at)
+                const dateStr = `${date.getMonth() + 1}/${date.getDate()} ${String(
+                  date.getHours(),
+                ).padStart(2, '0')}:${String(date.getMinutes()).padStart(2, '0')}`
+                const label =
+                  p.category === '기타' && p.custom_label
+                    ? p.custom_label
+                    : p.category
+                return (
+                  <li
+                    key={p.id}
+                    className="group relative rounded-md border border-slate-200 overflow-hidden bg-slate-100"
+                  >
+                    {url ? (
+                      <button
+                        type="button"
+                        onClick={() => setPreviewUrl(url)}
+                        className="block w-full"
+                        title={`${label} · 클릭하여 크게 보기`}
+                      >
+                        {/* eslint-disable-next-line @next/next/no-img-element */}
+                        <img
+                          src={url}
+                          alt={label}
+                          className="w-full h-24 object-cover"
+                        />
+                      </button>
+                    ) : (
+                      <div className="w-full h-24 flex items-center justify-center text-[10px] text-slate-400">
+                        로딩 중…
+                      </div>
+                    )}
+                    <div className="px-1.5 py-1 bg-white">
+                      <p className="text-[10px] font-semibold text-emerald-700 truncate" title={label}>
+                        {label}
+                      </p>
+                      <p className="text-[10px] text-slate-500">{dateStr}</p>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => onDeletePhoto(p.id)}
                       className="absolute top-1 right-1 rounded-md bg-white/90 p-1 text-slate-400 opacity-0 group-hover:opacity-100 hover:text-rose-600 transition"
                       title="삭제"
                     >

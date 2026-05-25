@@ -85,10 +85,10 @@ export async function loadRelocationCanvasData(
       .eq('is_active', true)
       .order('position'),
 
-    // 시설별 공종량
+    // 시설별 공종량 (order_no — 마이그 0077, 작업번호 귀속)
     supabase
       .from('relocation_facility_tasks')
-      .select('id, facility_id, task_type_id, quantity')
+      .select('id, facility_id, task_type_id, quantity, order_no')
       .eq('project_id', projectId),
 
     // 시설별 사용 자재 (기별명세서용)
