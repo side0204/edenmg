@@ -9,25 +9,47 @@ import {
   RELOCATION_CATEGORY_LABEL,
   RELOCATION_CATEGORY_DESCRIPTION,
 } from '@/lib/relocation'
+import {
+  SubscriptionProjectsTable,
+  type RelocationProjectRow,
+} from './SubscriptionProjectsTable'
 
-// 공사 설계 — 카테고리별 프로젝트 목록.
+// 공사 설계 — 카테고리별 프로젝트 목록 (테이블 게시판형).
 // 권한: 회사 직원 누구나 (RLS 가 회사 스코프 강제).
 
-type ProjectRow = {
+type RawProjectRow = {
   id: string
   title: string
-  client: string
-  region: string | null
-  surveyed_at: string | null
   status: string
-  notes: string | null
+  category: string
+  subcategory: string | null
+  region: string | null
+  subscription_id: string | null
+  order_no: string | null
+  subscriber_name: string | null
+  subscriber_address: string | null
+  branch_manager: string | null
+  branch_contact: string | null
+  subscribed_at: string | null
+  desired_open_at: string | null
+  surveyed_at: string | null
+  expected_completion_at: string | null
+  completion_at: string | null
+  outside_worker_ids: unknown
+  splice_worker_ids: unknown
   designer_id: string | null
+  notes: string | null
   created_at: string
 }
 
 type EmployeeMini = {
   id: string
   name: string | null
+}
+
+function safeIdArr(v: unknown): string[] {
+  if (!Array.isArray(v)) return []
+  return v.filter((x): x is string => typeof x === 'string')
 }
 
 export default async function RelocationCategoryListPage({
@@ -57,38 +79,72 @@ export default async function RelocationCategoryListPage({
     redirect('/?err=' + encodeURIComponent('계정이 활성 상태가 아닙니다'))
   }
 
-  const { data: rows, error: listError } = await supabase
+  const { data: rawRows, error: listError } = await supabase
     .from('relocation_projects')
     .select(
-      'id, title, client, region, surveyed_at, status, notes, designer_id, created_at',
+      'id, title, status, category, subcategory, region, subscription_id, order_no, subscriber_name, subscriber_address, branch_manager, branch_contact, subscribed_at, desired_open_at, surveyed_at, expected_completion_at, completion_at, outside_worker_ids, splice_worker_ids, designer_id, notes, created_at',
     )
     .eq('company_id', me.company_id)
     .eq('category', category)
     .order('created_at', { ascending: false })
-    .limit(200)
+    .limit(500)
 
-  const projects = (rows ?? []) as ProjectRow[]
+  const projects = (rawRows ?? []) as RawProjectRow[]
 
-  // 설계자 이름 매핑
-  const designerIds = Array.from(
-    new Set(projects.map((p) => p.designer_id).filter((v): v is string => v !== null)),
-  )
-  const designerMap = new Map<string, string>()
-  if (designerIds.length > 0) {
+  // 직원 이름 매핑 — 설계자 + 외선/접속 작업자 ID 일괄 fetch
+  const empIds = new Set<string>()
+  for (const p of projects) {
+    if (p.designer_id) empIds.add(p.designer_id)
+    for (const id of safeIdArr(p.outside_worker_ids)) empIds.add(id)
+    for (const id of safeIdArr(p.splice_worker_ids)) empIds.add(id)
+  }
+  const nameById = new Map<string, string>()
+  if (empIds.size > 0) {
     const { data: emps } = await supabase
       .from('employees')
       .select('id, name')
-      .in('id', designerIds)
+      .in('id', Array.from(empIds))
     for (const e of (emps ?? []) as EmployeeMini[]) {
-      if (e.name) designerMap.set(e.id, e.name)
+      if (e.name) nameById.set(e.id, e.name)
     }
   }
+
+  const rows: RelocationProjectRow[] = projects.map((p) => ({
+    id: p.id,
+    title: p.title,
+    status: p.status,
+    category: (p.category === '청약' || p.category === '계획' || p.category === '지장이설'
+      ? p.category
+      : '지장이설') as '청약' | '계획' | '지장이설',
+    subcategory: p.subcategory,
+    region: p.region,
+    subscription_id: p.subscription_id,
+    order_no: p.order_no,
+    subscriber_name: p.subscriber_name,
+    subscriber_address: p.subscriber_address,
+    branch_manager: p.branch_manager,
+    branch_contact: p.branch_contact,
+    subscribed_at: p.subscribed_at,
+    desired_open_at: p.desired_open_at,
+    surveyed_at: p.surveyed_at,
+    expected_completion_at: p.expected_completion_at,
+    completion_at: p.completion_at,
+    outside_worker_names: safeIdArr(p.outside_worker_ids)
+      .map((id) => nameById.get(id))
+      .filter((n): n is string => !!n),
+    splice_worker_names: safeIdArr(p.splice_worker_ids)
+      .map((id) => nameById.get(id))
+      .filter((n): n is string => !!n),
+    designer_name: p.designer_id ? nameById.get(p.designer_id) ?? null : null,
+    notes: p.notes,
+    created_at: p.created_at,
+  }))
 
   const newProjectHref = `/relocation/new?cat=${catRaw}`
 
   return (
     <main className="min-h-screen p-4 sm:p-6">
-      <div className="mx-auto max-w-5xl space-y-5">
+      <div className="mx-auto max-w-[100rem] space-y-5">
         <header className="space-y-3 sm:space-y-0 sm:flex sm:items-center sm:justify-between sm:gap-3">
           <div>
             <Link
@@ -101,9 +157,7 @@ export default async function RelocationCategoryListPage({
             <h1 className="mt-1 text-3xl font-bold text-slate-900 tracking-tight">
               {categoryLabel}
             </h1>
-            <p className="mt-1 text-sm text-slate-500">
-              {categoryDescription} · {projects.length}건
-            </p>
+            <p className="mt-1 text-sm text-slate-500">{categoryDescription}</p>
           </div>
           <Link
             href={newProjectHref}
@@ -120,7 +174,7 @@ export default async function RelocationCategoryListPage({
           </p>
         )}
 
-        {projects.length === 0 ? (
+        {rows.length === 0 ? (
           <EmptyState
             icon={Cable}
             title="아직 등록된 프로젝트가 없습니다"
@@ -136,52 +190,7 @@ export default async function RelocationCategoryListPage({
             }
           />
         ) : (
-          <ul className="grid gap-3 sm:grid-cols-2">
-            {projects.map((p) => {
-              const designer = p.designer_id ? designerMap.get(p.designer_id) ?? null : null
-              return (
-                <li key={p.id}>
-                  <Link
-                    href={`/relocation/${p.id}`}
-                    className="block rounded-2xl bg-white shadow-sm border border-slate-200 p-5 hover:border-slate-900 transition-colors"
-                  >
-                    <div className="flex items-start justify-between gap-3">
-                      <h2 className="text-lg font-semibold text-slate-900 line-clamp-2">
-                        {p.title}
-                      </h2>
-                      <span className="shrink-0 inline-flex items-center rounded-full bg-slate-100 px-2 py-0.5 text-xs font-medium text-slate-700">
-                        {p.status}
-                      </span>
-                    </div>
-                    <dl className="mt-3 space-y-1 text-sm text-slate-600">
-                      {p.region && (
-                        <div className="flex gap-2">
-                          <dt className="w-16 shrink-0 text-slate-400">지역</dt>
-                          <dd>{p.region}</dd>
-                        </div>
-                      )}
-                      {p.surveyed_at && (
-                        <div className="flex gap-2">
-                          <dt className="w-16 shrink-0 text-slate-400">계약일</dt>
-                          <dd>{p.surveyed_at}</dd>
-                        </div>
-                      )}
-                      {designer && (
-                        <div className="flex gap-2">
-                          <dt className="w-16 shrink-0 text-slate-400">설계자</dt>
-                          <dd>{designer}</dd>
-                        </div>
-                      )}
-                      <div className="flex gap-2">
-                        <dt className="w-16 shrink-0 text-slate-400">발주처</dt>
-                        <dd>{p.client}</dd>
-                      </div>
-                    </dl>
-                  </Link>
-                </li>
-              )
-            })}
-          </ul>
+          <SubscriptionProjectsTable rows={rows} category={category} />
         )}
       </div>
     </main>

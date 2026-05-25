@@ -706,6 +706,22 @@ owner 모바일 스크린샷 보고: `/vehicles` 헤더에서 "업무용 차량"
 - **적용 (10개 페이지)**: `/vehicles` · `/admin/employees` · `/admin/sites` · `/admin/facilities` · `/admin/materials` · `/admin/cables` · `/works` · `/works/[id]` · `/requests` · `/vehicles/trips`
 - **신규 페이지 작성 시**: 큰 제목(`text-2xl` 이상) + 우측 버튼 조합이면 처음부터 모바일 stack 패턴으로 시작. mobile_ux_patterns 메모리에 「8. 모바일 헤더 가로 강제」 로 기록.
 
+### ✅ 완료 (공사 설계 목록 테이블 + 컬럼 설정 + 검색, 2026-05-25)
+
+owner 요구: 카드 목록 → 게시판형 테이블, 모든 컬럼 표시, 사용자가 컬럼 순서·표시 여부 선택 가능. 검색 기능 추가. 세 카테고리(청약·계획·지장이설) 모두 테이블로.
+
+- **신규** [`src/app/relocation/category/[cat]/SubscriptionProjectsTable.tsx`](./src/app/relocation/category/[cat]/SubscriptionProjectsTable.tsx) (client):
+  - 19 컬럼 정의 (`ALL_COLUMNS`). 카테고리별 사용 컬럼 매핑 `CATEGORY_COLUMNS` — 청약 19개, 계획·지장이설 7개 (제목·상태·지역·공사계약일·설계자·비고·등록일시)
+  - **검색**: 상단 input — 보이는 컬럼 텍스트 전체에 대해 case-insensitive 부분 매칭. X 버튼으로 초기화. 검색 시 「N/M건 일치」 카운트
+  - **컬럼 설정 모달**: 체크박스(visibility 토글) + ▲▼ 화살표(순서 변경) + 「기본값으로 재설정」. visibility/순서는 `localStorage` 에 카테고리별 저장 (key `relocation:{category}:cols:v2`) — 브라우저별. 새 컬럼 추가 시 자동 보충 (forward-compat)
+  - **테이블**: `overflow-x-auto`, 첫 컬럼(제목) sticky-left, 상태 컬럼은 STATUS_BADGE 색상, 가입자 주소·비고는 `line-clamp-2`, 작업자 컬럼은 콤마 join, 빈 값은 `—`. 행 클릭 → 제목 컬럼의 Link 로 상세 진입
+  - SSR/CSR hydration mismatch 회피 — 마운트 후 `loadPrefs()` (기본값으로 첫 렌더 → useEffect 로 localStorage 적용)
+- **server page** [`src/app/relocation/category/[cat]/page.tsx`](./src/app/relocation/category/[cat]/page.tsx):
+  - 모든 컬럼 fetch (subscription·worker_ids 포함). 직원 ID 일괄 매핑 (설계자 + 외선·접속 worker_ids 합집합) → 이름 join
+  - 컨테이너 폭 확장 `max-w-[100rem]` — 테이블 가로 활용
+  - limit 500 (이전 200)
+- **계획·지장이설 카테고리**: 같은 테이블 컴포넌트 사용. 청약 전용 컬럼은 `CATEGORY_COLUMNS` 에서 빠져 컬럼 설정 모달에도 안 나옴
+
 ### ✅ 완료 (청약 작업관리 연동 + 작업자 picker + 작업완료일, 2026-05-25)
 
 owner 요구 (0067 후속): 「작업완료일」 추가 + 작업자 입력을 외선팀/접속팀 직원 picker 로 + 청약 프로젝트 생성 시 작업관리(`works`) 에 자동 연동 → 배정된 작업자가 일보 작성 시 「설계내역」 보면서 입력.
