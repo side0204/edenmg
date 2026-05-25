@@ -1,6 +1,6 @@
 'use client'
 
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import Link from 'next/link'
 import {
   ArrowDown,
@@ -14,6 +14,7 @@ import {
   Settings2,
   X,
 } from 'lucide-react'
+import { saveRelocationListPrefs } from './prefs-actions'
 
 /**
  * 공사 설계 — 카테고리별 프로젝트 게시판형 테이블.
@@ -21,11 +22,15 @@ import {
  *  - 모든 컬럼을 한 화면에 (가로 스크롤). 첫 컬럼(제목) sticky
  *  - 상단 검색 input — 보이는 컬럼 텍스트 전체에 대해 부분 매칭
  *  - 「컬럼 설정」 버튼 → 모달에서 visibility 토글 + ▲▼ 순서 조정 + 기본값 재설정
- *  - 컬럼 prefs 는 localStorage 에 저장 — 브라우저별·카테고리별
- *  - 행 클릭 시 프로젝트 상세로 이동
+ *  - 「CSV」 버튼 — 현재 보이는 컬럼 + 검색 결과만 UTF-8 BOM 다운로드
+ *  - 컬럼 헤더 클릭 = 정렬 (asc/desc/reset), shift+click = 다중 컬럼 정렬 체인
+ *  - 컬럼 헤더 우측 핸들 drag = 폭 조절 (px)
+ *  - 컬럼 prefs (visibility·순서·폭) 는 DB 동기화 (마이그 0069, 디바이스 간 공유)
+ *  - 정렬은 세션 단위 (DB 미동기화)
+ *  - 모바일 (<md): 카드 스택 — 같은 prefs 적용 (visibility·순서 공유)
  *
  * 카테고리별 컬럼:
- *  - 청약: 19 컬럼 전체 (가입자·청약일·작업자배정 등 청약 전용 포함)
+ *  - 청약: 20 컬럼 전체 (가입자·청약일·작업자배정 등 청약 전용 포함)
  *  - 계획·지장이설: 7 컬럼 (제목·상태·지역·공사계약일·설계자·비고·등록일시)
  */
 
@@ -79,41 +84,35 @@ type ColumnId =
 type ColumnDef = {
   id: ColumnId
   label: string
-  width: string
+  defaultWidth: number // px — 사용자 prefs 가 우선
   defaultVisible: boolean
 }
 
 const ALL_COLUMNS: ColumnDef[] = [
-  { id: 'title', label: '제목', width: 'min-w-[14rem]', defaultVisible: true },
-  { id: 'status', label: '상태', width: 'min-w-[5rem]', defaultVisible: true },
-  { id: 'subcategory', label: '청약 분류', width: 'min-w-[6rem]', defaultVisible: true },
-  { id: 'region', label: '지역', width: 'min-w-[8rem]', defaultVisible: true },
-  { id: 'subscription_id', label: '청약ID', width: 'min-w-[8rem]', defaultVisible: true },
-  { id: 'order_no', label: '공사번호', width: 'min-w-[8rem]', defaultVisible: true },
-  { id: 'subscriber_name', label: '가입자명', width: 'min-w-[7rem]', defaultVisible: true },
-  { id: 'subscriber_address', label: '가입자 주소', width: 'min-w-[14rem]', defaultVisible: true },
-  { id: 'branch_manager', label: '하위국 담당자', width: 'min-w-[7rem]', defaultVisible: false },
-  { id: 'branch_contact', label: '하위국 연락처', width: 'min-w-[8rem]', defaultVisible: false },
-  { id: 'subscribed_at', label: '청약일', width: 'min-w-[6.5rem]', defaultVisible: true },
-  { id: 'desired_open_at', label: '개통희망일', width: 'min-w-[6.5rem]', defaultVisible: true },
-  { id: 'surveyed_at', label: '공사계약일', width: 'min-w-[6.5rem]', defaultVisible: false },
-  {
-    id: 'expected_completion_at',
-    label: '준공예정일',
-    width: 'min-w-[6.5rem]',
-    defaultVisible: true,
-  },
-  { id: 'completion_at', label: '작업완료일', width: 'min-w-[6.5rem]', defaultVisible: true },
-  { id: 'outside_workers', label: '외선 작업자', width: 'min-w-[10rem]', defaultVisible: true },
-  { id: 'splice_workers', label: '접속 작업자', width: 'min-w-[10rem]', defaultVisible: true },
-  { id: 'designer', label: '설계자', width: 'min-w-[6rem]', defaultVisible: false },
-  { id: 'notes', label: '비고', width: 'min-w-[12rem]', defaultVisible: false },
-  { id: 'created_at', label: '등록일시', width: 'min-w-[10rem]', defaultVisible: false },
+  { id: 'title', label: '제목', defaultWidth: 224, defaultVisible: true },
+  { id: 'status', label: '상태', defaultWidth: 76, defaultVisible: true },
+  { id: 'subcategory', label: '청약 분류', defaultWidth: 88, defaultVisible: true },
+  { id: 'region', label: '지역', defaultWidth: 120, defaultVisible: true },
+  { id: 'subscription_id', label: '청약ID', defaultWidth: 120, defaultVisible: true },
+  { id: 'order_no', label: '공사번호', defaultWidth: 120, defaultVisible: true },
+  { id: 'subscriber_name', label: '가입자명', defaultWidth: 100, defaultVisible: true },
+  { id: 'subscriber_address', label: '가입자 주소', defaultWidth: 220, defaultVisible: true },
+  { id: 'branch_manager', label: '하위국 담당자', defaultWidth: 110, defaultVisible: false },
+  { id: 'branch_contact', label: '하위국 연락처', defaultWidth: 120, defaultVisible: false },
+  { id: 'subscribed_at', label: '청약일', defaultWidth: 100, defaultVisible: true },
+  { id: 'desired_open_at', label: '개통희망일', defaultWidth: 100, defaultVisible: true },
+  { id: 'surveyed_at', label: '공사계약일', defaultWidth: 100, defaultVisible: false },
+  { id: 'expected_completion_at', label: '준공예정일', defaultWidth: 100, defaultVisible: true },
+  { id: 'completion_at', label: '작업완료일', defaultWidth: 100, defaultVisible: true },
+  { id: 'outside_workers', label: '외선 작업자', defaultWidth: 160, defaultVisible: true },
+  { id: 'splice_workers', label: '접속 작업자', defaultWidth: 160, defaultVisible: true },
+  { id: 'designer', label: '설계자', defaultWidth: 90, defaultVisible: false },
+  { id: 'notes', label: '비고', defaultWidth: 200, defaultVisible: false },
+  { id: 'created_at', label: '등록일시', defaultWidth: 140, defaultVisible: false },
 ]
 
 const COLUMN_BY_ID: Map<ColumnId, ColumnDef> = new Map(ALL_COLUMNS.map((c) => [c.id, c]))
 
-// 카테고리별 사용 컬럼 + 기본 노출 (DB 컬럼은 공유, UI 만 분기)
 type Cat = '청약' | '계획' | '지장이설'
 const CATEGORY_COLUMNS: Record<Cat, ColumnId[]> = {
   청약: ALL_COLUMNS.map((c) => c.id),
@@ -121,61 +120,58 @@ const CATEGORY_COLUMNS: Record<Cat, ColumnId[]> = {
   지장이설: ['title', 'status', 'region', 'surveyed_at', 'designer', 'notes', 'created_at'],
 }
 
-function defaultPrefs(category: Cat): { order: ColumnId[]; hidden: ColumnId[] } {
-  const order = CATEGORY_COLUMNS[category]
-  const hidden = order.filter((id) => {
-    const def = COLUMN_BY_ID.get(id)
-    return def ? !def.defaultVisible : false
-  })
-  return { order: [...order], hidden }
-}
-
-function storageKey(category: Cat): string {
-  return `relocation:${category}:cols:v2`
+type Prefs = {
+  order: ColumnId[]
+  hidden: ColumnId[]
+  widths: Partial<Record<ColumnId, number>>
 }
 
 function isColumnId(v: string): v is ColumnId {
   return COLUMN_BY_ID.has(v as ColumnId)
 }
 
-type Prefs = { order: ColumnId[]; hidden: ColumnId[] }
-
-function loadPrefs(category: Cat): Prefs {
-  if (typeof window === 'undefined') return defaultPrefs(category)
-  try {
-    const raw = window.localStorage.getItem(storageKey(category))
-    if (!raw) return defaultPrefs(category)
-    const parsed = JSON.parse(raw) as { order?: unknown; hidden?: unknown }
-    const allowed = new Set(CATEGORY_COLUMNS[category])
-    const order: ColumnId[] = []
-    if (Array.isArray(parsed.order)) {
-      for (const v of parsed.order) {
-        if (typeof v === 'string' && isColumnId(v) && allowed.has(v) && !order.includes(v)) {
-          order.push(v)
-        }
-      }
-    }
-    // 누락된 새 컬럼은 기본 위치로 보충 (forward-compat)
-    for (const id of CATEGORY_COLUMNS[category]) if (!order.includes(id)) order.push(id)
-    const hidden: ColumnId[] = []
-    if (Array.isArray(parsed.hidden)) {
-      for (const v of parsed.hidden) {
-        if (typeof v === 'string' && isColumnId(v) && allowed.has(v) && !hidden.includes(v)) {
-          hidden.push(v)
-        }
-      }
-    }
-    return { order, hidden }
-  } catch {
-    return defaultPrefs(category)
-  }
+function defaultPrefs(category: Cat): Prefs {
+  const order = CATEGORY_COLUMNS[category]
+  const hidden = order.filter((id) => {
+    const def = COLUMN_BY_ID.get(id)
+    return def ? !def.defaultVisible : false
+  })
+  return { order: [...order], hidden, widths: {} }
 }
 
-function savePrefs(category: Cat, p: Prefs) {
-  if (typeof window === 'undefined') return
-  try {
-    window.localStorage.setItem(storageKey(category), JSON.stringify(p))
-  } catch {}
+function normalizePrefs(
+  category: Cat,
+  raw: { order?: string[]; hidden?: string[]; widths?: Record<string, number> } | null,
+): Prefs {
+  if (!raw) return defaultPrefs(category)
+  const allowed = new Set(CATEGORY_COLUMNS[category])
+  const order: ColumnId[] = []
+  if (Array.isArray(raw.order)) {
+    for (const v of raw.order) {
+      if (typeof v === 'string' && isColumnId(v) && allowed.has(v) && !order.includes(v)) {
+        order.push(v)
+      }
+    }
+  }
+  // 누락 컬럼 보충 (forward-compat)
+  for (const id of CATEGORY_COLUMNS[category]) if (!order.includes(id)) order.push(id)
+  const hidden: ColumnId[] = []
+  if (Array.isArray(raw.hidden)) {
+    for (const v of raw.hidden) {
+      if (typeof v === 'string' && isColumnId(v) && allowed.has(v) && !hidden.includes(v)) {
+        hidden.push(v)
+      }
+    }
+  }
+  const widths: Partial<Record<ColumnId, number>> = {}
+  if (raw.widths) {
+    for (const [k, v] of Object.entries(raw.widths)) {
+      if (isColumnId(k) && allowed.has(k) && typeof v === 'number' && isFinite(v)) {
+        widths[k] = Math.max(60, Math.min(800, Math.round(v)))
+      }
+    }
+  }
+  return { order, hidden, widths }
 }
 
 function valueOf(row: RelocationProjectRow, col: ColumnId): string {
@@ -247,7 +243,7 @@ function renderCell(row: RelocationProjectRow, col: ColumnId): React.ReactNode {
       return (
         <span
           className={
-            'inline-flex items-center rounded-full px-2 py-0.5 text-xs font-medium ' +
+            'inline-flex items-center rounded-full px-1.5 py-0.5 text-[10px] font-medium ' +
             (STATUS_BADGE[row.status] ?? 'bg-slate-100 text-slate-700')
           }
         >
@@ -280,25 +276,22 @@ function renderCell(row: RelocationProjectRow, col: ColumnId): React.ReactNode {
   }
 }
 
+type SortEntry = { col: ColumnId; dir: 'asc' | 'desc' }
+
 export function SubscriptionProjectsTable({
   rows,
   category,
+  initialPrefs,
 }: {
   rows: RelocationProjectRow[]
   category: Cat
+  initialPrefs: { order: string[]; hidden: string[]; widths: Record<string, number> } | null
 }) {
-  const [prefs, setPrefs] = useState<Prefs>(() => defaultPrefs(category))
-  const [hydrated, setHydrated] = useState(false)
+  const [prefs, setPrefs] = useState<Prefs>(() => normalizePrefs(category, initialPrefs))
   const [settingsOpen, setSettingsOpen] = useState(false)
   const [query, setQuery] = useState('')
-  // 정렬 — 헤더 클릭으로 asc/desc 토글, 3번째 클릭 시 reset (서버 기본 정렬 = created_at desc 유지)
-  const [sort, setSort] = useState<{ col: ColumnId; dir: 'asc' | 'desc' } | null>(null)
-
-  // SSR/CSR mismatch 회피 — 마운트 후 localStorage 읽기
-  useEffect(() => {
-    setPrefs(loadPrefs(category))
-    setHydrated(true)
-  }, [category])
+  // 다중 컬럼 정렬 체인 — shift+click 으로 추가, 단일 click 은 1개로 reset
+  const [sortChain, setSortChain] = useState<SortEntry[]>([])
 
   const visibleColumns: ColumnDef[] = useMemo(() => {
     const hidSet = new Set(prefs.hidden)
@@ -316,28 +309,123 @@ export function SubscriptionProjectsTable({
           visibleColumns.some((c) => valueOf(r, c.id).toLowerCase().includes(q)),
         )
       : rows
-    if (!sort) return base
-    // 정렬 — 날짜·텍스트 모두 문자열 비교 (ISO 날짜는 lexicographic 정렬과 일치)
-    const sorted = [...base].sort((a, b) => {
-      const va = valueOf(a, sort.col)
-      const vb = valueOf(b, sort.col)
-      // 빈 값은 항상 끝으로
-      if (va === '' && vb === '') return 0
-      if (va === '') return 1
-      if (vb === '') return -1
-      const cmp = va.localeCompare(vb, 'ko', { numeric: true })
-      return sort.dir === 'asc' ? cmp : -cmp
+    if (sortChain.length === 0) return base
+    return [...base].sort((a, b) => {
+      for (const s of sortChain) {
+        const va = valueOf(a, s.col)
+        const vb = valueOf(b, s.col)
+        if (va === '' && vb === '') continue
+        if (va === '') return 1 // 빈 값은 항상 끝
+        if (vb === '') return -1
+        const cmp = va.localeCompare(vb, 'ko', { numeric: true })
+        if (cmp !== 0) return s.dir === 'asc' ? cmp : -cmp
+      }
+      return 0
     })
-    return sorted
-  }, [rows, visibleColumns, query, sort])
+  }, [rows, visibleColumns, query, sortChain])
 
-  const toggleSort = (id: ColumnId) => {
-    setSort((cur) => {
-      if (!cur || cur.col !== id) return { col: id, dir: 'asc' }
-      if (cur.dir === 'asc') return { col: id, dir: 'desc' }
-      return null // 3번째 클릭 = reset
+  // 디바운스 저장 — prefs 변경 후 500ms 후 server action 호출
+  const saveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const isInitialMountRef = useRef(true)
+  useEffect(() => {
+    if (isInitialMountRef.current) {
+      isInitialMountRef.current = false
+      return
+    }
+    if (saveTimerRef.current) clearTimeout(saveTimerRef.current)
+    saveTimerRef.current = setTimeout(() => {
+      void saveRelocationListPrefs(category, {
+        order: prefs.order,
+        hidden: prefs.hidden,
+        widths: prefs.widths as Record<string, number>,
+      })
+    }, 500)
+    return () => {
+      if (saveTimerRef.current) clearTimeout(saveTimerRef.current)
+    }
+  }, [prefs, category])
+
+  const toggleVisible = (id: ColumnId) => {
+    const hidSet = new Set(prefs.hidden)
+    if (hidSet.has(id)) hidSet.delete(id)
+    else hidSet.add(id)
+    setPrefs({ ...prefs, hidden: Array.from(hidSet) })
+  }
+
+  const moveColumn = (id: ColumnId, dir: -1 | 1) => {
+    const order = [...prefs.order]
+    const idx = order.indexOf(id)
+    const target = idx + dir
+    if (idx < 0 || target < 0 || target >= order.length) return
+    ;[order[idx], order[target]] = [order[target], order[idx]]
+    setPrefs({ ...prefs, order })
+  }
+
+  const resetPrefs = () => {
+    setPrefs(defaultPrefs(category))
+    setSortChain([])
+  }
+
+  const toggleSort = (id: ColumnId, withShift: boolean) => {
+    setSortChain((chain) => {
+      const idx = chain.findIndex((s) => s.col === id)
+      if (!withShift) {
+        // 단일 정렬 — 1번째 asc, 2번째 desc, 3번째 reset
+        if (idx < 0) return [{ col: id, dir: 'asc' }]
+        if (chain.length === 1) {
+          return chain[0].dir === 'asc'
+            ? [{ col: id, dir: 'desc' }]
+            : []
+        }
+        // 다중 정렬 상태에서 일반 click — 단일로 reset
+        return [{ col: id, dir: 'asc' }]
+      }
+      // shift+click — 체인 추가/토글
+      if (idx < 0) return [...chain, { col: id, dir: 'asc' }]
+      const cur = chain[idx]
+      if (cur.dir === 'asc') {
+        const next = [...chain]
+        next[idx] = { col: id, dir: 'desc' }
+        return next
+      }
+      return chain.filter((s) => s.col !== id)
     })
   }
+
+  // 컬럼 폭 드래그 (resize) — 헤더 우측 핸들에서 시작
+  const resizeRef = useRef<{ id: ColumnId; startX: number; startWidth: number } | null>(null)
+  const [resizingId, setResizingId] = useState<ColumnId | null>(null)
+  const onResizeStart = (e: React.PointerEvent<HTMLDivElement>, id: ColumnId) => {
+    e.preventDefault()
+    e.stopPropagation()
+    const def = COLUMN_BY_ID.get(id)
+    if (!def) return
+    const currentWidth = prefs.widths[id] ?? def.defaultWidth
+    resizeRef.current = { id, startX: e.clientX, startWidth: currentWidth }
+    setResizingId(id)
+    document.body.style.userSelect = 'none'
+  }
+  useEffect(() => {
+    if (!resizingId) return
+    const onMove = (e: PointerEvent) => {
+      const ref = resizeRef.current
+      if (!ref) return
+      const delta = e.clientX - ref.startX
+      const next = Math.max(60, Math.min(800, ref.startWidth + delta))
+      setPrefs((p) => ({ ...p, widths: { ...p.widths, [ref.id]: next } }))
+    }
+    const onUp = () => {
+      resizeRef.current = null
+      setResizingId(null)
+      document.body.style.userSelect = ''
+    }
+    window.addEventListener('pointermove', onMove)
+    window.addEventListener('pointerup', onUp)
+    return () => {
+      window.removeEventListener('pointermove', onMove)
+      window.removeEventListener('pointerup', onUp)
+    }
+  }, [resizingId])
 
   // CSV 다운로드 — 보이는 컬럼만 (UTF-8 BOM + CRLF)
   const downloadCsv = () => {
@@ -363,32 +451,14 @@ export function SubscriptionProjectsTable({
     URL.revokeObjectURL(url)
   }
 
-  const updatePrefs = (next: Prefs) => {
-    setPrefs(next)
-    savePrefs(category, next)
-  }
+  const widthFor = (id: ColumnId): number =>
+    prefs.widths[id] ?? COLUMN_BY_ID.get(id)?.defaultWidth ?? 120
 
-  const toggleVisible = (id: ColumnId) => {
-    const hidSet = new Set(prefs.hidden)
-    if (hidSet.has(id)) hidSet.delete(id)
-    else hidSet.add(id)
-    updatePrefs({ ...prefs, hidden: Array.from(hidSet) })
-  }
-
-  const moveColumn = (id: ColumnId, dir: -1 | 1) => {
-    const order = [...prefs.order]
-    const idx = order.indexOf(id)
-    const target = idx + dir
-    if (idx < 0 || target < 0 || target >= order.length) return
-    ;[order[idx], order[target]] = [order[target], order[idx]]
-    updatePrefs({ ...prefs, order })
-  }
-
-  const resetPrefs = () => updatePrefs(defaultPrefs(category))
+  const sortIndexOf = (id: ColumnId): number => sortChain.findIndex((s) => s.col === id)
 
   return (
     <div className="space-y-3">
-      {/* 검색 + 컬럼 설정 + 결과 카운트 */}
+      {/* 검색 + 컬럼 설정 + CSV + 결과 카운트 */}
       <div className="flex flex-wrap items-center gap-2">
         <div className="relative flex-1 min-w-[12rem] max-w-md">
           <Search className="absolute left-2.5 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
@@ -431,8 +501,18 @@ export function SubscriptionProjectsTable({
           <Download className="h-4 w-4" />
           <span className="hidden sm:inline">CSV</span>
         </button>
+        {sortChain.length > 0 && (
+          <button
+            type="button"
+            onClick={() => setSortChain([])}
+            className="inline-flex items-center gap-1 rounded-lg border border-amber-300 bg-amber-50 px-3 py-1.5 text-xs font-medium text-amber-700 hover:bg-amber-100"
+            title="모든 정렬 해제"
+          >
+            정렬 {sortChain.length}개 해제
+          </button>
+        )}
         <p className="ml-auto text-xs text-slate-500 tabular-nums">
-          {hydrated && query ? (
+          {query ? (
             <>
               <span className="font-semibold text-slate-700">{filteredRows.length}</span> /{' '}
               {rows.length}건 일치
@@ -443,7 +523,7 @@ export function SubscriptionProjectsTable({
         </p>
       </div>
 
-      {/* 모바일 카드 뷰 (md 미만) — 같은 컬럼 prefs 적용 */}
+      {/* 모바일 카드 뷰 (md 미만) */}
       <div className="md:hidden space-y-2">
         {filteredRows.length === 0 ? (
           <p className="rounded-lg border border-slate-200 bg-white px-3 py-8 text-center text-sm text-slate-500">
@@ -453,10 +533,11 @@ export function SubscriptionProjectsTable({
           </p>
         ) : (
           filteredRows.map((row) => {
-            // 첫 컬럼은 카드 제목 — title 이 첫 컬럼이 아닐 수도 있으니 안전하게 분리
             const titleCol = visibleColumns.find((c) => c.id === 'title')
             const otherCols = visibleColumns.filter((c) => c.id !== 'title')
-            const cardTitle = titleCol ? row.title : valueOf(row, visibleColumns[0]?.id ?? 'title')
+            const cardTitle = titleCol
+              ? row.title
+              : valueOf(row, visibleColumns[0]?.id ?? 'title')
             return (
               <Link
                 key={row.id}
@@ -500,55 +581,79 @@ export function SubscriptionProjectsTable({
         )}
       </div>
 
-      {/* 데스크톱 테이블 (md 이상) */}
+      {/* 데스크톱 테이블 (md 이상) — 컬럼 경계선 + 작은 글자 + resize + 다중 정렬 */}
       <div className="hidden md:block overflow-x-auto rounded-lg border border-slate-200 bg-white">
-        <table className="min-w-full text-sm">
-          <thead className="border-b border-slate-200 bg-slate-50">
+        <table
+          className="border-collapse text-[11px]"
+          style={{ tableLayout: 'fixed', width: 'max-content', minWidth: '100%' }}
+        >
+          <colgroup>
+            {visibleColumns.map((col) => (
+              <col key={col.id} style={{ width: widthFor(col.id) + 'px' }} />
+            ))}
+          </colgroup>
+          <thead className="border-b border-slate-300 bg-slate-50">
             <tr>
               {visibleColumns.map((col, idx) => {
-                const isSorted = sort?.col === col.id
-                const SortIcon = !isSorted ? ArrowUpDown : sort!.dir === 'asc' ? ArrowUp : ArrowDown
+                const sortIdx = sortIndexOf(col.id)
+                const isSorted = sortIdx >= 0
+                const SortIcon = !isSorted
+                  ? ArrowUpDown
+                  : sortChain[sortIdx].dir === 'asc'
+                    ? ArrowUp
+                    : ArrowDown
                 return (
                   <th
                     key={col.id}
                     scope="col"
                     className={
-                      'px-3 py-2 text-left text-xs font-semibold whitespace-nowrap ' +
-                      col.width +
-                      (idx === 0 ? ' sticky left-0 bg-slate-50 z-10' : '')
+                      'relative border-r border-slate-200 px-2 py-1.5 text-left text-[10px] font-semibold whitespace-nowrap ' +
+                      (idx === 0 ? 'sticky left-0 bg-slate-50 z-10' : '')
                     }
                   >
                     <button
                       type="button"
-                      onClick={() => toggleSort(col.id)}
+                      onClick={(e) => toggleSort(col.id, e.shiftKey)}
                       className={
-                        'inline-flex items-center gap-1 rounded px-1 -mx-1 py-0.5 hover:bg-slate-100 ' +
+                        'inline-flex items-center gap-1 rounded px-1 -mx-1 py-0.5 hover:bg-slate-100 max-w-full ' +
                         (isSorted ? 'text-slate-900' : 'text-slate-600')
                       }
-                      title={
-                        isSorted
-                          ? `${sort!.dir === 'asc' ? '오름차순' : '내림차순'} 정렬됨 (한번 더 클릭하면 해제)`
-                          : '클릭하면 이 컬럼으로 정렬'
-                      }
+                      title="클릭 = 정렬 / Shift+클릭 = 다중 정렬 추가"
                     >
-                      {col.label}
+                      <span className="truncate">{col.label}</span>
+                      {isSorted && sortChain.length > 1 && (
+                        <span className="inline-flex h-3.5 min-w-[0.875rem] items-center justify-center rounded-full bg-slate-900 px-1 text-[8px] font-bold text-white">
+                          {sortIdx + 1}
+                        </span>
+                      )}
                       <SortIcon
                         className={
-                          'h-3 w-3 ' + (isSorted ? 'text-slate-900' : 'text-slate-300')
+                          'h-3 w-3 shrink-0 ' +
+                          (isSorted ? 'text-slate-900' : 'text-slate-300')
                         }
                       />
                     </button>
+                    {/* resize 핸들 — 우측 가장자리 */}
+                    <div
+                      onPointerDown={(e) => onResizeStart(e, col.id)}
+                      className={
+                        'absolute right-0 top-0 bottom-0 w-1.5 cursor-col-resize hover:bg-blue-400/60 ' +
+                        (resizingId === col.id ? 'bg-blue-500' : '')
+                      }
+                      style={{ touchAction: 'none' }}
+                      title="드래그하여 컬럼 폭 조절"
+                    />
                   </th>
                 )
               })}
             </tr>
           </thead>
-          <tbody className="divide-y divide-slate-100">
+          <tbody>
             {filteredRows.length === 0 ? (
               <tr>
                 <td
                   colSpan={Math.max(1, visibleColumns.length)}
-                  className="px-3 py-8 text-center text-sm text-slate-500"
+                  className="border-t border-slate-200 px-3 py-8 text-center text-sm text-slate-500"
                 >
                   {query
                     ? `'${query}' 로 검색된 결과가 없습니다.`
@@ -557,14 +662,13 @@ export function SubscriptionProjectsTable({
               </tr>
             ) : (
               filteredRows.map((row) => (
-                <tr key={row.id} className="hover:bg-slate-50">
+                <tr key={row.id} className="border-t border-slate-100 hover:bg-slate-50">
                   {visibleColumns.map((col, idx) => (
                     <td
                       key={col.id}
                       className={
-                        'px-3 py-2 align-top text-sm ' +
-                        col.width +
-                        (idx === 0 ? ' sticky left-0 bg-white z-10' : '')
+                        'border-r border-slate-200 px-2 py-1 align-top overflow-hidden ' +
+                        (idx === 0 ? 'sticky left-0 bg-white z-10' : '')
                       }
                     >
                       {renderCell(row, col.id)}
@@ -603,7 +707,7 @@ export function SubscriptionProjectsTable({
             </button>
           </div>
           <p className="px-4 pt-3 text-xs text-slate-500">
-            체크 = 표시 / 화살표 = 순서 변경. 이 브라우저·이 카테고리에만 저장됩니다.
+            체크 = 표시 / 화살표 = 순서 변경. 모든 디바이스에서 동기화됩니다.
           </p>
           <ul className="flex-1 overflow-y-auto px-2 py-2 space-y-0.5">
             {prefs.order.map((id, idx) => {

@@ -706,6 +706,21 @@ owner 모바일 스크린샷 보고: `/vehicles` 헤더에서 "업무용 차량"
 - **적용 (10개 페이지)**: `/vehicles` · `/admin/employees` · `/admin/sites` · `/admin/facilities` · `/admin/materials` · `/admin/cables` · `/works` · `/works/[id]` · `/requests` · `/vehicles/trips`
 - **신규 페이지 작성 시**: 큰 제목(`text-2xl` 이상) + 우측 버튼 조합이면 처음부터 모바일 stack 패턴으로 시작. mobile_ux_patterns 메모리에 「8. 모바일 헤더 가로 강제」 로 기록.
 
+### ✅ 완료 (공사 설계 목록 — DB 동기화 prefs + 다중 정렬 + 컬럼 폭 조절 + 경계선 + 작은 글자, 2026-05-25)
+
+owner 요구: 컬럼 prefs DB 동기화(디바이스 간 공유), 다중 컬럼 정렬, 컬럼 폭 조절, 컬럼 경계선, 글자 크기 축소.
+
+- **마이그** [`0069_employees_relocation_list_prefs.sql`](./supabase/migrations/0069_employees_relocation_list_prefs.sql): `employees.relocation_list_prefs jsonb default '{}'::jsonb`. 형식 `{ "청약": { order, hidden, widths }, "계획": {...}, "지장이설": {...} }`. 본인 row update 는 기존 `employees_update_self` RLS 가 허용 (home_card_prefs 동일 패턴)
+- **server action** [`prefs-actions.ts`](./src/app/relocation/category/[cat]/prefs-actions.ts): `saveRelocationListPrefs(category, {order, hidden, widths})` — sanitize 후 jsonb 의 카테고리 키만 덮어씀. width 60~800 px clamp
+- **server page**: `me.relocation_list_prefs` 에서 카테고리별 prefs 읽어 table 에 `initialPrefs` 로 전달. 첫 렌더부터 사용자 설정 적용 (hydration mismatch 없음)
+- **table** ([`SubscriptionProjectsTable`](./src/app/relocation/category/[cat]/SubscriptionProjectsTable.tsx)) 재작성:
+  - **DB prefs**: localStorage 제거. `useEffect` 로 500ms 디바운스 후 `saveRelocationListPrefs` 호출. 첫 마운트는 저장 안 함 (`isInitialMountRef`)
+  - **다중 컬럼 정렬**: shift+click 으로 정렬 체인 추가, 그냥 click 은 단일 컬럼 (asc → desc → reset). 정렬된 컬럼 헤더에 순번 배지(1, 2, 3...). 「정렬 N개 해제」 버튼 노출 (체인 2개 이상일 때)
+  - **컬럼 폭 조절**: `ColumnDef.defaultWidth` (px) + `prefs.widths` 우선. 헤더 우측에 1.5px 드래그 핸들 (hover 시 파랑) + pointer event 로 drag (resize). 드래그 중 `body.userSelect=none`. `<colgroup>` 으로 폭 적용, `table-layout: fixed`
+  - **컬럼 경계선**: `border-r border-slate-200` (header·td 모두). 헤더 하단 굵게 (`border-b border-slate-300`)
+  - **글자 크기 축소**: table cells `text-[11px]`, 헤더 `text-[10px]`, 상태 배지 `text-[10px]`. padding 도 축소 (`px-2 py-1.5` 헤더, `px-2 py-1` 셀). 모바일 카드뷰는 기존 크기 유지 (touch 가독성)
+  - **resize 중**: 핸들 색이 파랑(`bg-blue-500`) 으로 변경, 다른 컬럼 hover 도 가능
+
 ### ✅ 완료 (공사 설계 목록 — 모바일 카드뷰 + 헤더 정렬 + CSV 내보내기, 2026-05-25)
 
 owner 요구 (테이블 후속): 모바일에서도 보기 편하게 + 후속 작업(헤더 클릭 정렬·CSV).
@@ -1172,6 +1187,7 @@ owner 요구: "어느 메뉴를 많이 쓰는지" 페이지 단위 분석. 접�
   - [`0066_relocation_subscription_fields.sql`](./supabase/migrations/0066_relocation_subscription_fields.sql) — 청약 카테고리 전용 8 컬럼 (subscription_id·subscriber_name·subscriber_address·branch_contact·branch_manager·subscribed_at·desired_open_at·order_no) + order_no partial 인덱스
   - [`0067_relocation_subscription_fields_v2.sql`](./supabase/migrations/0067_relocation_subscription_fields_v2.sql) — 청약 폼 보강: `expected_completion_at` (준공예정일) + `outside_workers` (외선) + `splice_workers` (접속)
   - [`0068_relocation_works_link.sql`](./supabase/migrations/0068_relocation_works_link.sql) — 청약 작업관리 연동: `completion_at`·`outside_worker_ids jsonb`·`splice_worker_ids jsonb`·`subcategory`(청약 sub CHECK) + `works.relocation_project_id` 역방향 FK (unique partial). 청약 프로젝트 생성 시 자동 `works` upsert + `work_assignments` 동기화 → 배정 작업자가 일보 작성 진입점 노출
+  - [`0069_employees_relocation_list_prefs.sql`](./supabase/migrations/0069_employees_relocation_list_prefs.sql) — 공사 설계 목록 컬럼 prefs: `employees.relocation_list_prefs jsonb`. 카테고리별 order·hidden·widths 저장 → 디바이스 간 동기화
 - **외선일보 별도 entity (v2)** — 접속일보와 동일 패턴으로 외선팀 전용 모듈. 외선 작업 특성(케이블 포설구간·전주번호 등)에 맞는 구조 별도 설계.
 - **접속일보 후속 (v2)** — segment-level 작업자 태그, 사진 첨부 + EXIF, 국사·함체 마스터 테이블화, 재접속 이력 조회, 지도 시각화
 - **M3 Phase 2 후속** — 사진 첨부 + EXIF·워터마크 (PRD M3-06), 일보 결재함 통합 (현재는 작업 상세에서 진입), 일반 일보 월별 CSV 리포트

@@ -71,13 +71,44 @@ export default async function RelocationCategoryListPage({
 
   const { data: meRow } = await supabase
     .from('employees')
-    .select('id, company_id, is_active')
+    .select('id, company_id, is_active, relocation_list_prefs')
     .eq('auth_user_id', user.id)
     .maybeSingle()
-  const me = meRow as { id: string; company_id: string; is_active: boolean } | null
+  const me = meRow as {
+    id: string
+    company_id: string
+    is_active: boolean
+    relocation_list_prefs: unknown
+  } | null
   if (!me || !me.is_active) {
     redirect('/?err=' + encodeURIComponent('계정이 활성 상태가 아닙니다'))
   }
+
+  // 사용자 컬럼 prefs (카테고리별) — 형식: { 청약: {...}, 계획: {...}, 지장이설: {...} }
+  const initialPrefs = (() => {
+    const raw = me.relocation_list_prefs
+    if (!raw || typeof raw !== 'object') return null
+    const byCat = raw as Record<string, unknown>
+    const own = byCat[category]
+    if (!own || typeof own !== 'object') return null
+    const o = own as { order?: unknown; hidden?: unknown; widths?: unknown }
+    return {
+      order: Array.isArray(o.order)
+        ? o.order.filter((v): v is string => typeof v === 'string')
+        : [],
+      hidden: Array.isArray(o.hidden)
+        ? o.hidden.filter((v): v is string => typeof v === 'string')
+        : [],
+      widths:
+        o.widths && typeof o.widths === 'object'
+          ? Object.fromEntries(
+              Object.entries(o.widths as Record<string, unknown>).filter(
+                ([, v]) => typeof v === 'number' && isFinite(v as number),
+              ) as [string, number][],
+            )
+          : {},
+    }
+  })()
 
   const { data: rawRows, error: listError } = await supabase
     .from('relocation_projects')
@@ -190,7 +221,11 @@ export default async function RelocationCategoryListPage({
             }
           />
         ) : (
-          <SubscriptionProjectsTable rows={rows} category={category} />
+          <SubscriptionProjectsTable
+            rows={rows}
+            category={category}
+            initialPrefs={initialPrefs}
+          />
         )}
       </div>
     </main>
