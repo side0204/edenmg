@@ -63,13 +63,17 @@ export default function FacilitiesTab({
 
   return (
     <div className="space-y-6">
-      {/* 신규 등록 폼 */}
-      <section className="border border-slate-200 rounded-xl p-4 space-y-3 bg-slate-50">
-        <h3 className="flex items-center gap-1 text-sm font-semibold text-slate-700">
+      {/* 신규 등록 폼 — 헤더 클릭으로 접기/펼치기 */}
+      <details
+        open
+        className="group border border-slate-200 rounded-xl bg-slate-50 [&[open]>summary>.chev]:rotate-180"
+      >
+        <summary className="flex cursor-pointer list-none items-center gap-2 rounded-xl px-4 py-3 text-sm font-semibold text-slate-700 hover:bg-slate-100">
           <Plus className="h-4 w-4" />
-          시설 추가
-        </h3>
-        <form action={createFacility} className="grid gap-3 sm:grid-cols-2">
+          <span className="flex-1">시설 추가</span>
+          <span className="chev text-slate-400 transition-transform">▾</span>
+        </summary>
+        <form action={createFacility} className="grid gap-3 sm:grid-cols-2 px-4 pb-4">
           <input type="hidden" name="project_id" value={projectId} />
 
           <div className="sm:col-span-2">
@@ -199,7 +203,7 @@ export default function FacilitiesTab({
             </button>
           </div>
         </form>
-      </section>
+      </details>
 
       {/* 시설 목록 (종류별 그룹) */}
       <section className="space-y-3">
