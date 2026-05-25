@@ -148,29 +148,39 @@ export default async function Home() {
   const isAdmin = employee.permission === 'admin'
   const isFieldWorker = employee.workplace_type === '현장'
 
-  // 오늘 근태 1줄 요약 (홈 카드용)
+  // ===== 거대 병렬 배치 — 홈 카드 데이터 13건 한꺼번에 ===================
+  // 진입 페이지라 직렬 13 쿼리가 가장 큰 병목. 의존성 없는 것들을 모두 동시 발사.
+  // 의존성 있는 2건(sites, leave employees) 만 뒤에 작은 2차 배치로 처리.
   const workDate = todayInSeoul()
-  const { data: todayRow } = await supabase
-    .from('attendances')
-    .select('check_in_at, check_out_at, site_id')
-    .eq('employee_id', employee.id)
-    .eq('work_date', workDate)
-    .maybeSingle()
-  const today = todayRow as
-    | { check_in_at: string | null; check_out_at: string | null; site_id: string | null }
-    | null
+  const isStockManager = isAdmin || employee.can_manage_stock
+  const canApprove = employee.permission !== 'worker'
+  const annualCurrentSeq = employee.hire_date ? currentPeriodSeq(employee.hire_date) : null
+  const NEW_ASSIGNMENT_DAYS = 3
+  const newCutoff = new Date(
+    new Date().getTime() - NEW_ASSIGNMENT_DAYS * 24 * 60 * 60 * 1000,
+  ).toISOString()
 
-  let todaySiteName: string | null = null
-  if (today?.site_id) {
-    const { data: s } = await supabase.from('sites').select('name').eq('id', today.site_id).maybeSingle()
-    todaySiteName = (s as { name: string } | null)?.name ?? null
-  }
-
-  const checkedIn = !!today?.check_in_at
-  const checkedOut = !!today?.check_out_at
-
-  // 차량 — 회사 전 차량 + 현재 운행 중인 행 + 차량별 마지막 반납 km(placeholder 용)
-  const [vehiclesRes, activeTripsRes, recentReturnedRes] = await Promise.all([
+  const [
+    todayAttRes,
+    vehiclesRes,
+    activeTripsRes,
+    recentReturnedRes,
+    myAssignsRes,
+    todayChecksRes,
+    myHoldingsCountRes,
+    stockApprovalsCountRes,
+    annualBalanceRes,
+    annualPendingRes,
+    approvalsCountRes,
+    myPendingCountRes,
+    todayLeavesRes,
+  ] = await Promise.all([
+    supabase
+      .from('attendances')
+      .select('check_in_at, check_out_at, site_id')
+      .eq('employee_id', employee.id)
+      .eq('work_date', workDate)
+      .maybeSingle(),
     supabase
       .from('vehicles')
       .select('id, plate_number, name, is_active')
@@ -194,7 +204,81 @@ export default async function Home() {
       .not('returned_at', 'is', null)
       .order('returned_at', { ascending: false })
       .limit(50),
+    supabase
+      .from('work_assignments')
+      .select(
+        'work_id, created_at, works!inner(id, name, category, subcategory, status, order_id, company_id)',
+      )
+      .eq('employee_id', employee.id),
+    supabase
+      .from('work_daily_checks')
+      .select('id, work_id, decision, created_at, closed_at')
+      .eq('employee_id', employee.id)
+      .eq('check_date', workDate),
+    supabase
+      .from('worker_holdings')
+      .select('id', { count: 'exact', head: true })
+      .eq('employee_id', employee.id)
+      .gt('quantity_remaining', 0),
+    isStockManager
+      ? supabase
+          .from('daily_report_materials')
+          .select('id', { count: 'exact', head: true })
+          .eq('approval_status', '대기')
+      : Promise.resolve({ count: 0 as number | null }),
+    annualCurrentSeq !== null
+      ? supabase
+          .from('annual_leave_balances')
+          .select('granted, used, period_start, period_end, period_seq')
+          .eq('employee_id', employee.id)
+          .eq('period_seq', annualCurrentSeq)
+          .maybeSingle()
+      : Promise.resolve({ data: null }),
+    annualCurrentSeq !== null
+      ? supabase
+          .from('leave_requests')
+          .select('type, start_date, end_date')
+          .eq('employee_id', employee.id)
+          .eq('status', '대기')
+      : Promise.resolve({ data: [] as unknown[] }),
+    canApprove
+      ? isAdmin
+        ? supabase
+            .from('leave_requests')
+            .select('*', { count: 'exact', head: true })
+            .eq('company_id', employee.company_id)
+            .eq('status', '대기')
+            .not('pending_stage', 'is', null)
+        : supabase
+            .from('leave_requests')
+            .select('*', { count: 'exact', head: true })
+            .eq('assigned_foreman_id', employee.id)
+            .eq('pending_stage', 'foreman')
+            .eq('status', '대기')
+      : Promise.resolve({ count: 0 as number | null }),
+    supabase
+      .from('leave_requests')
+      .select('*', { count: 'exact', head: true })
+      .eq('employee_id', employee.id)
+      .eq('status', '대기'),
+    supabase
+      .from('leave_requests')
+      .select(
+        'id, employee_id, type, start_date, end_date, start_time, end_time, substitute_employee_id',
+      )
+      .eq('company_id', employee.company_id)
+      .eq('status', '승인')
+      .lte('start_date', workDate)
+      .gte('end_date', workDate)
+      .order('start_date', { ascending: true }),
   ])
+
+  // === 오늘 근태 ===
+  const today = todayAttRes.data as
+    | { check_in_at: string | null; check_out_at: string | null; site_id: string | null }
+    | null
+  const checkedIn = !!today?.check_in_at
+  const checkedOut = !!today?.check_out_at
 
   type VehicleRow = { id: string; plate_number: string; name: string; is_active: boolean }
   type ActiveTrip = {
@@ -258,17 +342,6 @@ export default async function Home() {
     })
 
   // ===== 내 작업 (배정자 알림용) =====
-  // 본인이 배정된 작업의 work_assignments 중 최근 created_at 모아 신규 배지 카운트
-  const NEW_ASSIGNMENT_DAYS = 3
-  const newCutoff = new Date(
-    new Date().getTime() - NEW_ASSIGNMENT_DAYS * 24 * 60 * 60 * 1000,
-  ).toISOString()
-  const { data: myAssignsData } = await supabase
-    .from('work_assignments')
-    .select(
-      'work_id, created_at, works!inner(id, name, category, subcategory, status, order_id, company_id)',
-    )
-    .eq('employee_id', employee.id)
   type MyAssignJoined = {
     work_id: string
     created_at: string
@@ -282,7 +355,7 @@ export default async function Home() {
       company_id: string
     }
   }
-  const myAssigns = ((myAssignsData ?? []) as unknown) as MyAssignJoined[]
+  const myAssigns = ((myAssignsRes.data ?? []) as unknown) as MyAssignJoined[]
   const myAssignsByWork = new Map<string, MyAssignJoined>()
   for (const a of myAssigns) {
     const prev = myAssignsByWork.get(a.work_id)
@@ -294,11 +367,6 @@ export default async function Home() {
   ).length
 
   // ===== 오늘 작업 체크 (work_daily_checks) =====
-  const { data: todayChecksData } = await supabase
-    .from('work_daily_checks')
-    .select('id, work_id, decision, created_at, closed_at')
-    .eq('employee_id', employee.id)
-    .eq('check_date', workDate)
   type TodayCheck = {
     id: string
     work_id: string
@@ -306,7 +374,7 @@ export default async function Home() {
     created_at: string
     closed_at: string | null
   }
-  const todayChecks = (todayChecksData ?? []) as TodayCheck[]
+  const todayChecks = (todayChecksRes.data ?? []) as TodayCheck[]
   const todayCheckByWork = new Map<string, TodayCheck>()
   for (const c of todayChecks) todayCheckByWork.set(c.work_id, c)
 
@@ -349,31 +417,16 @@ export default async function Home() {
       })
     }
   }
-  // 진행 중은 시작 시각 오래된 순
   activeCheckRows.sort((a, b) => a.createdAt.localeCompare(b.createdAt))
-  // 미체크인은 작업명
   pendingWorkRows.sort((a, b) => a.name.localeCompare(b.name))
 
-  // ===== 내 자재 카운트 =====
-  const { count: myHoldingsCount } = await supabase
-    .from('worker_holdings')
-    .select('id', { count: 'exact', head: true })
-    .eq('employee_id', employee.id)
-    .gt('quantity_remaining', 0)
+  // ===== 내 자재 / 자재 사용 승인 대기 ===
+  const myHoldingsCount = myHoldingsCountRes.count ?? 0
+  const stockApprovalsPendingCount = isStockManager
+    ? (stockApprovalsCountRes.count ?? 0)
+    : 0
 
-  // ===== 자재 사용 승인 대기 카운트 (자재담당자/admin 만) =====
-  const isStockManager = isAdmin || employee.can_manage_stock
-  let stockApprovalsPendingCount = 0
-  if (isStockManager) {
-    const { count } = await supabase
-      .from('daily_report_materials')
-      .select('id', { count: 'exact', head: true })
-      .eq('approval_status', '대기')
-    stockApprovalsPendingCount = count ?? 0
-  }
-
-  // 내 연차 잔여 (현재 회차)
-  const annualCurrentSeq = employee.hire_date ? currentPeriodSeq(employee.hire_date) : null
+  // ===== 연차 잔여 (현재 회차) + 대기 신청 합계 + 다음 회차 미리보기 =====
   let annualBalance: {
     granted: number
     used: number
@@ -382,45 +435,30 @@ export default async function Home() {
     period_end: string
     period_seq: number
   } | null = null
-  if (annualCurrentSeq !== null) {
-    const { data: balRow } = await supabase
-      .from('annual_leave_balances')
-      .select('granted, used, period_start, period_end, period_seq')
-      .eq('employee_id', employee.id)
-      .eq('period_seq', annualCurrentSeq)
-      .maybeSingle()
-    if (balRow) {
-      const b = balRow as {
-        granted: number
-        used: number
-        period_start: string
-        period_end: string
-        period_seq: number
-      }
-      annualBalance = {
-        granted: b.granted,
-        used: b.used,
-        remaining: calcRemaining(b.granted, b.used),
-        period_start: b.period_start,
-        period_end: b.period_end,
-        period_seq: b.period_seq,
-      }
+  if (annualCurrentSeq !== null && annualBalanceRes.data) {
+    const b = annualBalanceRes.data as {
+      granted: number
+      used: number
+      period_start: string
+      period_end: string
+      period_seq: number
+    }
+    annualBalance = {
+      granted: b.granted,
+      used: b.used,
+      remaining: calcRemaining(b.granted, b.used),
+      period_start: b.period_start,
+      period_end: b.period_end,
+      period_seq: b.period_seq,
     }
   }
-  // 본인 대기 신청 합계 (잔여 카드의 amber 줄)
   let annualPendingUsage = 0
   if (annualCurrentSeq !== null) {
-    const { data: pendingRows } = await supabase
-      .from('leave_requests')
-      .select('type, start_date, end_date')
-      .eq('employee_id', employee.id)
-      .eq('status', '대기')
     type PR = { type: LeaveType; start_date: string; end_date: string }
-    for (const p of (pendingRows ?? []) as PR[]) {
+    for (const p of (annualPendingRes.data ?? []) as PR[]) {
       annualPendingUsage += calcLeaveUsage(p.type, p.start_date, p.end_date)
     }
   }
-  // 다음 회차 미리보기
   let nextAnnualPeriod: { seq: number; start: string; end: string; granted: number } | null = null
   if (employee.hire_date && annualCurrentSeq !== null) {
     const nextSeq = annualCurrentSeq + 1
@@ -428,48 +466,11 @@ export default async function Home() {
     nextAnnualPeriod = { seq: nextSeq, start, end, granted: legalGrantForYear(nextSeq) }
   }
 
-  // 결재 대기 건수 (홈 배지용)
-  const canApprove = employee.permission !== 'worker'
-  let approvalsPendingCount = 0
-  if (canApprove) {
-    if (isAdmin) {
-      const { count } = await supabase
-        .from('leave_requests')
-        .select('*', { count: 'exact', head: true })
-        .eq('company_id', employee.company_id)
-        .eq('status', '대기')
-        .not('pending_stage', 'is', null)
-      approvalsPendingCount = count ?? 0
-    } else {
-      const { count } = await supabase
-        .from('leave_requests')
-        .select('*', { count: 'exact', head: true })
-        .eq('assigned_foreman_id', employee.id)
-        .eq('pending_stage', 'foreman')
-        .eq('status', '대기')
-      approvalsPendingCount = count ?? 0
-    }
-  }
+  // ===== 결재 / 내 대기 신청 =====
+  const approvalsPendingCount = canApprove ? (approvalsCountRes.count ?? 0) : 0
+  const myPendingCount = myPendingCountRes.count ?? 0
 
-  // 내가 낸 대기 신청 건수
-  const { count: myPendingCount } = await supabase
-    .from('leave_requests')
-    .select('*', { count: 'exact', head: true })
-    .eq('employee_id', employee.id)
-    .eq('status', '대기')
-
-  // 휴가·외근 현황 — 당일 진행 중인 승인된 신청만 (이번 달 전체는 /leaves 별도 페이지)
-  const { data: todayLeavesData } = await supabase
-    .from('leave_requests')
-    .select(
-      'id, employee_id, type, start_date, end_date, start_time, end_time, substitute_employee_id',
-    )
-    .eq('company_id', employee.company_id)
-    .eq('status', '승인')
-    .lte('start_date', workDate)
-    .gte('end_date', workDate)
-    .order('start_date', { ascending: true })
-
+  // ===== 휴가·외근 현황 =====
   type LeaveRow = {
     id: string
     employee_id: string
@@ -480,8 +481,7 @@ export default async function Home() {
     end_time: string | null
     substitute_employee_id: string | null
   }
-  const todayLeaves = (todayLeavesData ?? []) as LeaveRow[]
-
+  const todayLeaves = (todayLeavesRes.data ?? []) as LeaveRow[]
   const leavePersonIds = Array.from(
     new Set(
       todayLeaves
@@ -489,15 +489,23 @@ export default async function Home() {
         .filter((v): v is string => !!v),
     ),
   )
+
+  // ===== 2차 배치 (1차 결과에 의존) — 현장명 + 휴가 인원명 병렬 =====
+  const [siteRes, leavePersonsRes] = await Promise.all([
+    today?.site_id
+      ? supabase.from('sites').select('name').eq('id', today.site_id).maybeSingle()
+      : Promise.resolve({ data: null }),
+    leavePersonIds.length > 0
+      ? supabase.from('employees').select('id, name').in('id', leavePersonIds)
+      : Promise.resolve({ data: [] as { id: string; name: string }[] }),
+  ])
+  const todaySiteName: string | null =
+    siteRes.data && typeof siteRes.data === 'object' && 'name' in siteRes.data
+      ? ((siteRes.data as { name: string }).name ?? null)
+      : null
   const leaveNameById = new Map<string, string>()
-  if (leavePersonIds.length > 0) {
-    const { data: persons } = await supabase
-      .from('employees')
-      .select('id, name')
-      .in('id', leavePersonIds)
-    for (const p of (persons ?? []) as { id: string; name: string }[]) {
-      leaveNameById.set(p.id, p.name)
-    }
+  for (const p of (leavePersonsRes.data ?? []) as { id: string; name: string }[]) {
+    leaveNameById.set(p.id, p.name)
   }
 
   // 사용자 prefs 적용 — 카드 순서 + 표시 여부
