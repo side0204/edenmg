@@ -15,9 +15,23 @@ import {
   Settings2,
   X,
 } from 'lucide-react'
+import { saveRelocationListPrefs } from './prefs-actions'
 
 const MAX_SEARCH_INPUTS = 4
-import { saveRelocationListPrefs } from './prefs-actions'
+
+// 날짜 컬럼 — 이 컬럼이 선택되면 검색 input 이 from~to 기간 picker 로 자동 전환됨.
+//   created_at 은 'YYYY-MM-DD HH:MM' 형식이라 앞 10자 비교
+const DATE_COLUMN_IDS = [
+  'subscribed_at',
+  'desired_open_at',
+  'surveyed_at',
+  'expected_completion_at',
+  'completion_at',
+  'created_at',
+] as const
+type DateColumnId = (typeof DATE_COLUMN_IDS)[number]
+const isDateColumn = (id: string): id is DateColumnId =>
+  (DATE_COLUMN_IDS as readonly string[]).includes(id)
 
 /**
  * 공사 설계 — 카테고리별 프로젝트 게시판형 테이블.
@@ -292,30 +306,63 @@ export function SubscriptionProjectsTable({
 }) {
   const [prefs, setPrefs] = useState<Prefs>(() => normalizePrefs(category, initialPrefs))
   const [settingsOpen, setSettingsOpen] = useState(false)
-  // 다중 검색 (최대 4개, AND 필터) — 각 검색어가 보이는 컬럼 중 하나에 매치되어야 함
-  const [queries, setQueries] = useState<string[]>([''])
+  // 다중 검색 (최대 4개, AND 필터). 각 entry 는 컬럼 선택 + 텍스트 OR 날짜 from~to.
+  //   col='all' → 텍스트 매치를 보이는 모든 컬럼에 시도
+  //   col=텍스트컬럼 → 그 컬럼만 텍스트 매치
+  //   col=날짜컬럼 → from~to 기간 필터 (둘 다 없으면 무필터)
+  type SearchEntry = {
+    col: ColumnId | 'all'
+    text: string
+    dateFrom: string
+    dateTo: string
+  }
+  const [queries, setQueries] = useState<SearchEntry[]>([
+    { col: 'all', text: '', dateFrom: '', dateTo: '' },
+  ])
   // 다중 컬럼 정렬 체인 — shift+click 으로 추가, 단일 click 은 1개로 reset
   const [sortChain, setSortChain] = useState<SortEntry[]>([])
 
-  const activeQueries = useMemo(
-    () => queries.map((q) => q.trim().toLowerCase()).filter((q) => q.length > 0),
-    [queries],
-  )
-  const isSearching = activeQueries.length > 0
+  const activeEntries = useMemo(() => {
+    return queries.filter((q) => {
+      if (q.col !== 'all' && isDateColumn(q.col)) {
+        return q.dateFrom.length > 0 || q.dateTo.length > 0
+      }
+      return q.text.trim().length > 0
+    })
+  }, [queries])
+  const isSearching = activeEntries.length > 0
 
-  const updateQuery = (idx: number, value: string) => {
-    setQueries((prev) => prev.map((q, i) => (i === idx ? value : q)))
+  const updateQueryText = (idx: number, value: string) => {
+    setQueries((prev) => prev.map((q, i) => (i === idx ? { ...q, text: value } : q)))
+  }
+  const updateQueryCol = (idx: number, col: ColumnId | 'all') => {
+    setQueries((prev) =>
+      prev.map((q, i) =>
+        i === idx
+          ? // 컬럼 종류 변경 시 다른 모드 값 초기화
+            { ...q, col, text: '', dateFrom: '', dateTo: '' }
+          : q,
+      ),
+    )
+  }
+  const updateQueryDate = (idx: number, key: 'dateFrom' | 'dateTo', value: string) => {
+    setQueries((prev) => prev.map((q, i) => (i === idx ? { ...q, [key]: value } : q)))
   }
   const addQuery = () => {
-    setQueries((prev) => (prev.length < MAX_SEARCH_INPUTS ? [...prev, ''] : prev))
+    setQueries((prev) =>
+      prev.length < MAX_SEARCH_INPUTS
+        ? [...prev, { col: 'all', text: '', dateFrom: '', dateTo: '' }]
+        : prev,
+    )
   }
   const removeQuery = (idx: number) => {
     setQueries((prev) => {
-      if (prev.length <= 1) return ['']
+      if (prev.length <= 1) return [{ col: 'all', text: '', dateFrom: '', dateTo: '' }]
       return prev.filter((_, i) => i !== idx)
     })
   }
-  const clearAllQueries = () => setQueries([''])
+  const clearAllQueries = () =>
+    setQueries([{ col: 'all', text: '', dateFrom: '', dateTo: '' }])
 
   const visibleColumns: ColumnDef[] = useMemo(() => {
     const hidSet = new Set(prefs.hidden)
@@ -328,12 +375,29 @@ export function SubscriptionProjectsTable({
 
   const filteredRows = useMemo(() => {
     const base =
-      activeQueries.length === 0
+      activeEntries.length === 0
         ? rows
         : rows.filter((r) => {
-            // AND 필터 — 각 검색어가 보이는 컬럼 중 하나에 매치되어야 함
-            const haystacks = visibleColumns.map((c) => valueOf(r, c.id).toLowerCase())
-            return activeQueries.every((q) => haystacks.some((h) => h.includes(q)))
+            // AND 필터 — 모든 active entry 가 매치돼야 함
+            return activeEntries.every((q) => {
+              if (q.col !== 'all' && isDateColumn(q.col)) {
+                // 날짜 컬럼: from~to 범위 비교 (앞 10자 YYYY-MM-DD)
+                const raw = valueOf(r, q.col).slice(0, 10)
+                if (!raw) return false
+                if (q.dateFrom && raw < q.dateFrom) return false
+                if (q.dateTo && raw > q.dateTo) return false
+                return true
+              }
+              // 텍스트
+              const needle = q.text.trim().toLowerCase()
+              if (!needle) return true
+              if (q.col === 'all') {
+                return visibleColumns.some((c) =>
+                  valueOf(r, c.id).toLowerCase().includes(needle),
+                )
+              }
+              return valueOf(r, q.col).toLowerCase().includes(needle)
+            })
           })
     if (sortChain.length === 0) return base
     return [...base].sort((a, b) => {
@@ -348,7 +412,7 @@ export function SubscriptionProjectsTable({
       }
       return 0
     })
-  }, [rows, visibleColumns, activeQueries, sortChain])
+  }, [rows, visibleColumns, activeEntries, sortChain])
 
   // 디바운스 저장 — prefs 변경 후 500ms 후 server action 호출
   const saveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
@@ -551,49 +615,131 @@ export function SubscriptionProjectsTable({
     <div className="space-y-3">
       {/* 다중 검색 (최대 4개, AND) + 컬럼 설정 + CSV + 결과 카운트 */}
       <div className="space-y-2">
+        {/* 검색 row 들 (1~4개) — 각 row 는 [컬럼선택 ▾] + [텍스트 또는 from~to 날짜] + [×] */}
+        <ul className="space-y-1.5">
+          {queries.map((q, idx) => {
+            const isDateMode = q.col !== 'all' && isDateColumn(q.col)
+            const colLabel =
+              q.col === 'all'
+                ? '전체 컬럼'
+                : (COLUMN_BY_ID.get(q.col)?.label ?? q.col)
+            return (
+              <li key={idx} className="flex flex-wrap items-center gap-1.5">
+                <select
+                  value={q.col}
+                  onChange={(e) =>
+                    updateQueryCol(idx, e.currentTarget.value as ColumnId | 'all')
+                  }
+                  className="shrink-0 rounded-lg border border-slate-300 bg-white px-2 py-1.5 text-sm font-medium text-slate-700 focus:border-slate-900 focus:outline-none focus:ring-1 focus:ring-slate-900"
+                  title="검색 대상 컬럼"
+                >
+                  <option value="all">전체 컬럼</option>
+                  <optgroup label="텍스트">
+                    {CATEGORY_COLUMNS[category]
+                      .filter((id) => !isDateColumn(id))
+                      .map((id) => {
+                        const def = COLUMN_BY_ID.get(id)
+                        if (!def) return null
+                        return (
+                          <option key={id} value={id}>
+                            {def.label}
+                          </option>
+                        )
+                      })}
+                  </optgroup>
+                  <optgroup label="날짜 (기간 검색)">
+                    {CATEGORY_COLUMNS[category]
+                      .filter((id) => isDateColumn(id))
+                      .map((id) => {
+                        const def = COLUMN_BY_ID.get(id)
+                        if (!def) return null
+                        return (
+                          <option key={id} value={id}>
+                            {def.label}
+                          </option>
+                        )
+                      })}
+                  </optgroup>
+                </select>
+
+                {isDateMode ? (
+                  <div className="flex flex-1 min-w-[16rem] items-center gap-1.5">
+                    <input
+                      type="date"
+                      value={q.dateFrom}
+                      onChange={(e) => updateQueryDate(idx, 'dateFrom', e.currentTarget.value)}
+                      className="flex-1 rounded-lg border border-slate-300 bg-white py-1.5 px-2 text-sm focus:border-slate-900 focus:outline-none focus:ring-1 focus:ring-slate-900"
+                      aria-label={`${colLabel} 시작`}
+                    />
+                    <span className="shrink-0 text-xs text-slate-400">~</span>
+                    <input
+                      type="date"
+                      value={q.dateTo}
+                      onChange={(e) => updateQueryDate(idx, 'dateTo', e.currentTarget.value)}
+                      className="flex-1 rounded-lg border border-slate-300 bg-white py-1.5 px-2 text-sm focus:border-slate-900 focus:outline-none focus:ring-1 focus:ring-slate-900"
+                      aria-label={`${colLabel} 종료`}
+                    />
+                  </div>
+                ) : (
+                  <div className="relative flex-1 min-w-[12rem]">
+                    <Search className="absolute left-2.5 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
+                    <input
+                      type="text"
+                      value={q.text}
+                      onChange={(e) => updateQueryText(idx, e.currentTarget.value)}
+                      placeholder={
+                        q.col === 'all'
+                          ? '제목·가입자·공사번호 등 검색'
+                          : `${colLabel} 에서 검색`
+                      }
+                      className="w-full rounded-lg border border-slate-300 bg-white py-1.5 pl-8 pr-2 text-sm focus:border-slate-900 focus:outline-none focus:ring-1 focus:ring-slate-900"
+                    />
+                  </div>
+                )}
+
+                <button
+                  type="button"
+                  onClick={() => removeQuery(idx)}
+                  disabled={
+                    queries.length === 1 &&
+                    q.text === '' &&
+                    q.dateFrom === '' &&
+                    q.dateTo === '' &&
+                    q.col === 'all'
+                  }
+                  className="shrink-0 rounded-md p-1.5 text-slate-400 hover:bg-slate-100 hover:text-rose-600 disabled:opacity-30 disabled:hover:bg-transparent disabled:hover:text-slate-400"
+                  aria-label="검색 제거"
+                  title="검색 제거"
+                >
+                  <X className="h-4 w-4" />
+                </button>
+              </li>
+            )
+          })}
+        </ul>
+
         <div className="flex flex-wrap items-center gap-2">
-          {/* 검색 input 들 (1~4개) */}
-          <div className="flex flex-1 min-w-[14rem] flex-wrap gap-1.5">
-            {queries.map((q, idx) => {
-              const placeholder =
-                idx === 0
-                  ? '제목·가입자·공사번호·주소 등 검색'
-                  : `검색어 ${idx + 1}`
-              return (
-                <div key={idx} className="relative flex-1 min-w-[10rem]">
-                  <Search className="absolute left-2.5 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
-                  <input
-                    type="text"
-                    value={q}
-                    onChange={(e) => updateQuery(idx, e.currentTarget.value)}
-                    placeholder={placeholder}
-                    className="w-full rounded-lg border border-slate-300 bg-white py-1.5 pl-8 pr-7 text-sm focus:border-slate-900 focus:outline-none focus:ring-1 focus:ring-slate-900"
-                  />
-                  {(q.length > 0 || queries.length > 1) && (
-                    <button
-                      type="button"
-                      onClick={() => removeQuery(idx)}
-                      className="absolute right-1.5 top-1/2 -translate-y-1/2 rounded p-0.5 text-slate-400 hover:bg-slate-100 hover:text-slate-700"
-                      aria-label={queries.length > 1 ? '검색 제거' : '검색어 지우기'}
-                    >
-                      <X className="h-3.5 w-3.5" />
-                    </button>
-                  )}
-                </div>
-              )
-            })}
-            {queries.length < MAX_SEARCH_INPUTS && (
-              <button
-                type="button"
-                onClick={addQuery}
-                className="inline-flex shrink-0 items-center gap-1 rounded-lg border border-dashed border-slate-300 bg-white px-2.5 py-1.5 text-xs font-medium text-slate-600 hover:border-slate-900 hover:text-slate-900"
-                title="검색 추가 (AND 필터, 최대 4개)"
-              >
-                <Plus className="h-3.5 w-3.5" />
-                검색 추가
-              </button>
-            )}
-          </div>
+          {queries.length < MAX_SEARCH_INPUTS && (
+            <button
+              type="button"
+              onClick={addQuery}
+              className="inline-flex items-center gap-1 rounded-lg border border-dashed border-slate-300 bg-white px-2.5 py-1.5 text-xs font-medium text-slate-600 hover:border-slate-900 hover:text-slate-900"
+              title="검색 추가 (AND 필터, 최대 4개)"
+            >
+              <Plus className="h-3.5 w-3.5" />
+              검색 추가 ({queries.length}/{MAX_SEARCH_INPUTS})
+            </button>
+          )}
+          {isSearching && (
+            <button
+              type="button"
+              onClick={clearAllQueries}
+              className="inline-flex items-center gap-1 rounded-lg border border-slate-300 bg-white px-2.5 py-1.5 text-xs font-medium text-slate-600 hover:border-slate-900 hover:text-slate-900"
+            >
+              <X className="h-3.5 w-3.5" />
+              검색 모두 지우기
+            </button>
+          )}
           <button
             type="button"
             onClick={() => setSettingsOpen(true)}
@@ -625,28 +771,16 @@ export function SubscriptionProjectsTable({
               정렬 {sortChain.length}개 해제
             </button>
           )}
-        </div>
-        <div className="flex items-center justify-between gap-2">
-          {isSearching ? (
-            <p className="text-xs text-slate-500">
-              <span className="font-medium text-slate-700">AND 필터</span> —{' '}
-              {activeQueries.length}개 검색어 모두 매치된 행만 표시
-              <button
-                type="button"
-                onClick={clearAllQueries}
-                className="ml-2 inline-flex items-center gap-0.5 rounded px-1.5 py-0.5 text-[11px] font-medium text-slate-600 hover:bg-slate-100 hover:text-slate-900"
-              >
-                모두 지우기
-              </button>
-            </p>
-          ) : (
-            <span />
-          )}
-          <p className="text-xs text-slate-500 tabular-nums">
+          <p className="ml-auto text-xs text-slate-500 tabular-nums">
             {isSearching ? (
               <>
                 <span className="font-semibold text-slate-700">{filteredRows.length}</span> /{' '}
                 {rows.length}건 일치
+                {activeEntries.length > 1 && (
+                  <span className="ml-1 text-[10px] text-slate-400">
+                    (AND 필터 {activeEntries.length}개)
+                  </span>
+                )}
               </>
             ) : (
               <>총 {rows.length}건</>
@@ -660,7 +794,7 @@ export function SubscriptionProjectsTable({
         {filteredRows.length === 0 ? (
           <p className="rounded-lg border border-slate-200 bg-white px-3 py-8 text-center text-sm text-slate-500">
             {isSearching
-              ? `검색어(${activeQueries.length}개) 로 일치하는 결과가 없습니다.`
+              ? `검색어(${activeEntries.length}개) 로 일치하는 결과가 없습니다.`
               : '등록된 프로젝트가 없습니다.'}
           </p>
         ) : (
@@ -804,7 +938,7 @@ export function SubscriptionProjectsTable({
                   className="border-t border-slate-200 px-3 py-8 text-center text-sm text-slate-500"
                 >
                   {isSearching
-                    ? `검색어(${activeQueries.length}개) 로 일치하는 결과가 없습니다.`
+                    ? `검색어(${activeEntries.length}개) 로 일치하는 결과가 없습니다.`
                     : '등록된 프로젝트가 없습니다.'}
                 </td>
               </tr>
