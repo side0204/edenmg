@@ -9,11 +9,14 @@ import {
   ChevronDown,
   ChevronUp,
   Download,
+  Plus,
   RotateCcw,
   Search,
   Settings2,
   X,
 } from 'lucide-react'
+
+const MAX_SEARCH_INPUTS = 4
 import { saveRelocationListPrefs } from './prefs-actions'
 
 /**
@@ -289,9 +292,30 @@ export function SubscriptionProjectsTable({
 }) {
   const [prefs, setPrefs] = useState<Prefs>(() => normalizePrefs(category, initialPrefs))
   const [settingsOpen, setSettingsOpen] = useState(false)
-  const [query, setQuery] = useState('')
+  // 다중 검색 (최대 4개, AND 필터) — 각 검색어가 보이는 컬럼 중 하나에 매치되어야 함
+  const [queries, setQueries] = useState<string[]>([''])
   // 다중 컬럼 정렬 체인 — shift+click 으로 추가, 단일 click 은 1개로 reset
   const [sortChain, setSortChain] = useState<SortEntry[]>([])
+
+  const activeQueries = useMemo(
+    () => queries.map((q) => q.trim().toLowerCase()).filter((q) => q.length > 0),
+    [queries],
+  )
+  const isSearching = activeQueries.length > 0
+
+  const updateQuery = (idx: number, value: string) => {
+    setQueries((prev) => prev.map((q, i) => (i === idx ? value : q)))
+  }
+  const addQuery = () => {
+    setQueries((prev) => (prev.length < MAX_SEARCH_INPUTS ? [...prev, ''] : prev))
+  }
+  const removeQuery = (idx: number) => {
+    setQueries((prev) => {
+      if (prev.length <= 1) return ['']
+      return prev.filter((_, i) => i !== idx)
+    })
+  }
+  const clearAllQueries = () => setQueries([''])
 
   const visibleColumns: ColumnDef[] = useMemo(() => {
     const hidSet = new Set(prefs.hidden)
@@ -303,12 +327,14 @@ export function SubscriptionProjectsTable({
   const totalForCategory = CATEGORY_COLUMNS[category].length
 
   const filteredRows = useMemo(() => {
-    const q = query.trim().toLowerCase()
-    const base = q
-      ? rows.filter((r) =>
-          visibleColumns.some((c) => valueOf(r, c.id).toLowerCase().includes(q)),
-        )
-      : rows
+    const base =
+      activeQueries.length === 0
+        ? rows
+        : rows.filter((r) => {
+            // AND 필터 — 각 검색어가 보이는 컬럼 중 하나에 매치되어야 함
+            const haystacks = visibleColumns.map((c) => valueOf(r, c.id).toLowerCase())
+            return activeQueries.every((q) => haystacks.some((h) => h.includes(q)))
+          })
     if (sortChain.length === 0) return base
     return [...base].sort((a, b) => {
       for (const s of sortChain) {
@@ -322,7 +348,7 @@ export function SubscriptionProjectsTable({
       }
       return 0
     })
-  }, [rows, visibleColumns, query, sortChain])
+  }, [rows, visibleColumns, activeQueries, sortChain])
 
   // 디바운스 저장 — prefs 변경 후 500ms 후 server action 호출
   const saveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
@@ -458,77 +484,118 @@ export function SubscriptionProjectsTable({
 
   return (
     <div className="space-y-3">
-      {/* 검색 + 컬럼 설정 + CSV + 결과 카운트 */}
-      <div className="flex flex-wrap items-center gap-2">
-        <div className="relative flex-1 min-w-[12rem] max-w-md">
-          <Search className="absolute left-2.5 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
-          <input
-            type="text"
-            value={query}
-            onChange={(e) => setQuery(e.currentTarget.value)}
-            placeholder="제목·가입자·공사번호·주소 등 모든 컬럼 검색"
-            className="w-full rounded-lg border border-slate-300 bg-white py-1.5 pl-8 pr-7 text-sm focus:border-slate-900 focus:outline-none focus:ring-1 focus:ring-slate-900"
-          />
-          {query && (
+      {/* 다중 검색 (최대 4개, AND) + 컬럼 설정 + CSV + 결과 카운트 */}
+      <div className="space-y-2">
+        <div className="flex flex-wrap items-center gap-2">
+          {/* 검색 input 들 (1~4개) */}
+          <div className="flex flex-1 min-w-[14rem] flex-wrap gap-1.5">
+            {queries.map((q, idx) => {
+              const placeholder =
+                idx === 0
+                  ? '제목·가입자·공사번호·주소 등 검색'
+                  : `검색어 ${idx + 1}`
+              return (
+                <div key={idx} className="relative flex-1 min-w-[10rem]">
+                  <Search className="absolute left-2.5 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
+                  <input
+                    type="text"
+                    value={q}
+                    onChange={(e) => updateQuery(idx, e.currentTarget.value)}
+                    placeholder={placeholder}
+                    className="w-full rounded-lg border border-slate-300 bg-white py-1.5 pl-8 pr-7 text-sm focus:border-slate-900 focus:outline-none focus:ring-1 focus:ring-slate-900"
+                  />
+                  {(q.length > 0 || queries.length > 1) && (
+                    <button
+                      type="button"
+                      onClick={() => removeQuery(idx)}
+                      className="absolute right-1.5 top-1/2 -translate-y-1/2 rounded p-0.5 text-slate-400 hover:bg-slate-100 hover:text-slate-700"
+                      aria-label={queries.length > 1 ? '검색 제거' : '검색어 지우기'}
+                    >
+                      <X className="h-3.5 w-3.5" />
+                    </button>
+                  )}
+                </div>
+              )
+            })}
+            {queries.length < MAX_SEARCH_INPUTS && (
+              <button
+                type="button"
+                onClick={addQuery}
+                className="inline-flex shrink-0 items-center gap-1 rounded-lg border border-dashed border-slate-300 bg-white px-2.5 py-1.5 text-xs font-medium text-slate-600 hover:border-slate-900 hover:text-slate-900"
+                title="검색 추가 (AND 필터, 최대 4개)"
+              >
+                <Plus className="h-3.5 w-3.5" />
+                검색 추가
+              </button>
+            )}
+          </div>
+          <button
+            type="button"
+            onClick={() => setSettingsOpen(true)}
+            className="inline-flex items-center gap-1 rounded-lg border border-slate-300 bg-white px-3 py-1.5 text-sm font-medium text-slate-700 hover:bg-slate-50"
+          >
+            <Settings2 className="h-4 w-4" />
+            <span className="hidden sm:inline">컬럼 설정</span>
+            <span className="inline-flex items-center rounded bg-slate-100 px-1.5 py-0.5 text-[10px] text-slate-600">
+              {visibleColumns.length}/{totalForCategory}
+            </span>
+          </button>
+          <button
+            type="button"
+            onClick={downloadCsv}
+            disabled={filteredRows.length === 0}
+            className="inline-flex items-center gap-1 rounded-lg border border-slate-300 bg-white px-3 py-1.5 text-sm font-medium text-slate-700 hover:bg-slate-50 disabled:opacity-50 disabled:hover:bg-white"
+            title="현재 보이는 컬럼·검색 결과를 CSV 다운로드"
+          >
+            <Download className="h-4 w-4" />
+            <span className="hidden sm:inline">CSV</span>
+          </button>
+          {sortChain.length > 0 && (
             <button
               type="button"
-              onClick={() => setQuery('')}
-              className="absolute right-1.5 top-1/2 -translate-y-1/2 rounded p-0.5 text-slate-400 hover:bg-slate-100 hover:text-slate-700"
-              aria-label="검색어 지우기"
+              onClick={() => setSortChain([])}
+              className="inline-flex items-center gap-1 rounded-lg border border-amber-300 bg-amber-50 px-3 py-1.5 text-xs font-medium text-amber-700 hover:bg-amber-100"
+              title="모든 정렬 해제"
             >
-              <X className="h-3.5 w-3.5" />
+              정렬 {sortChain.length}개 해제
             </button>
           )}
         </div>
-        <button
-          type="button"
-          onClick={() => setSettingsOpen(true)}
-          className="inline-flex items-center gap-1 rounded-lg border border-slate-300 bg-white px-3 py-1.5 text-sm font-medium text-slate-700 hover:bg-slate-50"
-        >
-          <Settings2 className="h-4 w-4" />
-          <span className="hidden sm:inline">컬럼 설정</span>
-          <span className="inline-flex items-center rounded bg-slate-100 px-1.5 py-0.5 text-[10px] text-slate-600">
-            {visibleColumns.length}/{totalForCategory}
-          </span>
-        </button>
-        <button
-          type="button"
-          onClick={downloadCsv}
-          disabled={filteredRows.length === 0}
-          className="inline-flex items-center gap-1 rounded-lg border border-slate-300 bg-white px-3 py-1.5 text-sm font-medium text-slate-700 hover:bg-slate-50 disabled:opacity-50 disabled:hover:bg-white"
-          title="현재 보이는 컬럼·검색 결과를 CSV 다운로드"
-        >
-          <Download className="h-4 w-4" />
-          <span className="hidden sm:inline">CSV</span>
-        </button>
-        {sortChain.length > 0 && (
-          <button
-            type="button"
-            onClick={() => setSortChain([])}
-            className="inline-flex items-center gap-1 rounded-lg border border-amber-300 bg-amber-50 px-3 py-1.5 text-xs font-medium text-amber-700 hover:bg-amber-100"
-            title="모든 정렬 해제"
-          >
-            정렬 {sortChain.length}개 해제
-          </button>
-        )}
-        <p className="ml-auto text-xs text-slate-500 tabular-nums">
-          {query ? (
-            <>
-              <span className="font-semibold text-slate-700">{filteredRows.length}</span> /{' '}
-              {rows.length}건 일치
-            </>
+        <div className="flex items-center justify-between gap-2">
+          {isSearching ? (
+            <p className="text-xs text-slate-500">
+              <span className="font-medium text-slate-700">AND 필터</span> —{' '}
+              {activeQueries.length}개 검색어 모두 매치된 행만 표시
+              <button
+                type="button"
+                onClick={clearAllQueries}
+                className="ml-2 inline-flex items-center gap-0.5 rounded px-1.5 py-0.5 text-[11px] font-medium text-slate-600 hover:bg-slate-100 hover:text-slate-900"
+              >
+                모두 지우기
+              </button>
+            </p>
           ) : (
-            <>총 {rows.length}건</>
+            <span />
           )}
-        </p>
+          <p className="text-xs text-slate-500 tabular-nums">
+            {isSearching ? (
+              <>
+                <span className="font-semibold text-slate-700">{filteredRows.length}</span> /{' '}
+                {rows.length}건 일치
+              </>
+            ) : (
+              <>총 {rows.length}건</>
+            )}
+          </p>
+        </div>
       </div>
 
       {/* 모바일 카드 뷰 (md 미만) */}
       <div className="md:hidden space-y-2">
         {filteredRows.length === 0 ? (
           <p className="rounded-lg border border-slate-200 bg-white px-3 py-8 text-center text-sm text-slate-500">
-            {query
-              ? `'${query}' 로 검색된 결과가 없습니다.`
+            {isSearching
+              ? `검색어(${activeQueries.length}개) 로 일치하는 결과가 없습니다.`
               : '등록된 프로젝트가 없습니다.'}
           </p>
         ) : (
@@ -655,8 +722,8 @@ export function SubscriptionProjectsTable({
                   colSpan={Math.max(1, visibleColumns.length)}
                   className="border-t border-slate-200 px-3 py-8 text-center text-sm text-slate-500"
                 >
-                  {query
-                    ? `'${query}' 로 검색된 결과가 없습니다.`
+                  {isSearching
+                    ? `검색어(${activeQueries.length}개) 로 일치하는 결과가 없습니다.`
                     : '등록된 프로젝트가 없습니다.'}
                 </td>
               </tr>
