@@ -818,10 +818,13 @@ export default function TopologyCanvas({
   }, [coreAssignments])
 
   // 청약 — 역할별 라벨 (designer / worker). 케이블 위에 두 줄로 표시.
+  //   lifecycle='new' (신설) 만 케이블 라벨에 표시. 'preexisting'(기설) 은 정보패널만.
+  //   (owner 결정 2026-05-25 — 기설은 캔버스 잡음 줄임)
   const coresByCableByRole = useMemo(() => {
     const collectD = new Map<string, number[]>()
     const collectW = new Map<string, number[]>()
     for (const a of coreAssignments ?? []) {
+      if (a.lifecycle === 'preexisting') continue // 기설은 캔버스 라벨 제외
       const target = a.entered_role === 'designer' ? collectD : collectW
       if (!target.has(a.cable_id)) target.set(a.cable_id, [])
       target.get(a.cable_id)!.push(a.core_range_start)
@@ -5120,14 +5123,21 @@ export default function TopologyCanvas({
                   mode === 'schematic' &&
                   subscriptionPopoverCableId === c.id &&
                   (() => {
-                    // 이 케이블의 기존 사용 코어 — popover 에서 중복 경고용
-                    const usedCores = (coreAssignments ?? [])
+                    // 이 케이블의 기존 코어 배정 — popover 가 중복·designer 신설 감지에 사용
+                    const cableAssignments = (coreAssignments ?? [])
                       .filter((a) => a.cable_id === c.id)
-                      .map((a) => a.core_range_start)
+                      .map((a) => ({
+                        core: a.core_range_start,
+                        entered_role: a.entered_role,
+                        lifecycle: (a.lifecycle === 'preexisting'
+                          ? 'preexisting'
+                          : 'new') as 'preexisting' | 'new',
+                      }))
                     // popover 크기 (SVG 좌표) — 작은 화면에서도 입력하기 편하게 확대
                     //   (owner 2026-05-25 — 축소화면 입력 어려움 해결)
-                    const POP_W = 360
-                    const POP_H = 230
+                    //   사용확정/변경 액션 + 기설/신설 토글 추가로 세로 늘림
+                    const POP_W = 380
+                    const POP_H = 320
                     const defaultRole: 'designer' | 'worker' =
                       projectDesignerId && myEmployeeId === projectDesignerId
                         ? 'designer'
@@ -5145,7 +5155,7 @@ export default function TopologyCanvas({
                           cableId={c.id}
                           cableCode={c.cable_code}
                           cableSpec={c.spec}
-                          usedCores={usedCores}
+                          cableAssignments={cableAssignments}
                           defaultRole={defaultRole}
                           onSaved={() => router.refresh()}
                           onClose={() => setSubscriptionPopoverCableId(null)}

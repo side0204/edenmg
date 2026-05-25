@@ -348,6 +348,9 @@ export async function addSubscriptionCoresFromCanvas(input: {
   // 'designer' = 설계 계획 (기별 미반영) / 'worker' = 실시공 (기별 반영)
   // 미지정 시 현재 로그인 사용자가 프로젝트 designer 이면 'designer', 그 외 'worker'.
   entered_role?: 'designer' | 'worker'
+  // 'new' = 신설 선번 (케이블 위 표시) / 'preexisting' = 기설 선번 (정보패널만)
+  //   기본값 'new'. 청약 설계자가 기설 선번 입력 시 'preexisting' 으로 전송.
+  lifecycle?: 'new' | 'preexisting'
 }): Promise<
   | {
       ok: true
@@ -355,6 +358,7 @@ export async function addSubscriptionCoresFromCanvas(input: {
       skipped: { core: number; reason: string }[]
       circuit_id: string
       entered_role: 'designer' | 'worker'
+      lifecycle: 'new' | 'preexisting'
     }
   | { ok: false; error: string }
 > {
@@ -410,6 +414,9 @@ export async function addSubscriptionCoresFromCanvas(input: {
   const enteredRole: 'designer' | 'worker' =
     input.entered_role ??
     (project.designer_id === me.id ? 'designer' : 'worker')
+
+  // 신설 vs 기설 — 기본 신설. 설계자가 기설 선번 입력 시 preexisting.
+  const lifecycle: 'new' | 'preexisting' = input.lifecycle ?? 'new'
 
   // 케이블 — 같은 프로젝트인지 + 코어 수 검증
   const { data: cRow } = await supabase
@@ -484,7 +491,7 @@ export async function addSubscriptionCoresFromCanvas(input: {
       cable_id: input.cable_id,
       core_range_start: core,
       core_range_end: core,
-      lifecycle: 'new',
+      lifecycle,
       status: null,
       is_terminal: true, // 청약 = 가입자 종단
       is_auto_assigned: false,
@@ -503,7 +510,67 @@ export async function addSubscriptionCoresFromCanvas(input: {
   }
 
   revalidatePath(`/relocation/${input.project_id}`)
-  return { ok: true, created, skipped, circuit_id: circuitId, entered_role: enteredRole }
+  return {
+    ok: true,
+    created,
+    skipped,
+    circuit_id: circuitId,
+    entered_role: enteredRole,
+    lifecycle,
+  }
+}
+
+
+/**
+ * 작업자 「사용 확정」 — 이 케이블의 designer 입력 신설 코어를 worker 로 전환.
+ *   기존 코어/회선/lifecycle 모두 그대로 유지, entered_role 만 'designer' → 'worker'.
+ *   효과: 케이블 라벨이 파랑(설계자) → 빨강(작업자) 이동, 기별에 반영됨.
+ */
+export async function confirmDesignerCoresAsWorker(input: {
+  project_id: string
+  cable_id: string
+}): Promise<{ ok: true; updated: number } | { ok: false; error: string }> {
+  if (!input.project_id || !input.cable_id) {
+    return { ok: false, error: '케이블 정보가 없습니다' }
+  }
+  const { supabase } = await requireMember()
+  const { data, error } = await supabase
+    .from('relocation_core_assignments')
+    .update({ entered_role: 'worker' })
+    .eq('project_id', input.project_id)
+    .eq('cable_id', input.cable_id)
+    .eq('entered_role', 'designer')
+    .eq('lifecycle', 'new')
+    .select('id')
+  if (error) return { ok: false, error: '사용확정 실패: ' + error.message }
+  revalidatePath(`/relocation/${input.project_id}`)
+  return { ok: true, updated: (data ?? []).length }
+}
+
+
+/**
+ * 작업자 「변경」 — 이 케이블의 designer 입력 신설 코어를 모두 삭제.
+ *   삭제 후 popover 에서 사용자가 새 코어를 입력하게 한다 (작업자 entered_role 자동).
+ */
+export async function removeDesignerCoresOnCable(input: {
+  project_id: string
+  cable_id: string
+}): Promise<{ ok: true; removed: number } | { ok: false; error: string }> {
+  if (!input.project_id || !input.cable_id) {
+    return { ok: false, error: '케이블 정보가 없습니다' }
+  }
+  const { supabase } = await requireMember()
+  const { data, error } = await supabase
+    .from('relocation_core_assignments')
+    .delete()
+    .eq('project_id', input.project_id)
+    .eq('cable_id', input.cable_id)
+    .eq('entered_role', 'designer')
+    .eq('lifecycle', 'new')
+    .select('id')
+  if (error) return { ok: false, error: '변경 실패: ' + error.message }
+  revalidatePath(`/relocation/${input.project_id}`)
+  return { ok: true, removed: (data ?? []).length }
 }
 
 
