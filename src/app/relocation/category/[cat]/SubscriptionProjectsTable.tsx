@@ -387,6 +387,71 @@ export function SubscriptionProjectsTable({
     setPrefs({ ...prefs, order })
   }
 
+  // ── 컬럼 헤더 드래그·드롭 reorder (HTML5 drag API) ──
+  // 헤더를 좌클릭 후 드래그 → 다른 헤더 위에 드롭하면 그 위치로 삽입.
+  // 드롭 위치는 mouse x 가 target 의 좌·우 절반 중 어디인지로 before/after 결정.
+  const [draggingId, setDraggingId] = useState<ColumnId | null>(null)
+  const [dragOverId, setDragOverId] = useState<ColumnId | null>(null)
+  const [dragOverSide, setDragOverSide] = useState<'before' | 'after'>('before')
+
+  const cancelDrag = () => {
+    setDraggingId(null)
+    setDragOverId(null)
+  }
+
+  const onHeaderDragStart = (e: React.DragEvent<HTMLTableCellElement>, id: ColumnId) => {
+    // resize 핸들에서 시작된 drag 는 무시 — 컬럼 폭 조절과 충돌 회피
+    if ((e.target as HTMLElement).closest('[data-resize-handle]')) {
+      e.preventDefault()
+      return
+    }
+    setDraggingId(id)
+    try {
+      e.dataTransfer.effectAllowed = 'move'
+      e.dataTransfer.setData('text/plain', id) // Firefox 호환
+    } catch {}
+  }
+
+  const onHeaderDragOver = (e: React.DragEvent<HTMLTableCellElement>, id: ColumnId) => {
+    if (!draggingId) return
+    e.preventDefault()
+    e.dataTransfer.dropEffect = 'move'
+    if (id === draggingId) {
+      setDragOverId(null)
+      return
+    }
+    const rect = e.currentTarget.getBoundingClientRect()
+    const x = e.clientX - rect.left
+    setDragOverId(id)
+    setDragOverSide(x < rect.width / 2 ? 'before' : 'after')
+  }
+
+  const onHeaderDrop = (e: React.DragEvent<HTMLTableCellElement>, id: ColumnId) => {
+    e.preventDefault()
+    if (!draggingId || draggingId === id) {
+      cancelDrag()
+      return
+    }
+    const order = [...prefs.order]
+    const fromIdx = order.indexOf(draggingId)
+    if (fromIdx < 0) {
+      cancelDrag()
+      return
+    }
+    order.splice(fromIdx, 1)
+    let toIdx = order.indexOf(id)
+    if (toIdx < 0) {
+      cancelDrag()
+      return
+    }
+    if (dragOverSide === 'after') toIdx++
+    order.splice(toIdx, 0, draggingId)
+    setPrefs({ ...prefs, order })
+    cancelDrag()
+  }
+
+  const onHeaderDragEnd = () => cancelDrag()
+
   const resetPrefs = () => {
     setPrefs(defaultPrefs(category))
     setSortChain([])
@@ -669,13 +734,27 @@ export function SubscriptionProjectsTable({
                   : sortChain[sortIdx].dir === 'asc'
                     ? ArrowUp
                     : ArrowDown
+                const isDragging = draggingId === col.id
+                const isDragOver = dragOverId === col.id
                 return (
                   <th
                     key={col.id}
                     scope="col"
+                    draggable
+                    onDragStart={(e) => onHeaderDragStart(e, col.id)}
+                    onDragOver={(e) => onHeaderDragOver(e, col.id)}
+                    onDrop={(e) => onHeaderDrop(e, col.id)}
+                    onDragEnd={onHeaderDragEnd}
                     className={
-                      'relative border-r border-slate-200 px-2 py-1.5 text-left text-[10px] font-semibold whitespace-nowrap ' +
-                      (idx === 0 ? 'sticky left-0 bg-slate-50 z-10' : '')
+                      'relative border-r border-slate-200 px-2 py-1.5 text-left text-[10px] font-semibold whitespace-nowrap select-none cursor-grab ' +
+                      (idx === 0 ? 'sticky left-0 bg-slate-50 z-10 ' : '') +
+                      (isDragging ? 'opacity-50 ' : '') +
+                      (isDragOver && dragOverSide === 'before'
+                        ? 'shadow-[inset_3px_0_0_0_rgb(59,130,246)] '
+                        : '') +
+                      (isDragOver && dragOverSide === 'after'
+                        ? 'shadow-[inset_-3px_0_0_0_rgb(59,130,246)] '
+                        : '')
                     }
                   >
                     <button
@@ -685,7 +764,8 @@ export function SubscriptionProjectsTable({
                         'inline-flex items-center gap-1 rounded px-1 -mx-1 py-0.5 hover:bg-slate-100 max-w-full ' +
                         (isSorted ? 'text-slate-900' : 'text-slate-600')
                       }
-                      title="클릭 = 정렬 / Shift+클릭 = 다중 정렬 추가"
+                      title="클릭 = 정렬 / Shift+클릭 = 다중 정렬 추가 / 헤더 드래그 = 순서 변경"
+                      draggable={false}
                     >
                       <span className="truncate">{col.label}</span>
                       {isSorted && sortChain.length > 1 && (
@@ -700,8 +780,9 @@ export function SubscriptionProjectsTable({
                         }
                       />
                     </button>
-                    {/* resize 핸들 — 우측 가장자리 */}
+                    {/* resize 핸들 — 우측 가장자리. data-resize-handle 로 drag 시작 차단 */}
                     <div
+                      data-resize-handle
                       onPointerDown={(e) => onResizeStart(e, col.id)}
                       className={
                         'absolute right-0 top-0 bottom-0 w-1.5 cursor-col-resize hover:bg-blue-400/60 ' +
