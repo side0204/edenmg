@@ -299,11 +299,18 @@ export function SubscriptionProjectsTable({
   rows,
   category,
   initialPrefs,
+  theme,
 }: {
   rows: RelocationProjectRow[]
   category: Cat
   initialPrefs: { order: string[]; hidden: string[]; widths: Record<string, number> } | null
+  theme?: { headerBg: string; rowHover: string; cardBorder: string }
 }) {
+  const t = theme ?? {
+    headerBg: 'bg-slate-50',
+    rowHover: 'hover:bg-slate-50',
+    cardBorder: '',
+  }
   const [prefs, setPrefs] = useState<Prefs>(() => normalizePrefs(category, initialPrefs))
   const [settingsOpen, setSettingsOpen] = useState(false)
   // 다중 검색 (최대 4개, AND 필터). 각 entry 는 컬럼 선택 + 텍스트 OR 날짜 from~to.
@@ -808,7 +815,10 @@ export function SubscriptionProjectsTable({
               <Link
                 key={row.id}
                 href={`/relocation/${row.id}`}
-                className="block rounded-lg border border-slate-200 bg-white p-3 active:bg-slate-50"
+                className={
+                  'block rounded-lg border border-slate-200 bg-white p-3 active:bg-slate-50 ' +
+                  t.cardBorder
+                }
               >
                 <div className="flex items-start justify-between gap-2">
                   <h3 className="text-base font-semibold text-slate-900 line-clamp-2">
@@ -858,7 +868,7 @@ export function SubscriptionProjectsTable({
               <col key={col.id} style={{ width: widthFor(col.id) + 'px' }} />
             ))}
           </colgroup>
-          <thead className="border-b border-slate-300 bg-slate-50">
+          <thead className={'border-b border-slate-300 ' + t.headerBg}>
             <tr>
               {visibleColumns.map((col, idx) => {
                 const sortIdx = sortIndexOf(col.id)
@@ -881,7 +891,7 @@ export function SubscriptionProjectsTable({
                     onDragEnd={onHeaderDragEnd}
                     className={
                       'relative border-r border-slate-200 px-2 py-1.5 text-center text-[10px] font-semibold whitespace-nowrap select-none cursor-grab ' +
-                      (idx === 0 ? 'sticky left-0 bg-slate-50 z-10 ' : '') +
+                      (idx === 0 ? 'sticky left-0 z-10 ' + t.headerBg + ' ' : '') +
                       (isDragging ? 'opacity-50 ' : '') +
                       (isDragOver && dragOverSide === 'before'
                         ? 'shadow-[inset_3px_0_0_0_rgb(59,130,246)] '
@@ -944,7 +954,7 @@ export function SubscriptionProjectsTable({
               </tr>
             ) : (
               filteredRows.map((row) => (
-                <tr key={row.id} className="border-t border-slate-100 hover:bg-slate-50">
+                <tr key={row.id} className={'border-t border-slate-100 ' + t.rowHover}>
                   {visibleColumns.map((col, idx) => (
                     <td
                       key={col.id}

@@ -16,6 +16,38 @@ import {
 
 // 공사 설계 — 카테고리별 프로젝트 목록 (테이블 게시판형).
 // 권한: 회사 직원 누구나 (RLS 가 회사 스코프 강제).
+//
+// 카테고리별 권장 색상 (허브 카드 색과 일치):
+//   청약   = emerald (계약·청약의 진행성)
+//   계획   = blue (망 설계의 정적)
+//   지장이설 = amber (긴급·도로공사 주의)
+
+type CategoryTheme = {
+  pageBg: string
+  headerAccent: string
+  iconBg: string
+  iconText: string
+}
+const CATEGORY_THEME: Record<'청약' | '계획' | '지장이설', CategoryTheme> = {
+  청약: {
+    pageBg: 'bg-emerald-50/40',
+    headerAccent: 'border-l-4 border-emerald-500',
+    iconBg: 'bg-emerald-100',
+    iconText: 'text-emerald-700',
+  },
+  계획: {
+    pageBg: 'bg-blue-50/40',
+    headerAccent: 'border-l-4 border-blue-500',
+    iconBg: 'bg-blue-100',
+    iconText: 'text-blue-700',
+  },
+  지장이설: {
+    pageBg: 'bg-amber-50/40',
+    headerAccent: 'border-l-4 border-amber-500',
+    iconBg: 'bg-amber-100',
+    iconText: 'text-amber-700',
+  },
+}
 
 type RawProjectRow = {
   id: string
@@ -172,11 +204,17 @@ export default async function RelocationCategoryListPage({
   }))
 
   const newProjectHref = `/relocation/new?cat=${catRaw}`
+  const theme = CATEGORY_THEME[category]
 
   return (
-    <main className="min-h-screen p-3 sm:p-6">
+    <main className={'min-h-screen p-3 sm:p-6 ' + theme.pageBg}>
       <div className="mx-auto max-w-[100rem] space-y-4 sm:space-y-5">
-        <header className="space-y-3 sm:space-y-0 sm:flex sm:items-center sm:justify-between sm:gap-3">
+        <header
+          className={
+            'rounded-lg bg-white/70 px-4 py-3 sm:px-5 sm:py-4 space-y-3 sm:space-y-0 sm:flex sm:items-center sm:justify-between sm:gap-3 ' +
+            theme.headerAccent
+          }
+        >
           <div>
             <Link
               href="/relocation"
@@ -225,6 +263,23 @@ export default async function RelocationCategoryListPage({
             rows={rows}
             category={category}
             initialPrefs={initialPrefs}
+            theme={{
+              headerBg: {
+                청약: 'bg-emerald-50',
+                계획: 'bg-blue-50',
+                지장이설: 'bg-amber-50',
+              }[category],
+              rowHover: {
+                청약: 'hover:bg-emerald-50/70',
+                계획: 'hover:bg-blue-50/70',
+                지장이설: 'hover:bg-amber-50/70',
+              }[category],
+              cardBorder: {
+                청약: 'border-l-2 border-l-emerald-400',
+                계획: 'border-l-2 border-l-blue-400',
+                지장이설: 'border-l-2 border-l-amber-400',
+              }[category],
+            }}
           />
         )}
       </div>
