@@ -3260,7 +3260,22 @@ export default function TopologyCanvas({
             off.dy,
             mode === 'map' ? 'map' : 'schematic',
           )
-          if (!result.ok) toast.error(result.error)
+          if (!result.ok) {
+            toast.error(result.error)
+          } else {
+            // 저장 성공 — 로컬 override 제거. 이제 SVG 가 DB 의 해당 모드 컬럼에서
+            // 값을 읽어 표시 (다른 모드로 전환해도 그 모드의 offset 만 적용).
+            //   이걸 안 하면 한쪽 모드에서 드래그한 offset 이 다른 모드 라벨에도
+            //   계속 적용돼 보임 (owner 보고 2026-05-25).
+            //   router.refresh() 가 새 facilities props 를 받아오므로 자연스럽게
+            //   labelOffsets 우선순위가 사라짐.
+            setLabelOffsets((prev) => {
+              const next = { ...prev }
+              delete next[ld.id]
+              return next
+            })
+            router.refresh()
+          }
         }
       } else {
         // 이동 없이 클릭 — 시설 선택 (도형 클릭과 동일)
@@ -3407,6 +3422,9 @@ export default function TopologyCanvas({
                 setMode('schematic')
                 setCaptureActive(false)
                 setAutoCaptureActive(false)
+                // 모드 전환 시 라벨 로컬 override 비움 — 한쪽 모드에서 만든 drag offset 이
+                // 다른 모드 라벨에도 적용되는 현상 방지 (owner 2026-05-25).
+                setLabelOffsets({})
               }}
               className={
                 'inline-flex items-center gap-1 px-2 h-7 text-[11px] font-medium ' +
@@ -3425,6 +3443,7 @@ export default function TopologyCanvas({
                 // 지도 모드에 없는 도식 전용 도구는 정리
                 setAddTool(null)
                 setCableTool(null)
+                setLabelOffsets({})
               }}
               className={
                 'inline-flex items-center gap-1 px-2 h-7 text-[11px] font-medium border-l border-slate-300 ' +
