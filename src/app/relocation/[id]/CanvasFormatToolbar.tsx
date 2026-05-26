@@ -46,12 +46,15 @@ type CableLineStylePatch = {
   width_scale?: number | null
 }
 
+// mode: 'schematic' | 'map' — 어느 컬럼(label_style / label_style_map · line_style / line_style_map)을 갱신할지.
+//   도식·지도 독립 저장 (owner 2026-05-26, 마이그 0082).
 export type CanvasFormatTarget =
   | {
       kind: 'facility'
       projectId: string
       facilityId: string
       name: string
+      mode: 'schematic' | 'map'
       style: FacilityLabelStyle
     }
   | {
@@ -59,6 +62,7 @@ export type CanvasFormatTarget =
       projectId: string
       cableId: string
       cableCode: string
+      mode: 'schematic' | 'map'
       style: CableLineStyle
     }
 
@@ -109,6 +113,7 @@ export default function CanvasFormatToolbar({
     const result = await updateFacilityLabelStyle({
       project_id: target.projectId,
       facility_id: target.facilityId,
+      mode: target.mode,
       style: patch,
     })
     setBusy(false)
@@ -125,6 +130,7 @@ export default function CanvasFormatToolbar({
     const result = await updateCableLineStyle({
       project_id: target.projectId,
       cable_id: target.cableId,
+      mode: target.mode,
       style: patch,
     })
     setBusy(false)
@@ -155,6 +161,17 @@ export default function CanvasFormatToolbar({
       <div className="flex items-center gap-1.5 rounded-lg border border-slate-300 bg-white px-2 py-1.5 shadow-md text-xs">
         <span className="font-bold text-slate-700 mr-1 max-w-[160px] truncate" title={target.name}>
           📝 {target.name || '(이름 없음)'}
+        </span>
+        <span
+          className={
+            'rounded px-1.5 py-0.5 text-[10px] font-bold ' +
+            (target.mode === 'map'
+              ? 'bg-sky-100 text-sky-800 border border-sky-300'
+              : 'bg-slate-100 text-slate-700 border border-slate-300')
+          }
+          title="이 서식은 현재 모드 전용입니다 (도식/지도 독립 저장)"
+        >
+          {target.mode === 'map' ? '지도' : '도식'}
         </span>
         <span className="h-5 border-l border-slate-200" />
         {/* 폰트 family */}
@@ -262,6 +279,17 @@ export default function CanvasFormatToolbar({
     <div className="flex items-center gap-1.5 rounded-lg border border-slate-300 bg-white px-2 py-1.5 shadow-md text-xs">
       <span className="font-bold text-slate-700 mr-1 max-w-[160px] truncate" title={target.cableCode}>
         🔗 {target.cableCode}
+      </span>
+      <span
+        className={
+          'rounded px-1.5 py-0.5 text-[10px] font-bold ' +
+          (target.mode === 'map'
+            ? 'bg-sky-100 text-sky-800 border border-sky-300'
+            : 'bg-slate-100 text-slate-700 border border-slate-300')
+        }
+        title="이 두께는 현재 모드 전용입니다 (도식/지도 독립 저장)"
+      >
+        {target.mode === 'map' ? '지도' : '도식'}
       </span>
       <span className="h-5 border-l border-slate-200" />
       <span className="text-[11px] font-medium text-slate-600">두께</span>

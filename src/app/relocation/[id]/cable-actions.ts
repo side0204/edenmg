@@ -517,10 +517,13 @@ export async function deleteCable(formData: FormData) {
  *   width_scale: 1~5 정수 (1=얇음, 2=얇은보통, 3=보통, 4=굵음, 5=매우굵음).
  *   null 로 들어오면 키 삭제 → 기본 두께 복귀.
  *   jsonb merge — 다른 스타일 키가 추후 추가돼도 보존.
+ *   mode='schematic' 이면 line_style, 'map' 이면 line_style_map 컬럼 갱신.
+ *   (owner 2026-05-26 — 도식/지도 독립 저장. 마이그 0082)
  */
 export async function updateCableLineStyle(input: {
   project_id: string
   cable_id: string
+  mode?: 'schematic' | 'map'
   style: { width_scale?: number | null }
 }): Promise<{ ok: true } | { ok: false; error: string }> {
   const projectId = String(input.project_id ?? '').trim()
@@ -529,6 +532,8 @@ export async function updateCableLineStyle(input: {
   if (!input.style || typeof input.style !== 'object') {
     return { ok: false, error: '스타일이 없습니다' }
   }
+  const mode = input.mode === 'map' ? 'map' : 'schematic'
+  const column = mode === 'map' ? 'line_style_map' : 'line_style'
 
   if (input.style.width_scale !== null && input.style.width_scale !== undefined) {
     const ws = input.style.width_scale
@@ -541,12 +546,12 @@ export async function updateCableLineStyle(input: {
 
   const { data: row, error: readErr } = await supabase
     .from('relocation_cables')
-    .select('line_style')
+    .select(column)
     .eq('id', cableId)
     .eq('project_id', projectId)
     .maybeSingle()
   if (readErr) return { ok: false, error: '선 스타일 조회 실패: ' + readErr.message }
-  const existing = ((row?.line_style as Record<string, unknown>) ?? {}) as Record<string, unknown>
+  const existing = (((row as unknown as Record<string, unknown>)?.[column] as Record<string, unknown>) ?? {}) as Record<string, unknown>
   const next: Record<string, unknown> = { ...existing }
   for (const [k, v] of Object.entries(input.style)) {
     if (v === null) delete next[k]
@@ -555,7 +560,7 @@ export async function updateCableLineStyle(input: {
 
   const { error } = await supabase
     .from('relocation_cables')
-    .update({ line_style: next })
+    .update({ [column]: next })
     .eq('id', cableId)
     .eq('project_id', projectId)
   if (error) return { ok: false, error: '선 스타일 저장 실패: ' + error.message }

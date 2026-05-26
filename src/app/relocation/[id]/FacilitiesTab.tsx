@@ -40,8 +40,16 @@ export type FacilityRow = {
   label_dy_map: number
   install_order: number | null
   created_by: string | null
-  // 라벨 스타일 사용자 정의 (마이그 0081). 캔버스 상단 「서식」 툴바.
+  // 라벨 스타일 사용자 정의 (마이그 0081·0082). 캔버스 상단 「서식」 툴바.
+  //   label_style — 도식 모드 전용. label_style_map — 지도 모드 전용.
   label_style?: {
+    font_size_scale?: number
+    color?: string
+    font_family?: string
+    bold?: boolean
+    italic?: boolean
+  } | null
+  label_style_map?: {
     font_size_scale?: number
     color?: string
     font_family?: string

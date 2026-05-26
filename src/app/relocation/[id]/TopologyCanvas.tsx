@@ -83,6 +83,7 @@ import {
 import LegendPanel from './LegendPanel'
 import CanvasFormatToolbar, { type CanvasFormatTarget } from './CanvasFormatToolbar'
 import SpliceConnectModal from './SpliceConnectModal'
+import { deleteSpliceGroup } from './splice-actions'
 import RoadviewPanel from './RoadviewPanel'
 import SketchOverlay from './SketchOverlay'
 import FieldInspectionSaveDialog from './FieldInspectionSaveDialog'
@@ -166,8 +167,16 @@ type FacilityNode = {
   label_dy_map: number
   install_order: number | null
   created_by: string | null  // employees.id — 본인 작업분 필터링용
-  // 라벨 스타일 사용자 정의 (마이그 0081). 상단 「서식」 툴바.
+  // 라벨 스타일 사용자 정의 (마이그 0081·0082). 상단 「서식」 툴바.
+  //   labelStyle = 도식 모드 전용, labelStyleMap = 지도 모드 전용.
   labelStyle: {
+    font_size_scale?: number
+    color?: string
+    font_family?: string
+    bold?: boolean
+    italic?: boolean
+  }
+  labelStyleMap: {
     font_size_scale?: number
     color?: string
     font_family?: string
@@ -208,9 +217,11 @@ type CableEdge = {
     worker?: { dx: number; dy: number }
     single?: { dx: number; dy: number }
   }
-  // 케이블 선 스타일 사용자 정의 (마이그 0081). 상단 「서식」 툴바.
+  // 케이블 선 스타일 사용자 정의 (마이그 0081·0082). 상단 「서식」 툴바.
   //   width_scale: 1~5 (3=기본). 두께 = baseWidth × CABLE_WIDTH_SCALE_TABLE[ws]
+  //   lineStyle = 도식 모드 전용, lineStyleMap = 지도 모드 전용.
   lineStyle: { width_scale?: number }
+  lineStyleMap: { width_scale?: number }
 }
 
 // 시설 신규 배치 대기 — 도식 모드는 캔버스 픽셀(xy), 지도 모드는 GPS 좌표(latlng)
@@ -1168,6 +1179,7 @@ export default function TopologyCanvas({
   //   둘 다 선택돼 있으면 마지막에 클릭된 쪽 우선 (마이그 0081).
   //   다중 선택(selectedIds 2개+) 일 때는 표시 안 함 — 일괄 변경은 v2.
   const formatToolbarTarget: CanvasFormatTarget | null = useMemo(() => {
+    const targetMode: 'schematic' | 'map' = mode === 'map' ? 'map' : 'schematic'
     if (selectedCableId) {
       const cable = cables.find((c) => c.id === selectedCableId)
       if (cable) {
@@ -1176,7 +1188,9 @@ export default function TopologyCanvas({
           projectId,
           cableId: cable.id,
           cableCode: cable.cable_code,
-          style: cable.lineStyle ?? {},
+          mode: targetMode,
+          // 현재 모드의 컬럼 값 — 도식/지도 독립 저장 (마이그 0082).
+          style: (targetMode === 'map' ? cable.lineStyleMap : cable.lineStyle) ?? {},
         }
       }
     }
@@ -1188,12 +1202,13 @@ export default function TopologyCanvas({
           projectId,
           facilityId: fac.id,
           name: fac.name,
-          style: fac.labelStyle ?? {},
+          mode: targetMode,
+          style: (targetMode === 'map' ? fac.labelStyleMap : fac.labelStyle) ?? {},
         }
       }
     }
     return null
-  }, [selectedCableId, selectedId, cables, facilities, projectId])
+  }, [mode, selectedCableId, selectedId, cables, facilities, projectId])
 
   // 시설 「작업내역입력」 popover — 청약 모드 전용. 시설 선택과 별도 토글.
   //   시설 선택 시 popover 열림. popover 안 클릭으로 잘못 닫히는 것 방지 위해
@@ -3402,24 +3417,19 @@ export default function TopologyCanvas({
   ])
 
   // splice → 연결할 박스 쌍 derive. 같은 (cable, role) 쌍은 1줄로 묶음.
-  //   key = `${k1}::${k2}` (정렬), value = { aKey, bKey, count, isContinuous, facilityId }
-  const spliceConnections = useMemo(() => {
-    if (mode === 'map') return [] as Array<{
-      aKey: string
-      bKey: string
-      count: number
-      isContinuous: boolean
-      facilityId: string
-    }>
+  //   key = `${k1}::${k2}` (정렬), value = { aKey, bKey, count, isContinuous, facilityId, spliceIds }
+  type SpliceConnection = {
+    aKey: string
+    bKey: string
+    count: number
+    isContinuous: boolean
+    facilityId: string
+    spliceIds: string[]
+  }
+  const spliceConnections = useMemo<SpliceConnection[]>(() => {
+    if (mode === 'map') return []
     const isSubscriptionCtx = projectCategory === '청약'
-    type Conn = {
-      aKey: string
-      bKey: string
-      count: number
-      isContinuous: boolean
-      facilityId: string
-    }
-    const map = new Map<string, Conn>()
+    const map = new Map<string, SpliceConnection>()
     for (const s of splices ?? []) {
       // 어떤 박스(role)에 속하는지 — 청약은 entered_role + lifecycle='new'·preexisting 둘 다,
       //   비-청약은 항상 'single'.
@@ -3436,6 +3446,7 @@ export default function TopologyCanvas({
       const existing = map.get(groupKey)
       if (existing) {
         existing.count += 1
+        existing.spliceIds.push(s.id)
         if (!s.is_continuous) existing.isContinuous = false
       } else {
         map.set(groupKey, {
@@ -3444,11 +3455,32 @@ export default function TopologyCanvas({
           count: 1,
           isContinuous: s.is_continuous,
           facilityId: s.facility_id,
+          spliceIds: [s.id],
         })
       }
     }
     return [...map.values()]
   }, [mode, projectCategory, splices, coreAssignmentByCableCore])
+
+  // splice 그룹 취소 핸들러 (owner 2026-05-26) — 연결선의 X 버튼 클릭.
+  //   confirm 한 번 받고 bulk delete 호출.
+  const handleCancelSpliceGroup = async (
+    spliceIds: string[],
+    count: number,
+  ) => {
+    if (!spliceIds || spliceIds.length === 0) return
+    if (!confirm(`접속 ${count}개를 취소(삭제)하시겠습니까?`)) return
+    const result = await deleteSpliceGroup({
+      project_id: projectId,
+      splice_ids: spliceIds,
+    })
+    if (!result.ok) {
+      toast.error(result.error)
+      return
+    }
+    toast.success(`접속 ${result.deleted}개를 취소했습니다`)
+    router.refresh()
+  }
 
   // waypoint 추가 — 선분 i (점 i ~ 점 i+1 사이) 클릭 시 waypoints 의 index i 에 삽입
   const addWaypoint = async (cableId: string, segmentIndex: number, x: number, y: number) => {
@@ -5762,7 +5794,7 @@ export default function TopologyCanvas({
               (coreBoxAnchors 가 coreLabelOffsets 의존하므로 자동 재계산).
               여러 splice 가 같은 (cable·role) 쌍 → 하나의 굵은 선 (count 배지). */}
           {mode === 'schematic' && spliceConnections.length > 0 && (
-            <g pointerEvents="none">
+            <g>
               {spliceConnections.map((conn) => {
                 const a = coreBoxAnchors.get(conn.aKey)
                 const b = coreBoxAnchors.get(conn.bKey)
@@ -5806,6 +5838,12 @@ export default function TopologyCanvas({
                   path = `M ${fromX} ${fromY} L ${mid} L ${toX} ${toY}`
                 }
                 const stroke = conn.isContinuous ? '#10b981' : '#f59e0b'
+                const midX = (fromX + toX) / 2
+                const midY = (fromY + toY) / 2
+                // 취소 X 버튼 위치 — 가운데 배지가 있으면 그 옆, 없으면 가운데.
+                const hasBadge = conn.count > 1
+                const cancelX = hasBadge ? midX + 16 : midX
+                const cancelY = midY
                 return (
                   <g key={`${conn.aKey}::${conn.bKey}::${conn.facilityId}`}>
                     <path
@@ -5816,30 +5854,72 @@ export default function TopologyCanvas({
                       strokeOpacity={0.85}
                       strokeLinecap="round"
                       strokeLinejoin="round"
+                      pointerEvents="none"
                     />
                     {/* 끝점 dot — 박스에 명확히 닿아 있음 표시 */}
-                    <circle cx={fromX} cy={fromY} r={3.5} fill={stroke} />
-                    <circle cx={toX} cy={toY} r={3.5} fill={stroke} />
+                    <circle cx={fromX} cy={fromY} r={3.5} fill={stroke} pointerEvents="none" />
+                    <circle cx={toX} cy={toY} r={3.5} fill={stroke} pointerEvents="none" />
                     {/* 코어 개수 배지 (2개 이상일 때만) */}
-                    {conn.count > 1 && (
-                      <g>
+                    {hasBadge && (
+                      <g pointerEvents="none">
                         <circle
-                          cx={(fromX + toX) / 2}
-                          cy={(fromY + toY) / 2}
+                          cx={midX}
+                          cy={midY}
                           r={11}
                           fill={stroke}
                           stroke="white"
                           strokeWidth={1.5}
                         />
                         <text
-                          x={(fromX + toX) / 2}
-                          y={(fromY + toY) / 2 + 4}
+                          x={midX}
+                          y={midY + 4}
                           textAnchor="middle"
                           fill="white"
                           style={{ fontSize: 11, fontWeight: 800, fontFamily: 'system-ui' }}
                         >
                           {conn.count}
                         </text>
+                      </g>
+                    )}
+                    {/* 취소 X 버튼 (owner 2026-05-26) — 클릭 시 confirm + 그룹 splice 일괄 삭제.
+                        editable 일 때만 표시. */}
+                    {editable && (
+                      <g
+                        style={{ cursor: 'pointer' }}
+                        onClick={(e) => {
+                          e.stopPropagation()
+                          void handleCancelSpliceGroup(conn.spliceIds, conn.count)
+                        }}
+                      >
+                        <circle
+                          cx={cancelX}
+                          cy={cancelY}
+                          r={9}
+                          fill="white"
+                          stroke="#dc2626"
+                          strokeWidth={1.5}
+                        />
+                        <line
+                          x1={cancelX - 4}
+                          y1={cancelY - 4}
+                          x2={cancelX + 4}
+                          y2={cancelY + 4}
+                          stroke="#dc2626"
+                          strokeWidth={1.8}
+                          strokeLinecap="round"
+                          pointerEvents="none"
+                        />
+                        <line
+                          x1={cancelX + 4}
+                          y1={cancelY - 4}
+                          x2={cancelX - 4}
+                          y2={cancelY + 4}
+                          stroke="#dc2626"
+                          strokeWidth={1.8}
+                          strokeLinecap="round"
+                          pointerEvents="none"
+                        />
+                        <title>접속 취소 ({conn.count}개)</title>
                       </g>
                     )}
                   </g>
@@ -5879,7 +5959,9 @@ export default function TopologyCanvas({
               4: 1.5,
               5: 2.5,
             }
-            const widthScale = c.lineStyle?.width_scale ?? 3
+            // 도식/지도 독립 — 현재 모드의 컬럼 값 우선 (마이그 0082).
+            const widthScale =
+              (mode === 'map' ? c.lineStyleMap?.width_scale : c.lineStyle?.width_scale) ?? 3
             const widthMultiplier = WIDTH_SCALE_TABLE[widthScale] ?? 1
             const style = {
               ...baseStyle,
@@ -6393,12 +6475,13 @@ export default function TopologyCanvas({
             // 굵기 — 지도 모드는 650, 도식 모드는 큼직하게
             const facCodeWeightBase = mode === 'map' ? 650 : 700
             const facNameWeightBase = 600
-            // 사용자 정의 라벨 스타일 (마이그 0081) — 상단 「서식」 툴바로 변경.
+            // 사용자 정의 라벨 스타일 (마이그 0081·0082) — 상단 「서식」 툴바로 변경.
             //   font_size_scale: 1=기본, 1.5=1.5배 등
             //   bold: true → weight 850, italic: true → fontStyle italic
             //   color: undefined → 기본 className 색 (검정·신설 빨강 분기) 유지
             //   font_family: undefined → LABEL_FONT (Pretendard)
-            const fls = f.labelStyle ?? {}
+            //   도식/지도 독립 — 현재 모드의 컬럼 값 (마이그 0082).
+            const fls = (mode === 'map' ? f.labelStyleMap : f.labelStyle) ?? {}
             const sizeScale = fls.font_size_scale ?? 1
             const facCodeFont = facCodeFontBase * sizeScale
             const facNameFont = facNameFontBase * sizeScale

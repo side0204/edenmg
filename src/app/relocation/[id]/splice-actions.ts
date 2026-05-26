@@ -209,3 +209,31 @@ export async function deleteSplice(
   revalidatePath(`/relocation/${projectId}`)
   return { ok: true }
 }
+
+/**
+ * 코어 박스 사이 연결 취소 — 캔버스 splice 연결선 클릭 시 호출 (owner 2026-05-26).
+ *   spliceIds 가 같은 연결선 그룹(같은 cable·role 쌍·같은 facility)의 모든 splice 행을 가리킴.
+ *   bulk delete — 한 번에 N행 제거.
+ *   회사 스코프는 RLS 가 강제.
+ */
+export async function deleteSpliceGroup(input: {
+  project_id: string
+  splice_ids: string[]
+}): Promise<{ ok: true; deleted: number } | { ok: false; error: string }> {
+  const projectId = String(input.project_id ?? '').trim()
+  if (!projectId) return { ok: false, error: '프로젝트 정보가 없습니다' }
+  const ids = (input.splice_ids ?? []).filter((s) => typeof s === 'string' && s.length > 0)
+  if (ids.length === 0) return { ok: false, error: '취소할 접속이 없습니다' }
+
+  const { supabase } = await requireMember()
+
+  const { error, count } = await supabase
+    .from('relocation_splices')
+    .delete({ count: 'exact' })
+    .in('id', ids)
+    .eq('project_id', projectId)
+  if (error) return { ok: false, error: '연결 취소 실패: ' + error.message }
+
+  revalidatePath(`/relocation/${projectId}`)
+  return { ok: true, deleted: count ?? ids.length }
+}

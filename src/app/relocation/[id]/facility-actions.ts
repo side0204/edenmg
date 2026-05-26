@@ -1070,10 +1070,13 @@ export async function updateFacilityClosureType(input: {
  * 시설 라벨 스타일 갱신 — 캔버스 상단 「서식」 툴바에서 호출.
  *   부분 갱신: 입력된 키만 덮어쓰고 나머지는 보존 (jsonb merge).
  *   value=null 로 들어온 키는 삭제 → 캔버스 기본값 복귀.
+ *   mode='schematic' 이면 label_style, 'map' 이면 label_style_map 컬럼 갱신.
+ *   (owner 2026-05-26 — 도식/지도 독립 저장. 마이그 0082)
  */
 export async function updateFacilityLabelStyle(input: {
   project_id: string
   facility_id: string
+  mode?: 'schematic' | 'map'
   style: {
     font_size_scale?: number | null
     color?: string | null
@@ -1088,6 +1091,8 @@ export async function updateFacilityLabelStyle(input: {
   if (!input.style || typeof input.style !== 'object') {
     return { ok: false, error: '스타일이 없습니다' }
   }
+  const mode = input.mode === 'map' ? 'map' : 'schematic'
+  const column = mode === 'map' ? 'label_style_map' : 'label_style'
 
   // 입력값 검증
   const VALID_FAMILIES = ['Pretendard', 'monospace', 'serif']
@@ -1115,15 +1120,15 @@ export async function updateFacilityLabelStyle(input: {
 
   const { supabase } = await requireMember()
 
-  // 기존 jsonb merge
+  // 기존 jsonb merge — 모드별 컬럼 분기
   const { data: row, error: readErr } = await supabase
     .from('relocation_facilities')
-    .select('label_style')
+    .select(column)
     .eq('id', facilityId)
     .eq('project_id', projectId)
     .maybeSingle()
   if (readErr) return { ok: false, error: '라벨 스타일 조회 실패: ' + readErr.message }
-  const existing = ((row?.label_style as Record<string, unknown>) ?? {}) as Record<string, unknown>
+  const existing = (((row as unknown as Record<string, unknown>)?.[column] as Record<string, unknown>) ?? {}) as Record<string, unknown>
   const next: Record<string, unknown> = { ...existing }
   for (const [k, v] of Object.entries(input.style)) {
     if (v === null) delete next[k]
@@ -1132,7 +1137,7 @@ export async function updateFacilityLabelStyle(input: {
 
   const { error } = await supabase
     .from('relocation_facilities')
-    .update({ label_style: next })
+    .update({ [column]: next })
     .eq('id', facilityId)
     .eq('project_id', projectId)
   if (error) return { ok: false, error: '라벨 스타일 저장 실패: ' + error.message }
