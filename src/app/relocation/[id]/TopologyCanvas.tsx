@@ -3237,7 +3237,11 @@ export default function TopologyCanvas({
 
     // SVG 배경을 직접 누른 경우만 pan/marquee. 케이블·라벨·시설 위에서 누르면 시작 안 함
     // — setPointerCapture 가 케이블 click 이벤트를 SVG 로 가로채는 것을 방지.
-    if (e.target !== svgRef.current) return
+    //   지도 모드 일괄등록 대기 중에는 투명 rect(data-bulk-bg) 도 SVG 배경처럼 취급.
+    const target = e.target as Element | null
+    const isBulkBgRect =
+      !!target && target.tagName === 'rect' && target.hasAttribute('data-bulk-bg')
+    if (target !== svgRef.current && !isBulkBgRect) return
     // 선택 도구 ON 또는 일괄등록 대기 — pan 대신 marquee(사각 범위 선택) 시작
     if ((selectTool || bulkPayload) && e.button === 0) {
       const { x, y } = toSvgCoord(e.clientX, e.clientY)
@@ -5023,6 +5027,23 @@ export default function TopologyCanvas({
             onPointerCancel={onPointerUp}
             onClick={onCanvasClick}
         >
+          {/* 지도 모드 + 일괄등록 대기 — 투명 rect 로 드래그 영역 확보.
+              SVG 의 기본 pointer-events 는 visiblePainted 라 「투명 배경」 으로는
+              빈 영역 클릭이 안 잡힘. 명시적 rect 가 필요.
+              fill 은 visible 한 검정 1% alpha (브라우저별 안전망 — 'none' 으로 두면
+              파이어폭스 등에서 잡히지 않음). data 속성으로 onSvgPointerDown 이 SVG
+              배경과 동일하게 취급. */}
+          {mode === 'map' && bulkPayload && (
+            <rect
+              data-bulk-bg
+              x="0"
+              y="0"
+              width="100%"
+              height="100%"
+              fill="rgba(0,0,0,0.001)"
+              style={{ cursor: 'crosshair' }}
+            />
+          )}
           {/* 고장점 검색 하이라이트 — 경로 케이블 글로우 + 시설 링 (케이블·노드 아래) */}
           {highlight && (
             <g style={{ pointerEvents: 'none' }}>
