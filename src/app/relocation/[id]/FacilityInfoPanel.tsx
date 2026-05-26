@@ -553,13 +553,16 @@ export default function FacilityInfoPanel({
           {/* 이름 + 실사요청 (위) + 실사내용/비고 (아래, 두 배 크기) + 저장 */}
           <div className="space-y-2">
             <div>
-              <label className="block text-[11px] font-medium text-slate-600">이름</label>
-              <input
-                type="text"
+              <label className="block text-[11px] font-medium text-slate-600">
+                이름
+                <span className="ml-1 text-slate-400 font-normal">(여러 줄 가능)</span>
+              </label>
+              <textarea
                 value={name}
                 onChange={(e) => setName(e.target.value)}
+                rows={2}
                 maxLength={200}
-                className="mt-0.5 w-full rounded-md border border-slate-300 px-2 py-1 text-xs"
+                className="mt-0.5 w-full rounded-md border border-slate-300 px-2 py-1 text-xs resize-y font-medium"
               />
             </div>
             <div>
@@ -757,13 +760,14 @@ export default function FacilityInfoPanel({
           <div>
             <label className="block text-[11px] font-medium text-slate-600">
               시설 이름
+              <span className="ml-1 text-slate-400 font-normal">(여러 줄 가능)</span>
             </label>
-            <input
-              type="text"
+            <textarea
               value={name}
               onChange={(e) => setName(e.target.value)}
+              rows={2}
               maxLength={200}
-              className="mt-0.5 w-full rounded-md border border-slate-300 px-2 py-1 text-xs"
+              className="mt-0.5 w-full rounded-md border border-slate-300 px-2 py-1 text-xs resize-y font-medium"
             />
           </div>
           {installNo != null && (
@@ -888,6 +892,15 @@ export default function FacilityInfoPanel({
               라벨 위치 초기화
             </button>
           </div>
+          {/* 시설물 종류 변경 — 접속함체↔설치장소·국사·RN 등 양방향 (owner 2026-05-26).
+              seq_no 는 유지(같은 prefix 코드 충돌 시 facility_code 수동 입력으로 정정). */}
+          <FacilityTypeChanger
+            projectId={projectId}
+            facility={facility}
+            disabled={busy}
+            onChanged={onClose}
+          />
+
           {isInternal && (
             <div>
               <label className="block text-[11px] font-medium text-slate-600">
@@ -1325,6 +1338,128 @@ export default function FacilityInfoPanel({
         )}
 
       </div>
+    </div>
+  )
+}
+
+// 시설물 종류 변경 — 별도 컴포넌트로 분리 (메인 컴포넌트 가독성).
+//   접속함체↔국사·설치장소·RN 등 양방향 가능. seq_no 는 그대로 유지 (owner 결정).
+//   접속함체가 아닌 종류로 바꾸면 closure_spec(함체 규격)은 서버에서 자동 제거.
+import { CLOSURE_TYPE_VALUES } from '@/lib/relocation'
+import { updateFacilityClosureType } from './facility-actions'
+
+function FacilityTypeChanger({
+  projectId,
+  facility,
+  disabled,
+  onChanged,
+}: {
+  projectId: string
+  facility: FacilityPanelData
+  disabled: boolean
+  onChanged: () => void
+}) {
+  const [open, setOpen] = useState(false)
+  const [newType, setNewType] = useState<ClosureType>(facility.closure_type)
+  const [busy, setBusy] = useState(false)
+  const changed = newType !== facility.closure_type
+
+  // 카테고리별로 그룹핑된 옵션 — 사용자가 찾기 쉽게.
+  //   실사정보(category=설치장소이지만 도식상 별도)는 제외.
+  const groups = useMemo(() => {
+    const g: Record<string, ClosureType[]> = {}
+    for (const t of CLOSURE_TYPE_VALUES) {
+      if (t === '실사정보') continue  // 실사 캡처 전용 — 일반 변경 대상에서 제외
+      const cat = CLOSURE_TYPE_CATEGORY[t]
+      ;(g[cat] = g[cat] ?? []).push(t)
+    }
+    return g
+  }, [])
+
+  async function onApply() {
+    if (!changed || busy || disabled) return
+    if (
+      !confirm(
+        `시설물 종류를 「${CLOSURE_TYPE_LABEL[newType]}」 (으)로 변경하시겠습니까?\n` +
+          `함체 규격(있을 경우)은 자동 제거됩니다. 번호(${facility.seq_no})는 유지됩니다.`,
+      )
+    ) {
+      return
+    }
+    setBusy(true)
+    const result = await updateFacilityClosureType({
+      project_id: projectId,
+      facility_id: facility.id,
+      closure_type: newType,
+    })
+    setBusy(false)
+    if (!result.ok) {
+      toast.error(result.error)
+      return
+    }
+    toast.success('시설물 종류를 변경했습니다')
+    onChanged()
+  }
+
+  return (
+    <div>
+      <label className="block text-[11px] font-medium text-slate-600">시설물 종류</label>
+      <p className="mt-0.5 text-[10px] text-slate-400">
+        현재: {CLOSURE_TYPE_LABEL[facility.closure_type]}
+      </p>
+      {!open ? (
+        <button
+          type="button"
+          onClick={() => {
+            setOpen(true)
+            setNewType(facility.closure_type)
+          }}
+          disabled={disabled}
+          className="mt-1 inline-flex items-center gap-1 rounded-md border border-slate-300 px-2 py-1 text-[11px] font-medium text-slate-700 hover:bg-slate-50 disabled:opacity-50"
+        >
+          종류 변경
+        </button>
+      ) : (
+        <div className="mt-1 space-y-1.5 rounded-md border border-amber-300 bg-amber-50/60 p-2">
+          <select
+            value={newType}
+            onChange={(e) => setNewType(e.target.value as ClosureType)}
+            disabled={busy}
+            className="w-full rounded-md border border-slate-300 px-2 py-1 text-xs"
+          >
+            {Object.entries(groups).map(([cat, types]) => (
+              <optgroup key={cat} label={cat}>
+                {types.map((t) => (
+                  <option key={t} value={t}>
+                    {CLOSURE_TYPE_LABEL[t]}
+                  </option>
+                ))}
+              </optgroup>
+            ))}
+          </select>
+          <div className="flex items-center gap-1">
+            <button
+              type="button"
+              onClick={onApply}
+              disabled={!changed || busy}
+              className="flex-1 inline-flex items-center justify-center gap-1 rounded-md bg-amber-600 hover:bg-amber-700 px-2 py-1.5 text-[11px] font-bold text-white disabled:bg-slate-300"
+            >
+              {busy ? '변경 중…' : '변경 적용'}
+            </button>
+            <button
+              type="button"
+              onClick={() => {
+                setOpen(false)
+                setNewType(facility.closure_type)
+              }}
+              disabled={busy}
+              className="rounded-md border border-slate-300 px-2 py-1 text-[11px] font-medium text-slate-700 hover:bg-slate-50 disabled:opacity-40"
+            >
+              취소
+            </button>
+          </div>
+        </div>
+      )}
     </div>
   )
 }

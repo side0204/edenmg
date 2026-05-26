@@ -47,7 +47,7 @@ export async function loadRelocationCanvasData(
     supabase
       .from('relocation_facilities')
       .select(
-        'id, closure_type, seq_no, name, facility_code, install_address, closure_spec, parent_facility_id, is_marked, mark_note, notes, inspection_request, x_hint, y_hint, lat, lng, work_window_start, work_window_end, created_at, install_status, label_dx, label_dy, label_dx_map, label_dy_map, install_order, created_by',
+        'id, closure_type, seq_no, name, facility_code, install_address, closure_spec, parent_facility_id, is_marked, mark_note, notes, inspection_request, x_hint, y_hint, lat, lng, work_window_start, work_window_end, created_at, install_status, label_dx, label_dy, label_dx_map, label_dy_map, install_order, created_by, label_style',
       )
       .eq('project_id', projectId)
       .order('closure_type')
@@ -57,7 +57,7 @@ export async function loadRelocationCanvasData(
     supabase
       .from('relocation_cables')
       .select(
-        'id, from_facility_id, to_facility_id, spec, status, cable_code, installation_type, waypoints, map_waypoints, total_length, end_distance, notes, created_by, core_label_offsets',
+        'id, from_facility_id, to_facility_id, spec, status, cable_code, installation_type, waypoints, map_waypoints, total_length, end_distance, notes, created_by, core_label_offsets, line_style',
       )
       .eq('project_id', projectId)
       .order('cable_code'),

@@ -181,6 +181,16 @@ export default async function RelocationCanvasPage({
               label_dy_map: f.label_dy_map ?? 0,
               install_order: f.install_order ?? null,
               created_by: f.created_by ?? null,
+              labelStyle:
+                f.label_style && typeof f.label_style === 'object'
+                  ? (f.label_style as {
+                      font_size_scale?: number
+                      color?: string
+                      font_family?: string
+                      bold?: boolean
+                      italic?: boolean
+                    })
+                  : {},
             }))}
             cables={cables.map((c) => ({
               id: c.id,
@@ -202,6 +212,10 @@ export default async function RelocationCanvasPage({
                       worker?: { dx: number; dy: number }
                       single?: { dx: number; dy: number }
                     })
+                  : {},
+              lineStyle:
+                c.line_style && typeof c.line_style === 'object'
+                  ? (c.line_style as { width_scale?: number })
                   : {},
             }))}
             editable={true}

@@ -81,6 +81,7 @@ import {
   saveFacilityLabelOffset,
 } from './facility-actions'
 import LegendPanel from './LegendPanel'
+import CanvasFormatToolbar, { type CanvasFormatTarget } from './CanvasFormatToolbar'
 import RoadviewPanel from './RoadviewPanel'
 import SketchOverlay from './SketchOverlay'
 import FieldInspectionSaveDialog from './FieldInspectionSaveDialog'
@@ -164,6 +165,14 @@ type FacilityNode = {
   label_dy_map: number
   install_order: number | null
   created_by: string | null  // employees.id — 본인 작업분 필터링용
+  // 라벨 스타일 사용자 정의 (마이그 0081). 상단 「서식」 툴바.
+  labelStyle: {
+    font_size_scale?: number
+    color?: string
+    font_family?: string
+    bold?: boolean
+    italic?: boolean
+  }
 }
 
 // 경로점 — x/y 는 도식 캔버스 좌표, lat/lng 는 지도 모드 GPS 좌표(Phase 4),
@@ -198,6 +207,9 @@ type CableEdge = {
     worker?: { dx: number; dy: number }
     single?: { dx: number; dy: number }
   }
+  // 케이블 선 스타일 사용자 정의 (마이그 0081). 상단 「서식」 툴바.
+  //   width_scale: 1~5 (3=기본). 두께 = baseWidth × CABLE_WIDTH_SCALE_TABLE[ws]
+  lineStyle: { width_scale?: number }
 }
 
 // 시설 신규 배치 대기 — 도식 모드는 캔버스 픽셀(xy), 지도 모드는 GPS 좌표(latlng)
@@ -965,6 +977,38 @@ export default function TopologyCanvas({
   }, [coreAssignments])
 
   const [selectedId, setSelectedId] = useState<string | null>(null)
+
+  // 캔버스 상단 「서식」 툴바 대상 — 시설 OR 케이블 한 개 선택 시 노출.
+  //   둘 다 선택돼 있으면 마지막에 클릭된 쪽 우선 (마이그 0081).
+  //   다중 선택(selectedIds 2개+) 일 때는 표시 안 함 — 일괄 변경은 v2.
+  const formatToolbarTarget: CanvasFormatTarget | null = useMemo(() => {
+    if (selectedCableId) {
+      const cable = cables.find((c) => c.id === selectedCableId)
+      if (cable) {
+        return {
+          kind: 'cable',
+          projectId,
+          cableId: cable.id,
+          cableCode: cable.cable_code,
+          style: cable.lineStyle ?? {},
+        }
+      }
+    }
+    if (selectedId) {
+      const fac = facilities.find((f) => f.id === selectedId)
+      if (fac) {
+        return {
+          kind: 'facility',
+          projectId,
+          facilityId: fac.id,
+          name: fac.name,
+          style: fac.labelStyle ?? {},
+        }
+      }
+    }
+    return null
+  }, [selectedCableId, selectedId, cables, facilities, projectId])
+
   // 시설 「작업내역입력」 popover — 청약 모드 전용. 시설 선택과 별도 토글.
   //   시설 선택 시 popover 열림. popover 안 클릭으로 잘못 닫히는 것 방지 위해
   //   selectedId 가 null 로 바뀌어도(deselect) popover 는 자체 X 버튼으로만 닫힘.
@@ -5170,6 +5214,18 @@ export default function TopologyCanvas({
               </div>
             </div>
           )}
+
+          {/* 캔버스 상단 「서식」 툴바 — 시설 OR 케이블 선택 시 노출.
+              엑셀의 인라인 서식과 유사. 도식·지도 모드 공통.
+              마이그 0081. */}
+          {editable && !captureActive && !autoCaptureActive && formatToolbarTarget && (
+            <div className="absolute top-1 left-1/2 -translate-x-1/2 z-30 pointer-events-auto">
+              <CanvasFormatToolbar
+                target={formatToolbarTarget}
+                onChanged={() => router.refresh()}
+              />
+            </div>
+          )}
           <svg
             ref={setSvgRef}
             viewBox={mode === 'map' ? undefined : viewBoxStr}
@@ -5361,7 +5417,22 @@ export default function TopologyCanvas({
           {cables.map((c) => {
             const pts = cablePathPoints(c)
             if (pts.length < 2) return null
-            const style = edgeStyle(c.spec, c.status, c.installation_type)
+            const baseStyle = edgeStyle(c.spec, c.status, c.installation_type)
+            // 사용자 정의 두께 (마이그 0081, 「서식」 툴바). width_scale 1~5.
+            //   3=기본(1.0×), 4=1.5×, 5=2.5×, 2=0.65×, 1=0.4×
+            const WIDTH_SCALE_TABLE: Record<number, number> = {
+              1: 0.4,
+              2: 0.65,
+              3: 1,
+              4: 1.5,
+              5: 2.5,
+            }
+            const widthScale = c.lineStyle?.width_scale ?? 3
+            const widthMultiplier = WIDTH_SCALE_TABLE[widthScale] ?? 1
+            const style = {
+              ...baseStyle,
+              width: baseStyle.width * widthMultiplier,
+            }
             const selected = selectedCableId === c.id
             // 선택된 시설에 연결된 케이블인지 (동일 시설 연결 직관 확인)
             const linkedToSelectedFacility =
@@ -5832,21 +5903,41 @@ export default function TopologyCanvas({
             //   캡처도 평소 지도 화면 그대로 — 글자를 키우지 않는다 (키우면 상자가 겹침).
             // 지도 모드는 추가 확대(extraZoom>1) 시 폰트를 1/extraZoom 으로 줄여
             // 시각 크기를 고정 (SVG transform scale 과 상쇄).
-            const facCodeFont = mode === 'map' ? 9 / extraZoom : 15
-            const facNameFont = mode === 'map' ? 10 / extraZoom : 17
+            const facCodeFontBase = mode === 'map' ? 9 / extraZoom : 15
+            const facNameFontBase = mode === 'map' ? 10 / extraZoom : 17
             // 굵기 — 지도 모드는 650, 도식 모드는 큼직하게
-            const facCodeWeight = mode === 'map' ? 650 : 700
-            const facNameWeight = 600
-            const labelNameY = labelCodeY + (mode === 'map' ? 12 : 19)
-            // 라벨 위치 — 마우스 드래그 offset (시설명 겹침 방지).
-            //   드래그 중이면 로컬 override, 아니면 저장된 label_dx/label_dy.
-            // 시설명 — 잘라내지 않고 전체 표시 (라벨 박스가 글자에 맞춰 늘어남)
+            const facCodeWeightBase = mode === 'map' ? 650 : 700
+            const facNameWeightBase = 600
+            // 사용자 정의 라벨 스타일 (마이그 0081) — 상단 「서식」 툴바로 변경.
+            //   font_size_scale: 1=기본, 1.5=1.5배 등
+            //   bold: true → weight 850, italic: true → fontStyle italic
+            //   color: undefined → 기본 className 색 (검정·신설 빨강 분기) 유지
+            //   font_family: undefined → LABEL_FONT (Pretendard)
+            const fls = f.labelStyle ?? {}
+            const sizeScale = fls.font_size_scale ?? 1
+            const facCodeFont = facCodeFontBase * sizeScale
+            const facNameFont = facNameFontBase * sizeScale
+            const facCodeWeight = fls.bold ? 850 : facCodeWeightBase
+            const facNameWeight = fls.bold ? 850 : facNameWeightBase
+            const fontStyleApplied = fls.italic ? 'italic' : 'normal'
+            const colorApplied = fls.color ?? null  // null 이면 className 색 사용
+            const fontFamilyApplied = fls.font_family ?? LABEL_FONT
+            const labelNameY = labelCodeY + (mode === 'map' ? 12 : 19) * sizeScale
+            // 시설명 — 잘라내지 않고 전체 표시. \n 으로 줄바꿈 (textarea 입력).
             const labelDispName = f.name
+            const nameLines = labelDispName.split(/\r?\n/)
+            const nameLineHeight = facNameFont * 1.15
+            const maxNameLineW = Math.max(
+              0,
+              ...nameLines.map((line) => estimateTextWidth(line, facNameFont)),
+            )
             const labelW = Math.max(
               estimateTextWidth(code, facCodeFont),
-              estimateTextWidth(labelDispName, facNameFont) +
+              maxNameLineW +
                 (installNoByFacility.get(f.id) ? facNameFont * 1.9 : 0),
             )
+            // 라벨 위치 — 마우스 드래그 offset (시설명 겹침 방지).
+            //   드래그 중이면 로컬 override, 아니면 저장된 label_dx/label_dy.
             // 라벨 offset 은 도식·지도 모드별 별도 컬럼 — 한 모드에서 옮긴
             // 위치가 다른 모드를 흔들지 않게 (owner 2026-05-25).
             const labelOff = labelOffsets[f.id] ?? {
@@ -6039,13 +6130,20 @@ export default function TopologyCanvas({
                       : undefined
                   }
                 >
-                {/* 지도 모드 — 글자 뒤 흰 배경 박스로 지도 배경 글자와 시인성 확보 */}
+                {/* 지도 모드 — 글자 뒤 흰 배경 박스로 지도 배경 글자와 시인성 확보.
+                    다줄 이름이면 nameLineHeight 만큼 늘어남. */}
                 {mode === 'map' && (
                   <rect
                     x={nodeCx - labelW / 2 - 5}
                     y={labelCodeY - facCodeFont}
                     width={labelW + 10}
-                    height={labelNameY - labelCodeY + facNameFont + 8}
+                    height={
+                      labelNameY -
+                      labelCodeY +
+                      facNameFont +
+                      8 +
+                      Math.max(0, nameLines.length - 1) * nameLineHeight
+                    }
                     rx={4}
                     fill="#ffffff"
                     fillOpacity={1}
@@ -6058,15 +6156,23 @@ export default function TopologyCanvas({
                   x={nodeCx}
                   y={labelCodeY}
                   textAnchor="middle"
-                  className={isNewClosure ? 'fill-red-600' : 'fill-slate-900'}
+                  className={
+                    colorApplied
+                      ? undefined
+                      : isNewClosure
+                        ? 'fill-red-600'
+                        : 'fill-slate-900'
+                  }
+                  fill={colorApplied ?? undefined}
                   stroke="#ffffff"
                   strokeWidth={LABEL_HALO_WIDTH}
                   strokeLinejoin="round"
                   paintOrder="stroke"
                   style={{
                     fontSize: facCodeFont,
-                    fontFamily: LABEL_FONT,
+                    fontFamily: fontFamilyApplied,
                     fontWeight: facCodeWeight,
+                    fontStyle: fontStyleApplied,
                     letterSpacing: LABEL_TRACKING,
                     fontVariantNumeric: 'tabular-nums',
                   }}
@@ -6074,39 +6180,62 @@ export default function TopologyCanvas({
                   {code}
                 </text>
                 {(() => {
-                  const displayName = f.name
                   const installNo = installNoByFacility.get(f.id)
-                  // 접속함체가 아니면 기존처럼 가운데 정렬 이름만
+                  // 시설명을 \n 으로 줄바꿈 (textarea 입력 — 마이그 0081).
+                  //   각 줄을 <tspan> 으로 렌더, dy 로 줄간격 부여.
+                  // 접속함체가 아니면 기존처럼 가운데 정렬 (각 줄 가운데 정렬).
                   if (!installNo) {
                     return (
                       <text
                         x={nodeCx}
                         y={labelNameY}
                         textAnchor="middle"
-                        className={isNewClosure ? 'fill-red-600' : 'fill-slate-950'}
+                        className={
+                          colorApplied
+                            ? undefined
+                            : isNewClosure
+                              ? 'fill-red-600'
+                              : 'fill-slate-950'
+                        }
+                        fill={colorApplied ?? undefined}
                         stroke="#ffffff"
                         strokeWidth={LABEL_HALO_WIDTH}
                         strokeLinejoin="round"
                         paintOrder="stroke"
                         style={{
                           fontSize: facNameFont,
-                          fontFamily: LABEL_FONT,
+                          fontFamily: fontFamilyApplied,
                           fontWeight: facNameWeight,
+                          fontStyle: fontStyleApplied,
                           letterSpacing: LABEL_TRACKING,
                         }}
                       >
-                        {displayName}
+                        {nameLines.map((line, i) => (
+                          <tspan key={i} x={nodeCx} dy={i === 0 ? 0 : nameLineHeight}>
+                            {line || ' '}
+                          </tspan>
+                        ))}
                       </text>
                     )
                   }
                   // 접속함체 — 시설명 앞에 설치 순번 (녹색 원 + 흰 숫자, 글자와 같은 크기)
+                  //   다줄 이름은 첫 줄 옆에 번호 배치, 나머지 줄은 번호 폭 안에서 좌측 정렬 연장.
                   const F = facNameFont
                   const r = F * 0.78
                   const gap = 4
-                  const nameW = estimateTextWidth(displayName, F)
-                  const startX = nodeCx - (r * 2 + gap + nameW) / 2
+                  const firstLine = nameLines[0] ?? ''
+                  const firstLineW = estimateTextWidth(firstLine, F)
+                  // 전체 폭 — 첫 줄(번호+이름) vs 나머지 줄들 중 최대값.
+                  //   가운데 정렬을 첫 줄 기준으로 잡되, 다른 줄이 더 길어도 글자가 잘리지 않게.
+                  const restLineW = Math.max(
+                    0,
+                    ...nameLines.slice(1).map((l) => estimateTextWidth(l, F)),
+                  )
+                  const firstTotalW = r * 2 + gap + Math.max(firstLineW, restLineW)
+                  const startX = nodeCx - firstTotalW / 2
                   const circleCx = startX + r
                   const circleCy = labelNameY - F * 0.35
+                  const nameStartX = startX + r * 2 + gap
                   return (
                     <>
                       <circle
@@ -6132,33 +6261,52 @@ export default function TopologyCanvas({
                         {installNo}
                       </text>
                       <text
-                        x={startX + r * 2 + gap}
+                        x={nameStartX}
                         y={labelNameY}
                         textAnchor="start"
-                        className={isNewClosure ? 'fill-red-600' : 'fill-slate-950'}
+                        className={
+                          colorApplied
+                            ? undefined
+                            : isNewClosure
+                              ? 'fill-red-600'
+                              : 'fill-slate-950'
+                        }
+                        fill={colorApplied ?? undefined}
                         stroke="#ffffff"
                         strokeWidth={LABEL_HALO_WIDTH}
                         strokeLinejoin="round"
                         paintOrder="stroke"
                         style={{
                           fontSize: F,
-                          fontFamily: LABEL_FONT,
+                          fontFamily: fontFamilyApplied,
                           fontWeight: facNameWeight,
+                          fontStyle: fontStyleApplied,
                           letterSpacing: LABEL_TRACKING,
                         }}
                       >
-                        {displayName}
+                        {nameLines.map((line, i) => (
+                          <tspan key={i} x={nameStartX} dy={i === 0 ? 0 : nameLineHeight}>
+                            {line || ' '}
+                          </tspan>
+                        ))}
                       </text>
                     </>
                   )
                 })()}
-                {/* 라벨 드래그용 투명 hit area — 글자 위 전체를 덮어 드래그/선택 처리 */}
+                {/* 라벨 드래그용 투명 hit area — 글자 위 전체를 덮어 드래그/선택 처리.
+                    다줄 이름 지원 — 추가 줄마다 nameLineHeight 만큼 늘어남. */}
                 {editable && (
                   <rect
                     x={nodeCx - labelW / 2 - 5}
                     y={labelCodeY - facCodeFont}
                     width={labelW + 10}
-                    height={labelNameY - labelCodeY + facNameFont + 8}
+                    height={
+                      labelNameY -
+                      labelCodeY +
+                      facNameFont +
+                      8 +
+                      Math.max(0, nameLines.length - 1) * nameLineHeight
+                    }
                     fill="transparent"
                     style={{ cursor: 'move', pointerEvents: 'all' }}
                     onPointerDown={(e) =>

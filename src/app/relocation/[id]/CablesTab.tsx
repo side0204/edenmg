@@ -46,6 +46,8 @@ export type CableRow = {
         single?: { dx: number; dy: number }
       }
     | null
+  // 케이블 선 스타일 사용자 정의 (마이그 0081). 캔버스 상단 「서식」 툴바.
+  line_style?: { width_scale?: number } | null
 }
 
 type FacilityMini = {

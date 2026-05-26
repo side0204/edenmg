@@ -5,6 +5,7 @@ import { revalidatePath } from 'next/cache'
 import { createClient } from '@/lib/supabase/server'
 import {
   CLOSURE_TYPE_VALUES,
+  CLOSURE_TYPE_CATEGORY,
   FACILITY_INSTALL_STATUS_VALUES,
   isInternalNode,
   isInstallNumbered,
@@ -1009,4 +1010,133 @@ export async function createInspectionFacility(input: {
     }
   }
   return { ok: false, error: '실사정보 시설 생성 실패: ' + (lastErr ?? '알 수 없음') }
+}
+
+/**
+ * 시설 종류(closure_type) 변경 — 정보 패널의 「시설물 종류 변경」 액션.
+ *   접속함체 → 설치장소·국사·RN 등 또는 반대 방향 모두 허용.
+ *   owner 결정 2026-05-26: seq_no 는 기존 값 그대로 유지 (재할당 안 함).
+ *     - 내부 번호 보존 + 외부 도면·기별명세서 등에서 번호 안 흔들림.
+ *     - 같은 prefix 안 다른 시설과 표시 코드(S-005 등)가 우연히 같아질 수 있음 —
+ *       owner 가 facility_code 수동 입력으로 정정 가능.
+ *   접속함체가 아닌 종류로 바꾸면 closure_spec(함체 규격) 은 자동 제거.
+ */
+export async function updateFacilityClosureType(input: {
+  project_id: string
+  facility_id: string
+  closure_type: string
+}): Promise<{ ok: true } | { ok: false; error: string }> {
+  const projectId = String(input.project_id ?? '').trim()
+  const facilityId = String(input.facility_id ?? '').trim()
+  const newType = String(input.closure_type ?? '').trim()
+  if (!projectId || !facilityId) return { ok: false, error: '대상이 올바르지 않습니다' }
+  if (!isClosureType(newType)) return { ok: false, error: '시설 종류가 올바르지 않습니다' }
+
+  const { supabase } = await requireMember()
+
+  // 현재 closure_type 조회 — 변경 안 한 경우 빠르게 반환
+  const { data: existing, error: readErr } = await supabase
+    .from('relocation_facilities')
+    .select('closure_type')
+    .eq('id', facilityId)
+    .eq('project_id', projectId)
+    .maybeSingle()
+  if (readErr) return { ok: false, error: '시설 조회 실패: ' + readErr.message }
+  if (!existing) return { ok: false, error: '시설을 찾을 수 없습니다' }
+  const prevType = (existing as { closure_type: ClosureType }).closure_type
+  if (prevType === newType) return { ok: true }
+
+  // 접속함체가 아닌 종류로 바꾸면 closure_spec 비움
+  const update: {
+    closure_type: ClosureType
+    closure_spec?: null
+  } = { closure_type: newType as ClosureType }
+  if (CLOSURE_TYPE_CATEGORY[newType as ClosureType] !== '접속함체') {
+    update.closure_spec = null
+  }
+
+  const { error } = await supabase
+    .from('relocation_facilities')
+    .update(update)
+    .eq('id', facilityId)
+    .eq('project_id', projectId)
+  if (error) return { ok: false, error: '시설 종류 변경 실패: ' + error.message }
+
+  revalidatePath(`/relocation/${projectId}`)
+  return { ok: true }
+}
+
+/**
+ * 시설 라벨 스타일 갱신 — 캔버스 상단 「서식」 툴바에서 호출.
+ *   부분 갱신: 입력된 키만 덮어쓰고 나머지는 보존 (jsonb merge).
+ *   value=null 로 들어온 키는 삭제 → 캔버스 기본값 복귀.
+ */
+export async function updateFacilityLabelStyle(input: {
+  project_id: string
+  facility_id: string
+  style: {
+    font_size_scale?: number | null
+    color?: string | null
+    font_family?: string | null
+    bold?: boolean | null
+    italic?: boolean | null
+  }
+}): Promise<{ ok: true } | { ok: false; error: string }> {
+  const projectId = String(input.project_id ?? '').trim()
+  const facilityId = String(input.facility_id ?? '').trim()
+  if (!projectId || !facilityId) return { ok: false, error: '대상이 올바르지 않습니다' }
+  if (!input.style || typeof input.style !== 'object') {
+    return { ok: false, error: '스타일이 없습니다' }
+  }
+
+  // 입력값 검증
+  const VALID_FAMILIES = ['Pretendard', 'monospace', 'serif']
+  const COLOR_RX = /^#[0-9a-fA-F]{3,8}$/
+  for (const [k, v] of Object.entries(input.style)) {
+    if (v === null || v === undefined) continue
+    if (k === 'font_size_scale') {
+      if (typeof v !== 'number' || !Number.isFinite(v) || v < 0.3 || v > 4) {
+        return { ok: false, error: '글자 크기 배율은 0.3~4 사이여야 합니다' }
+      }
+    } else if (k === 'color') {
+      if (typeof v !== 'string' || !COLOR_RX.test(v)) {
+        return { ok: false, error: '색상이 올바르지 않습니다' }
+      }
+    } else if (k === 'font_family') {
+      if (typeof v !== 'string' || !VALID_FAMILIES.includes(v)) {
+        return { ok: false, error: '폰트가 올바르지 않습니다' }
+      }
+    } else if (k === 'bold' || k === 'italic') {
+      if (typeof v !== 'boolean') {
+        return { ok: false, error: `${k} 값이 올바르지 않습니다` }
+      }
+    }
+  }
+
+  const { supabase } = await requireMember()
+
+  // 기존 jsonb merge
+  const { data: row, error: readErr } = await supabase
+    .from('relocation_facilities')
+    .select('label_style')
+    .eq('id', facilityId)
+    .eq('project_id', projectId)
+    .maybeSingle()
+  if (readErr) return { ok: false, error: '라벨 스타일 조회 실패: ' + readErr.message }
+  const existing = ((row?.label_style as Record<string, unknown>) ?? {}) as Record<string, unknown>
+  const next: Record<string, unknown> = { ...existing }
+  for (const [k, v] of Object.entries(input.style)) {
+    if (v === null) delete next[k]
+    else if (v !== undefined) next[k] = v
+  }
+
+  const { error } = await supabase
+    .from('relocation_facilities')
+    .update({ label_style: next })
+    .eq('id', facilityId)
+    .eq('project_id', projectId)
+  if (error) return { ok: false, error: '라벨 스타일 저장 실패: ' + error.message }
+
+  revalidatePath(`/relocation/${projectId}`)
+  return { ok: true }
 }

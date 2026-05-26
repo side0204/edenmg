@@ -40,6 +40,14 @@ export type FacilityRow = {
   label_dy_map: number
   install_order: number | null
   created_by: string | null
+  // 라벨 스타일 사용자 정의 (마이그 0081). 캔버스 상단 「서식」 툴바.
+  label_style?: {
+    font_size_scale?: number
+    color?: string
+    font_family?: string
+    bold?: boolean
+    italic?: boolean
+  } | null
 }
 
 // 함체일 때 보여줄 기본 권장 함체 규격 (참고용 — 폼에는 직접 추천 표시)

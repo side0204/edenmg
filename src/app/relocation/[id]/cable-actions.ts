@@ -511,3 +511,55 @@ export async function deleteCable(formData: FormData) {
     `/relocation/${projectId}?tab=cables&ok=` + encodeURIComponent('케이블을 삭제했습니다'),
   )
 }
+
+/**
+ * 케이블 선 스타일(두께) 갱신 — 캔버스 상단 「서식」 툴바에서 호출.
+ *   width_scale: 1~5 정수 (1=얇음, 2=얇은보통, 3=보통, 4=굵음, 5=매우굵음).
+ *   null 로 들어오면 키 삭제 → 기본 두께 복귀.
+ *   jsonb merge — 다른 스타일 키가 추후 추가돼도 보존.
+ */
+export async function updateCableLineStyle(input: {
+  project_id: string
+  cable_id: string
+  style: { width_scale?: number | null }
+}): Promise<{ ok: true } | { ok: false; error: string }> {
+  const projectId = String(input.project_id ?? '').trim()
+  const cableId = String(input.cable_id ?? '').trim()
+  if (!projectId || !cableId) return { ok: false, error: '대상이 올바르지 않습니다' }
+  if (!input.style || typeof input.style !== 'object') {
+    return { ok: false, error: '스타일이 없습니다' }
+  }
+
+  if (input.style.width_scale !== null && input.style.width_scale !== undefined) {
+    const ws = input.style.width_scale
+    if (!Number.isInteger(ws) || ws < 1 || ws > 5) {
+      return { ok: false, error: '두께는 1~5 사이 정수여야 합니다' }
+    }
+  }
+
+  const { supabase } = await requireMember()
+
+  const { data: row, error: readErr } = await supabase
+    .from('relocation_cables')
+    .select('line_style')
+    .eq('id', cableId)
+    .eq('project_id', projectId)
+    .maybeSingle()
+  if (readErr) return { ok: false, error: '선 스타일 조회 실패: ' + readErr.message }
+  const existing = ((row?.line_style as Record<string, unknown>) ?? {}) as Record<string, unknown>
+  const next: Record<string, unknown> = { ...existing }
+  for (const [k, v] of Object.entries(input.style)) {
+    if (v === null) delete next[k]
+    else if (v !== undefined) next[k] = v
+  }
+
+  const { error } = await supabase
+    .from('relocation_cables')
+    .update({ line_style: next })
+    .eq('id', cableId)
+    .eq('project_id', projectId)
+  if (error) return { ok: false, error: '선 스타일 저장 실패: ' + error.message }
+
+  revalidatePath(`/relocation/${projectId}`)
+  return { ok: true }
+}
