@@ -43,6 +43,10 @@ type BulkResult =
       createdClosures: number
       createdCables: number
       pendingCables: number
+      // 되돌리기용 — 이번 실행이 만든 행 id
+      createdFacilityIds: string[]
+      createdCableIds: string[]
+      createdPendingCableIds: string[]
     }
   | { ok: false; error: string }
 
@@ -136,6 +140,9 @@ export async function bulkRegisterFromCanvas(input: {
   const newClosureIdByName = new Map<string, string>()
   const newClosureIdByFacilityCode = new Map<string, string>()
   let createdClosures = 0
+  const createdFacilityIds: string[] = []
+  const createdCableIds: string[] = []
+  const createdPendingCableIds: string[] = []
 
   for (const [closureType, list] of byType) {
     const seqs = await allocateSeqsForType(supabase, input.project_id, closureType, list.length)
@@ -170,6 +177,7 @@ export async function bulkRegisterFromCanvas(input: {
     }>
     createdClosures += insRows.length
     for (const r of insRows) {
+      createdFacilityIds.push(r.id)
       if (r.name) newClosureIdByName.set(r.name, r.id)
       if (r.facility_code) newClosureIdByFacilityCode.set(r.facility_code, r.id)
     }
@@ -283,7 +291,10 @@ export async function bulkRegisterFromCanvas(input: {
     }
 
     if (realInsertRows.length > 0) {
-      const { error } = await supabase.from('relocation_cables').insert(realInsertRows)
+      const { data: insCables, error } = await supabase
+        .from('relocation_cables')
+        .insert(realInsertRows)
+        .select('id')
       if (error) {
         return {
           ok: false,
@@ -291,11 +302,15 @@ export async function bulkRegisterFromCanvas(input: {
         }
       }
       createdCables = realInsertRows.length
+      for (const r of (insCables ?? []) as Array<{ id: string }>) {
+        createdCableIds.push(r.id)
+      }
     }
     if (pendingInsertRows.length > 0) {
-      const { error } = await supabase
+      const { data: insPending, error } = await supabase
         .from('relocation_pending_cables')
         .insert(pendingInsertRows)
+        .select('id')
       if (error) {
         return {
           ok: false,
@@ -303,6 +318,9 @@ export async function bulkRegisterFromCanvas(input: {
         }
       }
       pendingCables = pendingInsertRows.length
+      for (const r of (insPending ?? []) as Array<{ id: string }>) {
+        createdPendingCableIds.push(r.id)
+      }
     }
   }
 
@@ -312,7 +330,81 @@ export async function bulkRegisterFromCanvas(input: {
     createdClosures,
     createdCables,
     pendingCables,
+    createdFacilityIds,
+    createdCableIds,
+    createdPendingCableIds,
   }
+}
+
+
+// 일괄등록 되돌리기 — 직전 실행이 만든 시설/케이블/미연결 케이블 일괄 삭제.
+//   클라이언트가 응답으로 받은 id 목록을 그대로 전달.
+//   회사 스코프 검증 후 삭제.
+export async function undoBulkRegister(input: {
+  project_id: string
+  facility_ids: string[]
+  cable_ids: string[]
+  pending_cable_ids: string[]
+}): Promise<
+  | {
+      ok: true
+      removedFacilities: number
+      removedCables: number
+      removedPending: number
+    }
+  | { ok: false; error: string }
+> {
+  if (!input.project_id) return { ok: false, error: '프로젝트 id 가 없습니다' }
+
+  const auth = await requireMember()
+  if (!auth.ok) return auth
+  const { supabase, me } = auth
+
+  // 프로젝트 회사 스코프 검증
+  const { data: proj } = await supabase
+    .from('relocation_projects')
+    .select('company_id')
+    .eq('id', input.project_id)
+    .maybeSingle()
+  if (
+    !proj ||
+    (proj as { company_id: string }).company_id !== me.company_id
+  ) {
+    return { ok: false, error: '권한이 없습니다' }
+  }
+
+  let removedFacilities = 0
+  let removedCables = 0
+  let removedPending = 0
+
+  // 케이블 먼저 삭제 (시설 삭제하면 FK CASCADE 로 사라지지만, count 정확히 보려면 명시)
+  if (input.cable_ids.length > 0) {
+    const { count } = await supabase
+      .from('relocation_cables')
+      .delete({ count: 'exact' })
+      .eq('project_id', input.project_id)
+      .in('id', input.cable_ids)
+    removedCables = count ?? 0
+  }
+  if (input.facility_ids.length > 0) {
+    const { count } = await supabase
+      .from('relocation_facilities')
+      .delete({ count: 'exact' })
+      .eq('project_id', input.project_id)
+      .in('id', input.facility_ids)
+    removedFacilities = count ?? 0
+  }
+  if (input.pending_cable_ids.length > 0) {
+    const { count } = await supabase
+      .from('relocation_pending_cables')
+      .delete({ count: 'exact' })
+      .eq('project_id', input.project_id)
+      .in('id', input.pending_cable_ids)
+    removedPending = count ?? 0
+  }
+
+  revalidatePath(`/relocation/${input.project_id}`)
+  return { ok: true, removedFacilities, removedCables, removedPending }
 }
 
 

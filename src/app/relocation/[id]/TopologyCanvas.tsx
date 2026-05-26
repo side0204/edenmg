@@ -950,6 +950,43 @@ export default function TopologyCanvas({
   const [connectingPendingId, setConnectingPendingId] = useState<string | null>(null)
   const [connectingFromFacility, setConnectingFromFacility] = useState<string | null>(null)
   const [pendingListOpen, setPendingListOpen] = useState(true)
+  // 일괄등록 되돌리기 — 직전 실행이 만든 id 목록 스냅샷.
+  //   페이지 새로고침하면 사라짐 (메모리). 단일 undo.
+  type BulkUndoSnapshot = {
+    facilityIds: string[]
+    cableIds: string[]
+    pendingCableIds: string[]
+    closuresCount: number
+    cablesCount: number
+    pendingCount: number
+  }
+  const [bulkUndoSnap, setBulkUndoSnap] = useState<BulkUndoSnapshot | null>(null)
+  const [bulkUndoing, setBulkUndoing] = useState(false)
+
+  async function performBulkUndo() {
+    if (!bulkUndoSnap || bulkUndoing) return
+    setBulkUndoing(true)
+    try {
+      const { undoBulkRegister } = await import('./bulk-register-actions')
+      const r = await undoBulkRegister({
+        project_id: projectId,
+        facility_ids: bulkUndoSnap.facilityIds,
+        cable_ids: bulkUndoSnap.cableIds,
+        pending_cable_ids: bulkUndoSnap.pendingCableIds,
+      })
+      if (r.ok) {
+        toast.success(
+          `되돌리기 — 시설 ${r.removedFacilities}, 케이블 ${r.removedCables}, 미연결 ${r.removedPending} 삭제`,
+        )
+        setBulkUndoSnap(null)
+        router.refresh()
+      } else {
+        toast.error(r.error)
+      }
+    } finally {
+      setBulkUndoing(false)
+    }
+  }
   const [selectedIds, setSelectedIds] = useState<Set<string>>(() => new Set())
   // 사각 선택 드래그 — SVG 좌표계 (viewport 변환된 좌표). 진행 중에만 ref → null 아님.
   const marqueeRef = useRef<{
@@ -3689,6 +3726,14 @@ export default function TopologyCanvas({
                   ? ` · 미연결 ${r.pendingCables}건은 「미연결 케이블」 에 보관`
                   : ''),
             )
+            setBulkUndoSnap({
+              facilityIds: r.createdFacilityIds,
+              cableIds: r.createdCableIds,
+              pendingCableIds: r.createdPendingCableIds,
+              closuresCount: r.createdClosures,
+              cablesCount: r.createdCables,
+              pendingCount: r.pendingCables,
+            })
             setBulkPayload(null)
             router.refresh()
           } else {
@@ -6272,6 +6317,14 @@ export default function TopologyCanvas({
                           ? ` · 미연결 ${r.pendingCables}건은 「미연결 케이블」 에 보관`
                           : ''),
                     )
+                    setBulkUndoSnap({
+                      facilityIds: r.createdFacilityIds,
+                      cableIds: r.createdCableIds,
+                      pendingCableIds: r.createdPendingCableIds,
+                      closuresCount: r.createdClosures,
+                      cablesCount: r.createdCables,
+                      pendingCount: r.pendingCables,
+                    })
                     setBulkPayload(null)
                     router.refresh()
                   } else {
@@ -6701,6 +6754,38 @@ export default function TopologyCanvas({
               className="rounded-full bg-white/20 hover:bg-white/30 px-2 py-0.5 text-xs"
             >
               취소
+            </button>
+          </div>
+        </div>
+      )}
+
+      {/* 일괄등록 직후 — 되돌리기 배너. 페이지 새로고침/다른 일괄등록 시 사라짐. */}
+      {bulkUndoSnap && !bulkPayload && (
+        <div className="fixed top-3 left-1/2 -translate-x-1/2 z-50 pointer-events-auto">
+          <div className="inline-flex items-center gap-2 rounded-full bg-slate-900 text-white px-4 py-2 shadow-lg text-sm font-semibold">
+            <span>
+              일괄등록 완료 — 시설 {bulkUndoSnap.closuresCount}·케이블{' '}
+              {bulkUndoSnap.cablesCount}
+              {bulkUndoSnap.pendingCount > 0
+                ? `·미연결 ${bulkUndoSnap.pendingCount}`
+                : ''}
+            </span>
+            <button
+              type="button"
+              onClick={performBulkUndo}
+              disabled={bulkUndoing}
+              className="inline-flex items-center gap-1 rounded-full bg-amber-500 hover:bg-amber-600 disabled:opacity-50 px-3 py-0.5 text-xs font-bold"
+            >
+              {bulkUndoing ? '되돌리는 중…' : '↶ 되돌리기'}
+            </button>
+            <button
+              type="button"
+              onClick={() => setBulkUndoSnap(null)}
+              disabled={bulkUndoing}
+              className="rounded-full bg-white/20 hover:bg-white/30 disabled:opacity-50 px-2 py-0.5 text-xs"
+              title="배너 닫기 (등록은 유지)"
+            >
+              ✕
             </button>
           </div>
         </div>
