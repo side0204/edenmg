@@ -1253,6 +1253,15 @@ export default async function RelocationProjectPage({
         facilityMaterials={facilityMaterials}
         circuits={circuits}
         coreAssignments={assignments}
+        splices={splices.map((s) => ({
+          id: s.id,
+          facility_id: s.facility_id,
+          in_cable_id: s.in_cable_id,
+          in_core: s.in_core,
+          out_cable_id: s.out_cable_id,
+          out_core: s.out_core,
+          is_continuous: s.is_continuous,
+        }))}
         myEmployeeId={me.id}
         workerPositions={workerPositions}
         pendingCables={pendingCables}

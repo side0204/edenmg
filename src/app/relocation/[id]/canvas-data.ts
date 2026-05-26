@@ -14,6 +14,17 @@ import type {
 //   프로젝트 상세 페이지(page.tsx)와 전체화면 캔버스 라우트(canvas/page.tsx)가
 //   동일한 8개 쿼리를 쓰므로 한 곳에 모아 둔다.
 
+// 캔버스에서 접속(splice) 표시·생성에 필요한 최소 필드
+export type CanvasSpliceRow = {
+  id: string
+  facility_id: string
+  in_cable_id: string
+  in_core: number
+  out_cable_id: string
+  out_core: number
+  is_continuous: boolean
+}
+
 export type RelocationCanvasData = {
   facilities: FacilityRow[]
   cables: CableRow[]
@@ -23,6 +34,7 @@ export type RelocationCanvasData = {
   facilityTasks: FacilityTaskRow[]
   facilityMaterials: FacilityMaterialRow[]
   assignments: CoreAssignmentRow[]
+  splices: CanvasSpliceRow[]
 }
 
 export async function loadRelocationCanvasData(
@@ -42,6 +54,7 @@ export async function loadRelocationCanvasData(
     ftRes,
     fmtRes,
     aRes,
+    sRes,
   ] = await Promise.all([
     // 시설 (좌측 패널 + 시설 탭 + 케이블/코어 dropdown + 캔버스)
     supabase
@@ -106,6 +119,12 @@ export async function loadRelocationCanvasData(
       .eq('project_id', projectId)
       .order('cable_id')
       .order('core_range_start'),
+
+    // 접속(splice) — 함체에서 코어 ↔ 코어 매핑. 캔버스 박스 간 연결선 + 선번장 시점·종점.
+    supabase
+      .from('relocation_splices')
+      .select('id, facility_id, in_cable_id, in_core, out_cable_id, out_core, is_continuous')
+      .eq('project_id', projectId),
   ])
 
   return {
@@ -117,5 +136,6 @@ export async function loadRelocationCanvasData(
     facilityTasks: (ftRes.data ?? []) as FacilityTaskRow[],
     facilityMaterials: (fmtRes.data ?? []) as FacilityMaterialRow[],
     assignments: (aRes.data ?? []) as CoreAssignmentRow[],
+    splices: (sRes.data ?? []) as CanvasSpliceRow[],
   }
 }

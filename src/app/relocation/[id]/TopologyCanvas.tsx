@@ -82,6 +82,7 @@ import {
 } from './facility-actions'
 import LegendPanel from './LegendPanel'
 import CanvasFormatToolbar, { type CanvasFormatTarget } from './CanvasFormatToolbar'
+import SpliceConnectModal from './SpliceConnectModal'
 import RoadviewPanel from './RoadviewPanel'
 import SketchOverlay from './SketchOverlay'
 import FieldInspectionSaveDialog from './FieldInspectionSaveDialog'
@@ -388,6 +389,50 @@ function pointAlongPolyline(
   return pts[pts.length - 1]
 }
 
+// splice 트레이스 — 한 코어의 단말 시설을 찾는다. owner 2026-05-26 (선번장 시점·종점).
+//   시작 facility 에서 splice 를 따라 다른 케이블로 옮겨가며, 더 이상 splice 가 없는
+//   facility(=terminal)에 도달할 때까지 진행. 순환 방지 visited 사용.
+//   반환: terminal facility id (또는 입력값 — splice 없으면 그대로).
+function traceCoreTerminal(
+  startCable: string,
+  startCore: number,
+  startFacility: string | null,
+  splices: {
+    facility_id: string
+    in_cable_id: string
+    in_core: number
+    out_cable_id: string
+    out_core: number
+  }[],
+  cables: { id: string; from_facility_id: string; to_facility_id: string }[],
+  depth = 0,
+): string | null {
+  if (!startFacility) return null
+  if (depth > 64) return startFacility  // 안전망 — 비정상 데이터로 무한 루프 방지
+  const sp = splices.find(
+    (s) =>
+      s.facility_id === startFacility &&
+      ((s.in_cable_id === startCable && s.in_core === startCore) ||
+        (s.out_cable_id === startCable && s.out_core === startCore)),
+  )
+  if (!sp) return startFacility
+  const otherCable =
+    sp.in_cable_id === startCable && sp.in_core === startCore
+      ? sp.out_cable_id
+      : sp.in_cable_id
+  const otherCore =
+    sp.in_cable_id === startCable && sp.in_core === startCore
+      ? sp.out_core
+      : sp.in_core
+  const otherCableObj = cables.find((c) => c.id === otherCable)
+  if (!otherCableObj) return startFacility
+  const otherEnd =
+    otherCableObj.from_facility_id === startFacility
+      ? otherCableObj.to_facility_id
+      : otherCableObj.from_facility_id
+  return traceCoreTerminal(otherCable, otherCore, otherEnd, splices, cables, depth + 1)
+}
+
 // SVG 텍스트 폭 추정 — 한글·CJK(전각) ≈ 1.0×fontSize, ASCII ≈ 0.58×fontSize.
 //   설치 순번 배지를 시설명 앞에 정확히 붙이기 위한 근사값.
 function estimateTextWidth(text: string, fontSize: number): number {
@@ -510,6 +555,7 @@ export default function TopologyCanvas({
   facilityMaterials,
   circuits,
   coreAssignments,
+  splices,
   myEmployeeId,
   initialCanvasSize,
   tabPanel,
@@ -539,6 +585,16 @@ export default function TopologyCanvas({
   facilityMaterials?: FacilityMaterialRow[]
   circuits?: FaultSearchCircuit[]
   coreAssignments?: CanvasCoreAssignment[]
+  // 접속(splice) — 함체에서 코어↔코어 매핑. 박스 간 연결선 표시 + 박스 클릭 splice 생성.
+  splices?: {
+    id: string
+    facility_id: string
+    in_cable_id: string
+    in_core: number
+    out_cable_id: string
+    out_core: number
+    is_continuous: boolean
+  }[]
   // 본인 employees.id — 케이블 정렬·그래프 자동 배치 시 본인 작업분만 적용용.
   //   다중 작업 시 다른 사람 시설 위치가 안 틀어지게.
   myEmployeeId?: string | null
@@ -702,6 +758,94 @@ export default function TopologyCanvas({
   } | null>(null)
   const coreLabelKey = (cableId: string, role: CoreLabelRole): string =>
     `${cableId}:${role}`
+
+  // 코어 박스 클릭 → 접속(splice) 생성 워크플로우 (owner 2026-05-26).
+  //   첫 박스 클릭 → spliceSelection 에 저장 (시각 강조).
+  //   두 번째 박스 클릭 → 공유 시설(접속함체) 자동 탐지 → 코어 연결 모달 노출.
+  //   같은 박스 다시 클릭 → 선택 해제.
+  type CoreBoxSelection = {
+    cableId: string
+    role: CoreLabelRole
+    cores: number[]
+  }
+  const [spliceSelections, setSpliceSelections] = useState<CoreBoxSelection[]>([])
+  // 모달 표시용 상태 — 두 박스 모두 선택되고 공유 접속함체 존재 시 채워짐.
+  const [spliceModal, setSpliceModal] = useState<{
+    facility: { id: string; name: string; code: string }
+    side1: { cableId: string; cableCode: string; cableSpec: string; cores: number[] }
+    side2: { cableId: string; cableCode: string; cableSpec: string; cores: number[] }
+  } | null>(null)
+  const spliceKey = (cableId: string, role: CoreLabelRole): string =>
+    `${cableId}:${role}`
+  // 박스 클릭 핸들러 — 첫 박스/두 번째 박스/같은 박스 재클릭 분기.
+  //   같은 박스 → 선택 해제. 다른 박스 → 같은 케이블이면 교체, 다른 케이블이면 모달 트리거.
+  const handleCoreBoxClick = (cableId: string, role: CoreLabelRole) => {
+    const cores = coreNumbersByBox.get(spliceKey(cableId, role)) ?? []
+    if (cores.length === 0) {
+      toast.info('이 박스에 배정된 코어가 없습니다')
+      return
+    }
+    setSpliceSelections((prev) => {
+      // 같은 박스 다시 클릭 → 선택 해제
+      const sameIdx = prev.findIndex(
+        (s) => s.cableId === cableId && s.role === role,
+      )
+      if (sameIdx >= 0) {
+        return prev.filter((_, i) => i !== sameIdx)
+      }
+      // 첫 박스 → 추가
+      if (prev.length === 0) {
+        return [{ cableId, role, cores }]
+      }
+      // 이미 선택된 박스가 있는 케이블 다시 다른 role 로 클릭 → 교체 (같은 케이블끼리는 splice 불가)
+      const first = prev[0]
+      if (first.cableId === cableId) {
+        return [{ cableId, role, cores }]
+      }
+      // 두 번째 박스 — 공유 접속함체 찾기
+      const cable1 = cables.find((c) => c.id === first.cableId)
+      const cable2 = cables.find((c) => c.id === cableId)
+      if (!cable1 || !cable2) return prev
+      const shared = [cable1.from_facility_id, cable1.to_facility_id].find(
+        (f) => f === cable2.from_facility_id || f === cable2.to_facility_id,
+      )
+      if (!shared) {
+        toast.error('두 케이블이 공통된 시설에 연결되어 있지 않습니다')
+        return prev
+      }
+      const facility = facilities.find((f) => f.id === shared)
+      if (!facility) return prev
+      if (CLOSURE_TYPE_CATEGORY[facility.closure_type] !== '접속함체') {
+        toast.error(
+          `공통 시설(${facility.name})이 접속함체가 아닙니다. 접속은 접속함체에서만 가능합니다.`,
+        )
+        return prev
+      }
+      // 모달 노출
+      setSpliceModal({
+        facility: {
+          id: facility.id,
+          name: facility.name,
+          code:
+            facility.facility_code ||
+            formatFacilityCode(facility.closure_type, facility.seq_no),
+        },
+        side1: {
+          cableId: cable1.id,
+          cableCode: cable1.cable_code,
+          cableSpec: cable1.spec,
+          cores: first.cores,
+        },
+        side2: {
+          cableId: cable2.id,
+          cableCode: cable2.cable_code,
+          cableSpec: cable2.spec,
+          cores,
+        },
+      })
+      return [...prev, { cableId, role, cores }]
+    })
+  }
 
   // 케이블 경로 편집 — 선택된 케이블의 중간 waypoint 를 드래그/추가/삭제.
   //   selectedCableId: 현재 경로 편집 중인 케이블
@@ -974,6 +1118,48 @@ export default function TopologyCanvas({
       })
     }
     return result
+  }, [coreAssignments])
+
+  // (in_cable_id, in_core) → entered_role · lifecycle 빠른 lookup.
+  //   splice 시각 연결선 — 어떤 코어가 어느 박스(designer/worker/single)에 속하는지 결정.
+  const coreAssignmentByCableCore = useMemo(() => {
+    const m = new Map<string, { entered_role: 'designer' | 'worker'; lifecycle: 'preexisting' | 'new' }>()
+    for (const a of coreAssignments ?? []) {
+      m.set(`${a.cable_id}:${a.core_range_start}`, {
+        entered_role: a.entered_role as 'designer' | 'worker',
+        lifecycle: a.lifecycle === 'preexisting' ? 'preexisting' : 'new',
+      })
+    }
+    return m
+  }, [coreAssignments])
+
+  // (cable_id, role) → 코어 번호 배열 (정렬·중복제거). 코어 박스 클릭 splice 생성에 사용.
+  //   비-청약(role='single')은 전 lifecycle 의 합집합, 청약(role='designer'|'worker')은
+  //   해당 역할의 lifecycle='new' 만 (캔버스 라벨에 보이는 것 그대로 — 클릭한 그 박스의 cores).
+  const coreNumbersByBox = useMemo(() => {
+    const m = new Map<string, number[]>()
+    for (const a of coreAssignments ?? []) {
+      const cores = (() => {
+        // single (비-청약) — 전 lifecycle 합집합
+        const k1 = `${a.cable_id}:single`
+        if (!m.has(k1)) m.set(k1, [])
+        return m.get(k1)!
+      })()
+      cores.push(a.core_range_start)
+      if (a.lifecycle !== 'preexisting') {
+        const roleK =
+          a.entered_role === 'designer'
+            ? `${a.cable_id}:designer`
+            : `${a.cable_id}:worker`
+        if (!m.has(roleK)) m.set(roleK, [])
+        m.get(roleK)!.push(a.core_range_start)
+      }
+    }
+    // 정렬 + 중복제거
+    for (const [k, arr] of m.entries()) {
+      m.set(k, [...new Set(arr)].sort((a, b) => a - b))
+    }
+    return m
   }, [coreAssignments])
 
   const [selectedId, setSelectedId] = useState<string | null>(null)
@@ -3130,6 +3316,140 @@ export default function TopologyCanvas({
     [mode, kakaoMap],
   )
 
+  // 사용코어 박스의 캔버스 위치(중심) — 박스 렌더 위치와 정확히 일치.
+  //   key = `${cableId}:${role}`. 박스 사이 splice 연결선 + click 영향 영역 계산에 사용.
+  //   도식 모드 전용 (지도 모드에는 박스 안 그림).
+  const coreBoxAnchors = useMemo(() => {
+    const result = new Map<string, { x: number; y: number; w: number; h: number }>()
+    if (mode === 'map') return result
+    const isSubscriptionCtx = projectCategory === '청약'
+    for (const c of cables) {
+      const pts = cablePathPoints(c)
+      if (pts.length < 2) continue
+      const midIdx = Math.floor(pts.length / 2)
+      const labelPt =
+        pts.length % 2 === 1
+          ? pts[midIdx]
+          : {
+              x: (pts[midIdx - 1].x + pts[midIdx].x) / 2,
+              y: (pts[midIdx - 1].y + pts[midIdx].y) / 2,
+            }
+      if (isSubscriptionCtx) {
+        const byRole = coresByCableByRole.get(c.id)
+        if (!byRole) continue
+        const fontSize = 27
+        const padX = 10
+        const padY = 6
+        const rows: { role: 'worker' | 'designer'; label: string }[] = []
+        if (byRole.worker) rows.push({ role: 'worker', label: byRole.worker })
+        if (byRole.designer) rows.push({ role: 'designer', label: byRole.designer })
+        const firstY = labelPt.y - 80
+        const rowH = fontSize + padY * 2 + 4
+        for (let idx = 0; idx < rows.length; idx += 1) {
+          const row = rows[idx]
+          const w = estimateTextWidth(row.label, fontSize) + padX * 2
+          const h = fontSize + padY * 2
+          const baseY = firstY - idx * rowH
+          const localOff = coreLabelOffsets[coreLabelKey(c.id, row.role)]
+          const dbOff = c.coreLabelOffsets[row.role]
+          const off = localOff ?? dbOff ?? { dx: 0, dy: 0 }
+          result.set(`${c.id}:${row.role}`, {
+            x: labelPt.x + off.dx,
+            y: baseY + off.dy,
+            w,
+            h,
+          })
+        }
+      } else {
+        const coreLabel = coresByCable.get(c.id)
+        if (!coreLabel) continue
+        const fromPt = pts[0]
+        const nextPt = pts[1]
+        const dx = nextPt.x - fromPt.x
+        const dy = nextPt.y - fromPt.y
+        const len = Math.hypot(dx, dy) || 1
+        const ux = dx / len
+        const uy = dy / len
+        const ALONG = 35
+        const PERP = 12
+        const baseLx = fromPt.x + ux * ALONG - uy * PERP
+        const baseLy = fromPt.y + uy * ALONG + ux * PERP
+        const fontSize = 9
+        const padX = 4
+        const padY = 2
+        const w = estimateTextWidth(coreLabel, fontSize) + padX * 2
+        const h = fontSize + padY * 2
+        const localOff = coreLabelOffsets[coreLabelKey(c.id, 'single')]
+        const dbOff = c.coreLabelOffsets.single
+        const off = localOff ?? dbOff ?? { dx: 0, dy: 0 }
+        result.set(`${c.id}:single`, {
+          x: baseLx + off.dx,
+          y: baseLy + off.dy,
+          w,
+          h,
+        })
+      }
+    }
+    return result
+  }, [
+    mode,
+    projectCategory,
+    cables,
+    cablePathPoints,
+    coresByCableByRole,
+    coresByCable,
+    coreLabelOffsets,
+  ])
+
+  // splice → 연결할 박스 쌍 derive. 같은 (cable, role) 쌍은 1줄로 묶음.
+  //   key = `${k1}::${k2}` (정렬), value = { aKey, bKey, count, isContinuous, facilityId }
+  const spliceConnections = useMemo(() => {
+    if (mode === 'map') return [] as Array<{
+      aKey: string
+      bKey: string
+      count: number
+      isContinuous: boolean
+      facilityId: string
+    }>
+    const isSubscriptionCtx = projectCategory === '청약'
+    type Conn = {
+      aKey: string
+      bKey: string
+      count: number
+      isContinuous: boolean
+      facilityId: string
+    }
+    const map = new Map<string, Conn>()
+    for (const s of splices ?? []) {
+      // 어떤 박스(role)에 속하는지 — 청약은 entered_role + lifecycle='new'·preexisting 둘 다,
+      //   비-청약은 항상 'single'.
+      const inRole: 'designer' | 'worker' | 'single' = isSubscriptionCtx
+        ? coreAssignmentByCableCore.get(`${s.in_cable_id}:${s.in_core}`)?.entered_role ?? 'worker'
+        : 'single'
+      const outRole: 'designer' | 'worker' | 'single' = isSubscriptionCtx
+        ? coreAssignmentByCableCore.get(`${s.out_cable_id}:${s.out_core}`)?.entered_role ?? 'worker'
+        : 'single'
+      const k1 = `${s.in_cable_id}:${inRole}`
+      const k2 = `${s.out_cable_id}:${outRole}`
+      const [aKey, bKey] = k1 < k2 ? [k1, k2] : [k2, k1]
+      const groupKey = `${aKey}::${bKey}::${s.facility_id}`
+      const existing = map.get(groupKey)
+      if (existing) {
+        existing.count += 1
+        if (!s.is_continuous) existing.isContinuous = false
+      } else {
+        map.set(groupKey, {
+          aKey,
+          bKey,
+          count: 1,
+          isContinuous: s.is_continuous,
+          facilityId: s.facility_id,
+        })
+      }
+    }
+    return [...map.values()]
+  }, [mode, projectCategory, splices, coreAssignmentByCableCore])
+
   // waypoint 추가 — 선분 i (점 i ~ 점 i+1 사이) 클릭 시 waypoints 의 index i 에 삽입
   const addWaypoint = async (cableId: string, segmentIndex: number, x: number, y: number) => {
     const current = effectiveWaypoints(cableId)
@@ -3820,11 +4140,12 @@ export default function TopologyCanvas({
       }
       return
     }
-    // 1.6) 사용코어 라벨 박스 드래그 마무리
+    // 1.6) 사용코어 라벨 박스 드래그 마무리 or 클릭(splice 선택)
     const cld = coreLabelDragRef.current
     if (cld) {
       coreLabelDragRef.current = null
       if (cld.hasMoved) {
+        // 드래그 — 위치 저장
         const off = coreLabelOffsets[coreLabelKey(cld.cableId, cld.role)]
         if (off) {
           const result = await updateCoreLabelOffset(
@@ -3841,6 +4162,9 @@ export default function TopologyCanvas({
             router.refresh()
           }
         }
+      } else {
+        // 클릭 — splice 선택. 첫 박스/두 번째 박스 분기.
+        handleCoreBoxClick(cld.cableId, cld.role)
       }
       return
     }
@@ -5226,6 +5550,43 @@ export default function TopologyCanvas({
               />
             </div>
           )}
+
+          {/* 코어 박스 1개 선택됨 안내 — 두 번째 클릭 안내 (owner 2026-05-26) */}
+          {editable && spliceSelections.length === 1 && !spliceModal && (
+            <div className="absolute top-1 left-1/2 -translate-x-1/2 z-30 pointer-events-auto">
+              <div className="flex items-center gap-2 rounded-lg border border-emerald-300 bg-emerald-50 px-3 py-1.5 text-xs text-emerald-800 shadow-md">
+                <span className="font-bold">코어 박스 선택됨</span>
+                <span>—</span>
+                <span>접속함체로 연결할 반대 케이블의 코어 박스를 클릭하세요.</span>
+                <button
+                  type="button"
+                  onClick={() => setSpliceSelections([])}
+                  className="ml-1 rounded border border-emerald-400 px-1.5 py-0.5 text-[10px] font-semibold text-emerald-700 hover:bg-emerald-100"
+                >
+                  취소
+                </button>
+              </div>
+            </div>
+          )}
+
+          {/* 코어 연결 모달 (owner 2026-05-26) */}
+          {spliceModal && (
+            <SpliceConnectModal
+              projectId={projectId}
+              facility={spliceModal.facility}
+              side1={spliceModal.side1}
+              side2={spliceModal.side2}
+              onConnected={() => {
+                setSpliceModal(null)
+                setSpliceSelections([])
+                router.refresh()
+              }}
+              onClose={() => {
+                setSpliceModal(null)
+                setSpliceSelections([])
+              }}
+            />
+          )}
           <svg
             ref={setSvgRef}
             viewBox={mode === 'map' ? undefined : viewBoxStr}
@@ -5393,6 +5754,97 @@ export default function TopologyCanvas({
                   vectorEffect="non-scaling-stroke"
                 />
               )}
+            </g>
+          )}
+
+          {/* 코어 박스 splice 연결선 — 도식 모드. 박스 간 직각 elbow 로 라우팅.
+              owner 2026-05-26: 수평/수직/직각/대각선 라우팅. 박스 드래그 시 함께 따라옴
+              (coreBoxAnchors 가 coreLabelOffsets 의존하므로 자동 재계산).
+              여러 splice 가 같은 (cable·role) 쌍 → 하나의 굵은 선 (count 배지). */}
+          {mode === 'schematic' && spliceConnections.length > 0 && (
+            <g pointerEvents="none">
+              {spliceConnections.map((conn) => {
+                const a = coreBoxAnchors.get(conn.aKey)
+                const b = coreBoxAnchors.get(conn.bKey)
+                if (!a || !b) return null
+                // 박스 가장자리에서 가장 가까운 점으로 endpoints 보정.
+                //   박스 중심끼리 그리면 선이 박스 안으로 들어가 보임 → 변·꼭짓점에 닿게.
+                const adx = b.x - a.x
+                const ady = b.y - a.y
+                const fromX =
+                  Math.abs(adx) > Math.abs(ady)
+                    ? a.x + Math.sign(adx) * a.w / 2
+                    : a.x
+                const fromY =
+                  Math.abs(adx) > Math.abs(ady)
+                    ? a.y
+                    : a.y + Math.sign(ady) * a.h / 2
+                const toX =
+                  Math.abs(adx) > Math.abs(ady)
+                    ? b.x - Math.sign(adx) * b.w / 2
+                    : b.x
+                const toY =
+                  Math.abs(adx) > Math.abs(ady)
+                    ? b.y
+                    : b.y - Math.sign(ady) * b.h / 2
+                // 라우팅: 거의 수평/수직이면 직선, 그 외엔 L-elbow (직각).
+                //   기울기 비율 0.2 이하 → 수평/수직, 그 외엔 elbow.
+                const dxAbs = Math.abs(toX - fromX)
+                const dyAbs = Math.abs(toY - fromY)
+                const isAxisAligned =
+                  dxAbs < 4 || dyAbs < 4 ||
+                  Math.min(dxAbs, dyAbs) / Math.max(dxAbs, dyAbs) < 0.15
+                let path: string
+                if (isAxisAligned) {
+                  path = `M ${fromX} ${fromY} L ${toX} ${toY}`
+                } else {
+                  // L-elbow — 가로가 더 길면 가로 먼저, 세로가 더 길면 세로 먼저
+                  const mid =
+                    dxAbs > dyAbs
+                      ? `${toX} ${fromY}`
+                      : `${fromX} ${toY}`
+                  path = `M ${fromX} ${fromY} L ${mid} L ${toX} ${toY}`
+                }
+                const stroke = conn.isContinuous ? '#10b981' : '#f59e0b'
+                return (
+                  <g key={`${conn.aKey}::${conn.bKey}::${conn.facilityId}`}>
+                    <path
+                      d={path}
+                      fill="none"
+                      stroke={stroke}
+                      strokeWidth={2.5}
+                      strokeOpacity={0.85}
+                      strokeLinecap="round"
+                      strokeLinejoin="round"
+                    />
+                    {/* 끝점 dot — 박스에 명확히 닿아 있음 표시 */}
+                    <circle cx={fromX} cy={fromY} r={3.5} fill={stroke} />
+                    <circle cx={toX} cy={toY} r={3.5} fill={stroke} />
+                    {/* 코어 개수 배지 (2개 이상일 때만) */}
+                    {conn.count > 1 && (
+                      <g>
+                        <circle
+                          cx={(fromX + toX) / 2}
+                          cy={(fromY + toY) / 2}
+                          r={11}
+                          fill={stroke}
+                          stroke="white"
+                          strokeWidth={1.5}
+                        />
+                        <text
+                          x={(fromX + toX) / 2}
+                          y={(fromY + toY) / 2 + 4}
+                          textAnchor="middle"
+                          fill="white"
+                          style={{ fontSize: 11, fontWeight: 800, fontFamily: 'system-ui' }}
+                        >
+                          {conn.count}
+                        </text>
+                      </g>
+                    )}
+                  </g>
+                )
+              })}
             </g>
           )}
 
@@ -5651,6 +6103,9 @@ export default function TopologyCanvas({
                           const rectY = baseY - h / 2 + off.dy
                           const textX = labelPt.x + off.dx
                           const textY = baseY + fontSize * 0.35 + off.dy
+                          const isSpliceSelected = spliceSelections.some(
+                            (s) => s.cableId === c.id && s.role === row.role,
+                          )
                           return (
                             <g
                               key={idx}
@@ -5660,6 +6115,20 @@ export default function TopologyCanvas({
                                 onCoreLabelPointerDown(e, c.id, row.role, off.dx, off.dy)
                               }}
                             >
+                              {/* splice 선택 시 emerald 후광 — 두 박스 모두 강조 */}
+                              {isSpliceSelected && (
+                                <rect
+                                  x={rectX - 4}
+                                  y={rectY - 4}
+                                  width={w + 8}
+                                  height={h + 8}
+                                  rx={6}
+                                  fill="none"
+                                  stroke="#10b981"
+                                  strokeWidth={3.5}
+                                  strokeOpacity={0.7}
+                                />
+                              )}
                               <rect
                                 x={rectX}
                                 y={rectY}
@@ -5727,6 +6196,22 @@ export default function TopologyCanvas({
                         onCoreLabelPointerDown(e, c.id, 'single', off.dx, off.dy)
                       }}
                     >
+                      {/* splice 선택 시 emerald 후광 */}
+                      {spliceSelections.some(
+                        (s) => s.cableId === c.id && s.role === 'single',
+                      ) && (
+                        <rect
+                          x={lx - w / 2 - 3}
+                          y={ly - h / 2 - 3}
+                          width={w + 6}
+                          height={h + 6}
+                          rx={4}
+                          fill="none"
+                          stroke="#10b981"
+                          strokeWidth={2}
+                          strokeOpacity={0.8}
+                        />
+                      )}
                       <rect
                         x={lx - w / 2}
                         y={ly - h / 2}
@@ -6794,9 +7279,43 @@ export default function TopologyCanvas({
                 waypoints={wps}
                 waypointColumn={mode === 'map' ? 'map_waypoints' : 'waypoints'}
                 circuits={circuits ?? []}
-                assignments={(coreAssignments ?? []).filter(
-                  (a) => a.cable_id === c.id,
-                )}
+                assignments={(coreAssignments ?? [])
+                  .filter((a) => a.cable_id === c.id)
+                  .map((a) => {
+                    // splice 트레이스 — 코어가 함체 splice 를 따라 다른 케이블·다른 시설까지
+                    //   확장됐을 때 단말 시설명 노출. 양쪽 끝(from_facility / to_facility) 각각.
+                    const startTerminal = traceCoreTerminal(
+                      c.id,
+                      a.core_range_start,
+                      c.from_facility_id,
+                      splices ?? [],
+                      cables,
+                    )
+                    const endTerminal = traceCoreTerminal(
+                      c.id,
+                      a.core_range_start,
+                      c.to_facility_id,
+                      splices ?? [],
+                      cables,
+                    )
+                    const facLabel = (fid: string | null): string | undefined => {
+                      if (!fid) return undefined
+                      const fac = facilities.find((x) => x.id === fid)
+                      if (!fac) return undefined
+                      return `${formatFacilityCode(fac.closure_type, fac.seq_no)} ${fac.name}`
+                    }
+                    const traceStart = facLabel(startTerminal)
+                    const traceEnd = facLabel(endTerminal)
+                    const extended =
+                      (startTerminal !== c.from_facility_id) ||
+                      (endTerminal !== c.to_facility_id)
+                    return {
+                      ...a,
+                      trace_start_name: traceStart,
+                      trace_end_name: traceEnd,
+                      trace_extended: extended,
+                    }
+                  })}
                 onClose={() => setSelectedCableId(null)}
                 onSaved={() => {
                   setSelectedCableId(null)

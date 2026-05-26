@@ -82,6 +82,12 @@ export type CablePanelAssignment = {
   core_range_end: number
   lifecycle: CoreLifecycle
   is_terminal: boolean
+  // 선번장 시점·종점 (owner 2026-05-26) — splice 트레이스 결과 단말 시설명.
+  //   미입력 시 fromName/toName fallback.
+  trace_start_name?: string
+  trace_end_name?: string
+  // 트레이스가 splice 를 따라 다른 케이블까지 확장됐는지 (= 이 케이블의 from/to 와 다른 시설로 끝남)
+  trace_extended?: boolean
 }
 
 export default function CableInfoPanel({
@@ -333,6 +339,8 @@ export default function CableInfoPanel({
           cable={cable}
           circuits={circuits}
           assignments={assignments}
+          fromName={fromName}
+          toName={toName}
           onChanged={onCoreChanged}
         />
 
@@ -580,12 +588,17 @@ function CoreAssignSection({
   cable,
   circuits,
   assignments,
+  fromName,
+  toName,
   onChanged,
 }: {
   projectId: string
   cable: CablePanelData
   circuits: CablePanelCircuit[]
   assignments: CablePanelAssignment[]
+  // 선번장 시점·종점 fallback — splice 트레이스 없을 때 케이블 자체 from/to 표시.
+  fromName: string
+  toName: string
   onChanged: () => void
 }) {
   const cableId = cable.id
@@ -860,6 +873,21 @@ function CoreAssignSection({
                     <p className="text-[10px] text-slate-500 truncate">
                       {circuitLabel(a.circuit_id)} · {CORE_LIFECYCLE_LABEL[a.lifecycle]}
                       {a.segment_idx > 0 ? ` · 세그 ${a.segment_idx}` : ''}
+                    </p>
+                    {/* 선번장 시점·종점 (owner 2026-05-26) — splice 트레이스 단말.
+                        미입력 시 케이블 양 끝 시설명 fallback. */}
+                    <p
+                      className={
+                        'text-[10px] truncate ' +
+                        (a.trace_extended ? 'text-emerald-700 font-medium' : 'text-slate-500')
+                      }
+                      title={`${a.trace_start_name ?? fromName} ~ ${a.trace_end_name ?? toName}`}
+                    >
+                      <span className="text-slate-400">연결</span>{' '}
+                      {a.trace_start_name ?? fromName} ~ {a.trace_end_name ?? toName}
+                      {a.trace_extended && (
+                        <span className="ml-1 text-[9px] text-emerald-600">(접속 확장)</span>
+                      )}
                     </p>
                   </div>
                   <button

@@ -74,6 +74,7 @@ export default async function RelocationCanvasPage({
     facilityTasks,
     facilityMaterials,
     assignments,
+    splices,
   } = await loadRelocationCanvasData(id, me.company_id)
 
   // 작업자 위치 (지도 모드 표시용, 최근 30분)
@@ -225,6 +226,7 @@ export default async function RelocationCanvasPage({
             facilityMaterials={facilityMaterials}
             circuits={circuits}
             coreAssignments={assignments}
+            splices={splices}
             myEmployeeId={me.id}
             workerPositions={workerPositions}
             projectOrderNos={
