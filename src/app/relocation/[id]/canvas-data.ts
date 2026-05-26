@@ -57,7 +57,7 @@ export async function loadRelocationCanvasData(
     supabase
       .from('relocation_cables')
       .select(
-        'id, from_facility_id, to_facility_id, spec, status, cable_code, installation_type, waypoints, map_waypoints, total_length, end_distance, notes, created_by',
+        'id, from_facility_id, to_facility_id, spec, status, cable_code, installation_type, waypoints, map_waypoints, total_length, end_distance, notes, created_by, core_label_offsets',
       )
       .eq('project_id', projectId)
       .order('cable_code'),

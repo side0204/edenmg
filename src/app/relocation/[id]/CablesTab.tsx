@@ -38,6 +38,14 @@ export type CableRow = {
   end_distance: number | null
   notes: string | null
   created_by: string | null
+  // 사용코어 라벨 박스 위치 사용자 정의 (마이그 0080). 캔버스 드래그로 갱신.
+  core_label_offsets?:
+    | {
+        designer?: { dx: number; dy: number }
+        worker?: { dx: number; dy: number }
+        single?: { dx: number; dy: number }
+      }
+    | null
 }
 
 type FacilityMini = {

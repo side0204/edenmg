@@ -65,7 +65,11 @@ import { CABLE_STATUS_LABEL, CABLE_STATUS_VALUES } from '@/lib/relocation'
 import { autoLayoutPositions, NODE_SIZE } from './auto-layout'
 import { snapPositionsToCableDirections } from './cable-snap-layout'
 import { graphAwareLayout } from './graph-layout'
-import { saveNodePositions, saveCableWaypoints } from './position-actions'
+import {
+  saveNodePositions,
+  saveCableWaypoints,
+  updateCoreLabelOffset,
+} from './position-actions'
 import { createCableFromCanvas } from './cable-actions'
 import { seedTestFacilities, clearTestFacilities } from './test-actions'
 import {
@@ -186,6 +190,14 @@ type CableEdge = {
   total_length: number | null
   end_distance: number | null
   created_by: string | null  // employees.id — 본인 작업분 필터링용
+  // 사용코어 라벨 박스 위치 사용자 정의 (도식 모드). 마이그 0080.
+  //   기본 위치에서의 dx/dy 오프셋. 청약은 역할별(designer/worker) 박스 2 개,
+  //   계획·지장이설은 단일(single) 박스 1 개. 미지정 키는 (0,0).
+  coreLabelOffsets: {
+    designer?: { dx: number; dy: number }
+    worker?: { dx: number; dy: number }
+    single?: { dx: number; dy: number }
+  }
 }
 
 // 시설 신규 배치 대기 — 도식 모드는 캔버스 픽셀(xy), 지도 모드는 GPS 좌표(latlng)
@@ -659,6 +671,25 @@ export default function TopologyCanvas({
     startDy: number
     hasMoved: boolean
   } | null>(null)
+
+  // 사용코어 라벨 박스 (5~6, 1~4 등) 드래그 — labelOffsets 와 동일 패턴.
+  //   key 는 `${cableId}:${role}` — 청약은 role='designer'|'worker', 비-청약은 'single'
+  //   마이그 0080. 저장은 updateCoreLabelOffset(server action) 이 cable.core_label_offsets 갱신.
+  type CoreLabelRole = 'designer' | 'worker' | 'single'
+  const [coreLabelOffsets, setCoreLabelOffsets] = useState<
+    Record<string, { dx: number; dy: number }>
+  >({})
+  const coreLabelDragRef = useRef<{
+    cableId: string
+    role: CoreLabelRole
+    startX: number
+    startY: number
+    startDx: number
+    startDy: number
+    hasMoved: boolean
+  } | null>(null)
+  const coreLabelKey = (cableId: string, role: CoreLabelRole): string =>
+    `${cableId}:${role}`
 
   // 케이블 경로 편집 — 선택된 케이블의 중간 waypoint 를 드래그/추가/삭제.
   //   selectedCableId: 현재 경로 편집 중인 케이블
@@ -3117,6 +3148,7 @@ export default function TopologyCanvas({
     marqueeRef.current = null
     setMarquee(null)
     labelDragRef.current = null
+    coreLabelDragRef.current = null
     waypointDragRef.current = null
     groupDragRef.current = null
     interactionRef.current = null
@@ -3248,6 +3280,31 @@ export default function TopologyCanvas({
     ;(e.target as Element).setPointerCapture(e.pointerId)
   }
 
+  // 사용코어 라벨 박스(5~6, 1~4 등) 드래그 시작 — facility 라벨과 동일 패턴.
+  //   role: 청약 designer/worker, 비-청약 single
+  const onCoreLabelPointerDown = (
+    e: React.PointerEvent<SVGGElement>,
+    cableId: string,
+    role: CoreLabelRole,
+    curDx: number,
+    curDy: number,
+  ) => {
+    if (!editable) return
+    if (tryStartPinchFromChild(e)) return
+    e.stopPropagation()
+    const { x, y } = toSvgCoord(e.clientX, e.clientY)
+    coreLabelDragRef.current = {
+      cableId,
+      role,
+      startX: x,
+      startY: y,
+      startDx: curDx,
+      startDy: curDy,
+      hasMoved: false,
+    }
+    ;(e.target as Element).setPointerCapture(e.pointerId)
+  }
+
   // SVG 빈 영역 pointerdown — pan 시작. 노드 위는 노드 onPointerDown 에서 stopPropagation
   // 하므로 여기까지 안 옴.
   const onSvgPointerDown = (e: React.PointerEvent<SVGSVGElement>) => {
@@ -3274,6 +3331,7 @@ export default function TopologyCanvas({
         marqueeRef.current = null
         setMarquee(null)
         labelDragRef.current = null
+        coreLabelDragRef.current = null
         waypointDragRef.current = null
         groupDragRef.current = null
         interactionRef.current = null
@@ -3432,6 +3490,23 @@ export default function TopologyCanvas({
         [ld.id]: {
           dx: Math.round(ld.startDx + dx),
           dy: Math.round(ld.startDy + dy),
+        },
+      }))
+      return
+    }
+    // 1.6) 사용코어 라벨 박스 드래그 진행 중
+    const cld = coreLabelDragRef.current
+    if (cld) {
+      const { x, y } = toSvgCoord(e.clientX, e.clientY)
+      const dx = x - cld.startX
+      const dy = y - cld.startY
+      if (!cld.hasMoved && Math.hypot(dx, dy) < DRAG_THRESHOLD) return
+      cld.hasMoved = true
+      setCoreLabelOffsets((prev) => ({
+        ...prev,
+        [coreLabelKey(cld.cableId, cld.role)]: {
+          dx: Math.round(cld.startDx + dx),
+          dy: Math.round(cld.startDy + dy),
         },
       }))
       return
@@ -3698,6 +3773,30 @@ export default function TopologyCanvas({
       } else {
         // 이동 없이 클릭 — 시설 선택 (도형 클릭과 동일)
         handleNodeClick(ld.id)
+      }
+      return
+    }
+    // 1.6) 사용코어 라벨 박스 드래그 마무리
+    const cld = coreLabelDragRef.current
+    if (cld) {
+      coreLabelDragRef.current = null
+      if (cld.hasMoved) {
+        const off = coreLabelOffsets[coreLabelKey(cld.cableId, cld.role)]
+        if (off) {
+          const result = await updateCoreLabelOffset(
+            projectId,
+            cld.cableId,
+            cld.role,
+            { dx: off.dx, dy: off.dy },
+          )
+          if (!result.ok) {
+            toast.error(result.error)
+          } else {
+            // 로컬 override 유지 — facility 라벨과 동일 깜박임 회피 패턴.
+            //   router.refresh() 로 다른 패널이 새 데이터 받게 함.
+            router.refresh()
+          }
+        }
       }
       return
     }
@@ -5442,26 +5541,57 @@ export default function TopologyCanvas({
                     const fontWeight = 800
                     const padX = 10
                     const padY = 6
-                    const rows: { label: string; color: string; dashed: boolean }[] = []
+                    const rows: {
+                      label: string
+                      color: string
+                      dashed: boolean
+                      role: CoreLabelRole
+                    }[] = []
                     if (byRole.worker)
-                      rows.push({ label: byRole.worker, color: '#dc2626', dashed: false })
+                      rows.push({
+                        label: byRole.worker,
+                        color: '#dc2626',
+                        dashed: false,
+                        role: 'worker',
+                      })
                     if (byRole.designer)
-                      rows.push({ label: byRole.designer, color: '#2563eb', dashed: true })
+                      rows.push({
+                        label: byRole.designer,
+                        color: '#2563eb',
+                        dashed: true,
+                        role: 'designer',
+                      })
                     if (rows.length === 0) return null
                     // 첫 줄 y — 36C(spec, 20px) 위쪽 충분히 띄움. 80px 위.
                     const firstY = labelPt.y - 80
                     const rowH = fontSize + padY * 2 + 4
                     return (
-                      <g pointerEvents="none">
+                      <g>
                         {rows.map((row, idx) => {
                           const w = estimateTextWidth(row.label, fontSize) + padX * 2
                           const h = fontSize + padY * 2
-                          const y = firstY - idx * rowH
+                          const baseY = firstY - idx * rowH
+                          // 사용자 정의 오프셋 — 로컬 override 우선, 없으면 DB 저장값.
+                          //   key 는 cableId:role. 마이그 0080.
+                          const localOff = coreLabelOffsets[coreLabelKey(c.id, row.role)]
+                          const dbOff = c.coreLabelOffsets[row.role]
+                          const off = localOff ?? dbOff ?? { dx: 0, dy: 0 }
+                          const rectX = labelPt.x - w / 2 + off.dx
+                          const rectY = baseY - h / 2 + off.dy
+                          const textX = labelPt.x + off.dx
+                          const textY = baseY + fontSize * 0.35 + off.dy
                           return (
-                            <g key={idx}>
+                            <g
+                              key={idx}
+                              style={{ cursor: editable ? 'move' : 'default', touchAction: 'none' }}
+                              onPointerDown={(e) => {
+                                if (!editable) return
+                                onCoreLabelPointerDown(e, c.id, row.role, off.dx, off.dy)
+                              }}
+                            >
                               <rect
-                                x={labelPt.x - w / 2}
-                                y={y - h / 2}
+                                x={rectX}
+                                y={rectY}
                                 width={w}
                                 height={h}
                                 rx={4}
@@ -5471,11 +5601,17 @@ export default function TopologyCanvas({
                                 strokeDasharray={row.dashed ? '7 4' : undefined}
                               />
                               <text
-                                x={labelPt.x}
-                                y={y + fontSize * 0.35}
+                                x={textX}
+                                y={textY}
                                 textAnchor="middle"
                                 fill={row.color}
-                                style={{ fontSize, fontWeight, fontFamily: LABEL_FONT }}
+                                style={{
+                                  fontSize,
+                                  fontWeight,
+                                  fontFamily: LABEL_FONT,
+                                  pointerEvents: 'none',
+                                  userSelect: 'none',
+                                }}
                               >
                                 {row.label}
                               </text>
@@ -5485,7 +5621,7 @@ export default function TopologyCanvas({
                       </g>
                     )
                   }
-                  // 비-청약 (지장이설/계획) — 기존 from-anchor 동작 유지
+                  // 비-청약 (지장이설/계획) — 기존 from-anchor 동작 유지 + 드래그 이동 지원
                   const coreLabel = coresByCable.get(c.id)
                   if (!coreLabel) return null
                   if (pts.length < 2) return null
@@ -5498,16 +5634,28 @@ export default function TopologyCanvas({
                   const uy = dy / len
                   const ALONG = 35
                   const PERP = 12
-                  const lx = fromPt.x + ux * ALONG - uy * PERP
-                  const ly = fromPt.y + uy * ALONG + ux * PERP
+                  const baseLx = fromPt.x + ux * ALONG - uy * PERP
+                  const baseLy = fromPt.y + uy * ALONG + ux * PERP
                   const fontSize = 9
                   const fontWeight = 600
                   const padX = 4
                   const padY = 2
                   const w = estimateTextWidth(coreLabel, fontSize) + padX * 2
                   const h = fontSize + padY * 2
+                  // 사용자 정의 오프셋 — key 는 cableId:single
+                  const localOff = coreLabelOffsets[coreLabelKey(c.id, 'single')]
+                  const dbOff = c.coreLabelOffsets.single
+                  const off = localOff ?? dbOff ?? { dx: 0, dy: 0 }
+                  const lx = baseLx + off.dx
+                  const ly = baseLy + off.dy
                   return (
-                    <g pointerEvents="none">
+                    <g
+                      style={{ cursor: editable ? 'move' : 'default', touchAction: 'none' }}
+                      onPointerDown={(e) => {
+                        if (!editable) return
+                        onCoreLabelPointerDown(e, c.id, 'single', off.dx, off.dy)
+                      }}
+                    >
                       <rect
                         x={lx - w / 2}
                         y={ly - h / 2}
@@ -5523,7 +5671,13 @@ export default function TopologyCanvas({
                         y={ly + fontSize * 0.35}
                         textAnchor="middle"
                         fill="#dc2626"
-                        style={{ fontSize, fontWeight, fontFamily: LABEL_FONT }}
+                        style={{
+                          fontSize,
+                          fontWeight,
+                          fontFamily: LABEL_FONT,
+                          pointerEvents: 'none',
+                          userSelect: 'none',
+                        }}
                       >
                         {coreLabel}
                       </text>

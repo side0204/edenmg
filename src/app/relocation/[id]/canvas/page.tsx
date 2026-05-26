@@ -195,6 +195,14 @@ export default async function RelocationCanvasPage({
               total_length: c.total_length,
               end_distance: c.end_distance,
               created_by: c.created_by ?? null,
+              coreLabelOffsets:
+                c.core_label_offsets && typeof c.core_label_offsets === 'object'
+                  ? (c.core_label_offsets as {
+                      designer?: { dx: number; dy: number }
+                      worker?: { dx: number; dy: number }
+                      single?: { dx: number; dy: number }
+                    })
+                  : {},
             }))}
             editable={true}
             facilityMasters={facilityMasters}

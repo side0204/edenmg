@@ -131,3 +131,78 @@ export async function saveCableWaypoints(
   revalidatePath(`/relocation/${projectId}`)
   return { ok: true }
 }
+
+/**
+ * 사용코어 라벨 박스 위치 사용자 정의 — 케이블의 core_label_offsets jsonb 갱신.
+ *   role: 청약은 'designer' 또는 'worker', 비-청약(계획·지장이설)은 'single'.
+ *   기존 다른 역할 키는 보존(merge). offset 이 null 이면 그 역할 키 삭제(기본 위치 복귀).
+ *
+ * 마이그 0080. RLS 가 회사 스코프 보장.
+ */
+export async function updateCoreLabelOffset(
+  projectId: string,
+  cableId: string,
+  role: 'designer' | 'worker' | 'single',
+  offset: { dx: number; dy: number } | null,
+): Promise<{ ok: true } | { ok: false; error: string }> {
+  const supabase = await createClient()
+  const {
+    data: { user },
+  } = await supabase.auth.getUser()
+  if (!user) return { ok: false, error: '로그인이 필요합니다' }
+
+  const { data: meRow } = await supabase
+    .from('employees')
+    .select('id, is_active')
+    .eq('auth_user_id', user.id)
+    .maybeSingle()
+  const me = meRow as { id: string; is_active: boolean } | null
+  if (!me || !me.is_active) return { ok: false, error: '계정이 활성 상태가 아닙니다' }
+
+  if (!projectId || !cableId) {
+    return { ok: false, error: '케이블 정보가 없습니다' }
+  }
+  if (role !== 'designer' && role !== 'worker' && role !== 'single') {
+    return { ok: false, error: '라벨 종류가 올바르지 않습니다' }
+  }
+  if (offset !== null) {
+    if (!Number.isFinite(offset.dx) || !Number.isFinite(offset.dy)) {
+      return { ok: false, error: '오프셋 값이 올바르지 않습니다' }
+    }
+  }
+
+  // 기존 jsonb merge — 다른 역할 키는 보존
+  const { data: existingRow, error: readErr } = await supabase
+    .from('relocation_cables')
+    .select('core_label_offsets')
+    .eq('id', cableId)
+    .eq('project_id', projectId)
+    .maybeSingle()
+  if (readErr) {
+    return { ok: false, error: `라벨 위치 조회 실패: ${readErr.message}` }
+  }
+  const existing =
+    (existingRow?.core_label_offsets as Record<
+      string,
+      { dx: number; dy: number }
+    > | null) ?? {}
+
+  const next: Record<string, { dx: number; dy: number }> = { ...existing }
+  if (offset === null) {
+    delete next[role]
+  } else {
+    next[role] = { dx: Math.round(offset.dx), dy: Math.round(offset.dy) }
+  }
+
+  const { error } = await supabase
+    .from('relocation_cables')
+    .update({ core_label_offsets: next })
+    .eq('id', cableId)
+    .eq('project_id', projectId)
+  if (error) {
+    return { ok: false, error: `라벨 위치 저장 실패: ${error.message}` }
+  }
+
+  revalidatePath(`/relocation/${projectId}`)
+  return { ok: true }
+}
