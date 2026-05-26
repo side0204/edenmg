@@ -1,11 +1,13 @@
 import Link from 'next/link'
 import { redirect, notFound } from 'next/navigation'
-import { ChevronLeft, Plus, Cable } from 'lucide-react'
+import { ChevronLeft, Plus, Cable, MoreHorizontal } from 'lucide-react'
 import { createClient } from '@/lib/supabase/server'
 import { EmptyState } from '@/components/EmptyState'
 import {
   isRelocationCategorySlug,
+  RELOCATION_CATEGORY_VALUES,
   RELOCATION_CATEGORY_FROM_SLUG,
+  RELOCATION_CATEGORY_SLUG,
   RELOCATION_CATEGORY_LABEL,
   RELOCATION_CATEGORY_DESCRIPTION,
 } from '@/lib/relocation'
@@ -265,24 +267,58 @@ export default async function RelocationCategoryListPage({
         >
           <div>
             <Link
-              href="/relocation"
+              href="/"
               className="inline-flex items-center gap-1 text-sm text-slate-500 hover:text-slate-900"
             >
               <ChevronLeft className="h-4 w-4" />
-              공사 목록
+              홈
             </Link>
             <h1 className="mt-1 text-3xl font-bold text-slate-900 tracking-tight">
               {categoryLabel}
             </h1>
             <p className="mt-1 text-sm text-slate-500">{categoryDescription}</p>
           </div>
-          <Link
-            href={newProjectHref}
-            className="inline-flex items-center gap-1 rounded-lg bg-slate-900 px-4 py-2 text-sm font-medium text-white hover:bg-slate-800"
-          >
-            <Plus className="h-4 w-4" />
-            프로젝트 생성
-          </Link>
+          <div className="flex items-center gap-2">
+            {/* 더보기 — 다른 카테고리(청약/계획/지장이설)로 전환 (owner 2026-05-26).
+                native <details> + summary — 외부 클릭 감지 불필요, 모바일 안전. */}
+            <details className="relative group">
+              <summary className="cursor-pointer list-none inline-flex items-center gap-1 rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50">
+                <MoreHorizontal className="h-4 w-4" />
+                더보기
+              </summary>
+              <div className="absolute right-0 top-full mt-1 z-20 rounded-lg border border-slate-200 bg-white shadow-lg py-1 min-w-[200px]">
+                <p className="px-3 py-1.5 text-[10px] font-semibold uppercase tracking-wide text-slate-400">
+                  카테고리 전환
+                </p>
+                {RELOCATION_CATEGORY_VALUES.map((c) => {
+                  const slug = RELOCATION_CATEGORY_SLUG[c]
+                  const isActive = c === category
+                  return (
+                    <Link
+                      key={c}
+                      href={`/relocation/category/${slug}`}
+                      className={
+                        'block px-3 py-2 text-sm ' +
+                        (isActive
+                          ? 'bg-slate-100 font-bold text-slate-900 cursor-default'
+                          : 'text-slate-700 hover:bg-slate-50')
+                      }
+                    >
+                      {RELOCATION_CATEGORY_LABEL[c]} 설계
+                      {isActive && <span className="ml-1 text-[10px] text-slate-500">(현재)</span>}
+                    </Link>
+                  )
+                })}
+              </div>
+            </details>
+            <Link
+              href={newProjectHref}
+              className="inline-flex items-center gap-1 rounded-lg bg-slate-900 px-4 py-2 text-sm font-medium text-white hover:bg-slate-800"
+            >
+              <Plus className="h-4 w-4" />
+              프로젝트 생성
+            </Link>
+          </div>
         </header>
 
         {listError && (
