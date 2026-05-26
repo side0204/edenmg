@@ -23,6 +23,10 @@ type BulkClosure = {
   name: string
   x: number
   y: number
+  // 지도 모드 — 컨테이너 픽셀을 카카오 projection 으로 변환한 GPS 좌표.
+  //   둘 다 저장하면 도식/지도 어느 모드에서도 같은 시설이 그대로 표시됨.
+  lat?: number | null
+  lng?: number | null
 }
 
 type BulkCable = {
@@ -144,6 +148,8 @@ export async function bulkRegisterFromCanvas(input: {
       closure_spec: c.closure_spec && isCableSpec(c.closure_spec) ? c.closure_spec : null,
       x_hint: Math.round(c.x),
       y_hint: Math.round(c.y),
+      lat: typeof c.lat === 'number' && Number.isFinite(c.lat) ? c.lat : null,
+      lng: typeof c.lng === 'number' && Number.isFinite(c.lng) ? c.lng : null,
       install_status: 'new',
       created_by: me.id,
     }))

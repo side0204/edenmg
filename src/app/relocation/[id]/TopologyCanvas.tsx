@@ -3654,11 +3654,26 @@ export default function TopologyCanvas({
           bbox: { x: marquee.x, y: marquee.y, width: marquee.w, height: marquee.h },
           direction: bulkPayload.direction,
         })
-        const closuresWithPos = bulkPayload.closures.map((c, i) => ({
-          ...c,
-          x: positions[i]?.x ?? marquee.x,
-          y: positions[i]?.y ?? marquee.y,
-        }))
+        // 지도 모드 — 컨테이너 픽셀을 GPS 로 변환해 lat/lng 도 함께 저장.
+        //   변환 안 되면(map 미준비) 도식 모드처럼 x/y 만 보냄.
+        const proj = mode === 'map' && kakaoMap ? kakaoMap.getProjection() : null
+        const closuresWithPos = bulkPayload.closures.map((c, i) => {
+          const px = positions[i]?.x ?? marquee.x
+          const py = positions[i]?.y ?? marquee.y
+          let lat: number | null = null
+          let lng: number | null = null
+          if (proj) {
+            try {
+              const ll = proj.coordsFromContainerPoint(new kakao.maps.Point(px, py))
+              lat = ll.getLat()
+              lng = ll.getLng()
+            } catch {
+              lat = null
+              lng = null
+            }
+          }
+          return { ...c, x: px, y: py, lat, lng }
+        })
         setMarquee(null)
         recentlyPannedRef.current = true
         void bulkRegisterFromCanvas({
@@ -3941,8 +3956,8 @@ export default function TopologyCanvas({
             시설 목록
           </button>
 
-          {/* 시설물 일괄등록 — 도식 모드 전용 (드래그 범위 지정) */}
-          {editable && mode === 'schematic' && (
+          {/* 시설물 일괄등록 — 도식 + 지도 모드 모두 (드래그 범위 지정) */}
+          {editable && (
             <button
               type="button"
               onClick={() => setBulkRegisterOpen(true)}
@@ -4998,7 +5013,9 @@ export default function TopologyCanvas({
               touchAction: 'none',
               // 지도 모드 — SVG 루트는 이벤트 통과(지도 pan/zoom). 시설·케이블 등
               // 클릭 대상 요소만 pointer-events 를 개별로 켠다.
-              pointerEvents: mode === 'map' ? 'none' : 'auto',
+              //   ⚠ 예외: 일괄등록 대기 중에는 SVG 가 드래그 사각형을 받아야 함 → auto
+              pointerEvents:
+                mode === 'map' && !bulkPayload ? 'none' : 'auto',
             }}
             onPointerDown={onSvgPointerDown}
             onPointerMove={onPointerMove}
