@@ -11,6 +11,7 @@ export type HomeCardId =
   | 'my_materials'
   | 'stock_approvals'
   | 'my_works'
+  | 'schedule_changes'
   | 'approvals'
   | 'annual_leave'
   | 'leaves'
@@ -25,6 +26,7 @@ export const HOME_CARD_DEFAULT_ORDER: HomeCardId[] = [
   'my_materials',
   'stock_approvals',
   'my_works',
+  'schedule_changes',
   'approvals',
   'annual_leave',
   'leaves',
@@ -39,6 +41,7 @@ export const HOME_CARD_LABEL: Record<HomeCardId, string> = {
   my_materials: '내 자재',
   stock_approvals: '자재 사용 승인 대기',
   my_works: '내 작업 진행 목록',
+  schedule_changes: '일정변경 요청 대기',
   approvals: '결재',
   annual_leave: '내 연차 잔여',
   leaves: '휴가·외근 현황',
@@ -53,6 +56,7 @@ export const HOME_CARD_DESCRIPTION: Record<HomeCardId, string> = {
   my_materials: '보유 자재 (보유 시에만 자동 노출)',
   stock_approvals: '자재 사용 승인 대기 (자재담당자만 노출 대상)',
   my_works: '본인 배정된 작업 진행 목록',
+  schedule_changes: '담당 작업의 일정변경 요청 대기 (요청 시에만 노출)',
   approvals: '내 신청 + 결재함 (본사 직원만 노출 대상)',
   annual_leave: '본인 연차 잔여·사용 (입사일 등록 시 노출)',
   leaves: '회사 직원 오늘 휴가·외근 현황',

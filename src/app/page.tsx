@@ -426,6 +426,26 @@ export default async function Home() {
     ? (stockApprovalsCountRes.count ?? 0)
     : 0
 
+  // ===== 일정 변경 요청 대기 (owner 2026-05-26) ===
+  //   본인이 담당자(works.assignee_employee_id)인 작업의 pending 요청 수.
+  let myPendingScheduleChanges = 0
+  {
+    const { data: myAssigneeWorks } = await supabase
+      .from('works')
+      .select('id')
+      .eq('company_id', employee.company_id)
+      .eq('assignee_employee_id', employee.id)
+    const ids = ((myAssigneeWorks ?? []) as { id: string }[]).map((r) => r.id)
+    if (ids.length > 0) {
+      const { count } = await supabase
+        .from('work_schedule_change_requests')
+        .select('id', { count: 'exact', head: true })
+        .in('work_id', ids)
+        .eq('status', 'pending')
+      myPendingScheduleChanges = count ?? 0
+    }
+  }
+
   // ===== 연차 잔여 (현재 회차) + 대기 신청 합계 + 다음 회차 미리보기 =====
   let annualBalance: {
     granted: number
@@ -676,6 +696,26 @@ export default async function Home() {
           <p className="text-[11px] text-slate-500">
             카드 탭 시 바로 일보 작성. 신규 배정은 호박색 「신규」 배지로 강조됩니다.
           </p>
+        </section>
+      ) : undefined,
+
+    // 일정 변경 요청 대기 (owner 2026-05-26) — 본인이 담당자인 작업의 pending 요청.
+    schedule_changes:
+      myPendingScheduleChanges > 0 ? (
+        <section className="rounded-2xl bg-amber-50 border border-amber-300 dark:bg-amber-900/20 dark:border-amber-800 p-6 space-y-3">
+          <h2 className="flex items-center gap-2 text-base font-semibold text-amber-800 tracking-tight dark:text-amber-200">
+            <Bell className="h-5 w-5" />
+            일정 변경 요청 대기
+            <span className="ml-auto inline-flex items-center rounded-full bg-amber-200 text-amber-900 text-xs font-bold px-2 py-0.5">
+              {myPendingScheduleChanges}건
+            </span>
+          </h2>
+          <Link
+            href="/works/schedule"
+            className="block rounded-lg bg-amber-600 hover:bg-amber-700 px-4 py-3 text-base font-bold text-white text-center"
+          >
+            작업 캘린더에서 확인하기 →
+          </Link>
         </section>
       ) : undefined,
 

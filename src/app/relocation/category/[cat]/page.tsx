@@ -57,6 +57,7 @@ type RawProjectRow = {
   status: string
   category: string
   subcategory: string | null
+  subcategory_major: string | null
   region: string | null
   subscription_id: string | null
   order_no: string | null
@@ -70,6 +71,8 @@ type RawProjectRow = {
   surveyed_at: string | null
   expected_completion_at: string | null
   completion_at: string | null
+  work_request_start: string | null
+  work_request_end: string | null
   outside_worker_ids: unknown
   splice_worker_ids: unknown
   designer_id: string | null
@@ -154,7 +157,7 @@ export default async function RelocationCategoryListPage({
   const { data: rawRows, error: listError } = await supabase
     .from('relocation_projects')
     .select(
-      'id, title, status, category, subcategory, region, subscription_id, order_no, order_nos, subscriber_name, subscriber_address, branch_manager, branch_contact, subscribed_at, desired_open_at, surveyed_at, expected_completion_at, completion_at, outside_worker_ids, splice_worker_ids, designer_id, notes, created_at',
+      'id, title, status, category, subcategory, subcategory_major, region, subscription_id, order_no, order_nos, subscriber_name, subscriber_address, branch_manager, branch_contact, subscribed_at, desired_open_at, surveyed_at, expected_completion_at, completion_at, work_request_start, work_request_end, outside_worker_ids, splice_worker_ids, designer_id, notes, created_at',
     )
     .eq('company_id', me.company_id)
     .eq('category', category)
@@ -235,6 +238,7 @@ export default async function RelocationCategoryListPage({
       ? p.category
       : '지장이설') as '청약' | '계획' | '지장이설',
     subcategory: p.subcategory,
+    subcategory_major: p.subcategory_major,
     region: p.region,
     subscription_id: p.subscription_id,
     order_no: p.order_no,
@@ -252,6 +256,8 @@ export default async function RelocationCategoryListPage({
     surveyed_at: p.surveyed_at,
     expected_completion_at: p.expected_completion_at,
     completion_at: p.completion_at,
+    work_request_start: p.work_request_start,
+    work_request_end: p.work_request_end,
     outside_workers: workerEntries(p.id, safeIdArr(p.outside_worker_ids)),
     splice_workers: workerEntries(p.id, safeIdArr(p.splice_worker_ids)),
     designer_name: p.designer_id ? nameById.get(p.designer_id) ?? null : null,

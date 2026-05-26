@@ -21,6 +21,7 @@ import {
 } from 'lucide-react'
 import { saveRelocationListPrefs } from './prefs-actions'
 import { confirmWorkAssignment, cancelWorkAssignment } from '../../actions'
+import WorkRequestCell from './WorkRequestCell'
 
 // 작업자 칩 + 확정/취소 버튼 — 청약 목록 외선/접속 작업자 컬럼.
 //   server action 호출 후 router.refresh() 로 최신 상태 반영.
@@ -143,6 +144,7 @@ export type RelocationProjectRow = {
   status: string
   category: '청약' | '계획' | '지장이설'
   subcategory: string | null
+  subcategory_major: string | null
   region: string | null
   subscription_id: string | null
   order_no: string | null
@@ -156,6 +158,9 @@ export type RelocationProjectRow = {
   surveyed_at: string | null
   expected_completion_at: string | null
   completion_at: string | null
+  // 작업요청일 (마이그 0083) — 단일/기간. 인라인 캘린더로 편집.
+  work_request_start: string | null
+  work_request_end: string | null
   outside_workers: { id: string; name: string; confirmed: boolean }[]
   splice_workers: { id: string; name: string; confirmed: boolean }[]
   designer_name: string | null
@@ -166,6 +171,7 @@ export type RelocationProjectRow = {
 type ColumnId =
   | 'title'
   | 'status'
+  | 'subcategory_major'
   | 'subcategory'
   | 'region'
   | 'subscription_id'
@@ -179,6 +185,7 @@ type ColumnId =
   | 'surveyed_at'
   | 'expected_completion_at'
   | 'completion_at'
+  | 'work_request'
   | 'outside_workers'
   | 'splice_workers'
   | 'designer'
@@ -195,10 +202,13 @@ type ColumnDef = {
 const ALL_COLUMNS: ColumnDef[] = [
   { id: 'title', label: '제목', defaultWidth: 224, defaultVisible: true },
   { id: 'status', label: '상태', defaultWidth: 76, defaultVisible: true },
-  { id: 'subcategory', label: '청약 분류', defaultWidth: 88, defaultVisible: true },
+  // 대분류 (mig 0083, 청약 자유 텍스트) · 소분류 (기존 subcategory, owner 2026-05-26 라벨 변경)
+  { id: 'subcategory_major', label: '대분류', defaultWidth: 100, defaultVisible: true },
+  { id: 'subcategory', label: '소분류', defaultWidth: 88, defaultVisible: true },
   { id: 'region', label: '지역', defaultWidth: 120, defaultVisible: true },
   { id: 'subscription_id', label: '청약ID', defaultWidth: 120, defaultVisible: true },
-  { id: 'order_no', label: '작업번호', defaultWidth: 150, defaultVisible: true },
+  // owner 2026-05-26: 작업번호 → 공사번호 라벨 정리 (DB 컬럼은 order_no 유지)
+  { id: 'order_no', label: '공사번호', defaultWidth: 150, defaultVisible: true },
   { id: 'subscriber_name', label: '가입자명', defaultWidth: 100, defaultVisible: true },
   { id: 'subscriber_address', label: '가입자 주소', defaultWidth: 220, defaultVisible: true },
   { id: 'branch_manager', label: '하위국 담당자', defaultWidth: 110, defaultVisible: false },
@@ -208,6 +218,8 @@ const ALL_COLUMNS: ColumnDef[] = [
   { id: 'surveyed_at', label: '공사계약일', defaultWidth: 100, defaultVisible: false },
   { id: 'expected_completion_at', label: '준공예정일', defaultWidth: 100, defaultVisible: true },
   { id: 'completion_at', label: '작업완료일', defaultWidth: 100, defaultVisible: true },
+  // 작업요청일 (mig 0083) — 단일/기간. 인라인 캘린더로 편집·필터.
+  { id: 'work_request', label: '작업요청일', defaultWidth: 180, defaultVisible: true },
   { id: 'outside_workers', label: '외선 작업자', defaultWidth: 280, defaultVisible: true },
   { id: 'splice_workers', label: '접속 작업자', defaultWidth: 280, defaultVisible: true },
   { id: 'designer', label: '설계자', defaultWidth: 90, defaultVisible: false },
@@ -220,8 +232,8 @@ const COLUMN_BY_ID: Map<ColumnId, ColumnDef> = new Map(ALL_COLUMNS.map((c) => [c
 type Cat = '청약' | '계획' | '지장이설'
 const CATEGORY_COLUMNS: Record<Cat, ColumnId[]> = {
   청약: ALL_COLUMNS.map((c) => c.id),
-  계획: ['title', 'status', 'region', 'surveyed_at', 'designer', 'notes', 'created_at'],
-  지장이설: ['title', 'status', 'region', 'surveyed_at', 'designer', 'notes', 'created_at'],
+  계획: ['title', 'status', 'region', 'surveyed_at', 'work_request', 'designer', 'notes', 'created_at'],
+  지장이설: ['title', 'status', 'region', 'surveyed_at', 'work_request', 'designer', 'notes', 'created_at'],
 }
 
 type Prefs = {
@@ -286,6 +298,8 @@ function valueOf(row: RelocationProjectRow, col: ColumnId): string {
       return row.status
     case 'subcategory':
       return row.subcategory ?? ''
+    case 'subcategory_major':
+      return row.subcategory_major ?? ''
     case 'region':
       return row.region ?? ''
     case 'subscription_id':
@@ -313,6 +327,13 @@ function valueOf(row: RelocationProjectRow, col: ColumnId): string {
       return row.expected_completion_at ?? ''
     case 'completion_at':
       return row.completion_at ?? ''
+    case 'work_request': {
+      const s = row.work_request_start
+      const e = row.work_request_end
+      if (!s && !e) return ''
+      if (s && e && s !== e) return `${s} ~ ${e}`
+      return s ?? e ?? ''
+    }
     case 'outside_workers':
       return row.outside_workers
         .map((w) => `${w.name}${w.confirmed ? '(확정)' : '(대기)'}`)
@@ -360,6 +381,14 @@ function renderCell(row: RelocationProjectRow, col: ColumnId): React.ReactNode {
         >
           {row.status}
         </span>
+      )
+    case 'work_request':
+      return (
+        <WorkRequestCell
+          projectId={row.id}
+          start={row.work_request_start}
+          end={row.work_request_end}
+        />
       )
     case 'subscriber_address':
     case 'notes':

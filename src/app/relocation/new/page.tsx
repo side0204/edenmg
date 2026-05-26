@@ -165,23 +165,35 @@ export default async function NewRelocationProjectPage({
           {/* ── 청약 카테고리 전용 필드 ── */}
           {isSubscription && (
             <>
-              <div>
-                <label className={LABEL}>
-                  청약 분류 <span className="text-rose-600">*</span>
-                </label>
-                <select name="subcategory" required defaultValue="" className={INPUT}>
-                  <option value="" disabled>
-                    선택하세요
-                  </option>
-                  {SUBSCRIPTION_SUBCATEGORIES.map((s) => (
-                    <option key={s} value={s}>
-                      {s}
+              <div className="grid gap-3 lg:gap-2 lg:grid-cols-2">
+                <div>
+                  <label className={LABEL}>대분류</label>
+                  <input
+                    type="text"
+                    name="subcategory_major"
+                    maxLength={100}
+                    placeholder="자유 입력 (예: 일반·긴급 등)"
+                    className={INPUT}
+                  />
+                </div>
+                <div>
+                  <label className={LABEL}>
+                    소분류 <span className="text-rose-600">*</span>
+                  </label>
+                  <select name="subcategory" required defaultValue="" className={INPUT}>
+                    <option value="" disabled>
+                      선택하세요
                     </option>
-                  ))}
-                </select>
-                <p className="mt-0.5 text-xs lg:text-[10px] text-slate-500">
-                  작업관리(작업자 일보)에 자동 연동됨
-                </p>
+                    {SUBSCRIPTION_SUBCATEGORIES.map((s) => (
+                      <option key={s} value={s}>
+                        {s}
+                      </option>
+                    ))}
+                  </select>
+                  <p className="mt-0.5 text-xs lg:text-[10px] text-slate-500">
+                    작업관리(작업자 일보)에 자동 연동됨
+                  </p>
+                </div>
               </div>
 
               <div className="grid gap-3 lg:gap-2 lg:grid-cols-2">

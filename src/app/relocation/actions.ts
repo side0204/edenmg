@@ -150,6 +150,7 @@ type ProjectFormParsed = {
   outside_workers: string | null
   splice_workers: string | null
   subcategory: SubscriptionSubcategory | null
+  subcategory_major: string | null // 대분류 (마이그 0083, 청약 전용 자유 텍스트)
   outside_worker_ids: string[]
   splice_worker_ids: string[]
 }
@@ -176,6 +177,10 @@ function parseProjectForm(formData: FormData): ProjectFormParsed {
     isSubscription ? String(formData.get(key) ?? '').trim() || null : null
   const pickDate = (key: string) =>
     isSubscription ? parseDate(String(formData.get(key) ?? '').trim()) : null
+
+  // 작업요청일(work_request_start/end)은 프로젝트 폼이 아니라 목록 인라인
+  //   캘린더에서만 설정 — 별도 server action setProjectWorkRequestRange 가 처리.
+  //   createProject/updateProject 는 이 필드를 건드리지 않음 (덮어쓰기 회피).
 
   return {
     title,
@@ -224,6 +229,9 @@ function parseProjectForm(formData: FormData): ProjectFormParsed {
       const raw = String(formData.get('subcategory') ?? '').trim()
       return isSubscriptionSubcategory(raw) ? raw : null
     })(),
+    subcategory_major: isSubscription
+      ? (String(formData.get('subcategory_major') ?? '').trim().slice(0, 100) || null)
+      : null,
     outside_worker_ids: isSubscription ? parseIdArray(formData.get('outside_worker_ids')) : [],
     splice_worker_ids: isSubscription ? parseIdArray(formData.get('splice_worker_ids')) : [],
   }
@@ -614,6 +622,58 @@ export async function cancelWorkAssignment(formData: FormData) {
   revalidatePath(`/relocation/${projectId}`)
   revalidatePath('/works')
   return { ok: true as const }
+}
+
+
+/**
+ * 작업요청일(work_request_start/end) — 공사 목록 인라인 캘린더에서 호출 (owner 2026-05-26).
+ *   start, end: 'YYYY-MM-DD' 또는 null. end 가 null 이면 단일 일자(end=start 저장).
+ *   둘 다 null 이면 두 컬럼 모두 null 로 초기화.
+ *   redirect 안 함 — JSON 결과 반환 (인라인 컴포넌트 UX).
+ */
+export async function setProjectWorkRequestRange(input: {
+  project_id: string
+  start: string | null
+  end: string | null
+}): Promise<{ ok: true } | { ok: false; error: string }> {
+  const projectId = String(input.project_id ?? '').trim()
+  if (!projectId) return { ok: false, error: '프로젝트 id 가 없습니다' }
+  const start = input.start && /^\d{4}-\d{2}-\d{2}$/.test(input.start) ? input.start : null
+  const endRaw = input.end && /^\d{4}-\d{2}-\d{2}$/.test(input.end) ? input.end : null
+  // end 없으면 단일 일자 — start 와 같은 값
+  const end = endRaw ?? start
+  // start 가 end 보다 늦으면 swap
+  let s = start
+  let e = end
+  if (s && e && s > e) {
+    const t = s
+    s = e
+    e = t
+  }
+
+  const { supabase, me } = await requireMember()
+
+  // 회사 스코프 확인
+  const { data: proj } = await supabase
+    .from('relocation_projects')
+    .select('id, company_id, category')
+    .eq('id', projectId)
+    .maybeSingle()
+  if (!proj || (proj as { company_id: string }).company_id !== me.company_id) {
+    return { ok: false, error: '권한이 없습니다' }
+  }
+
+  const { error } = await supabase
+    .from('relocation_projects')
+    .update({ work_request_start: s, work_request_end: e })
+    .eq('id', projectId)
+  if (error) return { ok: false, error: '저장 실패: ' + error.message }
+
+  const cat = (proj as { category: string }).category
+  if (isRelocationCategory(cat)) {
+    revalidatePath(`/relocation/category/${RELOCATION_CATEGORY_SLUG[cat]}`)
+  }
+  return { ok: true }
 }
 
 

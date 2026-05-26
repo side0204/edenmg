@@ -148,6 +148,7 @@ type ProjectRow = {
   outside_workers: string | null
   splice_workers: string | null
   subcategory: string | null
+  subcategory_major: string | null
   outside_worker_ids: unknown
   splice_worker_ids: unknown
 }
@@ -187,7 +188,7 @@ export default async function RelocationProjectPage({
   const { data: pRow } = await supabase
     .from('relocation_projects')
     .select(
-      'id, company_id, title, category, client, region, surveyed_at, designer_id, status, notes, created_at, updated_at, subscription_id, subscriber_name, subscriber_address, branch_contact, branch_manager, subscribed_at, desired_open_at, order_no, order_nos, expected_completion_at, completion_at, outside_workers, splice_workers, subcategory, outside_worker_ids, splice_worker_ids',
+      'id, company_id, title, category, client, region, surveyed_at, designer_id, status, notes, created_at, updated_at, subscription_id, subscriber_name, subscriber_address, branch_contact, branch_manager, subscribed_at, desired_open_at, order_no, order_nos, expected_completion_at, completion_at, outside_workers, splice_workers, subcategory, subcategory_major, outside_worker_ids, splice_worker_ids',
     )
     .eq('id', id)
     .maybeSingle()
@@ -990,25 +991,38 @@ export default async function RelocationProjectPage({
                     />
                   </div>
                 </div>
-                <div>
-                  <label className="block text-sm font-medium text-slate-700">
-                    청약 분류 <span className="text-rose-600">*</span>
-                  </label>
-                  <select
-                    name="subcategory"
-                    required
-                    defaultValue={project.subcategory ?? ''}
-                    className="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2 text-base"
-                  >
-                    <option value="" disabled>
-                      선택하세요
-                    </option>
-                    {['소호', 'FTTH', '모바일', '전용회선', '다회선', '아파트'].map((s) => (
-                      <option key={s} value={s}>
-                        {s}
+                <div className="grid gap-3 sm:grid-cols-2">
+                  <div>
+                    <label className="block text-sm font-medium text-slate-700">대분류</label>
+                    <input
+                      type="text"
+                      name="subcategory_major"
+                      maxLength={100}
+                      defaultValue={project.subcategory_major ?? ''}
+                      placeholder="자유 입력 (예: 일반·긴급 등)"
+                      className="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2 text-base"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-sm font-medium text-slate-700">
+                      소분류 <span className="text-rose-600">*</span>
+                    </label>
+                    <select
+                      name="subcategory"
+                      required
+                      defaultValue={project.subcategory ?? ''}
+                      className="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2 text-base"
+                    >
+                      <option value="" disabled>
+                        선택하세요
                       </option>
-                    ))}
-                  </select>
+                      {['소호', 'FTTH', '모바일', '전용회선', '다회선', '아파트'].map((s) => (
+                        <option key={s} value={s}>
+                          {s}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
                 </div>
                 <div className="grid gap-3 sm:grid-cols-3">
                   <div>

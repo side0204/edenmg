@@ -1,6 +1,6 @@
 import Link from 'next/link'
 import { redirect } from 'next/navigation'
-import { BarChart3, Bell, ChevronLeft, ChevronRight, FileText, Hammer, ListTodo, Plus, Search, Users } from 'lucide-react'
+import { BarChart3, Bell, CalendarDays, ChevronLeft, ChevronRight, FileText, Hammer, ListTodo, Plus, Search, Users } from 'lucide-react'
 import { createClient } from '@/lib/supabase/server'
 import { EmptyState } from '@/components/EmptyState'
 import {
@@ -255,6 +255,25 @@ export default async function WorksPage({
   // mine 모드의 신규 배정 카운트
   const newAssignmentCount = rows.filter((r) => isNewAssignment(r.id)).length
 
+  // 일정 변경 요청 대기 카운트 — 본인이 담당자(assignee_employee_id)인 작업의 pending (owner 2026-05-26)
+  let pendingScheduleChanges = 0
+  {
+    const { data: myWorksData } = await supabase
+      .from('works')
+      .select('id')
+      .eq('company_id', me.company_id)
+      .eq('assignee_employee_id', me.id)
+    const myWorkIdList = ((myWorksData ?? []) as { id: string }[]).map((r) => r.id)
+    if (myWorkIdList.length > 0) {
+      const { count } = await supabase
+        .from('work_schedule_change_requests')
+        .select('id', { count: 'exact', head: true })
+        .in('work_id', myWorkIdList)
+        .eq('status', 'pending')
+      pendingScheduleChanges = count ?? 0
+    }
+  }
+
   // 각 작업의 작업자(들) — 복수 배정 표시용. 한 번에 fetch + 그룹핑.
   type AssignedWorker = {
     employee_id: string
@@ -405,6 +424,18 @@ export default async function WorksPage({
                 작업 등록
               </Link>
             )}
+            <Link
+              href="/works/schedule"
+              className="inline-flex items-center gap-1 rounded-lg border border-slate-300 px-3 py-1.5 text-xs font-medium text-slate-700 hover:bg-slate-50"
+            >
+              <CalendarDays className="h-3.5 w-3.5" />
+              작업 캘린더
+              {pendingScheduleChanges > 0 && (
+                <span className="ml-1 inline-flex items-center justify-center rounded-full bg-amber-500 px-1.5 text-[10px] font-bold text-white">
+                  {pendingScheduleChanges}
+                </span>
+              )}
+            </Link>
             <Link
               href="/works/stats"
               className="inline-flex items-center gap-1 rounded-lg border border-slate-300 px-3 py-1.5 text-xs font-medium text-slate-700 hover:bg-slate-50"
