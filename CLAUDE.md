@@ -1167,6 +1167,35 @@ owner 요구: "어느 메뉴를 많이 쓰는지" 페이지 단위 분석. 접�
 - **관리자 페이지** [`/admin/activity`](./src/app/admin/activity/page.tsx) — 「메뉴별 사용량」 섹션 추가. 경로를 메뉴(작업관리·차량관리·지장이설 등)로 묶어 막대 랭킹 + 세부 페이지 TOP 12(UUID→`:id` 정규화). 7일/30일 토글.
 - **후속 후보**: 사용자별·시간대별 분석은 owner 가 더 깊은 데이터를 원할 때. page_views 누적 시 보존 정책(오래된 행 정리) 검토.
 
+### ✅ 완료 (캔버스 UX 일괄 + 공사 목록 운영 필드 + 작업 캘린더, 2026-05-26)
+
+**캔버스 — 시설·케이블·코어 박스 인터랙션 일괄 보강** (mig 0080·0081·0082)
+- **사용코어 라벨 박스 드래그** (mig 0080) — `relocation_cables.core_label_offsets jsonb` (designer/worker/single 키별 dx/dy). 청약 2박스(designer/worker) · 비-청약 1박스(single) 모두 드래그 위치 영구 저장.
+- **시설물 종류 변경** (FacilityInfoPanel) — 접속함체↔국사·설치장소·RN 등 양방향. seq_no 유지 (충돌 시 facility_code 수동 정정). 접속함체 외 종류로 바꾸면 closure_spec 자동 제거.
+- **캔버스 「서식」 툴바** ([CanvasFormatToolbar](./src/app/relocation/[id]/CanvasFormatToolbar.tsx)) (mig 0081·0082) — 시설 OR 케이블 선택 시 상단 floating 툴바. 시설: 폰트(Pretendard/monospace/serif) + 크기 ±/% + B/I/색 + 초기화. 케이블: 두께 1~5. **도식/지도 모드별 독립 저장** (label_style/line_style 도식, *_map 지도). 툴바 좌측 「도식/지도」 배지로 현재 영향 모드 표시.
+- **시설명 줄바꿈** — name 입력 textarea 화. 캔버스는 `\n` 으로 split → 다줄 tspan 렌더. hit area + 지도 모드 배경 박스 자동 확장.
+- **접속(splice) 박스 클릭 생성** — 접속함체 양쪽 케이블의 코어 박스 차례로 클릭 → 공유 시설 자동 탐지 → [SpliceConnectModal](./src/app/relocation/[id]/SpliceConnectModal.tsx) 노출. 코어 수 일치 시 「성공적으로 연결되었습니다.」 토스트 + `createSplicesFromBoxes` N행 일괄 insert. 다르면 안내.
+- **Splice 시각 연결선** — `coreBoxAnchors` useMemo 가 박스 중심 계산 → 박스 간 직각 elbow 라우팅 (거의 수평/수직이면 직선). 박스 드래그 시 자동 추종. count 배지 + **취소 X 버튼** (그룹 splice 일괄 삭제, `deleteSpliceGroup`).
+- **선번장 시점·종점** (CableInfoPanel 코어 배정 row) — `traceCoreTerminal` 재귀가 splice 따라 단말 facility 추적. splice 확장 시 emerald 「(접속 확장)」 배지.
+
+**공사 목록 라벨 정리** (2026-05-26)
+- BottomNav 탭: `공사설계` → `공사목록`.
+- `/relocation` 카테고리 허브 3 카드 제거 → server redirect to `/relocation/category/subscription` (청약 default 진입).
+- 청약 카테고리 페이지 헤더: `청약 설계` → `공사 목록` + 설명 `모든 공사의 목록 및 공정을 관리`. 계획·지장이설은 본래 라벨 유지 (더보기로 명시적 전환).
+- 카테고리 페이지 상단에 「더보기」 native `<details>` 드롭다운 — 청약/계획/지장이설 3 카테고리 전환 (현재 카테고리 highlight + 「(현재)」).
+
+**공사 목록 운영 필드** (mig 0083)
+- 「청약 분류」 라벨 → 「소분류」.
+- 「대분류」 자유 텍스트 컬럼 신규 (`relocation_projects.subcategory_major`) — 청약 프로젝트 등록/수정 폼.
+- 「작업번호」 라벨 → 「공사번호」 (DB 컬럼 `order_no` 유지).
+- 「작업요청일」 컬럼 신규 — 인라인 캘린더 ([WorkRequestCell](./src/app/relocation/category/[cat]/WorkRequestCell.tsx)). 셀 클릭 = 단일 일자, 드래그 = 기간. 청약/계획/지장이설 모두. **프로젝트 폼이 아닌 목록 셀에서만 설정** — `setProjectWorkRequestRange` 분리 액션 (parseProjectForm 의 덮어쓰기 회피, owner 결정).
+
+**작업 캘린더 + 일정변경 요청 모듈** (mig 0083, owner 2026-05-26)
+- **새 라우트** [`/works/schedule`](./src/app/works/schedule/page.tsx) — 월 grid 캘린더, 작업 일정을 색상 bar 로 표시. 청약=emerald · 그 외=blue · 완료=연한 톤 · 취소=취소선.
+- **상단 탭 — 전체 / 청약작업 / 청약작업외** — `works.relocation_project_id` 유무로 client-side filter.
+- **이벤트 클릭 → 일정 변경 요청 모달** ([ScheduleChangeRequestModal](./src/app/works/schedule/ScheduleChangeRequestModal.tsx)): 본인 배정 작업이면 사유·새 일자 입력 → `createScheduleChangeRequest`. 본인 담당 작업이면 「대기 중 요청」 섹션에서 승인(`approveScheduleChangeRequest` — 승인 시 `works.start_date/end_date` 자동 갱신)/반려 가능.
+- **알림 (인앱 배지)** — `work_schedule_change_requests` 테이블 (append-only, RLS 3개). 홈 카드 [`schedule_changes`](./src/lib/home-cards.ts) (담당자 본인의 pending 카운트만 노출) + `/works` 헤더 「작업 캘린더」 버튼에 amber 배지.
+
 ### 🟡 미완 / 후속
 
 - **운영 작업 (owner 가 Supabase Dashboard 에서 SQL 실행 필요)** ⚠️
@@ -1223,6 +1252,10 @@ owner 요구: "어느 메뉴를 많이 쓰는지" 페이지 단위 분석. 접�
   - [`0067_relocation_subscription_fields_v2.sql`](./supabase/migrations/0067_relocation_subscription_fields_v2.sql) — 청약 폼 보강: `expected_completion_at` (준공예정일) + `outside_workers` (외선) + `splice_workers` (접속)
   - [`0068_relocation_works_link.sql`](./supabase/migrations/0068_relocation_works_link.sql) — 청약 작업관리 연동: `completion_at`·`outside_worker_ids jsonb`·`splice_worker_ids jsonb`·`subcategory`(청약 sub CHECK) + `works.relocation_project_id` 역방향 FK (unique partial). 청약 프로젝트 생성 시 자동 `works` upsert + `work_assignments` 동기화 → 배정 작업자가 일보 작성 진입점 노출
   - [`0069_employees_relocation_list_prefs.sql`](./supabase/migrations/0069_employees_relocation_list_prefs.sql) — 공사 설계 목록 컬럼 prefs: `employees.relocation_list_prefs jsonb`. 카테고리별 order·hidden·widths 저장 → 디바이스 간 동기화
+  - [`0080_core_label_offsets.sql`](./supabase/migrations/0080_core_label_offsets.sql) — 청약 사용코어 라벨 박스 위치 사용자 정의: `relocation_cables.core_label_offsets jsonb` (designer/worker/single 키별 dx/dy 오프셋). 캔버스 드래그로 박스 자유 배치
+  - [`0081_label_and_line_style.sql`](./supabase/migrations/0081_label_and_line_style.sql) — 캔버스 라벨·선 스타일: `relocation_facilities.label_style jsonb` (글자 크기·색·폰트·B/I) + `relocation_cables.line_style jsonb` (두께 width_scale 1~5). 상단 「서식」 툴바
+  - [`0082_label_line_style_per_mode.sql`](./supabase/migrations/0082_label_line_style_per_mode.sql) — 도식/지도 모드별 독립: `label_style_map` + `line_style_map` jsonb 추가. 0081 은 도식 전용으로 유지 (label_dx/label_dx_map 와 같은 mode-split 패턴)
+  - [`0083_subcategory_major_work_request_and_schedule_change.sql`](./supabase/migrations/0083_subcategory_major_work_request_and_schedule_change.sql) — 공사 목록 「대분류」 자유 텍스트(`subcategory_major`) + 「작업요청일」(`work_request_start/end`) + `work_schedule_change_requests` 테이블 (작업자→담당자 일정변경 요청·승인/반려 audit, append-only)
 - **외선일보 별도 entity (v2)** — 접속일보와 동일 패턴으로 외선팀 전용 모듈. 외선 작업 특성(케이블 포설구간·전주번호 등)에 맞는 구조 별도 설계.
 - **접속일보 후속 (v2)** — segment-level 작업자 태그, 사진 첨부 + EXIF, 국사·함체 마스터 테이블화, 재접속 이력 조회, 지도 시각화
 - **M3 Phase 2 후속** — 사진 첨부 + EXIF·워터마크 (PRD M3-06), 일보 결재함 통합 (현재는 작업 상세에서 진입), 일반 일보 월별 CSV 리포트
