@@ -31,7 +31,7 @@ const TABS: Tab[] = [
   },
   {
     href: '/relocation',
-    label: '공사설계',
+    label: '공사목록',
     icon: ClipboardList,
     matchPrefixes: ['/relocation'],
   },

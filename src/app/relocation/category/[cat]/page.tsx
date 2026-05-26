@@ -269,7 +269,7 @@ export default async function RelocationCategoryListPage({
               className="inline-flex items-center gap-1 text-sm text-slate-500 hover:text-slate-900"
             >
               <ChevronLeft className="h-4 w-4" />
-              공사 설계
+              공사 목록
             </Link>
             <h1 className="mt-1 text-3xl font-bold text-slate-900 tracking-tight">
               {categoryLabel}

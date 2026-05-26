@@ -99,7 +99,7 @@ export default async function NewRelocationProjectPage({
     : '/relocation'
   const backLabel = categoryFromUrl
     ? `${RELOCATION_CATEGORY_LABEL[categoryFromUrl]} 목록`
-    : '공사 설계'
+    : '공사 목록'
 
   // 카테고리 분기 — 청약은 폼 구조가 다름 (전용 필드 8 개)
   const isSubscription = categoryFromUrl === '청약'

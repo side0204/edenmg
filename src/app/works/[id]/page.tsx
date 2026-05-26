@@ -373,7 +373,7 @@ export default async function WorkDetailPage({
               <Link
                 href={`/relocation/${work.relocation_project_id}`}
                 className="inline-flex items-center gap-1 rounded-lg border border-indigo-300 bg-indigo-50 px-3 py-2 text-sm font-medium text-indigo-700 hover:bg-indigo-100"
-                title="공사 설계 — 행정도·코어구성도·직선도 보기"
+                title="설계내역 — 행정도·코어구성도·직선도 보기"
               >
                 <Cable className="h-4 w-4" />
                 설계내역 보기

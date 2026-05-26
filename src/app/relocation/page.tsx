@@ -88,9 +88,9 @@ export default async function RelocationHubPage() {
             <ChevronLeft className="h-4 w-4" />
             홈
           </Link>
-          <h1 className="mt-1 text-3xl font-bold text-slate-900 tracking-tight">공사 설계</h1>
+          <h1 className="mt-1 text-3xl font-bold text-slate-900 tracking-tight">공사 목록</h1>
           <p className="mt-1 text-sm text-slate-500">
-            모든 공사의 행정도·코어구성도·직선도 설계 (데스크톱 권장).
+            모든 공사의 목록 및 공정을 관리
           </p>
         </header>
 

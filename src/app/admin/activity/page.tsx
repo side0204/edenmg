@@ -54,7 +54,7 @@ function metaLine(r: OnlineRow): string {
 function pathSection(path: string): string {
   if (path === '/') return '홈'
   if (path.startsWith('/works')) return '작업관리'
-  if (path.startsWith('/relocation')) return '공사 설계'
+  if (path.startsWith('/relocation')) return '공사 목록'
   if (path.startsWith('/attendance')) return '근태'
   if (path.startsWith('/vehicles')) return '차량관리'
   if (path.startsWith('/requests') || path.startsWith('/approvals')) return '결재'
