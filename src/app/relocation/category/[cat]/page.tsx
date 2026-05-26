@@ -97,6 +97,12 @@ export default async function RelocationCategoryListPage({
   const category = RELOCATION_CATEGORY_FROM_SLUG[catRaw]
   const categoryLabel = RELOCATION_CATEGORY_LABEL[category]
   const categoryDescription = RELOCATION_CATEGORY_DESCRIPTION[category]
+  // 청약은 기본 진입 페이지(/relocation 이 redirect) — 「공사 목록」 으로 일반화 표기.
+  //   계획·지장이설은 「더보기」 로 명시적 전환하는 카테고리라 본래 라벨 유지.
+  //   (owner 2026-05-26)
+  const headerTitle = category === '청약' ? '공사 목록' : categoryLabel
+  const headerDescription =
+    category === '청약' ? '모든 공사의 목록 및 공정을 관리' : categoryDescription
 
   const supabase = await createClient()
   const {
@@ -274,9 +280,9 @@ export default async function RelocationCategoryListPage({
               홈
             </Link>
             <h1 className="mt-1 text-3xl font-bold text-slate-900 tracking-tight">
-              {categoryLabel}
+              {headerTitle}
             </h1>
-            <p className="mt-1 text-sm text-slate-500">{categoryDescription}</p>
+            <p className="mt-1 text-sm text-slate-500">{headerDescription}</p>
           </div>
           <div className="flex items-center gap-2">
             {/* 더보기 — 다른 카테고리(청약/계획/지장이설)로 전환 (owner 2026-05-26).
