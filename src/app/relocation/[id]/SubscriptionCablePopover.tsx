@@ -2,7 +2,7 @@
 
 import { useState, useMemo, useRef } from 'react'
 import { toast } from 'sonner'
-import { X, Save, Loader2, CheckCircle2, Pencil, GripHorizontal } from 'lucide-react'
+import { X, Save, Loader2, CheckCircle2, Pencil, GripHorizontal, Plus } from 'lucide-react'
 import {
   addSubscriptionCoresFromCanvas,
   confirmDesignerCoresAsWorker,
@@ -32,6 +32,15 @@ export type SubscriptionCablePopoverProps = {
   defaultRole: 'designer' | 'worker'
   // SVG viewport unit per client pixel — 드래그 거리 보정용. 1 = SVG zoom 100%
   svgScale: number
+  // 다방향 입력 — owner 2026-05-26. 같은 케이블에 여러 박스 동시 노출.
+  //   directionIndex: 1-based 순번 (헤더에 "방향 1/N" 표시)
+  //   totalDirections: 현재 같은 케이블에 열린 박스 수
+  //   canAddDirection: 16개 미만이면 true
+  //   onAddDirection: 「+ 방향추가」 클릭 — 부모가 박스 한 개 추가
+  directionIndex: number
+  totalDirections: number
+  canAddDirection: boolean
+  onAddDirection: () => void
   onSaved: () => void
   onClose: () => void
 }
@@ -80,6 +89,10 @@ export default function SubscriptionCablePopover({
   cableAssignments,
   defaultRole,
   svgScale,
+  directionIndex,
+  totalDirections,
+  canAddDirection,
+  onAddDirection,
   onSaved,
   onClose,
 }: SubscriptionCablePopoverProps) {
@@ -256,6 +269,11 @@ export default function SubscriptionCablePopover({
             <div className="min-w-0">
               <p className={`text-2xl font-extrabold ${titleColor} leading-tight`}>
                 사용 코어 입력
+                {totalDirections > 1 && (
+                  <span className="ml-2 text-lg font-bold">
+                    방향 {directionIndex}/{totalDirections}
+                  </span>
+                )}
                 <span className="ml-2 text-lg font-bold">
                   ({isDesigner ? '설계자 · 기별 미반영' : '작업자 · 기별 반영'})
                 </span>
@@ -265,15 +283,35 @@ export default function SubscriptionCablePopover({
               </p>
             </div>
           </div>
-          <button
-            type="button"
-            onClick={onClose}
-            onPointerDown={(e) => e.stopPropagation()}
-            className="shrink-0 text-slate-500 hover:text-slate-900 ml-2"
-            aria-label="닫기"
-          >
-            <X className="h-6 w-6" />
-          </button>
+          <div className="shrink-0 ml-2 flex items-center gap-1">
+            {/* 방향추가 — 같은 케이블에 박스 한 개 더 띄움. 16 도달 시 비활성.
+                헤더 안에 두어 첫 박스 / 추가 박스 어디서나 한 손에 닿게.
+                onPointerDown stopPropagation 으로 드래그 트리거 차단. */}
+            <button
+              type="button"
+              onClick={onAddDirection}
+              onPointerDown={(e) => e.stopPropagation()}
+              disabled={!canAddDirection}
+              className="inline-flex items-center gap-1 rounded-md border-2 border-slate-300 bg-white px-2 py-1.5 text-base font-bold text-slate-700 hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-40"
+              title={
+                canAddDirection
+                  ? '같은 케이블에 입력 박스 추가 (최대 16)'
+                  : '최대 16방향까지 추가 가능합니다'
+              }
+            >
+              <Plus className="h-4 w-4" />
+              방향추가
+            </button>
+            <button
+              type="button"
+              onClick={onClose}
+              onPointerDown={(e) => e.stopPropagation()}
+              className="text-slate-500 hover:text-slate-900 px-1"
+              aria-label="닫기"
+            >
+              <X className="h-6 w-6" />
+            </button>
+          </div>
         </div>
         <div className="flex-1 min-h-0 overflow-y-auto px-4 py-3 space-y-3">
           {showWorkerDecision && (

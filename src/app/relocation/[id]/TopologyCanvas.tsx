@@ -215,6 +215,18 @@ const LABEL_FONT = "'Pretendard Variable', Pretendard, system-ui, sans-serif"
 // 라벨 자간 — 약간 넓혀 글자가 서로 붙지 않게 (외곽선 번짐 방지 + 가독성).
 //   0.02em 은 작은 글자에서 눈에 안 띔 → 0.06em 으로. 더 넓게/좁게는 이 값만 조정.
 const LABEL_TRACKING = '0.14em'
+
+// 청약 사용코어 popover — 한 케이블에 동시 노출 가능한 방향(박스) 최대 개수.
+//   owner 2026-05-26: 다방향 입력 — 첫 박스는 자동, 「+ 방향추가」 로 16 까지.
+const MAX_DIRECTIONS_PER_CABLE = 16
+// 두 번째 이후 박스는 첫 박스와 겹치지 않도록 우하 방향으로 픽셀 오프셋.
+//   SVG viewport unit 기준 (foreignObject x/y). 헤더 드래그로 사용자가 추가 이동.
+const POPOVER_STACK_OFFSET = 56
+function makePopoverKey(): string {
+  return typeof crypto !== 'undefined' && 'randomUUID' in crypto
+    ? crypto.randomUUID()
+    : `pop-${Math.random().toString(36).slice(2)}-${Date.now().toString(36)}`
+}
 // 시설 라벨 글자 변형 — 너비 0.75배(가로 압축)·높이 1.2배(세로 신장). 조밀한 장체.
 const LABEL_SCALE_X = 0.75
 const LABEL_SCALE_Y = 1.4
@@ -655,13 +667,38 @@ export default function TopologyCanvas({
   // 청약 popover 가시 상태 — selectedCableId 와 별개로 X 닫기 가능.
   //   selectedCableId 변경 시 자동으로 따라가지만, popover X 누르면 popover 만 닫힘.
   //   (owner 2026-05-25 — popover 닫기로 정보 패널까지 사라지지 않게)
-  const [subscriptionPopoverCableId, setSubscriptionPopoverCableId] = useState<
-    string | null
-  >(null)
+  //
+  // 다방향 입력 — 한 케이블에 여러 방향(최대 16) 박스 동시 노출 가능.
+  //   각 박스는 독립 instance(`key`). 헤더 드래그로 자유 이동.
+  //   (owner 2026-05-26 추가)
+  const [subscriptionPopovers, setSubscriptionPopovers] = useState<
+    { key: string; cableId: string }[]
+  >([])
   useEffect(() => {
-    // 선택 케이블 바뀌면 popover 도 동기화 — 새 케이블 클릭 시 자동으로 popover 열림.
-    setSubscriptionPopoverCableId(selectedCableId)
+    // 선택 케이블 바뀌면 popover 도 동기화.
+    //   같은 케이블이 다시 선택되면 기존 다방향 박스 유지 (의도적 보존).
+    //   다른 케이블이면 한 박스로 리셋.
+    if (selectedCableId == null) {
+      setSubscriptionPopovers([])
+      return
+    }
+    setSubscriptionPopovers((prev) => {
+      const allSameCable =
+        prev.length > 0 && prev.every((p) => p.cableId === selectedCableId)
+      if (allSameCable) return prev
+      return [{ key: makePopoverKey(), cableId: selectedCableId }]
+    })
   }, [selectedCableId])
+  const closeSubscriptionPopover = useCallback((key: string) => {
+    setSubscriptionPopovers((prev) => prev.filter((p) => p.key !== key))
+  }, [])
+  const addSubscriptionDirection = useCallback((cableId: string) => {
+    setSubscriptionPopovers((prev) => {
+      const count = prev.filter((p) => p.cableId === cableId).length
+      if (count >= MAX_DIRECTIONS_PER_CABLE) return prev
+      return [...prev, { key: makePopoverKey(), cableId }]
+    })
+  }, [])
   const [cableWaypoints, setCableWaypoints] = useState<Record<string, Waypoint[]>>({})
   const waypointDragRef = useRef<{
     cableId: string
@@ -5397,7 +5434,7 @@ export default function TopologyCanvas({
                   if (mode === 'map') return null
                   const isSubscriptionCtx = projectCategory === '청약'
                   if (isSubscriptionCtx) {
-                    if (subscriptionPopoverCableId === c.id) return null
+                    if (subscriptionPopovers.some((p) => p.cableId === c.id)) return null
                     const byRole = coresByCableByRole.get(c.id)
                     if (!byRole) return null
                     // 청약 라벨 — owner 2026-05-25 추가 조정: 0.7배 축소 (39→27), 더 위로.
@@ -5495,11 +5532,13 @@ export default function TopologyCanvas({
                 })()}
 
                 {/* 청약 카테고리 도식 모드 — 선택된 케이블 위에 사용코어 입력 popover.
-                    selectedCableId 와 별개로 subscriptionPopoverCableId 가 통제 →
-                    popover X 만 누르면 popover 만 닫히고 정보 패널은 유지됨. */}
+                    selectedCableId 와 별개로 subscriptionPopovers 가 통제 →
+                    popover X 만 누르면 popover 만 닫히고 정보 패널은 유지됨.
+                    다방향 입력 — 한 케이블에 여러 박스 동시 노출 (최대 16).
+                    각 박스는 우하 방향 stack offset + 헤더 드래그로 자유 이동. */}
                 {projectCategory === '청약' &&
                   mode === 'schematic' &&
-                  subscriptionPopoverCableId === c.id &&
+                  subscriptionPopovers.some((p) => p.cableId === c.id) &&
                   (() => {
                     // 이 케이블의 기존 코어 배정 — popover 가 중복·designer 신설 감지에 사용
                     const cableAssignments = (coreAssignments ?? [])
@@ -5528,26 +5567,54 @@ export default function TopologyCanvas({
                       svgRect && svgRect.width > 0
                         ? viewport.width / svgRect.width
                         : 1
+                    const popsForCable = subscriptionPopovers.filter(
+                      (p) => p.cableId === c.id,
+                    )
+                    const totalDirections = popsForCable.length
+                    const canAddDirection = totalDirections < MAX_DIRECTIONS_PER_CABLE
                     return (
-                      <foreignObject
-                        x={labelPt.x - POP_W / 2}
-                        y={labelPt.y - POP_H - POP_OFFSET_FROM_LABEL}
-                        width={POP_W}
-                        height={POP_H}
-                        style={{ overflow: 'visible' }}
-                      >
-                        <SubscriptionCablePopover
-                          projectId={projectId}
-                          cableId={c.id}
-                          cableCode={c.cable_code}
-                          cableSpec={c.spec}
-                          cableAssignments={cableAssignments}
-                          defaultRole={defaultRole}
-                          svgScale={svgScale}
-                          onSaved={() => router.refresh()}
-                          onClose={() => setSubscriptionPopoverCableId(null)}
-                        />
-                      </foreignObject>
+                      <>
+                        {popsForCable.map((pop, idx) => {
+                          // 박스 stack — 두 번째부터 우하 방향으로 오프셋.
+                          //   사용자가 헤더 드래그로 추가 이동 가능.
+                          const stackDx = idx * POPOVER_STACK_OFFSET
+                          const stackDy = idx * POPOVER_STACK_OFFSET
+                          return (
+                            <foreignObject
+                              key={pop.key}
+                              x={labelPt.x - POP_W / 2 + stackDx}
+                              y={labelPt.y - POP_H - POP_OFFSET_FROM_LABEL + stackDy}
+                              width={POP_W}
+                              height={POP_H}
+                              style={{ overflow: 'visible' }}
+                            >
+                              <SubscriptionCablePopover
+                                projectId={projectId}
+                                cableId={c.id}
+                                cableCode={c.cable_code}
+                                cableSpec={c.spec}
+                                cableAssignments={cableAssignments}
+                                defaultRole={defaultRole}
+                                svgScale={svgScale}
+                                directionIndex={idx + 1}
+                                totalDirections={totalDirections}
+                                canAddDirection={canAddDirection}
+                                onAddDirection={() => {
+                                  if (!canAddDirection) {
+                                    toast.warning(
+                                      `최대 ${MAX_DIRECTIONS_PER_CABLE}방향까지 입력 가능합니다`,
+                                    )
+                                    return
+                                  }
+                                  addSubscriptionDirection(c.id)
+                                }}
+                                onSaved={() => router.refresh()}
+                                onClose={() => closeSubscriptionPopover(pop.key)}
+                              />
+                            </foreignObject>
+                          )
+                        })}
+                      </>
                     )
                   })()}
                 {/* 선택 시 waypoint 핸들 — 드래그 이동 / 우클릭 삭제.
