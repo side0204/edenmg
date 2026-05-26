@@ -3237,12 +3237,9 @@ export default function TopologyCanvas({
 
     // SVG 배경을 직접 누른 경우만 pan/marquee. 케이블·라벨·시설 위에서 누르면 시작 안 함
     // — setPointerCapture 가 케이블 click 이벤트를 SVG 로 가로채는 것을 방지.
-    //   지도 모드 일괄등록 대기 중에는 투명 rect(data-bulk-bg) 도 SVG 배경처럼 취급.
-    const target = e.target as Element | null
-    const isBulkBgRect =
-      !!target && target.tagName === 'rect' && target.hasAttribute('data-bulk-bg')
-    if (target !== svgRef.current && !isBulkBgRect) return
+    if (e.target !== svgRef.current) return
     // 선택 도구 ON 또는 일괄등록 대기 — pan 대신 marquee(사각 범위 선택) 시작
+    //   ⚠ 지도 모드는 별도 HTML 오버레이가 처리 (BulkDragOverlay) — 여기 안 옴
     if ((selectTool || bulkPayload) && e.button === 0) {
       const { x, y } = toSvgCoord(e.clientX, e.clientY)
       marqueeRef.current = { startX: x, startY: y, hasMoved: false }
@@ -5017,9 +5014,7 @@ export default function TopologyCanvas({
               touchAction: 'none',
               // 지도 모드 — SVG 루트는 이벤트 통과(지도 pan/zoom). 시설·케이블 등
               // 클릭 대상 요소만 pointer-events 를 개별로 켠다.
-              //   ⚠ 예외: 일괄등록 대기 중에는 SVG 가 드래그 사각형을 받아야 함 → auto
-              pointerEvents:
-                mode === 'map' && !bulkPayload ? 'none' : 'auto',
+              pointerEvents: mode === 'map' ? 'none' : 'auto',
             }}
             onPointerDown={onSvgPointerDown}
             onPointerMove={onPointerMove}
@@ -5027,23 +5022,6 @@ export default function TopologyCanvas({
             onPointerCancel={onPointerUp}
             onClick={onCanvasClick}
         >
-          {/* 지도 모드 + 일괄등록 대기 — 투명 rect 로 드래그 영역 확보.
-              SVG 의 기본 pointer-events 는 visiblePainted 라 「투명 배경」 으로는
-              빈 영역 클릭이 안 잡힘. 명시적 rect 가 필요.
-              fill 은 visible 한 검정 1% alpha (브라우저별 안전망 — 'none' 으로 두면
-              파이어폭스 등에서 잡히지 않음). data 속성으로 onSvgPointerDown 이 SVG
-              배경과 동일하게 취급. */}
-          {mode === 'map' && bulkPayload && (
-            <rect
-              data-bulk-bg
-              x="0"
-              y="0"
-              width="100%"
-              height="100%"
-              fill="rgba(0,0,0,0.001)"
-              style={{ cursor: 'crosshair' }}
-            />
-          )}
           {/* 고장점 검색 하이라이트 — 경로 케이블 글로우 + 시설 링 (케이블·노드 아래) */}
           {highlight && (
             <g style={{ pointerEvents: 'none' }}>
@@ -6204,6 +6182,124 @@ export default function TopologyCanvas({
             )}
           </svg>
 
+          {/* 지도 모드 + 일괄등록 대기 — HTML div 오버레이로 드래그 사각형 캡처.
+              SVG visiblePainted 규칙 + 카카오맵 자체 드래그를 피하려 순수 HTML div 사용.
+              pointerdown/move/up 으로 사각형 추적 → 좌표를 GPS 변환 후 서버 액션 호출.
+              SVG/맵 위 (z-30) 라 클릭 가로채기 보장. */}
+          {mode === 'map' && bulkPayload && (
+            <div
+              className="absolute inset-0 z-30"
+              style={{ cursor: 'crosshair', touchAction: 'none' }}
+              onPointerDown={(e) => {
+                if (e.button !== 0) return
+                const host = e.currentTarget
+                const rect = host.getBoundingClientRect()
+                const x = e.clientX - rect.left
+                const y = e.clientY - rect.top
+                marqueeRef.current = { startX: x, startY: y, hasMoved: false }
+                setMarquee({ x, y, w: 0, h: 0 })
+                try {
+                  host.setPointerCapture(e.pointerId)
+                } catch {}
+              }}
+              onPointerMove={(e) => {
+                const mq = marqueeRef.current
+                if (!mq) return
+                const host = e.currentTarget
+                const rect = host.getBoundingClientRect()
+                const x = e.clientX - rect.left
+                const y = e.clientY - rect.top
+                const dx = x - mq.startX
+                const dy = y - mq.startY
+                if (!mq.hasMoved && Math.hypot(dx, dy) < 4) return
+                mq.hasMoved = true
+                setMarquee({
+                  x: Math.min(mq.startX, x),
+                  y: Math.min(mq.startY, y),
+                  w: Math.abs(dx),
+                  h: Math.abs(dy),
+                })
+              }}
+              onPointerUp={(e) => {
+                const mq = marqueeRef.current
+                if (!mq) return
+                marqueeRef.current = null
+                try {
+                  e.currentTarget.releasePointerCapture(e.pointerId)
+                } catch {}
+                if (!mq.hasMoved || !marquee || !bulkPayload) {
+                  setMarquee(null)
+                  return
+                }
+                // 컨테이너 픽셀 → GPS 변환
+                const positions = computeBulkPositions({
+                  count: bulkPayload.closures.length,
+                  bbox: {
+                    x: marquee.x,
+                    y: marquee.y,
+                    width: marquee.w,
+                    height: marquee.h,
+                  },
+                  direction: bulkPayload.direction,
+                })
+                const proj = kakaoMap ? kakaoMap.getProjection() : null
+                const closuresWithPos = bulkPayload.closures.map((c, i) => {
+                  const px = positions[i]?.x ?? marquee.x
+                  const py = positions[i]?.y ?? marquee.y
+                  let lat: number | null = null
+                  let lng: number | null = null
+                  if (proj) {
+                    try {
+                      const ll = proj.coordsFromContainerPoint(
+                        new kakao.maps.Point(px, py),
+                      )
+                      lat = ll.getLat()
+                      lng = ll.getLng()
+                    } catch {}
+                  }
+                  return { ...c, x: px, y: py, lat, lng }
+                })
+                setMarquee(null)
+                void bulkRegisterFromCanvas({
+                  project_id: projectId,
+                  closures: closuresWithPos,
+                  cables: bulkPayload.cables,
+                }).then((r) => {
+                  if (r.ok) {
+                    toast.success(
+                      `시설 ${r.createdClosures}개·케이블 ${r.createdCables}개 등록` +
+                        (r.pendingCables > 0
+                          ? ` · 미연결 ${r.pendingCables}건은 「미연결 케이블」 에 보관`
+                          : ''),
+                    )
+                    setBulkPayload(null)
+                    router.refresh()
+                  } else {
+                    toast.error(r.error)
+                  }
+                })
+              }}
+              onPointerCancel={() => {
+                marqueeRef.current = null
+                setMarquee(null)
+              }}
+            >
+              {/* 사각형 시각화 — 드래그 중에만 보임 */}
+              {marquee && (marquee.w > 0 || marquee.h > 0) && (
+                <div
+                  className="absolute border-2 border-emerald-500 bg-emerald-500/15"
+                  style={{
+                    left: marquee.x,
+                    top: marquee.y,
+                    width: marquee.w,
+                    height: marquee.h,
+                    pointerEvents: 'none',
+                  }}
+                />
+              )}
+            </div>
+          )}
+
           {/* 분할 캡처 가이드 — 지도 모드, 시설 영역을 격자로 나눠 스크린샷 */}
           {captureActive && mode === 'map' && mapStatus === 'ready' && kakaoMap && (
             <MapCaptureGuide
@@ -6609,6 +6705,7 @@ export default function TopologyCanvas({
           </div>
         </div>
       )}
+
 
       {/* 미연결 케이블 연결 모드 — 시설 2개 클릭 안내 */}
       {connectingPendingId && (
