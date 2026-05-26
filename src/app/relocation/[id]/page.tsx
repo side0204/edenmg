@@ -295,6 +295,26 @@ export default async function RelocationProjectPage({
     workerActiveOnProject = await isWorkerActiveOnProject(id)
   }
 
+  // 미연결 케이블 (일괄 등록 시 매칭 실패한 케이블) — 모든 카테고리에서 사용
+  const { data: pendingCableRows } = await supabase
+    .from('relocation_pending_cables')
+    .select(
+      'id, cable_code, spec, installation_type, expected_from, expected_to, created_at',
+    )
+    .eq('project_id', id)
+    .order('created_at', { ascending: false })
+    .limit(200)
+  type PendingCableRow = {
+    id: string
+    cable_code: string | null
+    spec: string
+    installation_type: string | null
+    expected_from: string
+    expected_to: string
+    created_at: string
+  }
+  const pendingCables = (pendingCableRows ?? []) as PendingCableRow[]
+
   // 설계자 이름 · 캔버스 공통 데이터 · 접속 · 스플리터 · 차수 · (조건부) 이전 이력 일괄 병렬.
   //   page.tsx 의 router.refresh 체감 속도를 결정 — 직렬이면 합산 4~5초.
   //   designerId 가 없으면 designer 쿼리는 건너뜀(null 반환). migrations 는 탭에서만 필요.
@@ -1213,6 +1233,7 @@ export default async function RelocationProjectPage({
         coreAssignments={assignments}
         myEmployeeId={me.id}
         workerPositions={workerPositions}
+        pendingCables={pendingCables}
         projectOrderNos={
           Array.isArray(project.order_nos)
             ? (project.order_nos as unknown[]).filter(

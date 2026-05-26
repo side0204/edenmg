@@ -83,6 +83,12 @@ import FieldInspectionSaveDialog from './FieldInspectionSaveDialog'
 import CableInfoPanel from './CableInfoPanel'
 import SubscriptionCablePopover from './SubscriptionCablePopover'
 import FacilityTaskPopover from './FacilityTaskPopover'
+import BulkRegisterModal from './BulkRegisterModal'
+import {
+  parseBulkRegisterText,
+  computeBulkPositions,
+} from './bulk-register-parser'
+import { bulkRegisterFromCanvas } from './bulk-register-actions'
 import FacilityInfoPanel, {
   type TaskTypeOption,
   type FacilityTaskItem,
@@ -475,6 +481,7 @@ export default function TopologyCanvas({
   initialFocusIds,
   workerPositions,
   projectOrderNos,
+  pendingCables,
 }: {
   projectId: string
   // 공사 분류 — '청약' 일 때 도식 모드에서 케이블 클릭 시 사용코어 입력 popover 노출.
@@ -521,6 +528,17 @@ export default function TopologyCanvas({
   // 청약 작업번호 목록 — FacilityTaskPopover 의 작업번호 선택자 후보.
   //   relocation_projects.order_nos 의 array.
   projectOrderNos?: string[]
+  // 미연결 케이블 (일괄 등록에서 from/to 매칭 실패 항목)
+  //   목록에서 선택 후 시설 2 개 클릭으로 연결
+  pendingCables?: Array<{
+    id: string
+    cable_code: string | null
+    spec: string
+    installation_type: string | null
+    expected_from: string
+    expected_to: string
+    created_at: string
+  }>
 }) {
   const router = useRouter()
 
@@ -906,6 +924,32 @@ export default function TopologyCanvas({
   //   선택 후 선택된 시설 중 하나 드래그 = 선택 전체 같은 delta 로 이동 (그룹 이동).
   //   addTool / cableTool 과 상호 배타. 2026-05-24 owner 요청.
   const [selectTool, setSelectTool] = useState(false)
+  // 시설물 일괄등록 — owner 2026-05-26.
+  //   1) 모달에서 텍스트 입력·파싱·방향 선택
+  //   2) bulkPayload 설정 후 모달 닫힘 → 캔버스 드래그로 범위 지정 (marquee 재사용)
+  //   3) 드래그 종료 시 bulk-register-actions.bulkRegisterFromCanvas 호출
+  const [bulkRegisterOpen, setBulkRegisterOpen] = useState(false)
+  type BulkPendingPayload = {
+    closures: Array<{
+      closure_spec: string | null
+      facility_code: string | null
+      closure_type: string
+      name: string
+    }>
+    cables: Array<{
+      spec: string
+      cable_code: string | null
+      installation_type: string | null
+      from_name: string
+      to_name: string
+    }>
+    direction: 'horizontal' | 'vertical' | 'auto'
+  }
+  const [bulkPayload, setBulkPayload] = useState<BulkPendingPayload | null>(null)
+  // 미연결 케이블 연결 모드 — 사용자가 pending 케이블 클릭 → 시설 2 개 클릭으로 연결
+  const [connectingPendingId, setConnectingPendingId] = useState<string | null>(null)
+  const [connectingFromFacility, setConnectingFromFacility] = useState<string | null>(null)
+  const [pendingListOpen, setPendingListOpen] = useState(true)
   const [selectedIds, setSelectedIds] = useState<Set<string>>(() => new Set())
   // 사각 선택 드래그 — SVG 좌표계 (viewport 변환된 좌표). 진행 중에만 ref → null 아님.
   const marqueeRef = useRef<{
@@ -2259,6 +2303,39 @@ export default function TopologyCanvas({
   }
 
   const handleNodeClick = (id: string) => {
+    // 미연결 케이블 연결 모드 — 시설 2 개 차례 클릭으로 연결 완료
+    if (connectingPendingId) {
+      if (!connectingFromFacility) {
+        setConnectingFromFacility(id)
+        toast.info('도착 시설을 클릭하세요')
+        return
+      }
+      if (connectingFromFacility === id) {
+        toast.warning('같은 시설은 출발·도착 둘 다 될 수 없습니다')
+        return
+      }
+      const pid = connectingPendingId
+      const fromId = connectingFromFacility
+      const toId = id
+      setConnectingPendingId(null)
+      setConnectingFromFacility(null)
+      void import('./bulk-register-actions').then(({ resolvePendingCable }) =>
+        resolvePendingCable({
+          project_id: projectId,
+          pending_id: pid,
+          from_facility_id: fromId,
+          to_facility_id: toId,
+        }).then((r) => {
+          if (r.ok) {
+            toast.success('미연결 케이블 연결 완료')
+            router.refresh()
+          } else {
+            toast.error(r.error)
+          }
+        }),
+      )
+      return
+    }
     // 고장점 검색 모드 — 시설 클릭은 드릴다운 step 1 (시설물) 선택
     if (faultSearchOpen) {
       pickFaultFacility(id)
@@ -3161,8 +3238,8 @@ export default function TopologyCanvas({
     // SVG 배경을 직접 누른 경우만 pan/marquee. 케이블·라벨·시설 위에서 누르면 시작 안 함
     // — setPointerCapture 가 케이블 click 이벤트를 SVG 로 가로채는 것을 방지.
     if (e.target !== svgRef.current) return
-    // 선택 도구 ON — pan 대신 marquee(사각 범위 선택) 시작
-    if (selectTool && e.button === 0) {
+    // 선택 도구 ON 또는 일괄등록 대기 — pan 대신 marquee(사각 범위 선택) 시작
+    if ((selectTool || bulkPayload) && e.button === 0) {
       const { x, y } = toSvgCoord(e.clientX, e.clientY)
       marqueeRef.current = { startX: x, startY: y, hasMoved: false }
       setMarquee({ x, y, w: 0, h: 0 })
@@ -3566,9 +3643,44 @@ export default function TopologyCanvas({
       return
     }
     // 2.5) marquee 마무리 — 사각 범위 안 시설 모두 selectedIds 에 담음
+    //   bulkPayload 가 있으면 마무리 시점에 일괄등록 실행 (selectTool 보다 우선)
     const mq = marqueeRef.current
     if (mq) {
       marqueeRef.current = null
+      if (mq.hasMoved && marquee && bulkPayload) {
+        // 일괄등록 — 드래그한 bbox 안에 함체 배치 + 케이블 매칭
+        const positions = computeBulkPositions({
+          count: bulkPayload.closures.length,
+          bbox: { x: marquee.x, y: marquee.y, width: marquee.w, height: marquee.h },
+          direction: bulkPayload.direction,
+        })
+        const closuresWithPos = bulkPayload.closures.map((c, i) => ({
+          ...c,
+          x: positions[i]?.x ?? marquee.x,
+          y: positions[i]?.y ?? marquee.y,
+        }))
+        setMarquee(null)
+        recentlyPannedRef.current = true
+        void bulkRegisterFromCanvas({
+          project_id: projectId,
+          closures: closuresWithPos,
+          cables: bulkPayload.cables,
+        }).then((r) => {
+          if (r.ok) {
+            toast.success(
+              `시설 ${r.createdClosures}개·케이블 ${r.createdCables}개 등록` +
+                (r.pendingCables > 0
+                  ? ` · 미연결 ${r.pendingCables}건은 「미연결 케이블」 에 보관`
+                  : ''),
+            )
+            setBulkPayload(null)
+            router.refresh()
+          } else {
+            toast.error(r.error)
+          }
+        })
+        return
+      }
       if (mq.hasMoved && marquee) {
         const x0 = marquee.x
         const y0 = marquee.y
@@ -3589,7 +3701,7 @@ export default function TopologyCanvas({
         recentlyPannedRef.current = true
       } else {
         // 빈 클릭 — 선택 해제
-        setSelectedIds(new Set())
+        if (!bulkPayload) setSelectedIds(new Set())
       }
       setMarquee(null)
       return
@@ -3828,6 +3940,29 @@ export default function TopologyCanvas({
             <List className="h-3 w-3" />
             시설 목록
           </button>
+
+          {/* 시설물 일괄등록 — 도식 모드 전용 (드래그 범위 지정) */}
+          {editable && mode === 'schematic' && (
+            <button
+              type="button"
+              onClick={() => setBulkRegisterOpen(true)}
+              className={
+                'mr-1 inline-flex items-center gap-1 rounded-md border px-2 h-7 text-[11px] font-medium ' +
+                (bulkPayload
+                  ? 'bg-emerald-600 text-white border-emerald-600'
+                  : 'text-slate-700 border-slate-300 hover:bg-slate-50')
+              }
+              title="시설물 일괄등록 — 텍스트 입력 후 캔버스 드래그로 범위 지정"
+            >
+              <Layers className="h-3 w-3" />
+              일괄등록
+              {bulkPayload && (
+                <span className="ml-0.5 rounded bg-white/20 px-1 text-[9px] font-semibold">
+                  {bulkPayload.closures.length}C/{bulkPayload.cables.length}L
+                </span>
+              )}
+            </button>
+          )}
 
           {/* 시설 추가 보임/숨김 — 좌측 사이드바 토글 (도식·지도 공통) */}
           {editable && (
@@ -6388,6 +6523,159 @@ export default function TopologyCanvas({
           </div>
         )}
       </div>
+
+      {/* 시설물 일괄등록 모달 — 텍스트 입력 → 「범위 지정하기」 → bulkPayload 설정 + 모달 닫힘 */}
+      <BulkRegisterModal
+        open={bulkRegisterOpen}
+        onClose={() => setBulkRegisterOpen(false)}
+        onConfirm={(payload) => {
+          // 파싱 결과를 다시 한 번 파서로 변환 (modal 안에서 useMemo 한 거 그대로 가져오는 대신
+          // 같은 텍스트로 재 파싱해 깔끔하게 데이터만 추출)
+          const parsed = parseBulkRegisterText(payload.text)
+          setBulkPayload({
+            closures: parsed.closures.map((c) => ({
+              closure_spec: c.closure_spec,
+              facility_code: c.facility_code,
+              closure_type: c.closure_type,
+              name: c.name,
+            })),
+            cables: parsed.cables.map((c) => ({
+              spec: c.spec,
+              cable_code: c.cable_code,
+              installation_type: c.installation_type,
+              from_name: c.from_name,
+              to_name: c.to_name,
+            })),
+            direction: payload.direction,
+          })
+          setBulkRegisterOpen(false)
+          toast.info(
+            `캔버스에서 마우스로 드래그해 시설 ${parsed.closures.length}개를 배치할 범위를 지정하세요`,
+            { duration: 3500 },
+          )
+        }}
+      />
+
+      {/* 일괄등록 대기 중 — 상단 안내 배너 + 취소 버튼 */}
+      {bulkPayload && (
+        <div className="fixed top-3 left-1/2 -translate-x-1/2 z-50 pointer-events-auto">
+          <div className="inline-flex items-center gap-2 rounded-full bg-emerald-600 text-white px-4 py-2 shadow-lg text-sm font-semibold">
+            <span>드래그로 배치 범위 지정 — 함체 {bulkPayload.closures.length}개</span>
+            <button
+              type="button"
+              onClick={() => setBulkPayload(null)}
+              className="rounded-full bg-white/20 hover:bg-white/30 px-2 py-0.5 text-xs"
+            >
+              취소
+            </button>
+          </div>
+        </div>
+      )}
+
+      {/* 미연결 케이블 연결 모드 — 시설 2개 클릭 안내 */}
+      {connectingPendingId && (
+        <div className="fixed top-3 left-1/2 -translate-x-1/2 z-50 pointer-events-auto">
+          <div className="inline-flex items-center gap-2 rounded-full bg-blue-600 text-white px-4 py-2 shadow-lg text-sm font-semibold">
+            <span>
+              {connectingFromFacility ? '도착 시설 클릭' : '출발 시설 클릭'}
+            </span>
+            <button
+              type="button"
+              onClick={() => {
+                setConnectingPendingId(null)
+                setConnectingFromFacility(null)
+              }}
+              className="rounded-full bg-white/20 hover:bg-white/30 px-2 py-0.5 text-xs"
+            >
+              취소
+            </button>
+          </div>
+        </div>
+      )}
+
+      {/* 미연결 케이블 목록 — 우상단 floating 패널 (있을 때만) */}
+      {pendingCables && pendingCables.length > 0 && (
+        <div className="absolute top-12 right-2 z-40 max-w-xs">
+          <div className="rounded-lg border-2 border-amber-300 bg-amber-50 shadow-lg overflow-hidden">
+            <button
+              type="button"
+              onClick={() => setPendingListOpen((v) => !v)}
+              className="w-full flex items-center justify-between gap-2 px-3 py-2 text-xs font-bold text-amber-800 hover:bg-amber-100"
+            >
+              <span>미연결 케이블 {pendingCables.length}건</span>
+              <span>{pendingListOpen ? '▲' : '▼'}</span>
+            </button>
+            {pendingListOpen && (
+              <ul className="max-h-64 overflow-y-auto divide-y divide-amber-200">
+                {pendingCables.map((p) => (
+                  <li
+                    key={p.id}
+                    className={
+                      'px-3 py-2 text-[11px] ' +
+                      (connectingPendingId === p.id
+                        ? 'bg-blue-100 ring-2 ring-blue-400 ring-inset'
+                        : 'hover:bg-amber-100')
+                    }
+                  >
+                    <div className="flex items-center justify-between gap-2">
+                      <div className="min-w-0 flex-1">
+                        <p className="font-semibold text-slate-900 truncate">
+                          {p.cable_code ?? '(코드 없음)'} · {p.spec}
+                        </p>
+                        <p className="text-slate-600 truncate">
+                          {p.expected_from} → {p.expected_to}
+                        </p>
+                        {p.installation_type && (
+                          <p className="text-slate-500 text-[10px]">
+                            {p.installation_type}
+                          </p>
+                        )}
+                      </div>
+                      <div className="shrink-0 flex flex-col gap-1">
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setConnectingPendingId(p.id)
+                            setConnectingFromFacility(null)
+                            toast.info('출발 시설을 클릭하세요', { duration: 2500 })
+                          }}
+                          disabled={!!bulkPayload || !!connectingPendingId}
+                          className="rounded bg-emerald-600 px-2 py-0.5 text-[10px] font-bold text-white hover:bg-emerald-700 disabled:bg-slate-300"
+                          title="시설 2개 선택해 연결"
+                        >
+                          연결
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => {
+                            if (!confirm('이 미연결 케이블을 삭제하시겠습니까?')) return
+                            void import('./bulk-register-actions').then(
+                              ({ deletePendingCable }) =>
+                                deletePendingCable({
+                                  project_id: projectId,
+                                  pending_id: p.id,
+                                }).then((r) => {
+                                  if (r.ok) {
+                                    toast.success('삭제됨')
+                                    router.refresh()
+                                  } else toast.error(r.error)
+                                }),
+                            )
+                          }}
+                          className="rounded border border-rose-300 bg-white px-2 py-0.5 text-[10px] font-bold text-rose-700 hover:bg-rose-50"
+                          title="삭제"
+                        >
+                          삭제
+                        </button>
+                      </div>
+                    </div>
+                  </li>
+                ))}
+              </ul>
+            )}
+          </div>
+        </div>
+      )}
 
       {/* 실사 화면 저장 다이얼로그 — 시설 선택 + 화면 캡처(getDisplayMedia) → Storage */}
       <FieldInspectionSaveDialog
