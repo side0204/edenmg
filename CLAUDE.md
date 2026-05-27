@@ -693,6 +693,38 @@ owner 결정사항: 폐차뿐 아니라 매각·렌트반납·리스반납 등 �
 - **운행 이력 검색** (`/vehicles/trips`): 사용 종료 차량 그대로 포함 (과거 이력 검색 보장)
 - **아이콘**: lucide-react 에 `CarOff` 없음 → `Ban` 사용
 
+### ✅ 완료 (지장이설 AI 도면 보조 PoC — Owner 전용, 2026-05-27)
+
+owner 요청: "도면작성을 쉽게" 가 핵심 목적. 자연어 → 캔버스에 시설·케이블 자동 그리기. 일단 owner 한 명만 (side0204@gmail.com) — 실효성 확인 후 오픈 예정.
+
+| 항목 | 결정 | 비고 |
+|---|---|---|
+| **모델** | Claude Opus 4.7 (`claude-opus-4-7`) | 도구 사용 능력 최상. Sonnet 4.6 으로 비용 5x 절감 가능 (claude.ts 의 `CLAUDE_MODEL` 한 줄 교체) |
+| **방식** | Tool Use (자연어 → server action 호출) | Computer Use 아님. 캔버스는 데이터 변경 결과를 그대로 렌더 |
+| **권한** | owner 이메일 hardcode | server action 의 `requireOwner()` + page 의 조건부 렌더. 실효성 확인 후 권한 토글로 확장 예정 |
+| **노출 도구 4개** | list_facilities · list_cables · create_facility · create_cable | 읽기 2개 + 쓰기 2개. 다음 확장 후보: chain·circuit·core_assignment·update_position |
+| **대화 상태** | in-memory (React state) | 페이지 새로고침 시 리셋. DB 저장은 추후 |
+| **prompt caching** | system 프롬프트(~3K 토큰) 캐싱 | 5분 TTL. cache_read 시 ~90% 단가 절감 |
+| **effort** | `high` | tool use 가용성 ↑. xhigh 는 더 적극적이지만 토큰 ↑ |
+
+- **공통 lib** [`src/lib/claude.ts`](./src/lib/claude.ts) — `getAnthropic()` 싱글톤(server-only) + `CLAUDE_MODEL` + `OWNER_EMAIL` + 한국어 시스템 프롬프트(도메인·도구 사용 규칙·시설 종류·케이블 규격) + `RELOCATION_TOOLS` JSON Schema 4개
+- **server action** [`ai-actions.ts`](./src/app/relocation/[id]/ai-actions.ts) — `runAIChat(projectId, history, message)`. tool use 루프(최대 10턴). 각 tool 은 기존 server action 호출 (`createFacilityAtPosition`·`createCableFromCanvas`). create_cable 은 facility name → id 매핑 자동 처리. mutated 면 revalidatePath
+- **client UI** [`AIChatPanel.tsx`](./src/app/relocation/[id]/AIChatPanel.tsx) — floating button (indigo, bottom-right) → 슬라이드 패널. 대화 bubble + 도구 호출 카운트(상세 펼치기) + Loader2 spinner + 에러 박스. Enter 전송, Shift+Enter 줄바꿈. 「초기화」로 대화 리셋. mutated 시 `router.refresh()` → 캔버스 즉시 반영
+- **노출** [`page.tsx`](./src/app/relocation/[id]/page.tsx) — `user.email === OWNER_EMAIL` 일 때만 패널 마운트. 다른 사용자에게는 보이지 않음
+
+**비용 추정**: claude-opus-4-7 기준 일반 대화 1턴(자연어 입력 → 도구 5~10회 → 응답) ≈ 30K 입력(캐시 적용 시 ~6K 실비) + 3K 출력 ≈ ₩600/대화. Sonnet 4.6 로 교체 시 ₩120 수준. 월 ₩30K~₩50K 예산이면 owner 혼자 충분히 실험 가능
+
+**owner 운영 작업**:
+1. console.anthropic.com 에서 API 키 발급
+2. `.env.local` 에 `ANTHROPIC_API_KEY=sk-ant-...` 추가
+3. Vercel Environment Variables 에 동일 추가 (Production + Preview)
+4. dev 재시작 → 지장이설 프로젝트 페이지 → 우하단 「AI 도면 보조」 버튼
+
+**알려진 한계**:
+- 대화 상태 페이지 새로고침 시 리셋 (in-memory)
+- 캔버스 좌표(x/y)는 도식 모드 픽셀 기준. 지도 모드 좌표(lat/lng) 미지원 — 추후 추가
+- 도구가 4개라 복잡한 작업(코어 배정·차수 분할·자동 검증)은 사용자가 캔버스에서 직접
+
 ### ✅ 완료 (출고 취소 — 10분 윈도우, 2026-05-27)
 
 owner: 잘못 누른 출고 즉시 정정용. 10분 내 본인 운행만 영구 삭제. 운행 기록 자체를 안 한 걸로.

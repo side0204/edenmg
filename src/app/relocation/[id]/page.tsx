@@ -33,6 +33,8 @@ import { isWorkerActiveOnProject } from './worker-position-actions'
 import CollapsibleLayout from './CollapsibleLayout'
 import ProgressStepBar, { type ProgressStep } from './ProgressStepBar'
 import RealtimeSync from './RealtimeSync'
+import AIChatPanel from './AIChatPanel'
+import { OWNER_EMAIL } from '@/lib/claude'
 import { loadRelocationCanvasData } from './canvas-data'
 import VerifyTab from './VerifyTab'
 import { runVerification } from '@/lib/relocation-verify'
@@ -1322,6 +1324,7 @@ export default async function RelocationProjectPage({
         </div>
         <CollapsibleLayout topPanel={topPanel} canvas={canvasPanel} />
       </HighlightProvider>
+      {user.email === OWNER_EMAIL && <AIChatPanel projectId={id} />}
     </main>
   )
 }
