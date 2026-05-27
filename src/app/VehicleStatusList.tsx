@@ -3,6 +3,7 @@
 import Link from 'next/link'
 import { useEffect, useState } from 'react'
 import { checkoutVehicle } from './vehicles/actions'
+import CheckoutCancelButton from './vehicles/CheckoutCancelButton'
 
 type Row = {
   vehicleId: string
@@ -14,6 +15,8 @@ type Row = {
   startOdometerKm: number | null
   purpose: string | null
   isMine: boolean
+  // 본인 사용 중일 때 출고 취소용 (in_use && isMine 일 때만 의미)
+  tripId: string | null
   lastEndOdometerKm: number | null
   // 「대기」 상태일 때 최종 사용자 + 반납위치 (idle 만 의미)
   lastDriverName: string | null
@@ -168,12 +171,21 @@ export default function VehicleStatusList({
                   )}
                   {r.purpose && <DetailRow label="목적">{r.purpose}</DetailRow>}
                   {r.isMine && (
-                    <Link
-                      href={`/vehicles/${r.vehicleId}/return`}
-                      className="mt-2 block rounded-lg bg-emerald-600 hover:bg-emerald-700 active:bg-emerald-800 px-3 py-2 text-center text-sm font-medium text-white"
-                    >
-                      반납하기 →
-                    </Link>
+                    <div className="mt-2 space-y-2">
+                      <Link
+                        href={`/vehicles/${r.vehicleId}/return`}
+                        className="block rounded-lg bg-emerald-600 hover:bg-emerald-700 active:bg-emerald-800 px-3 py-2 text-center text-sm font-medium text-white"
+                      >
+                        반납하기 →
+                      </Link>
+                      {r.tripId && r.departedAt && (
+                        <CheckoutCancelButton
+                          tripId={r.tripId}
+                          departedAt={r.departedAt}
+                          variant="block"
+                        />
+                      )}
+                    </div>
                   )}
                 </div>
               )}

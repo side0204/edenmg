@@ -616,6 +616,7 @@ export default async function Home() {
               startOdometerKm: trip?.start_odometer_km ?? null,
               purpose: trip?.purpose ?? null,
               isMine: trip?.driver_employee_id === employee.id,
+              tripId: trip?.id ?? null,
               lastEndOdometerKm: lastEndKmByVehicleId.get(vehicle.id) ?? null,
               lastDriverName: lastReturn?.driverName ?? null,
               lastReturnedAt: lastReturn?.returnedAt ?? null,

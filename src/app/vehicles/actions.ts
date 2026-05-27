@@ -350,3 +350,23 @@ export async function returnVehicle(formData: FormData) {
   revalidatePath('/')
   redirect('/vehicles?ok=' + encodeURIComponent('반납 처리됐습니다'))
 }
+
+// 출고 취소 — 출고 후 10분 내 본인 운행만. security definer RPC 호출.
+// vehicle_trips DELETE GRANT 없으므로 RPC 가 모든 검증 + 삭제 담당.
+export async function cancelCheckout(formData: FormData) {
+  const tripId = String(formData.get('trip_id') ?? '').trim()
+  if (!tripId) {
+    redirect('/vehicles?err=' + encodeURIComponent('운행 id 가 없습니다'))
+  }
+
+  const { supabase } = await requireMe()
+  const { error } = await supabase.rpc('vehicle_trip_cancel', { _trip_id: tripId })
+
+  if (error) {
+    redirect('/vehicles?err=' + encodeURIComponent(error.message))
+  }
+
+  revalidatePath('/vehicles')
+  revalidatePath('/')
+  redirect('/vehicles?ok=' + encodeURIComponent('출고를 취소했습니다'))
+}

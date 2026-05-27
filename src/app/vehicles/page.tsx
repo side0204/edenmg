@@ -4,6 +4,7 @@ import { createClient } from '@/lib/supabase/server'
 import { EmptyState } from '@/components/EmptyState'
 import { retireVehicle } from './actions'
 import DeleteVehicleButton from './DeleteVehicleButton'
+import CheckoutCancelButton from './CheckoutCancelButton'
 
 function todayInSeoul(): string {
   return new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Seoul' }).format(new Date())
@@ -294,6 +295,14 @@ export default async function VehiclesPage() {
                         <p>
                           <span className="text-slate-500">출고</span>{' '}
                           {TIME_FMT.format(new Date(active.departed_at))}
+                          {usedByMe && (
+                            <span className="ml-2">
+                              <CheckoutCancelButton
+                                tripId={active.id}
+                                departedAt={active.departed_at}
+                              />
+                            </span>
+                          )}
                           {active.start_odometer_km !== null && (
                             <span className="ml-2 text-slate-500">
                               ({active.start_odometer_km.toLocaleString()} km)

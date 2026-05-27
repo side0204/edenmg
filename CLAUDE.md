@@ -693,6 +693,16 @@ owner 결정사항: 폐차뿐 아니라 매각·렌트반납·리스반납 등 �
 - **운행 이력 검색** (`/vehicles/trips`): 사용 종료 차량 그대로 포함 (과거 이력 검색 보장)
 - **아이콘**: lucide-react 에 `CarOff` 없음 → `Ban` 사용
 
+### ✅ 완료 (출고 취소 — 10분 윈도우, 2026-05-27)
+
+owner: 잘못 누른 출고 즉시 정정용. 10분 내 본인 운행만 영구 삭제. 운행 기록 자체를 안 한 걸로.
+
+- **마이그** [`0084_vehicle_trip_cancel.sql`](./supabase/migrations/0084_vehicle_trip_cancel.sql) — `vehicle_trip_cancel(_trip_id uuid)` security definer 함수. 검증 4단계: 로그인 / 본인(또는 admin) / 미반납 / `departed_at >= now() - interval '10 minutes'`. `vehicle_trips` DELETE GRANT 미부여 (append-only) 라 RPC 가 모든 검증 + delete 담당. 10분 지나면 「반납 처리해주세요」 안내로 유도
+- **server action** [`cancelCheckout`](./src/app/vehicles/actions.ts) — RPC 호출 후 토스트 + revalidatePath. RPC 의 raise exception 메시지를 그대로 `?err=` 로 노출
+- **client 컴포넌트** [`CheckoutCancelButton.tsx`](./src/app/vehicles/CheckoutCancelButton.tsx) — 1초 tick 카운트다운. `useEffect` 마운트 전엔 숨김(SSR/CSR 시각 차이로 깜박임 회피). 10분 경과 시 자동 사라짐. confirm() 가드. `variant="inline"|"block"` 으로 위치별 스타일 분기
+- **노출 위치**: `/vehicles` 활성 차량 박스 (본인 사용 중) — 출고 시각 옆 작은 rose 링크. 홈 카드 (VehicleStatusList) — 「반납하기」 버튼 아래 outline 버튼. tripId·departedAt 만 추가로 row 에 전달
+- **race**: 사용자가 9:59 에 클릭 → RPC 가 10:01 에 실행되면 「출고 후 10분이 지나…」 토스트로 막힘. 안전망 동작 OK
+
 ### ✅ 완료 (페이지 헤더 모바일 레이아웃 일괄 보정, 2026-05-19)
 
 owner 모바일 스크린샷 보고: `/vehicles` 헤더에서 "업무용 차량" 이 "업무 / 용 / 차량" 처럼 한 글자씩 세로로 깨짐.
@@ -1256,6 +1266,7 @@ owner 요구: "어느 메뉴를 많이 쓰는지" 페이지 단위 분석. 접�
   - [`0081_label_and_line_style.sql`](./supabase/migrations/0081_label_and_line_style.sql) — 캔버스 라벨·선 스타일: `relocation_facilities.label_style jsonb` (글자 크기·색·폰트·B/I) + `relocation_cables.line_style jsonb` (두께 width_scale 1~5). 상단 「서식」 툴바
   - [`0082_label_line_style_per_mode.sql`](./supabase/migrations/0082_label_line_style_per_mode.sql) — 도식/지도 모드별 독립: `label_style_map` + `line_style_map` jsonb 추가. 0081 은 도식 전용으로 유지 (label_dx/label_dx_map 와 같은 mode-split 패턴)
   - [`0083_subcategory_major_work_request_and_schedule_change.sql`](./supabase/migrations/0083_subcategory_major_work_request_and_schedule_change.sql) — 공사 목록 「대분류」 자유 텍스트(`subcategory_major`) + 「작업요청일」(`work_request_start/end`) + `work_schedule_change_requests` 테이블 (작업자→담당자 일정변경 요청·승인/반려 audit, append-only)
+  - [`0084_vehicle_trip_cancel.sql`](./supabase/migrations/0084_vehicle_trip_cancel.sql) — 출고 취소 RPC: `vehicle_trip_cancel(_trip_id uuid)` security definer. 출고 후 10분 내 본인 운행만 영구 삭제 (append-only DELETE GRANT 우회)
 - **외선일보 별도 entity (v2)** — 접속일보와 동일 패턴으로 외선팀 전용 모듈. 외선 작업 특성(케이블 포설구간·전주번호 등)에 맞는 구조 별도 설계.
 - **접속일보 후속 (v2)** — segment-level 작업자 태그, 사진 첨부 + EXIF, 국사·함체 마스터 테이블화, 재접속 이력 조회, 지도 시각화
 - **M3 Phase 2 후속** — 사진 첨부 + EXIF·워터마크 (PRD M3-06), 일보 결재함 통합 (현재는 작업 상세에서 진입), 일반 일보 월별 CSV 리포트
