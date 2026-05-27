@@ -281,6 +281,7 @@ export default async function Home() {
   const checkedOut = !!today?.check_out_at
 
   type VehicleRow = { id: string; plate_number: string; name: string; is_active: boolean }
+  type EmbeddedEmployee = { name: string } | { name: string }[] | null
   type ActiveTrip = {
     id: string
     vehicle_id: string
@@ -288,7 +289,7 @@ export default async function Home() {
     driver_employee_id: string
     start_odometer_km: number | null
     purpose: string | null
-    employees: { name: string }[] | null
+    employees: EmbeddedEmployee
   }
   type RecentReturned = {
     vehicle_id: string
@@ -296,7 +297,12 @@ export default async function Home() {
     returned_at: string
     return_location: string | null
     driver_employee_id: string | null
-    employees: { name: string }[] | null
+    employees: EmbeddedEmployee
+  }
+  const pickEmbeddedName = (emp: EmbeddedEmployee): string | null => {
+    if (!emp) return null
+    if (Array.isArray(emp)) return emp[0]?.name ?? null
+    return emp.name ?? null
   }
   const vehicles = (vehiclesRes.data ?? []) as VehicleRow[]
   const activeTrips = (activeTripsRes.data ?? []) as unknown as ActiveTrip[]
@@ -311,9 +317,8 @@ export default async function Home() {
   for (const t of (recentReturnedRes.data ?? []) as unknown as RecentReturned[]) {
     if (!lastEndKmByVehicleId.has(t.vehicle_id)) {
       lastEndKmByVehicleId.set(t.vehicle_id, t.end_odometer_km)
-      const drvName = t.employees && t.employees.length > 0 ? t.employees[0].name : null
       lastReturnByVehicleId.set(t.vehicle_id, {
-        driverName: drvName,
+        driverName: pickEmbeddedName(t.employees),
         returnedAt: t.returned_at,
         returnLocation: t.return_location,
       })
@@ -606,7 +611,7 @@ export default async function Home() {
               plateNumber: vehicle.plate_number,
               name: vehicle.name,
               status,
-              driverName: trip?.employees?.[0]?.name ?? null,
+              driverName: trip ? pickEmbeddedName(trip.employees) : null,
               departedAt: trip?.departed_at ?? null,
               startOdometerKm: trip?.start_odometer_km ?? null,
               purpose: trip?.purpose ?? null,
