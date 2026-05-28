@@ -735,6 +735,43 @@ owner: 잘못 누른 출고 즉시 정정용. 10분 내 본인 운행만 영구 
 - **노출 위치**: `/vehicles` 활성 차량 박스 (본인 사용 중) — 출고 시각 옆 작은 rose 링크. 홈 카드 (VehicleStatusList) — 「반납하기」 버튼 아래 outline 버튼. tripId·departedAt 만 추가로 row 에 전달
 - **race**: 사용자가 9:59 에 클릭 → RPC 가 10:01 에 실행되면 「출고 후 10분이 지나…」 토스트로 막힘. 안전망 동작 OK
 
+### ✅ 완료 (현장관리 — 지도 노트 + 외부 네비 길찾기 Phase A·B1, 2026-05-28)
+
+owner 요구 (2026-05-28): 공사 설계 프로젝트마다 「현장관리」 탭. 현장 특이점·주의·위험을 지도 위 마커로 기록 + 사진 첨부 + 외부 네비 앱으로 즉시 길찾기. 실사정보입력(시설별)과 별개 독립 모듈. 기존 작업 데이터 취합은 Phase C 로 분리.
+
+| 항목 | 결정 | 비고 |
+|---|---|---|
+| **모듈성** | 독립 — 자체 테이블 `relocation_field_notes`. 시설/작업과 FK 연결 없음 | 「취합」 은 Phase C 에 회색 마커 표시로 별도 구현 |
+| **kind** | 일반/주의/위험 3 단계 (slate·amber·rose) | 위험 마커는 `!` 글자 + 펄스 후광 강조 |
+| **삭제 정책** | 본인+당일 KST OR admin | DB RLS 의 `(created_at at time zone 'Asia/Seoul')::date` 로 강제 |
+| **「내 위치」 동작** | Geolocation API 호출 → 지도 중앙 이동만. DB 저장 X | PIPA 부담 0 — 위치 등록 편의 도우미용. 신선도 추적은 0076 worker_positions 별도 모듈 |
+| **사진** | 1:N · 10MB · JPG/PNG/WEBP/HEIC · EXIF (촬영시각·GPS) 자동 추출 | R2 버킷 `relocation-field-notes` 별도 |
+| **길찾기** | 외부 네비 앱 deep link 4종 (카카오맵·티맵·네이버·구글) + 선호 앱 localStorage | 외부 API 호출 0 — 영구 무료. 출발지=현재위치는 네비 앱이 자체 처리 |
+| **모바일 fallback** | 앱 미설치 시 1.6초 후 웹 fallback URL 자동 진입 | 구글지도는 웹 URL 자체로 동작 |
+
+- **마이그** [`0085_field_notes.sql`](./supabase/migrations/0085_field_notes.sql) — `relocation_field_notes`(kind 일반/주의/위험·lat/lng·title/body/address·created_by) + `relocation_field_note_photos`(1:N + EXIF) + RLS 4종(select/insert/update/delete) + 당일 본인 OR admin 삭제 제약 + Realtime publication 등록
+- **공통 lib**
+  - [`src/lib/field-notes.ts`](./src/lib/field-notes.ts) — `FieldNoteKind`·색상 매핑·Haversine 거리 계산·`isSameKstDate`·R2 버킷 상수
+  - [`src/lib/nav-deep-links.ts`](./src/lib/nav-deep-links.ts) — 5개 앱 URL builder + 웹 fallback + 모바일 UA 판별 + localStorage 키
+- **server actions** [`field-note-actions.ts`](./src/app/relocation/[id]/field-note-actions.ts) — `createFieldNote` / `updateFieldNote` / `deleteFieldNote` (RLS 차단 시 친절 메시지) / `uploadFieldNotePhoto` (EXIF 함께 저장) / `deleteFieldNotePhoto` / `getFieldNotePhotoUrls` (30분 signedUrl 일괄)
+- **UI**
+  - [`FieldNotesView.tsx`](./src/app/relocation/[id]/FieldNotesView.tsx) — 메인 뷰. 자체 카카오맵 + SVG 오버레이 마커. 좌측 사이드바(목록·필터·정렬)·중앙 지도·우측 상세 패널 3컬럼. 거리순 정렬은 「내 위치」 클릭 후 활성. 1회 클릭 = 1회 GPS pin (저장 X)
+  - [`NavLauncher.tsx`](./src/app/relocation/[id]/NavLauncher.tsx) — 길찾기 버튼 + 앱 선택 모달. 첫 사용 시 4개 앱 중 선택, 이후 localStorage 의 선호 앱으로 즉시 진입. 「앱 변경」 링크로 초기화. 모바일 deep link 실패 시 1.6초 후 웹 fallback
+  - [`FieldPhotoUploader.tsx`](./src/app/relocation/[id]/FieldPhotoUploader.tsx) — exifr 로 EXIF 자동 추출 (works 의 PhotoUploader 와 동일 패턴). 카메라 즉시 촬영 (`capture="environment"`)
+- **page.tsx 통합** ([`src/app/relocation/[id]/page.tsx`](./src/app/relocation/[id]/page.tsx)) — TabId 에 `'field'` 추가, TABS 의 「시설」 다음 위치에 MapPin 아이콘 「현장관리」 탭 노출. me 쿼리에 `permission` 추가하여 `meIsAdmin` 계산. `tab === 'field'` 일 때만 notes + photos + 작성자 이름 매핑 fetch. 모든 카테고리(청약·계획·지장이설) 공통
+- **운영 필요** (owner 수동 작업):
+  1. Supabase Dashboard 에서 [`0085_field_notes.sql`](./supabase/migrations/0085_field_notes.sql) 실행
+  2. Cloudflare R2 콘솔에서 `relocation-field-notes` 버킷 생성 (region: auto, public access 비활성)
+  3. 기존 `R2_ACCESS_KEY_ID` / `R2_SECRET_ACCESS_KEY` 가 Account-level Object Read & Write 키면 자동 적용 (별도 env 추가 X)
+- **HTTPS 필수**: Geolocation API 는 HTTPS 에서만 작동. 로컬 dev (http) 에서는 「내 위치」 거부됨 → Vercel 배포본에서 모바일 검증
+- **Phase B1 (외부 네비 deep link) 영구 무료**: 우리 책임 외부 API 호출 0 — Kakao Mobility / Naver Directions 등 유료 가능성 있는 라우팅 API 미사용
+- **알려진 한계** (후속 Phase 후보):
+  - Phase B2: 정확한 도로 거리·시간 미리보기 (Kakao Mobility 또는 Naver Directions, 무료 한도 내 사용)
+  - Phase C: 외부 데이터 취합 표시 (접속일보 사진 EXIF·일반일보 특이사항 회색 마커)
+  - Phase D: 국사 마스터 (배치도·랙·장비·포트·사진 갤러리)
+  - 다중 마커 순회 경로 (Kakao Mobility multi-waypoint)
+  - 위치 수정은 일단 삭제 후 재추가 — 마커 드래그는 후속
+
 ### ✅ 완료 (페이지 헤더 모바일 레이아웃 일괄 보정, 2026-05-19)
 
 owner 모바일 스크린샷 보고: `/vehicles` 헤더에서 "업무용 차량" 이 "업무 / 용 / 차량" 처럼 한 글자씩 세로로 깨짐.
@@ -1299,6 +1336,7 @@ owner 요구: "어느 메뉴를 많이 쓰는지" 페이지 단위 분석. 접�
   - [`0082_label_line_style_per_mode.sql`](./supabase/migrations/0082_label_line_style_per_mode.sql) — 도식/지도 모드별 독립: `label_style_map` + `line_style_map` jsonb 추가. 0081 은 도식 전용으로 유지 (label_dx/label_dx_map 와 같은 mode-split 패턴)
   - [`0083_subcategory_major_work_request_and_schedule_change.sql`](./supabase/migrations/0083_subcategory_major_work_request_and_schedule_change.sql) — 공사 목록 「대분류」 자유 텍스트(`subcategory_major`) + 「작업요청일」(`work_request_start/end`) + `work_schedule_change_requests` 테이블 (작업자→담당자 일정변경 요청·승인/반려 audit, append-only)
   - [`0084_vehicle_trip_cancel.sql`](./supabase/migrations/0084_vehicle_trip_cancel.sql) — 출고 취소 RPC: `vehicle_trip_cancel(_trip_id uuid)` security definer. 출고 후 10분 내 본인 운행만 영구 삭제 (append-only DELETE GRANT 우회)
+  - [`0085_field_notes.sql`](./supabase/migrations/0085_field_notes.sql) — 현장관리 노트: `relocation_field_notes` + `relocation_field_note_photos` + R2 버킷 `relocation-field-notes` (Cloudflare 콘솔에서 별도 생성 필요)
 - **외선일보 별도 entity (v2)** — 접속일보와 동일 패턴으로 외선팀 전용 모듈. 외선 작업 특성(케이블 포설구간·전주번호 등)에 맞는 구조 별도 설계.
 - **접속일보 후속 (v2)** — segment-level 작업자 태그, 사진 첨부 + EXIF, 국사·함체 마스터 테이블화, 재접속 이력 조회, 지도 시각화
 - **M3 Phase 2 후속** — 사진 첨부 + EXIF·워터마크 (PRD M3-06), 일보 결재함 통합 (현재는 작업 상세에서 진입), 일반 일보 월별 CSV 리포트

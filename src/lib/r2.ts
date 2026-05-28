@@ -138,4 +138,5 @@ export const R2_BUCKETS = {
   LEAVE_ATTACHMENTS: 'leave-attachments',
   RELOCATION_FIELD_INSPECTIONS: 'relocation-field-inspections',
   RELOCATION_FACILITY_PHOTOS: 'relocation-facility-photos',
+  RELOCATION_FIELD_NOTES: 'relocation-field-notes',
 } as const

@@ -12,8 +12,11 @@ import {
   ArrowRightLeft,
   ExternalLink,
   Upload,
+  MapPin,
 } from 'lucide-react'
 import { Sparkles, Settings, Hammer } from 'lucide-react'
+import FieldNotesView, { type FieldNoteData, type FieldNotePhoto } from './FieldNotesView'
+import { isFieldNoteKind } from '@/lib/field-notes'
 import { createClient } from '@/lib/supabase/server'
 import { updateProject, deleteProject } from '../actions'
 import FacilitiesTab from './FacilitiesTab'
@@ -59,6 +62,7 @@ import SpliceTab, { type SpliceRow } from './SpliceTab'
 
 type TabId =
   | 'facilities'
+  | 'field'
   | 'cables'
   | 'circuits'
   | 'cores'
@@ -70,6 +74,7 @@ type TabId =
 
 const TABS: { id: TabId; label: string; icon: typeof Cable }[] = [
   { id: 'facilities', label: '시설', icon: Network },
+  { id: 'field', label: '현장관리', icon: MapPin },
   { id: 'cables', label: '케이블', icon: Cable },
   { id: 'circuits', label: '회선', icon: Radio },
   { id: 'cores', label: '코어배정', icon: Layers },
@@ -177,15 +182,16 @@ export default async function RelocationProjectPage({
 
   const { data: meRow } = await supabase
     .from('employees')
-    .select('id, company_id, name, is_active')
+    .select('id, company_id, name, is_active, permission')
     .eq('auth_user_id', user.id)
     .maybeSingle()
   const me = meRow as
-    | { id: string; company_id: string; name: string; is_active: boolean }
+    | { id: string; company_id: string; name: string; is_active: boolean; permission: string }
     | null
   if (!me || !me.is_active) {
     redirect('/?err=' + encodeURIComponent('계정이 활성 상태가 아닙니다'))
   }
+  const meIsAdmin = me.permission === 'admin'
 
   const { data: pRow } = await supabase
     .from('relocation_projects')
@@ -404,6 +410,98 @@ export default async function RelocationProjectPage({
       .select('migration_id, circuit_id, segment_idx')
       .in('migration_id', migIds)
     migrationCircuits = (mcRows ?? []) as MigrationCircuitRow[]
+  }
+
+  // 현장관리 — 노트 + 사진 (탭이 'field' 일 때만)
+  let fieldNotes: FieldNoteData[] = []
+  if (tab === 'field') {
+    const { data: noteRows } = await supabase
+      .from('relocation_field_notes')
+      .select('id, kind, title, body, lat, lng, address, created_by, created_at')
+      .eq('project_id', id)
+      .order('created_at', { ascending: false })
+      .limit(500)
+    type NoteRow = {
+      id: string
+      kind: string
+      title: string | null
+      body: string | null
+      lat: number
+      lng: number
+      address: string | null
+      created_by: string | null
+      created_at: string
+    }
+    const notes = (noteRows ?? []) as NoteRow[]
+
+    let photoRows: Array<{
+      id: string
+      note_id: string
+      path: string
+      taken_at: string | null
+      gps_lat: number | null
+      gps_lng: number | null
+      uploaded_by: string | null
+      created_at: string
+    }> = []
+    if (notes.length > 0) {
+      const { data: ph } = await supabase
+        .from('relocation_field_note_photos')
+        .select('id, note_id, path, taken_at, gps_lat, gps_lng, uploaded_by, created_at')
+        .in(
+          'note_id',
+          notes.map((n) => n.id),
+        )
+        .order('created_at', { ascending: true })
+      photoRows = (ph ?? []) as typeof photoRows
+    }
+
+    // 직원 이름 매핑 (작성자 + 업로더 union)
+    const empIds = new Set<string>()
+    for (const n of notes) if (n.created_by) empIds.add(n.created_by)
+    for (const p of photoRows) if (p.uploaded_by) empIds.add(p.uploaded_by)
+    const nameById = new Map<string, string>()
+    if (empIds.size > 0) {
+      const { data: empRows } = await supabase
+        .from('employees')
+        .select('id, name')
+        .in('id', Array.from(empIds))
+      for (const r of (empRows ?? []) as { id: string; name: string }[]) {
+        nameById.set(r.id, r.name)
+      }
+    }
+
+    const photosByNote = new Map<string, FieldNotePhoto[]>()
+    for (const p of photoRows) {
+      const arr = photosByNote.get(p.note_id) ?? []
+      arr.push({
+        id: p.id,
+        path: p.path,
+        taken_at: p.taken_at,
+        gps_lat: p.gps_lat,
+        gps_lng: p.gps_lng,
+        uploaded_by: p.uploaded_by,
+        uploaded_by_name: p.uploaded_by ? nameById.get(p.uploaded_by) ?? null : null,
+        created_at: p.created_at,
+      })
+      photosByNote.set(p.note_id, arr)
+    }
+
+    fieldNotes = notes
+      .filter((n) => isFieldNoteKind(n.kind))
+      .map((n) => ({
+        id: n.id,
+        kind: n.kind as FieldNoteData['kind'],
+        title: n.title,
+        body: n.body,
+        lat: n.lat,
+        lng: n.lng,
+        address: n.address,
+        created_by: n.created_by,
+        created_by_name: n.created_by ? nameById.get(n.created_by) ?? null : null,
+        created_at: n.created_at,
+        photos: photosByNote.get(n.id) ?? [],
+      }))
   }
 
   // 검증 — 모든 탭에서 실행 (진행 표시줄·검증 탭 배지·검증 탭 콘텐츠 공용)
@@ -685,6 +783,14 @@ export default async function RelocationProjectPage({
           <div className="rounded-2xl bg-white shadow-sm border border-slate-200 p-4 sm:p-6 min-w-0">
             {effectiveTab === 'facilities' && (
               <FacilitiesTab projectId={project.id} facilities={facilities} />
+            )}
+            {effectiveTab === 'field' && (
+              <FieldNotesView
+                projectId={project.id}
+                notes={fieldNotes}
+                meId={me.id}
+                meIsAdmin={meIsAdmin}
+              />
             )}
             {effectiveTab === 'cables' && (
               <CablesTab projectId={project.id} cables={cables} facilities={facilities} />
