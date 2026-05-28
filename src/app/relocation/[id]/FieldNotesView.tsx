@@ -640,11 +640,11 @@ export default function FieldNotesView({ projectId, notes, meId, meIsAdmin }: Pr
           </div>
         )}
 
-        {/* 지도 컨테이너 */}
+        {/* 지도 컨테이너 — z-index 0 (배경). SVG 오버레이가 그 위에 z-index 1. */}
         <div
           ref={setContainer}
           className="absolute inset-0 bg-slate-200"
-          style={{ cursor: addMode ? 'crosshair' : 'grab' }}
+          style={{ cursor: addMode ? 'crosshair' : 'grab', zIndex: 0 }}
         />
 
         {/* 지도 status 표시 */}
@@ -661,11 +661,11 @@ export default function FieldNotesView({ projectId, notes, meId, meIsAdmin }: Pr
           </div>
         )}
 
-        {/* SVG 오버레이 — 마커 */}
+        {/* SVG 오버레이 — 마커. 카카오맵 배경(z-index 0) 위에 z-index 1 로 명시 고정.
+            (z-index 미지정 시 카카오 내부 요소에 가려져 줌 repaint 때만 잠깐 보이는 버그) */}
         <svg
-          className="absolute inset-0 pointer-events-none"
-          width="100%"
-          height="100%"
+          className="absolute inset-0 w-full h-full pointer-events-none"
+          style={{ zIndex: 1 }}
         >
           <defs>
             <filter id="fieldPinShadow" x="-50%" y="-50%" width="200%" height="200%">
