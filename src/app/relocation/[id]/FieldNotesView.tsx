@@ -98,9 +98,6 @@ const KIND_BUTTON_TONE: Record<FieldNoteKind, string> = {
   위험: 'bg-rose-600 hover:bg-rose-700 text-white border-rose-700',
 }
 
-const MARKER_DIAMETER = 36
-const MARKER_RADIUS = MARKER_DIAMETER / 2
-
 export default function FieldNotesView({ projectId, notes, meId, meIsAdmin }: Props) {
   const router = useRouter()
   const { setContainer, map, status, epoch } = useKakaoMap(true)
@@ -283,6 +280,12 @@ export default function FieldNotesView({ projectId, notes, meId, meIsAdmin }: Pr
     )
   }, [map])
 
+  // 내 위치 지우기 — 마커 제거 + 거리순 정렬이면 최신순으로 복귀
+  const clearMyLocation = useCallback(() => {
+    setMyLocation(null)
+    setSortBy((prev) => (prev === 'distance' ? 'recent' : prev))
+  }, [])
+
   // ===== 노트 선택 (지도 중앙으로 이동) =================================
   function selectNote(note: FieldNoteData) {
     setSelectedId(note.id)
@@ -343,6 +346,7 @@ export default function FieldNotesView({ projectId, notes, meId, meIsAdmin }: Pr
     for (const n of notes) c[n.kind]++
     return c
   }, [notes])
+  const allKindsShown = FIELD_NOTE_KIND_VALUES.every((k) => kindFilter[k])
 
   return (
     <div className="relative flex h-[78vh] sm:h-[80vh] w-full overflow-hidden rounded-xl border border-slate-300 bg-slate-100">
@@ -495,47 +499,102 @@ export default function FieldNotesView({ projectId, notes, meId, meIsAdmin }: Pr
 
       {/* 지도 + 마커 오버레이 */}
       <div className="relative flex-1 min-w-0">
-        {/* 상단 도구바 */}
-        <div className="absolute top-3 left-1/2 -translate-x-1/2 z-20 flex items-center gap-1 bg-white shadow-lg rounded-xl border border-slate-200 px-2 py-1.5">
-          {FIELD_NOTE_KIND_VALUES.map((k) => {
-            const Icon = KIND_ICON[k]
-            const active = addMode === k
-            return (
+        {/* 상단 도구바 — 보기 필터(위) + 추가/내위치(아래) 두 줄 */}
+        <div className="absolute top-3 left-1/2 -translate-x-1/2 z-20 flex flex-col items-center gap-1.5">
+          {/* 보기 필터 — 전체 / 일반 / 주의 / 위험 (복수 선택) */}
+          <div className="flex items-center gap-1 bg-white shadow-lg rounded-xl border border-slate-200 px-1.5 py-1">
+            <span className="px-1 text-[10px] font-semibold text-slate-400">보기</span>
+            <button
+              onClick={() =>
+                setKindFilter({ 일반: true, 주의: true, 위험: true })
+              }
+              className={
+                'rounded-lg px-2 py-1 text-xs font-medium transition ' +
+                (allKindsShown
+                  ? 'bg-slate-900 text-white'
+                  : 'bg-white text-slate-600 border border-slate-300 hover:bg-slate-50')
+              }
+            >
+              전체 {notes.length}
+            </button>
+            {FIELD_NOTE_KIND_VALUES.map((k) => {
+              const on = kindFilter[k]
+              const c = FIELD_NOTE_KIND_COLOR[k]
+              return (
+                <button
+                  key={k}
+                  onClick={() => setKindFilter((p) => ({ ...p, [k]: !p[k] }))}
+                  title={`${k} 표시/숨김`}
+                  className={
+                    'inline-flex items-center gap-1 rounded-lg px-2 py-1 text-xs font-medium border transition ' +
+                    (on
+                      ? `${c.badgeBg} ${c.badgeText} ${c.badgeBorder}`
+                      : 'bg-white text-slate-400 border-slate-200 opacity-60')
+                  }
+                >
+                  <span
+                    className="inline-block h-2 w-2 rounded-full"
+                    style={{ backgroundColor: on ? c.fill : '#cbd5e1' }}
+                  />
+                  {k} {kindCounts[k]}
+                </button>
+              )
+            })}
+          </div>
+
+          {/* 추가 + 내 위치 */}
+          <div className="flex items-center gap-1 bg-white shadow-lg rounded-xl border border-slate-200 px-1.5 py-1">
+            <span className="px-1 text-[10px] font-semibold text-slate-400">추가</span>
+            {FIELD_NOTE_KIND_VALUES.map((k) => {
+              const Icon = KIND_ICON[k]
+              const active = addMode === k
+              return (
+                <button
+                  key={k}
+                  onClick={() => setAddMode(active ? null : k)}
+                  title={`${k} 추가 — 지도 클릭 위치에 노트 생성`}
+                  className={
+                    'inline-flex items-center gap-1 rounded-lg border px-2 py-1 text-xs font-medium transition ' +
+                    (active
+                      ? KIND_BUTTON_TONE[k] + ' ring-2 ring-offset-1 ring-' + (k === '위험' ? 'rose' : k === '주의' ? 'amber' : 'slate') + '-400'
+                      : `bg-white text-slate-700 border-slate-300 hover:${k === '위험' ? 'bg-rose-50' : k === '주의' ? 'bg-amber-50' : 'bg-slate-50'}`)
+                  }
+                >
+                  <Icon className="h-3.5 w-3.5" />
+                  {active ? `${k} 추가 중` : k}
+                </button>
+              )
+            })}
+            <div className="mx-1 h-5 w-px bg-slate-200" />
+            <button
+              onClick={locateMe}
+              disabled={locating}
+              title="GPS 로 내 위치를 찾아 지도 중앙으로 이동"
+              className="inline-flex items-center gap-1 rounded-lg bg-indigo-600 text-white px-2 py-1 text-xs font-medium hover:bg-indigo-700 disabled:opacity-50"
+            >
+              {locating ? (
+                <Loader2 className="h-3.5 w-3.5 animate-spin" />
+              ) : (
+                <Crosshair className="h-3.5 w-3.5" />
+              )}
+              {myLocation ? '내 위치로' : '내 위치'}
+            </button>
+            {myLocation && (
               <button
-                key={k}
-                onClick={() => setAddMode(active ? null : k)}
-                title={`${k} 추가 — 지도 클릭 위치에 노트 생성`}
-                className={
-                  'inline-flex items-center gap-1 rounded-lg border px-2 py-1.5 text-xs font-medium transition ' +
-                  (active
-                    ? KIND_BUTTON_TONE[k] + ' ring-2 ring-offset-1 ring-' + (k === '위험' ? 'rose' : k === '주의' ? 'amber' : 'slate') + '-400'
-                    : `bg-white text-slate-700 border-slate-300 hover:${k === '위험' ? 'bg-rose-50' : k === '주의' ? 'bg-amber-50' : 'bg-slate-50'}`)
-                }
+                onClick={clearMyLocation}
+                title="내 위치 마커 지우기"
+                className="inline-flex items-center gap-1 rounded-lg border border-slate-300 bg-white text-slate-600 px-2 py-1 text-xs font-medium hover:bg-slate-50"
               >
-                <Icon className="h-3.5 w-3.5" />
-                {active ? `${k} 추가 중` : k}
+                <X className="h-3.5 w-3.5" />
+                지우기
               </button>
-            )
-          })}
-          <div className="mx-1 h-5 w-px bg-slate-200" />
-          <button
-            onClick={locateMe}
-            disabled={locating}
-            title="GPS 로 내 위치를 찾아 지도 중앙으로 이동"
-            className="inline-flex items-center gap-1 rounded-lg bg-indigo-600 text-white px-2 py-1.5 text-xs font-medium hover:bg-indigo-700 disabled:opacity-50"
-          >
-            {locating ? (
-              <Loader2 className="h-3.5 w-3.5 animate-spin" />
-            ) : (
-              <Crosshair className="h-3.5 w-3.5" />
             )}
-            내 위치
-          </button>
+          </div>
         </div>
 
         {/* 안내 메시지 — 추가 모드 활성 */}
         {addMode && (
-          <div className="absolute top-16 left-1/2 -translate-x-1/2 z-20 rounded-full bg-slate-900/90 text-white text-xs px-3 py-1 shadow">
+          <div className="absolute top-28 left-1/2 -translate-x-1/2 z-20 rounded-full bg-slate-900/90 text-white text-xs px-3 py-1 shadow">
             지도에서 {addMode} 마커를 추가할 위치를 클릭하세요. (취소: 같은 버튼 다시 누르기)
           </div>
         )}
@@ -567,9 +626,25 @@ export default function FieldNotesView({ projectId, notes, meId, meIsAdmin }: Pr
           width="100%"
           height="100%"
         >
+          <defs>
+            <filter id="fieldPinShadow" x="-50%" y="-50%" width="200%" height="200%">
+              <feDropShadow
+                dx="0"
+                dy="2"
+                stdDeviation="2"
+                floodColor="#0f172a"
+                floodOpacity="0.35"
+              />
+            </filter>
+          </defs>
           {projectedMarkers.map(({ note, x, y }) => {
             const color = FIELD_NOTE_KIND_COLOR[note.kind]
             const selected = selectedId === note.id
+            const symbol = note.kind === '일반' ? 'i' : '!'
+            // 핀: 팁이 (x, y), 머리 원은 위쪽. 선택 시 더 크게.
+            const headOffset = selected ? 34 : 30
+            const headR = selected ? 15 : 13
+            const cy = y - headOffset
             return (
               <g
                 key={note.id}
@@ -579,51 +654,73 @@ export default function FieldNotesView({ projectId, notes, meId, meIsAdmin }: Pr
                   selectNote(note)
                 }}
               >
-                {selected && (
-                  <circle
-                    cx={x}
-                    cy={y}
-                    r={MARKER_RADIUS + 8}
-                    fill={color.fill}
-                    opacity={0.25}
-                  />
+                {/* 위험 — 항상 펄스 링으로 주의 환기 */}
+                {note.kind === '위험' && (
+                  <circle cx={x} cy={cy} fill={color.fill} opacity={0.3}>
+                    <animate
+                      attributeName="r"
+                      values={`${headR};${headR + 12};${headR}`}
+                      dur="1.8s"
+                      repeatCount="indefinite"
+                    />
+                    <animate
+                      attributeName="opacity"
+                      values="0.3;0;0.3"
+                      dur="1.8s"
+                      repeatCount="indefinite"
+                    />
+                  </circle>
                 )}
+                {/* 선택 글로우 */}
+                {selected && (
+                  <circle cx={x} cy={cy} r={headR + 7} fill={color.fill} opacity={0.22} />
+                )}
+                {/* 핀 포인터(삼각) — 머리에서 팁으로 */}
+                <path
+                  d={`M ${x - headR * 0.62} ${cy + headR * 0.55} L ${x + headR * 0.62} ${cy + headR * 0.55} L ${x} ${y} Z`}
+                  fill={color.fill}
+                  filter="url(#fieldPinShadow)"
+                />
+                {/* 핀 머리 */}
                 <circle
                   cx={x}
-                  cy={y}
-                  r={MARKER_RADIUS}
+                  cy={cy}
+                  r={headR}
                   fill={color.fill}
-                  stroke={color.stroke}
-                  strokeWidth={selected ? 3 : 2}
+                  stroke="white"
+                  strokeWidth={selected ? 3 : 2.5}
+                  filter="url(#fieldPinShadow)"
                 />
+                {/* 심볼 */}
                 <text
                   x={x}
-                  y={y + 4}
+                  y={cy + 5}
                   textAnchor="middle"
-                  fontSize="13"
-                  fontWeight="700"
-                  fill={color.text}
+                  fontSize={selected ? 16 : 14}
+                  fontWeight="800"
+                  fill="white"
                   style={{ userSelect: 'none' }}
                 >
-                  {note.kind === '위험' ? '!' : note.kind === '주의' ? '⚠' : 'i'}
+                  {symbol}
                 </text>
+                {/* 사진 수 배지 */}
                 {note.photos.length > 0 && (
                   <g>
                     <circle
-                      cx={x + MARKER_RADIUS - 3}
-                      cy={y - MARKER_RADIUS + 3}
-                      r={7}
+                      cx={x + headR - 2}
+                      cy={cy - headR + 2}
+                      r={7.5}
                       fill="white"
-                      stroke={color.stroke}
+                      stroke={color.fill}
                       strokeWidth={1.5}
                     />
                     <text
-                      x={x + MARKER_RADIUS - 3}
-                      y={y - MARKER_RADIUS + 6}
+                      x={x + headR - 2}
+                      y={cy - headR + 5}
                       textAnchor="middle"
                       fontSize="9"
                       fontWeight="700"
-                      fill={color.stroke}
+                      fill={color.fill}
                     >
                       {note.photos.length > 9 ? '9+' : note.photos.length}
                     </text>
@@ -633,23 +730,45 @@ export default function FieldNotesView({ projectId, notes, meId, meIsAdmin }: Pr
             )
           })}
 
-          {/* 내 위치 마커 */}
+          {/* 내 위치 마커 — 펄스 링 + 핀(teardrop). 팁이 실제 위치를 가리킴 */}
           {myLocationPixel && (
             <g pointerEvents="none">
-              <circle
-                cx={myLocationPixel.x}
-                cy={myLocationPixel.y}
-                r={14}
-                fill="#3b82f6"
-                opacity={0.2}
-              />
-              <circle
-                cx={myLocationPixel.x}
-                cy={myLocationPixel.y}
-                r={6}
-                fill="#3b82f6"
+              {/* 펄스 정확도 링 (애니메이션) */}
+              <circle cx={myLocationPixel.x} cy={myLocationPixel.y} fill="#3b82f6">
+                <animate
+                  attributeName="r"
+                  values="6;22;6"
+                  dur="2s"
+                  repeatCount="indefinite"
+                />
+                <animate
+                  attributeName="opacity"
+                  values="0.35;0;0.35"
+                  dur="2s"
+                  repeatCount="indefinite"
+                />
+              </circle>
+              {/* 핀 teardrop — 팁이 (x, y) */}
+              <path
+                d={
+                  `M ${myLocationPixel.x} ${myLocationPixel.y} ` +
+                  `C ${myLocationPixel.x - 11} ${myLocationPixel.y - 16}, ` +
+                  `${myLocationPixel.x - 13} ${myLocationPixel.y - 34}, ` +
+                  `${myLocationPixel.x} ${myLocationPixel.y - 34} ` +
+                  `C ${myLocationPixel.x + 13} ${myLocationPixel.y - 34}, ` +
+                  `${myLocationPixel.x + 11} ${myLocationPixel.y - 16}, ` +
+                  `${myLocationPixel.x} ${myLocationPixel.y} Z`
+                }
+                fill="#2563eb"
                 stroke="white"
                 strokeWidth={2}
+              />
+              {/* 핀 머리 흰 점 */}
+              <circle
+                cx={myLocationPixel.x}
+                cy={myLocationPixel.y - 26}
+                r={5}
+                fill="white"
               />
             </g>
           )}
@@ -676,6 +795,31 @@ export default function FieldNotesView({ projectId, notes, meId, meIsAdmin }: Pr
             </g>
           )}
         </svg>
+
+        {/* 내 위치 칩 — 핀 머리 위. ✕ 로 지우기 */}
+        {myLocationPixel && (
+          <div
+            className="absolute z-20 -translate-x-1/2 -translate-y-full"
+            style={{
+              left: myLocationPixel.x,
+              top: myLocationPixel.y - 40,
+            }}
+          >
+            <div className="flex items-center gap-1 rounded-full bg-blue-600 px-2 py-1 text-[11px] font-medium text-white shadow-lg whitespace-nowrap">
+              <Crosshair className="h-3 w-3" />
+              내 위치
+              <button
+                type="button"
+                onClick={clearMyLocation}
+                className="ml-0.5 -mr-0.5 rounded-full p-0.5 hover:bg-white/25"
+                aria-label="내 위치 지우기"
+                title="내 위치 지우기"
+              >
+                <X className="h-3 w-3" />
+              </button>
+            </div>
+          </div>
+        )}
       </div>
 
       {/* 우측 상세 패널 */}
