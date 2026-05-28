@@ -417,7 +417,7 @@ export default async function RelocationProjectPage({
   if (tab === 'field') {
     const { data: noteRows } = await supabase
       .from('relocation_field_notes')
-      .select('id, kind, title, body, lat, lng, address, created_by, created_at')
+      .select('id, kind, title, body, lat, lng, address, created_by, created_at, shared_to_field')
       .eq('project_id', id)
       .order('created_at', { ascending: false })
       .limit(500)
@@ -431,6 +431,7 @@ export default async function RelocationProjectPage({
       address: string | null
       created_by: string | null
       created_at: string
+      shared_to_field: boolean
     }
     const notes = (noteRows ?? []) as NoteRow[]
 
@@ -501,6 +502,9 @@ export default async function RelocationProjectPage({
         created_by_name: n.created_by ? nameById.get(n.created_by) ?? null : null,
         created_at: n.created_at,
         photos: photosByNote.get(n.id) ?? [],
+        sharedToField: n.shared_to_field,
+        projectId: id,
+        projectTitle: project.title,
       }))
   }
 

@@ -772,6 +772,23 @@ owner 요구 (2026-05-28): 공사 설계 프로젝트마다 「현장관리」 �
   - 다중 마커 순회 경로 (Kakao Mobility multi-waypoint)
   - 위치 수정은 일단 삭제 후 재추가 — 마커 드래그는 후속
 
+#### 후속 (2026-05-28): 독립 최상위 모듈 승격 + 홈 상단바 + 공사→현장관리 보내기
+
+owner 결정: 현장관리를 공사 종속이 아니라 **독립 최상위 메뉴**로 별도 관리. 공사에서 입력한 노트는 **명시적 「보내기」** 한 것만 최상위 통합 지도에 표시. 하단 탭바 공간 확보 위해 **홈을 상단바로 이동**.
+
+| 항목 | 결정 | 비고 |
+|---|---|---|
+| **최상위 진입** | 하단 탭바 재구성: 홈(상단 이동) → **사무·공사·현장관리·작업·자재** 5탭 | 「공사목록」 라벨 → 「공사」. 「현장관리」(`/field`) 신규 |
+| **홈 위치** | 상단 전역 바([`TopBar`](./src/components/TopBar.tsx))로 이동 | OfficeSubTabs 와 sticky 충돌 회피 위해 TopBar 는 **비-sticky**(스크롤 시 사라짐) |
+| **공사↔현장관리 연계** | 명시적 「보내기」 — 공사 노트는 기본 그 공사에서만, 보낸 것만 최상위 노출 | `shared_to_field` 플래그. 독립 노트(`project_id` null)는 항상 최상위 |
+
+- **마이그** [`0086_field_notes_standalone.sql`](./supabase/migrations/0086_field_notes_standalone.sql) — `relocation_field_notes.project_id` NOT NULL 제거(nullable) + `shared_to_field boolean` 추가 + 최상위 뷰 partial index. 기존 0085 노트는 `shared_to_field=false` → 해당 공사 탭에서만 보임 (보내야 최상위 노출)
+- **server action 추가** [`setFieldNoteShared`](./src/app/relocation/[id]/field-note-actions.ts) — 공사 노트의 `shared_to_field` 토글. createFieldNote 등 전 액션의 `project_id` optional 화 (null=독립 노트). revalidate 는 공사 + `/field` 양쪽
+- **신규 라우트** [`/field`](./src/app/field/page.tsx) — 최상위 현장관리. 회사 노트 중 `project_id IS NULL OR shared_to_field` 조회 + 출처 공사 제목 매핑. `FieldNotesView` 를 `projectId={null}` (global 모드)로 렌더
+- **`FieldNotesView` 모드 분기** — `projectId: string | null`. global 모드: 독립 노트 생성·출처 공사 라벨 표시·「보내기」 버튼 없음. project 모드: 상세 패널에 「현장관리로 보내기 / 내리기」 토글(작성자 OR admin). 지도 준비 후 노트 범위로 1회 fit 추가
+- **하단 탭바** [`BottomNav`](./src/components/BottomNav.tsx) — 홈 제거, 「공사목록」→「공사」, 「현장관리」 추가. [`TopBar`](./src/components/TopBar.tsx) 신규(홈 링크) + layout 에 마운트
+- **운영 필요**: Supabase 에서 [`0086_field_notes_standalone.sql`](./supabase/migrations/0086_field_notes_standalone.sql) 실행 (R2 추가 작업 없음 — 0085 버킷 그대로)
+
 ### ✅ 완료 (페이지 헤더 모바일 레이아웃 일괄 보정, 2026-05-19)
 
 owner 모바일 스크린샷 보고: `/vehicles` 헤더에서 "업무용 차량" 이 "업무 / 용 / 차량" 처럼 한 글자씩 세로로 깨짐.
@@ -1337,6 +1354,7 @@ owner 요구: "어느 메뉴를 많이 쓰는지" 페이지 단위 분석. 접�
   - [`0083_subcategory_major_work_request_and_schedule_change.sql`](./supabase/migrations/0083_subcategory_major_work_request_and_schedule_change.sql) — 공사 목록 「대분류」 자유 텍스트(`subcategory_major`) + 「작업요청일」(`work_request_start/end`) + `work_schedule_change_requests` 테이블 (작업자→담당자 일정변경 요청·승인/반려 audit, append-only)
   - [`0084_vehicle_trip_cancel.sql`](./supabase/migrations/0084_vehicle_trip_cancel.sql) — 출고 취소 RPC: `vehicle_trip_cancel(_trip_id uuid)` security definer. 출고 후 10분 내 본인 운행만 영구 삭제 (append-only DELETE GRANT 우회)
   - [`0085_field_notes.sql`](./supabase/migrations/0085_field_notes.sql) — 현장관리 노트: `relocation_field_notes` + `relocation_field_note_photos` + R2 버킷 `relocation-field-notes` (Cloudflare 콘솔에서 별도 생성 필요)
+  - [`0086_field_notes_standalone.sql`](./supabase/migrations/0086_field_notes_standalone.sql) — 현장관리 독립 모듈 승격: `relocation_field_notes.project_id` nullable + `shared_to_field` 플래그 (공사→현장관리 명시적 보내기)
 - **외선일보 별도 entity (v2)** — 접속일보와 동일 패턴으로 외선팀 전용 모듈. 외선 작업 특성(케이블 포설구간·전주번호 등)에 맞는 구조 별도 설계.
 - **접속일보 후속 (v2)** — segment-level 작업자 태그, 사진 첨부 + EXIF, 국사·함체 마스터 테이블화, 재접속 이력 조회, 지도 시각화
 - **M3 Phase 2 후속** — 사진 첨부 + EXIF·워터마크 (PRD M3-06), 일보 결재함 통합 (현재는 작업 상세에서 진입), 일반 일보 월별 CSV 리포트

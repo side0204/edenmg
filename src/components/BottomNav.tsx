@@ -2,27 +2,20 @@
 
 import Link from 'next/link'
 import { usePathname } from 'next/navigation'
-import { Home, Briefcase, ClipboardList, Hammer, Package } from 'lucide-react'
+import { Briefcase, ClipboardList, MapPin, Hammer, Package } from 'lucide-react'
 
 type Tab = {
   href: string
   label: string
-  icon: typeof Home
+  icon: typeof Briefcase
   /** 활성 판정 — pathname 이 이 prefix 중 하나로 시작하면 active. exact 모드는 isExact 로 마킹. */
   matchPrefixes: string[]
   isExact?: boolean
 }
 
-// 최상위 탭. 향후 M3 작업·M4 자재·M5 안전이 단일 페이지로 들어오면 여기 추가.
+// 최상위 탭. 홈은 상단바(TopBar)로 이동 — 하단은 5개 (사무·공사·현장관리·작업·자재).
 // 사무 그룹은 자체 서브탭(근태·차량·결재) 으로 세분화한다.
 const TABS: Tab[] = [
-  {
-    href: '/',
-    label: '홈',
-    icon: Home,
-    matchPrefixes: ['/'],
-    isExact: true,
-  },
   {
     href: '/attendance',
     label: '사무',
@@ -31,9 +24,15 @@ const TABS: Tab[] = [
   },
   {
     href: '/relocation',
-    label: '공사목록',
+    label: '공사',
     icon: ClipboardList,
     matchPrefixes: ['/relocation'],
+  },
+  {
+    href: '/field',
+    label: '현장관리',
+    icon: MapPin,
+    matchPrefixes: ['/field'],
   },
   {
     href: '/works',

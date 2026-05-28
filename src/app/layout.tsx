@@ -3,6 +3,7 @@ import { Suspense } from "react";
 import { Toaster } from "sonner";
 import ToastBridge from "@/components/ToastBridge";
 import BottomNav from "@/components/BottomNav";
+import TopBar from "@/components/TopBar";
 import OfficeSubTabs from "@/components/OfficeSubTabs";
 import { createClient } from "@/lib/supabase/server";
 import "./globals.css";
@@ -64,6 +65,7 @@ export default async function RootLayout({
         className="min-h-full flex flex-col bg-slate-50 text-slate-900 dark:bg-slate-950 dark:text-slate-100"
         style={{ paddingBottom: 'calc(4rem + env(safe-area-inset-bottom))' }}
       >
+        <TopBar />
         <OfficeSubTabs hideOffice={isFieldWorker} />
         {children}
         <Toaster

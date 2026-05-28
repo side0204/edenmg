@@ -35,6 +35,7 @@ import {
   deleteFieldNote,
   deleteFieldNotePhoto,
   getFieldNotePhotoUrls,
+  setFieldNoteShared,
 } from './field-note-actions'
 
 // 현장관리 — 지도 모드 전용 뷰.
@@ -68,10 +69,16 @@ export type FieldNoteData = {
   created_by_name: string | null
   created_at: string
   photos: FieldNotePhoto[]
+  // 공사 노트의 최상위 공유 플래그 (project 모드에서 「보내기」 상태)
+  sharedToField: boolean
+  // 최상위(global) 모드에서 출처 공사 표시용
+  projectId: string | null
+  projectTitle: string | null
 }
 
 type Props = {
-  projectId: string
+  // 공사(프로젝트) 모드면 projectId 문자열, 최상위 현장관리(/field) 모드면 null
+  projectId: string | null
   notes: FieldNoteData[]
   meId: string
   meIsAdmin: boolean
@@ -97,6 +104,7 @@ const MARKER_RADIUS = MARKER_DIAMETER / 2
 export default function FieldNotesView({ projectId, notes, meId, meIsAdmin }: Props) {
   const router = useRouter()
   const { setContainer, map, status, epoch } = useKakaoMap(true)
+  const isGlobal = projectId === null
 
   // 추가 모드 — 도구바에서 선택한 종류. 빈 지도 클릭 시 새 노트 폼 오픈.
   const [addMode, setAddMode] = useState<FieldNoteKind | null>(null)
@@ -176,6 +184,22 @@ export default function FieldNotesView({ projectId, notes, meId, meIsAdmin }: Pr
       kakao.maps.event.removeListener(map, 'click', handler)
     }
   }, [map, addMode])
+
+  // ===== 지도 준비 후 노트 범위로 1회 fit =================================
+  //   global 모드는 회사 노트가 전국 분산일 수 있어 특히 필요. project 모드도 동일.
+  const fittedRef = useState({ done: false })[0]
+  useEffect(() => {
+    if (!map || fittedRef.done || notes.length === 0) return
+    fittedRef.done = true
+    if (notes.length === 1) {
+      map.setCenter(new kakao.maps.LatLng(notes[0].lat, notes[0].lng))
+      map.setLevel(4)
+      return
+    }
+    const bounds = new kakao.maps.LatLngBounds()
+    for (const n of notes) bounds.extend(new kakao.maps.LatLng(n.lat, n.lng))
+    map.setBounds(bounds)
+  }, [map, notes, fittedRef])
 
   // ===== 노트 → 화면 픽셀 투영 (epoch 가 카카오맵 이동 시마다 증가하므로 캐시 무효화) =====
   const projectedMarkers = useMemo(() => {
@@ -273,7 +297,7 @@ export default function FieldNotesView({ projectId, notes, meId, meIsAdmin }: Pr
     if (!confirm('이 노트를 삭제하시겠습니까? 첨부 사진도 함께 삭제됩니다.')) return
     const fd = new FormData()
     fd.append('note_id', noteId)
-    fd.append('project_id', projectId)
+    fd.append('project_id', projectId ?? '')
     const res = await deleteFieldNote(fd)
     if (res.ok) {
       toast.success('삭제됨')
@@ -288,10 +312,25 @@ export default function FieldNotesView({ projectId, notes, meId, meIsAdmin }: Pr
     if (!confirm('이 사진을 삭제하시겠습니까?')) return
     const fd = new FormData()
     fd.append('photo_id', photoId)
-    fd.append('project_id', projectId)
+    fd.append('project_id', projectId ?? '')
     const res = await deleteFieldNotePhoto(fd)
     if (res.ok) {
       toast.success('사진 삭제됨')
+      router.refresh()
+    } else {
+      toast.error(res.error)
+    }
+  }
+
+  // ===== 공사 노트 → 최상위 현장관리로 보내기 / 취소 (project 모드만) =====
+  async function handleSetShared(noteId: string, shared: boolean) {
+    const fd = new FormData()
+    fd.append('note_id', noteId)
+    fd.append('project_id', projectId ?? '')
+    fd.append('shared', String(shared))
+    const res = await setFieldNoteShared(fd)
+    if (res.ok) {
+      toast.success(shared ? '현장관리로 보냈습니다' : '현장관리에서 내렸습니다')
       router.refresh()
     } else {
       toast.error(res.error)
@@ -313,7 +352,9 @@ export default function FieldNotesView({ projectId, notes, meId, meIsAdmin }: Pr
           <div className="flex items-center justify-between px-3 py-2.5 border-b border-slate-200">
             <div className="flex items-center gap-1.5">
               <MapIcon className="h-4 w-4 text-slate-600" />
-              <span className="text-sm font-semibold">현장관리 노트</span>
+              <span className="text-sm font-semibold">
+                {isGlobal ? '현장관리 (전체)' : '현장관리 노트'}
+              </span>
               <span className="text-[11px] text-slate-500">{filteredNotes.length}/{notes.length}</span>
             </div>
             <button
@@ -416,6 +457,11 @@ export default function FieldNotesView({ projectId, notes, meId, meIsAdmin }: Pr
                             <div className="mt-0.5 text-sm font-medium text-slate-900 truncate">
                               {n.title || n.body?.slice(0, 30) || '(제목 없음)'}
                             </div>
+                            {isGlobal && n.projectTitle && (
+                              <div className="mt-0.5 text-[10px] text-indigo-600 truncate">
+                                공사: {n.projectTitle}
+                              </div>
+                            )}
                             <div className="mt-0.5 text-[10px] text-slate-500">
                               {n.created_by_name ?? '—'} ·{' '}
                               {new Date(n.created_at).toLocaleString('ko-KR', {
@@ -638,6 +684,7 @@ export default function FieldNotesView({ projectId, notes, meId, meIsAdmin }: Pr
           note={selectedNote}
           meId={meId}
           meIsAdmin={meIsAdmin}
+          isGlobal={isGlobal}
           myLocation={myLocation}
           projectId={projectId}
           photoUrls={photoUrls}
@@ -645,6 +692,7 @@ export default function FieldNotesView({ projectId, notes, meId, meIsAdmin }: Pr
           onEdit={() => setShowForm({ mode: 'edit', note: selectedNote })}
           onDelete={() => handleDelete(selectedNote.id)}
           onDeletePhoto={handleDeletePhoto}
+          onSetShared={(shared) => handleSetShared(selectedNote.id, shared)}
         />
       )}
 
@@ -677,6 +725,7 @@ function NoteDetailPanel({
   note,
   meId,
   meIsAdmin,
+  isGlobal,
   myLocation,
   projectId,
   photoUrls,
@@ -684,17 +733,20 @@ function NoteDetailPanel({
   onEdit,
   onDelete,
   onDeletePhoto,
+  onSetShared,
 }: {
   note: FieldNoteData
   meId: string
   meIsAdmin: boolean
+  isGlobal: boolean
   myLocation: LatLng | null
-  projectId: string
+  projectId: string | null
   photoUrls: Record<string, string>
   onClose: () => void
   onEdit: () => void
   onDelete: () => void
   onDeletePhoto: (photoId: string) => void
+  onSetShared: (shared: boolean) => void
 }) {
   const color = FIELD_NOTE_KIND_COLOR[note.kind]
   const Icon = KIND_ICON[note.kind]
@@ -702,6 +754,8 @@ function NoteDetailPanel({
   const sameDay = isSameKstDate(note.created_at)
   const canDelete = meIsAdmin || (isAuthor && sameDay)
   const canEdit = meIsAdmin || isAuthor
+  // 「보내기」 권한 = 작성자 OR admin (update RLS 와 동일)
+  const canShare = !isGlobal && (meIsAdmin || isAuthor)
   const distance = myLocation
     ? haversineMeters(myLocation, { lat: note.lat, lng: note.lng })
     : null
@@ -746,6 +800,37 @@ function NoteDetailPanel({
           <div className="text-xs text-slate-500">
             <MapPin className="inline h-3 w-3 mr-0.5" />
             {note.address}
+          </div>
+        )}
+
+        {/* 출처 공사 (최상위 모드) */}
+        {isGlobal && note.projectTitle && (
+          <div className="rounded bg-indigo-50 border border-indigo-100 px-2 py-1.5 text-[11px] text-indigo-700">
+            출처 공사: <span className="font-medium">{note.projectTitle}</span>
+          </div>
+        )}
+
+        {/* 현장관리로 보내기 (공사 모드만) */}
+        {canShare && (
+          <div className="rounded border border-slate-200 px-2 py-2 space-y-1.5">
+            <div className="flex items-center justify-between gap-2">
+              <span className="text-[11px] text-slate-600">
+                {note.sharedToField
+                  ? '✓ 최상위 현장관리에 표시 중'
+                  : '이 공사에서만 보임'}
+              </span>
+              <button
+                onClick={() => onSetShared(!note.sharedToField)}
+                className={
+                  'rounded-md px-2 py-1 text-[11px] font-medium ' +
+                  (note.sharedToField
+                    ? 'bg-slate-100 text-slate-600 hover:bg-slate-200'
+                    : 'bg-indigo-600 text-white hover:bg-indigo-700')
+                }
+              >
+                {note.sharedToField ? '내리기' : '현장관리로 보내기'}
+              </button>
+            </div>
           </div>
         )}
 
@@ -886,7 +971,7 @@ function NoteFormModal({
   onClose,
   onSuccess,
 }: {
-  projectId: string
+  projectId: string | null
   state:
     | { mode: 'create'; kind: FieldNoteKind; lat: number; lng: number }
     | { mode: 'edit'; note: FieldNoteData }
@@ -920,7 +1005,7 @@ function NoteFormModal({
     e.preventDefault()
     setBusy(true)
     const fd = new FormData()
-    fd.append('project_id', projectId)
+    fd.append('project_id', projectId ?? '')
     fd.append('kind', kind)
     fd.append('title', title.trim())
     fd.append('body', body.trim())

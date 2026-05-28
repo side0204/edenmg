@@ -78,8 +78,8 @@ export type FieldNoteCreateResult =
 export async function createFieldNote(
   formData: FormData,
 ): Promise<FieldNoteCreateResult> {
-  const projectId = String(formData.get('project_id') ?? '').trim()
-  if (!projectId) return { ok: false, error: '프로젝트 id 가 없습니다' }
+  // project_id 가 비면 최상위(/field) 독립 노트.
+  const projectId = String(formData.get('project_id') ?? '').trim() || null
 
   const kindRaw = String(formData.get('kind') ?? '').trim()
   if (!isFieldNoteKind(kindRaw)) {
@@ -97,19 +97,24 @@ export async function createFieldNote(
   if (isAuthError(auth)) return { ok: false, error: auth.error }
   const { supabase, me } = auth
 
-  const { data: proj } = await supabase
-    .from('relocation_projects')
-    .select('id, company_id')
-    .eq('id', projectId)
-    .maybeSingle()
-  const projRow = proj as { id: string; company_id: string } | null
-  if (!projRow) return { ok: false, error: '프로젝트를 찾을 수 없습니다' }
+  // 회사 스코프 — 프로젝트 노트면 프로젝트의 company, 독립 노트면 본인 company.
+  let companyId = me.company_id
+  if (projectId) {
+    const { data: proj } = await supabase
+      .from('relocation_projects')
+      .select('id, company_id')
+      .eq('id', projectId)
+      .maybeSingle()
+    const projRow = proj as { id: string; company_id: string } | null
+    if (!projRow) return { ok: false, error: '프로젝트를 찾을 수 없습니다' }
+    companyId = projRow.company_id
+  }
 
   const { data: ins, error } = await supabase
     .from('relocation_field_notes')
     .insert({
       project_id: projectId,
-      company_id: projRow.company_id,
+      company_id: companyId,
       kind: kindRaw,
       title,
       body,
@@ -124,17 +129,47 @@ export async function createFieldNote(
     return { ok: false, error: '저장 실패: ' + (error?.message ?? '알 수 없음') }
   }
 
-  revalidatePath(`/relocation/${projectId}`)
+  if (projectId) revalidatePath(`/relocation/${projectId}`)
+  revalidatePath('/field')
   return { ok: true, id: (ins as { id: string }).id }
+}
+
+// 공사 노트를 최상위 현장관리(/field)에 노출/숨김 (명시적 보내기).
+export async function setFieldNoteShared(
+  formData: FormData,
+): Promise<{ ok: true } | { ok: false; error: string }> {
+  const noteId = String(formData.get('note_id') ?? '').trim()
+  const projectId = String(formData.get('project_id') ?? '').trim() || null
+  const shared = String(formData.get('shared') ?? '') === 'true'
+  if (!noteId) return { ok: false, error: '노트 id 가 없습니다' }
+
+  const auth = await requireMember()
+  if (isAuthError(auth)) return { ok: false, error: auth.error }
+  const { supabase } = auth
+
+  const { error } = await supabase
+    .from('relocation_field_notes')
+    .update({ shared_to_field: shared })
+    .eq('id', noteId)
+  if (error) {
+    const msg = /permission|policy|denied/i.test(error.message)
+      ? '권한이 없습니다 (작성자 또는 관리자만 가능)'
+      : '처리 실패: ' + error.message
+    return { ok: false, error: msg }
+  }
+
+  if (projectId) revalidatePath(`/relocation/${projectId}`)
+  revalidatePath('/field')
+  return { ok: true }
 }
 
 export async function updateFieldNote(
   formData: FormData,
 ): Promise<{ ok: true } | { ok: false; error: string }> {
   const noteId = String(formData.get('note_id') ?? '').trim()
-  const projectId = String(formData.get('project_id') ?? '').trim()
-  if (!noteId || !projectId) {
-    return { ok: false, error: '필수 id 가 비어 있습니다' }
+  const projectId = String(formData.get('project_id') ?? '').trim() || null
+  if (!noteId) {
+    return { ok: false, error: '노트 id 가 비어 있습니다' }
   }
   const kindRaw = String(formData.get('kind') ?? '').trim()
   if (!isFieldNoteKind(kindRaw)) {
@@ -170,7 +205,8 @@ export async function updateFieldNote(
     .eq('id', noteId)
   if (error) return { ok: false, error: '수정 실패: ' + error.message }
 
-  revalidatePath(`/relocation/${projectId}`)
+  if (projectId) revalidatePath(`/relocation/${projectId}`)
+  revalidatePath('/field')
   return { ok: true }
 }
 
@@ -178,8 +214,8 @@ export async function deleteFieldNote(
   formData: FormData,
 ): Promise<{ ok: true } | { ok: false; error: string }> {
   const noteId = String(formData.get('note_id') ?? '').trim()
-  const projectId = String(formData.get('project_id') ?? '').trim()
-  if (!noteId || !projectId) return { ok: false, error: '필수 id 가 비어 있습니다' }
+  const projectId = String(formData.get('project_id') ?? '').trim() || null
+  if (!noteId) return { ok: false, error: '노트 id 가 비어 있습니다' }
 
   const auth = await requireMember()
   if (isAuthError(auth)) return { ok: false, error: auth.error }
@@ -206,7 +242,8 @@ export async function deleteFieldNote(
 
   if (paths.length > 0) await r2Remove(FIELD_NOTE_PHOTO_BUCKET, paths)
 
-  revalidatePath(`/relocation/${projectId}`)
+  if (projectId) revalidatePath(`/relocation/${projectId}`)
+  revalidatePath('/field')
   return { ok: true }
 }
 
@@ -222,9 +259,9 @@ export async function uploadFieldNotePhoto(
   formData: FormData,
 ): Promise<UploadPhotoResult> {
   const noteId = String(formData.get('note_id') ?? '').trim()
-  const projectId = String(formData.get('project_id') ?? '').trim()
-  if (!noteId || !projectId) {
-    return { ok: false, error: '필수 id 가 비어 있습니다' }
+  const projectId = String(formData.get('project_id') ?? '').trim() || null
+  if (!noteId) {
+    return { ok: false, error: '노트 id 가 비어 있습니다' }
   }
 
   const file = formData.get('file')
@@ -257,12 +294,9 @@ export async function uploadFieldNotePhoto(
     .eq('id', noteId)
     .maybeSingle()
   const noteRow = note as
-    | { id: string; company_id: string; project_id: string }
+    | { id: string; company_id: string; project_id: string | null }
     | null
   if (!noteRow) return { ok: false, error: '노트를 찾을 수 없습니다' }
-  if (noteRow.project_id !== projectId) {
-    return { ok: false, error: '노트의 프로젝트가 일치하지 않습니다' }
-  }
 
   const path = buildPhotoPath(noteId, extFromMime(file.type))
   const body = new Uint8Array(await file.arrayBuffer())
@@ -290,7 +324,8 @@ export async function uploadFieldNotePhoto(
     }
   }
 
-  revalidatePath(`/relocation/${projectId}`)
+  if (projectId) revalidatePath(`/relocation/${projectId}`)
+  revalidatePath('/field')
   return { ok: true, id: (ins as { id: string }).id, path }
 }
 
@@ -298,9 +333,9 @@ export async function deleteFieldNotePhoto(
   formData: FormData,
 ): Promise<{ ok: true } | { ok: false; error: string }> {
   const photoId = String(formData.get('photo_id') ?? '').trim()
-  const projectId = String(formData.get('project_id') ?? '').trim()
-  if (!photoId || !projectId) {
-    return { ok: false, error: '필수 id 가 비어 있습니다' }
+  const projectId = String(formData.get('project_id') ?? '').trim() || null
+  if (!photoId) {
+    return { ok: false, error: '사진 id 가 비어 있습니다' }
   }
 
   const auth = await requireMember()
@@ -327,7 +362,8 @@ export async function deleteFieldNotePhoto(
   }
 
   await r2Remove(FIELD_NOTE_PHOTO_BUCKET, [photo.path])
-  revalidatePath(`/relocation/${projectId}`)
+  if (projectId) revalidatePath(`/relocation/${projectId}`)
+  revalidatePath('/field')
   return { ok: true }
 }
 

@@ -16,7 +16,7 @@ import { uploadFieldNotePhoto } from './field-note-actions'
 
 type Props = {
   noteId: string
-  projectId: string
+  projectId: string | null
 }
 
 export default function FieldPhotoUploader({ noteId, projectId }: Props) {
@@ -75,7 +75,7 @@ export default function FieldPhotoUploader({ noteId, projectId }: Props) {
       const fd = new FormData()
       fd.append('file', file)
       fd.append('note_id', noteId)
-      fd.append('project_id', projectId)
+      fd.append('project_id', projectId ?? '')
       if (takenAt) fd.append('taken_at', takenAt)
       if (gpsLat !== null) fd.append('gps_lat', String(gpsLat))
       if (gpsLng !== null) fd.append('gps_lng', String(gpsLng))
