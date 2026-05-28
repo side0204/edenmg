@@ -17,6 +17,7 @@ import {
   ChevronRight,
   Map as MapIcon,
   Image as ImageIcon,
+  Maximize2,
 } from 'lucide-react'
 import { toast } from 'sonner'
 import { useKakaoMap } from './useKakaoMap'
@@ -186,21 +187,29 @@ export default function FieldNotesView({ projectId, notes, meId, meIsAdmin }: Pr
     }
   }, [map, addMode])
 
-  // ===== 지도 준비 후 노트 범위로 1회 fit =================================
-  //   global 모드는 회사 노트가 전국 분산일 수 있어 특히 필요. project 모드도 동일.
+  // ===== 노트 범위로 지도 맞춤 (수동 「전체 보기」 + 초기 1회) =============
+  const fitToNotes = useCallback(
+    (list: FieldNoteData[]) => {
+      if (!map || list.length === 0) return
+      if (list.length === 1) {
+        map.setCenter(new kakao.maps.LatLng(list[0].lat, list[0].lng))
+        map.setLevel(4)
+        return
+      }
+      const bounds = new kakao.maps.LatLngBounds()
+      for (const n of list) bounds.extend(new kakao.maps.LatLng(n.lat, n.lng))
+      map.setBounds(bounds)
+    },
+    [map],
+  )
+
+  // 지도 준비 후 노트 범위로 1회 자동 fit
   const fittedRef = useState({ done: false })[0]
   useEffect(() => {
     if (!map || fittedRef.done || notes.length === 0) return
     fittedRef.done = true
-    if (notes.length === 1) {
-      map.setCenter(new kakao.maps.LatLng(notes[0].lat, notes[0].lng))
-      map.setLevel(4)
-      return
-    }
-    const bounds = new kakao.maps.LatLngBounds()
-    for (const n of notes) bounds.extend(new kakao.maps.LatLng(n.lat, n.lng))
-    map.setBounds(bounds)
-  }, [map, notes, fittedRef])
+    fitToNotes(notes)
+  }, [map, notes, fittedRef, fitToNotes])
 
   // ===== 노트 → 화면 픽셀 투영 (epoch 가 카카오맵 이동 시마다 증가하므로 캐시 무효화) =====
   const projectedMarkers = useMemo(() => {
@@ -414,6 +423,17 @@ export default function FieldNotesView({ projectId, notes, meId, meIsAdmin }: Pr
             )
           })}
         </div>
+
+        {/* 전체 보기 — 노트 범위로 지도 맞춤 (마커가 화면 밖으로 나갔을 때) */}
+        <button
+          onClick={() => fitToNotes(filteredNotes)}
+          disabled={filteredNotes.length === 0}
+          className="inline-flex items-center gap-1 rounded-lg border border-slate-300 bg-white px-2 py-1 text-xs font-medium text-slate-700 hover:bg-slate-50 disabled:opacity-40"
+          title="등록된 노트가 모두 보이도록 지도 맞춤"
+        >
+          <Maximize2 className="h-3.5 w-3.5" />
+          전체 보기
+        </button>
 
         {/* 사진 갤러리 */}
         <button
