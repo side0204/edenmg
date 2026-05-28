@@ -439,6 +439,7 @@ export default async function RelocationProjectPage({
       id: string
       note_id: string
       path: string
+      caption: string | null
       taken_at: string | null
       gps_lat: number | null
       gps_lng: number | null
@@ -448,7 +449,7 @@ export default async function RelocationProjectPage({
     if (notes.length > 0) {
       const { data: ph } = await supabase
         .from('relocation_field_note_photos')
-        .select('id, note_id, path, taken_at, gps_lat, gps_lng, uploaded_by, created_at')
+        .select('id, note_id, path, caption, taken_at, gps_lat, gps_lng, uploaded_by, created_at')
         .in(
           'note_id',
           notes.map((n) => n.id),
@@ -478,6 +479,7 @@ export default async function RelocationProjectPage({
       arr.push({
         id: p.id,
         path: p.path,
+        caption: p.caption,
         taken_at: p.taken_at,
         gps_lat: p.gps_lat,
         gps_lng: p.gps_lng,

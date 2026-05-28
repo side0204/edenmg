@@ -1,8 +1,8 @@
 'use client'
 
-import { useRef, useState } from 'react'
+import { useRef, useState, useEffect } from 'react'
 import { useRouter } from 'next/navigation'
-import { Camera, Loader2 } from 'lucide-react'
+import { Camera, Loader2, X } from 'lucide-react'
 import { toast } from 'sonner'
 import exifr from 'exifr'
 import {
@@ -11,45 +11,76 @@ import {
 } from '@/lib/field-notes'
 import { uploadFieldNotePhoto } from './field-note-actions'
 
-// 현장관리 노트 사진 업로더. exifr 로 EXIF (촬영시각·GPS) 추출 후 server action 호출.
-//   접속일보 PhotoUploader 와 동일 패턴. 모바일 카메라 즉시 촬영 지원.
+// 현장관리 노트 사진 업로더.
+//   선택 → 각 사진에 설명(caption) 입력 → 업로드. EXIF (촬영시각·GPS) 자동 추출.
+//   접속일보 PhotoUploader 와 달리 업로드 전 설명을 받는 스테이징 단계가 있음.
 
 type Props = {
   noteId: string
   projectId: string | null
 }
 
+type Staged = {
+  file: File
+  previewUrl: string
+  caption: string
+}
+
 export default function FieldPhotoUploader({ noteId, projectId }: Props) {
   const router = useRouter()
   const inputRef = useRef<HTMLInputElement>(null)
+  const [staged, setStaged] = useState<Staged[]>([])
   const [busy, setBusy] = useState(false)
   const [progress, setProgress] = useState<{ done: number; total: number } | null>(null)
 
-  async function handleChange(e: React.ChangeEvent<HTMLInputElement>) {
+  // object URL 정리
+  useEffect(() => {
+    return () => {
+      staged.forEach((s) => URL.revokeObjectURL(s.previewUrl))
+    }
+  }, [staged])
+
+  function handleSelect(e: React.ChangeEvent<HTMLInputElement>) {
     const files = Array.from(e.target.files ?? [])
     e.target.value = ''
     if (files.length === 0) return
 
-    setBusy(true)
-    setProgress({ done: 0, total: files.length })
-
-    let success = 0
-    let failed = 0
-    for (let i = 0; i < files.length; i++) {
-      const file = files[i]
-
+    const next: Staged[] = []
+    for (const file of files) {
       if (file.size > FIELD_NOTE_PHOTO_MAX_BYTES) {
         toast.error(`'${file.name}' — 10MB 초과`)
-        failed++
-        setProgress({ done: i + 1, total: files.length })
         continue
       }
       if (!(FIELD_NOTE_PHOTO_MIME_WHITELIST as readonly string[]).includes(file.type)) {
         toast.error(`'${file.name}' — 이미지 형식 아님`)
-        failed++
-        setProgress({ done: i + 1, total: files.length })
         continue
       }
+      next.push({ file, previewUrl: URL.createObjectURL(file), caption: '' })
+    }
+    if (next.length > 0) setStaged((prev) => [...prev, ...next])
+  }
+
+  function setCaption(i: number, v: string) {
+    setStaged((prev) => prev.map((s, idx) => (idx === i ? { ...s, caption: v } : s)))
+  }
+
+  function removeStaged(i: number) {
+    setStaged((prev) => {
+      const target = prev[i]
+      if (target) URL.revokeObjectURL(target.previewUrl)
+      return prev.filter((_, idx) => idx !== i)
+    })
+  }
+
+  async function uploadAll() {
+    if (staged.length === 0) return
+    setBusy(true)
+    setProgress({ done: 0, total: staged.length })
+
+    let success = 0
+    let failed = 0
+    for (let i = 0; i < staged.length; i++) {
+      const { file, caption } = staged[i]
 
       let takenAt: string | null = null
       let gpsLat: number | null = null
@@ -76,6 +107,7 @@ export default function FieldPhotoUploader({ noteId, projectId }: Props) {
       fd.append('file', file)
       fd.append('note_id', noteId)
       fd.append('project_id', projectId ?? '')
+      if (caption.trim()) fd.append('caption', caption.trim())
       if (takenAt) fd.append('taken_at', takenAt)
       if (gpsLat !== null) fd.append('gps_lat', String(gpsLat))
       if (gpsLng !== null) fd.append('gps_lng', String(gpsLng))
@@ -91,11 +123,13 @@ export default function FieldPhotoUploader({ noteId, projectId }: Props) {
         toast.error(`'${file.name}' — ${err instanceof Error ? err.message : '업로드 실패'}`)
         failed++
       }
-      setProgress({ done: i + 1, total: files.length })
+      setProgress({ done: i + 1, total: staged.length })
     }
 
     setBusy(false)
     setProgress(null)
+    staged.forEach((s) => URL.revokeObjectURL(s.previewUrl))
+    setStaged([])
 
     if (success > 0) toast.success(`사진 ${success}장 업로드`)
     if (success > 0 || failed > 0) router.refresh()
@@ -109,7 +143,7 @@ export default function FieldPhotoUploader({ noteId, projectId }: Props) {
         accept="image/jpeg,image/png,image/webp,image/heic,image/heif"
         multiple
         capture="environment"
-        onChange={handleChange}
+        onChange={handleSelect}
         disabled={busy}
         className="hidden"
       />
@@ -122,7 +156,55 @@ export default function FieldPhotoUploader({ noteId, projectId }: Props) {
         {busy ? <Loader2 className="h-4 w-4 animate-spin" /> : <Camera className="h-4 w-4" />}
         {busy && progress ? `업로드 중 ${progress.done}/${progress.total}` : '사진 추가'}
       </button>
-      <p className="text-[10px] text-slate-500">최대 10MB · 여러 장 선택 가능 · 카메라 즉시 촬영도 OK</p>
+
+      {/* 스테이징 — 설명 입력 후 업로드 */}
+      {staged.length > 0 && (
+        <div className="mt-1 space-y-1.5 rounded-lg border border-slate-200 bg-slate-50 p-1.5">
+          <p className="text-[10px] text-slate-500 px-0.5">
+            각 사진에 설명을 입력하고 업로드하세요 (설명은 선택)
+          </p>
+          {staged.map((s, i) => (
+            <div key={i} className="flex items-start gap-1.5">
+              <img
+                src={s.previewUrl}
+                alt=""
+                className="h-12 w-12 shrink-0 rounded object-cover"
+              />
+              <textarea
+                value={s.caption}
+                onChange={(e) => setCaption(i, e.target.value)}
+                rows={2}
+                maxLength={200}
+                disabled={busy}
+                placeholder="어떤 사진인지 설명"
+                className="flex-1 min-w-0 rounded border border-slate-300 px-1.5 py-1 text-[11px] focus:border-indigo-500 focus:outline-none resize-none disabled:opacity-60"
+              />
+              <button
+                type="button"
+                onClick={() => removeStaged(i)}
+                disabled={busy}
+                className="shrink-0 rounded p-1 text-slate-400 hover:bg-slate-200 hover:text-slate-700 disabled:opacity-50"
+                aria-label="제거"
+              >
+                <X className="h-3.5 w-3.5" />
+              </button>
+            </div>
+          ))}
+          <button
+            type="button"
+            onClick={uploadAll}
+            disabled={busy}
+            className="w-full rounded-lg bg-indigo-600 px-3 py-1.5 text-xs font-medium text-white hover:bg-indigo-700 disabled:opacity-50"
+          >
+            {busy
+              ? `업로드 중 ${progress?.done ?? 0}/${progress?.total ?? staged.length}`
+              : `${staged.length}장 업로드`}
+          </button>
+        </div>
+      )}
+      {staged.length === 0 && (
+        <p className="text-[10px] text-slate-500">최대 10MB · 여러 장 선택 가능 · 카메라 즉시 촬영도 OK</p>
+      )}
     </div>
   )
 }

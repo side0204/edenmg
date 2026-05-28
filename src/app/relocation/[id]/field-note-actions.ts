@@ -275,6 +275,9 @@ export async function uploadFieldNotePhoto(
     return { ok: false, error: '지원하는 이미지 형식이 아닙니다' }
   }
 
+  // 설명 (선택)
+  const caption = String(formData.get('caption') ?? '').trim() || null
+
   // EXIF (선택)
   const takenAtRaw = String(formData.get('taken_at') ?? '').trim()
   const gpsLatRaw = formData.get('gps_lat')
@@ -309,6 +312,7 @@ export async function uploadFieldNotePhoto(
       note_id: noteId,
       company_id: noteRow.company_id,
       path,
+      caption,
       taken_at: takenAt && !Number.isNaN(takenAt.getTime()) ? takenAt.toISOString() : null,
       gps_lat: gpsLat != null && Number.isFinite(gpsLat) ? gpsLat : null,
       gps_lng: gpsLng != null && Number.isFinite(gpsLng) ? gpsLng : null,
@@ -362,6 +366,35 @@ export async function deleteFieldNotePhoto(
   }
 
   await r2Remove(FIELD_NOTE_PHOTO_BUCKET, [photo.path])
+  if (projectId) revalidatePath(`/relocation/${projectId}`)
+  revalidatePath('/field')
+  return { ok: true }
+}
+
+// 사진 설명(caption) 수정 — 업로더 본인 OR admin (RLS 가 한 번 더 검증)
+export async function updateFieldNotePhotoCaption(
+  formData: FormData,
+): Promise<{ ok: true } | { ok: false; error: string }> {
+  const photoId = String(formData.get('photo_id') ?? '').trim()
+  const projectId = String(formData.get('project_id') ?? '').trim() || null
+  const caption = String(formData.get('caption') ?? '').trim() || null
+  if (!photoId) return { ok: false, error: '사진 id 가 비어 있습니다' }
+
+  const auth = await requireMember()
+  if (isAuthError(auth)) return { ok: false, error: auth.error }
+  const { supabase } = auth
+
+  const { error } = await supabase
+    .from('relocation_field_note_photos')
+    .update({ caption })
+    .eq('id', photoId)
+  if (error) {
+    const msg = /permission|policy|denied/i.test(error.message)
+      ? '설명 수정 권한이 없습니다 (업로더 또는 관리자만 가능)'
+      : '수정 실패: ' + error.message
+    return { ok: false, error: msg }
+  }
+
   if (projectId) revalidatePath(`/relocation/${projectId}`)
   revalidatePath('/field')
   return { ok: true }

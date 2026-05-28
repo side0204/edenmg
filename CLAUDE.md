@@ -789,6 +789,19 @@ owner 결정: 현장관리를 공사 종속이 아니라 **독립 최상위 메�
 - **하단 탭바** [`BottomNav`](./src/components/BottomNav.tsx) — 홈 제거, 「공사목록」→「공사」, 「현장관리」 추가. [`TopBar`](./src/components/TopBar.tsx) 신규(홈 링크) + layout 에 마운트
 - **운영 필요**: Supabase 에서 [`0086_field_notes_standalone.sql`](./supabase/migrations/0086_field_notes_standalone.sql) 실행 (R2 추가 작업 없음 — 0085 버킷 그대로)
 
+#### 후속 (2026-05-28): 마커 핀·필터·사진 갤러리·설명(caption)
+
+owner 추가 요구: 내 위치 시각화 강화, 종류 필터를 캔버스 밖 상단으로, 사진 갤러리 + 사진 설명 입력. 「일반 1건 선택해도 안 보임」 버그도 동시 수정.
+
+- **마이그** [`0087_field_note_photo_caption.sql`](./supabase/migrations/0087_field_note_photo_caption.sql) — `relocation_field_note_photos.caption text` (사진 설명)
+- **내 위치 마커** — 작은 점 → 펄스 링 + 파란 핀(teardrop) + 「내 위치」 칩 ✕. toolbar 「지우기」 버튼 (핀이 화면 밖일 때 대비)
+- **노트 마커** — 원형 → 종류별 색 teardrop 핀(그림자·흰 테두리·심볼 i/!). **위험은 펄스 링**으로 자동 강조. 선택 시 확대+글로우, 사진 수 배지
+- **보기 필터 캔버스 밖 상단 이동** ([`FieldNotesView`](./src/app/relocation/[id]/FieldNotesView.tsx)) — floating overlay → 캔버스 박스 위 외부 컨트롤 바(보기·갤러리·추가·내위치). 사이드바 중복 종류 칩 제거. **TopBar 와의 sticky 충돌 회피 위해 캔버스 높이 78→72vh**
+- **필터 토글 버그 수정** — 「보기」 종류 칩이 단순 토글이라 전체 상태에서 「일반」 누르면 일반을 *꺼버려* 사라짐(= 「선택해도 안 보임」의 원인). `toggleKind`: 전체 상태에서 1클릭 = 그 종류만 isolate, 이후 복수 토글, 모두 끄면 전체 복귀
+- **사진 갤러리** — 상단 「사진 갤러리 N」 버튼 → 전체 사진 grid 모달 + 라이트박스(◀▶·ESC·캡션·메타·「이 노트 위치 보기」). filteredNotes 기준이라 보기 필터와 연동
+- **사진 설명(caption)** — 업로더가 「선택 → 각 사진 설명 입력 → 업로드」 스테이징 방식으로 변경([`FieldPhotoUploader`](./src/app/relocation/[id]/FieldPhotoUploader.tsx)). 상세 패널 사진 카드에 caption 표시 + 인라인 편집(`updateFieldNotePhotoCaption`, 업로더 OR admin)
+- **운영 필요**: [`0087_field_note_photo_caption.sql`](./supabase/migrations/0087_field_note_photo_caption.sql) 실행 (완료)
+
 ### ✅ 완료 (페이지 헤더 모바일 레이아웃 일괄 보정, 2026-05-19)
 
 owner 모바일 스크린샷 보고: `/vehicles` 헤더에서 "업무용 차량" 이 "업무 / 용 / 차량" 처럼 한 글자씩 세로로 깨짐.
@@ -1355,6 +1368,7 @@ owner 요구: "어느 메뉴를 많이 쓰는지" 페이지 단위 분석. 접�
   - [`0084_vehicle_trip_cancel.sql`](./supabase/migrations/0084_vehicle_trip_cancel.sql) — 출고 취소 RPC: `vehicle_trip_cancel(_trip_id uuid)` security definer. 출고 후 10분 내 본인 운행만 영구 삭제 (append-only DELETE GRANT 우회)
   - [`0085_field_notes.sql`](./supabase/migrations/0085_field_notes.sql) — 현장관리 노트: `relocation_field_notes` + `relocation_field_note_photos` + R2 버킷 `relocation-field-notes` (Cloudflare 콘솔에서 별도 생성 필요)
   - [`0086_field_notes_standalone.sql`](./supabase/migrations/0086_field_notes_standalone.sql) — 현장관리 독립 모듈 승격: `relocation_field_notes.project_id` nullable + `shared_to_field` 플래그 (공사→현장관리 명시적 보내기)
+  - [`0087_field_note_photo_caption.sql`](./supabase/migrations/0087_field_note_photo_caption.sql) — 현장관리 사진 설명: `relocation_field_note_photos.caption text`
 - **외선일보 별도 entity (v2)** — 접속일보와 동일 패턴으로 외선팀 전용 모듈. 외선 작업 특성(케이블 포설구간·전주번호 등)에 맞는 구조 별도 설계.
 - **접속일보 후속 (v2)** — segment-level 작업자 태그, 사진 첨부 + EXIF, 국사·함체 마스터 테이블화, 재접속 이력 조회, 지도 시각화
 - **M3 Phase 2 후속** — 사진 첨부 + EXIF·워터마크 (PRD M3-06), 일보 결재함 통합 (현재는 작업 상세에서 진입), 일반 일보 월별 CSV 리포트

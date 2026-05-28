@@ -16,6 +16,7 @@ import {
   ChevronLeft,
   ChevronRight,
   Map as MapIcon,
+  Image as ImageIcon,
 } from 'lucide-react'
 import { toast } from 'sonner'
 import { useKakaoMap } from './useKakaoMap'
@@ -36,6 +37,7 @@ import {
   deleteFieldNotePhoto,
   getFieldNotePhotoUrls,
   setFieldNoteShared,
+  updateFieldNotePhotoCaption,
 } from './field-note-actions'
 
 // 현장관리 — 지도 모드 전용 뷰.
@@ -49,6 +51,7 @@ import {
 export type FieldNotePhoto = {
   id: string
   path: string
+  caption: string | null
   taken_at: string | null
   gps_lat: number | null
   gps_lng: number | null
@@ -122,6 +125,7 @@ export default function FieldNotesView({ projectId, notes, meId, meIsAdmin }: Pr
   const [sortBy, setSortBy] = useState<'recent' | 'distance'>('recent')
   const [sidebarOpen, setSidebarOpen] = useState(true)
   const [photoUrls, setPhotoUrls] = useState<Record<string, string>>({})
+  const [galleryOpen, setGalleryOpen] = useState(false)
 
   // ===== 노트 필터·정렬 =================================================
   const filteredNotes = useMemo(() => {
@@ -286,6 +290,22 @@ export default function FieldNotesView({ projectId, notes, meId, meIsAdmin }: Pr
     setSortBy((prev) => (prev === 'distance' ? 'recent' : prev))
   }, [])
 
+  // 종류 필터 — 전체 상태에서 하나 클릭 = 그 종류만 보기(isolate),
+  //   이후 클릭은 복수 토글. 모두 꺼지면 전체로 복귀 (빈 화면 방지).
+  const toggleKind = useCallback((k: FieldNoteKind) => {
+    setKindFilter((prev) => {
+      const allOn = prev.일반 && prev.주의 && prev.위험
+      if (allOn) {
+        return { 일반: k === '일반', 주의: k === '주의', 위험: k === '위험' }
+      }
+      const next = { ...prev, [k]: !prev[k] }
+      if (!next.일반 && !next.주의 && !next.위험) {
+        return { 일반: true, 주의: true, 위험: true }
+      }
+      return next
+    })
+  }, [])
+
   // ===== 노트 선택 (지도 중앙으로 이동) =================================
   function selectNote(note: FieldNoteData) {
     setSelectedId(note.id)
@@ -347,9 +367,121 @@ export default function FieldNotesView({ projectId, notes, meId, meIsAdmin }: Pr
     return c
   }, [notes])
   const allKindsShown = FIELD_NOTE_KIND_VALUES.every((k) => kindFilter[k])
+  const totalPhotos = useMemo(
+    () => notes.reduce((s, n) => s + n.photos.length, 0),
+    [notes],
+  )
 
   return (
-    <div className="relative flex h-[78vh] sm:h-[80vh] w-full overflow-hidden rounded-xl border border-slate-300 bg-slate-100">
+    <div className="space-y-2">
+      {/* 캔버스 밖 상단 컨트롤 바 — 보기 필터 · 갤러리 · 추가 · 내 위치 */}
+      <div className="flex flex-wrap items-center gap-x-3 gap-y-2 rounded-xl border border-slate-200 bg-white px-3 py-2 shadow-sm">
+        {/* 보기 필터 */}
+        <div className="flex items-center gap-1">
+          <span className="text-[11px] font-semibold text-slate-400">보기</span>
+          <button
+            onClick={() => setKindFilter({ 일반: true, 주의: true, 위험: true })}
+            className={
+              'rounded-lg px-2 py-1 text-xs font-medium transition ' +
+              (allKindsShown
+                ? 'bg-slate-900 text-white'
+                : 'bg-white text-slate-600 border border-slate-300 hover:bg-slate-50')
+            }
+          >
+            전체 {notes.length}
+          </button>
+          {FIELD_NOTE_KIND_VALUES.map((k) => {
+            const on = kindFilter[k]
+            const c = FIELD_NOTE_KIND_COLOR[k]
+            return (
+              <button
+                key={k}
+                onClick={() => toggleKind(k)}
+                title={`${k}만 보기 / 복수 선택`}
+                className={
+                  'inline-flex items-center gap-1 rounded-lg px-2 py-1 text-xs font-medium border transition ' +
+                  (on
+                    ? `${c.badgeBg} ${c.badgeText} ${c.badgeBorder}`
+                    : 'bg-white text-slate-400 border-slate-200 opacity-60')
+                }
+              >
+                <span
+                  className="inline-block h-2 w-2 rounded-full"
+                  style={{ backgroundColor: on ? c.fill : '#cbd5e1' }}
+                />
+                {k} {kindCounts[k]}
+              </button>
+            )
+          })}
+        </div>
+
+        {/* 사진 갤러리 */}
+        <button
+          onClick={() => setGalleryOpen(true)}
+          disabled={totalPhotos === 0}
+          className="inline-flex items-center gap-1 rounded-lg border border-slate-300 bg-white px-2 py-1 text-xs font-medium text-slate-700 hover:bg-slate-50 disabled:opacity-40"
+          title={totalPhotos === 0 ? '등록된 사진이 없습니다' : '등록된 사진을 갤러리로 보기'}
+        >
+          <ImageIcon className="h-3.5 w-3.5" />
+          사진 갤러리 {totalPhotos}
+        </button>
+
+        <div className="grow" />
+
+        {/* 추가 */}
+        <div className="flex items-center gap-1">
+          <span className="text-[11px] font-semibold text-slate-400">추가</span>
+          {FIELD_NOTE_KIND_VALUES.map((k) => {
+            const Icon = KIND_ICON[k]
+            const active = addMode === k
+            return (
+              <button
+                key={k}
+                onClick={() => setAddMode(active ? null : k)}
+                title={`${k} 추가 — 지도 클릭 위치에 노트 생성`}
+                className={
+                  'inline-flex items-center gap-1 rounded-lg border px-2 py-1 text-xs font-medium transition ' +
+                  (active
+                    ? KIND_BUTTON_TONE[k] + ' ring-2 ring-offset-1 ring-' + (k === '위험' ? 'rose' : k === '주의' ? 'amber' : 'slate') + '-400'
+                    : `bg-white text-slate-700 border-slate-300 hover:${k === '위험' ? 'bg-rose-50' : k === '주의' ? 'bg-amber-50' : 'bg-slate-50'}`)
+                }
+              >
+                <Icon className="h-3.5 w-3.5" />
+                {active ? `${k} 추가 중` : k}
+              </button>
+            )
+          })}
+        </div>
+
+        {/* 내 위치 */}
+        <div className="flex items-center gap-1">
+          <button
+            onClick={locateMe}
+            disabled={locating}
+            title="GPS 로 내 위치를 찾아 지도 중앙으로 이동"
+            className="inline-flex items-center gap-1 rounded-lg bg-indigo-600 text-white px-2 py-1 text-xs font-medium hover:bg-indigo-700 disabled:opacity-50"
+          >
+            {locating ? (
+              <Loader2 className="h-3.5 w-3.5 animate-spin" />
+            ) : (
+              <Crosshair className="h-3.5 w-3.5" />
+            )}
+            {myLocation ? '내 위치로' : '내 위치'}
+          </button>
+          {myLocation && (
+            <button
+              onClick={clearMyLocation}
+              title="내 위치 마커 지우기"
+              className="inline-flex items-center gap-1 rounded-lg border border-slate-300 bg-white text-slate-600 px-2 py-1 text-xs font-medium hover:bg-slate-50"
+            >
+              <X className="h-3.5 w-3.5" />
+              지우기
+            </button>
+          )}
+        </div>
+      </div>
+
+    <div className="relative flex h-[72vh] sm:h-[76vh] w-full overflow-hidden rounded-xl border border-slate-300 bg-slate-100">
       {/* 좌측 사이드바 — 노트 목록 */}
       {sidebarOpen ? (
         <aside className="w-[280px] shrink-0 bg-white border-r border-slate-200 flex flex-col">
@@ -370,26 +502,8 @@ export default function FieldNotesView({ projectId, notes, meId, meIsAdmin }: Pr
             </button>
           </div>
 
-          {/* 필터 + 정렬 */}
+          {/* 정렬 (종류 필터는 상단 바로 이동) */}
           <div className="px-3 py-2 border-b border-slate-200 space-y-1.5">
-            <div className="flex flex-wrap gap-1">
-              {FIELD_NOTE_KIND_VALUES.map((k) => (
-                <button
-                  key={k}
-                  onClick={() =>
-                    setKindFilter((p) => ({ ...p, [k]: !p[k] }))
-                  }
-                  className={
-                    'rounded-full border px-2 py-0.5 text-[11px] transition-colors ' +
-                    (kindFilter[k]
-                      ? `${FIELD_NOTE_KIND_COLOR[k].badgeBg} ${FIELD_NOTE_KIND_COLOR[k].badgeText} ${FIELD_NOTE_KIND_COLOR[k].badgeBorder}`
-                      : 'bg-slate-100 text-slate-400 border-slate-200 line-through')
-                  }
-                >
-                  {k} {kindCounts[k]}
-                </button>
-              ))}
-            </div>
             <div className="flex gap-1">
               <button
                 onClick={() => setSortBy('recent')}
@@ -499,103 +613,10 @@ export default function FieldNotesView({ projectId, notes, meId, meIsAdmin }: Pr
 
       {/* 지도 + 마커 오버레이 */}
       <div className="relative flex-1 min-w-0">
-        {/* 상단 도구바 — 보기 필터(위) + 추가/내위치(아래) 두 줄 */}
-        <div className="absolute top-3 left-1/2 -translate-x-1/2 z-20 flex flex-col items-center gap-1.5">
-          {/* 보기 필터 — 전체 / 일반 / 주의 / 위험 (복수 선택) */}
-          <div className="flex items-center gap-1 bg-white shadow-lg rounded-xl border border-slate-200 px-1.5 py-1">
-            <span className="px-1 text-[10px] font-semibold text-slate-400">보기</span>
-            <button
-              onClick={() =>
-                setKindFilter({ 일반: true, 주의: true, 위험: true })
-              }
-              className={
-                'rounded-lg px-2 py-1 text-xs font-medium transition ' +
-                (allKindsShown
-                  ? 'bg-slate-900 text-white'
-                  : 'bg-white text-slate-600 border border-slate-300 hover:bg-slate-50')
-              }
-            >
-              전체 {notes.length}
-            </button>
-            {FIELD_NOTE_KIND_VALUES.map((k) => {
-              const on = kindFilter[k]
-              const c = FIELD_NOTE_KIND_COLOR[k]
-              return (
-                <button
-                  key={k}
-                  onClick={() => setKindFilter((p) => ({ ...p, [k]: !p[k] }))}
-                  title={`${k} 표시/숨김`}
-                  className={
-                    'inline-flex items-center gap-1 rounded-lg px-2 py-1 text-xs font-medium border transition ' +
-                    (on
-                      ? `${c.badgeBg} ${c.badgeText} ${c.badgeBorder}`
-                      : 'bg-white text-slate-400 border-slate-200 opacity-60')
-                  }
-                >
-                  <span
-                    className="inline-block h-2 w-2 rounded-full"
-                    style={{ backgroundColor: on ? c.fill : '#cbd5e1' }}
-                  />
-                  {k} {kindCounts[k]}
-                </button>
-              )
-            })}
-          </div>
-
-          {/* 추가 + 내 위치 */}
-          <div className="flex items-center gap-1 bg-white shadow-lg rounded-xl border border-slate-200 px-1.5 py-1">
-            <span className="px-1 text-[10px] font-semibold text-slate-400">추가</span>
-            {FIELD_NOTE_KIND_VALUES.map((k) => {
-              const Icon = KIND_ICON[k]
-              const active = addMode === k
-              return (
-                <button
-                  key={k}
-                  onClick={() => setAddMode(active ? null : k)}
-                  title={`${k} 추가 — 지도 클릭 위치에 노트 생성`}
-                  className={
-                    'inline-flex items-center gap-1 rounded-lg border px-2 py-1 text-xs font-medium transition ' +
-                    (active
-                      ? KIND_BUTTON_TONE[k] + ' ring-2 ring-offset-1 ring-' + (k === '위험' ? 'rose' : k === '주의' ? 'amber' : 'slate') + '-400'
-                      : `bg-white text-slate-700 border-slate-300 hover:${k === '위험' ? 'bg-rose-50' : k === '주의' ? 'bg-amber-50' : 'bg-slate-50'}`)
-                  }
-                >
-                  <Icon className="h-3.5 w-3.5" />
-                  {active ? `${k} 추가 중` : k}
-                </button>
-              )
-            })}
-            <div className="mx-1 h-5 w-px bg-slate-200" />
-            <button
-              onClick={locateMe}
-              disabled={locating}
-              title="GPS 로 내 위치를 찾아 지도 중앙으로 이동"
-              className="inline-flex items-center gap-1 rounded-lg bg-indigo-600 text-white px-2 py-1 text-xs font-medium hover:bg-indigo-700 disabled:opacity-50"
-            >
-              {locating ? (
-                <Loader2 className="h-3.5 w-3.5 animate-spin" />
-              ) : (
-                <Crosshair className="h-3.5 w-3.5" />
-              )}
-              {myLocation ? '내 위치로' : '내 위치'}
-            </button>
-            {myLocation && (
-              <button
-                onClick={clearMyLocation}
-                title="내 위치 마커 지우기"
-                className="inline-flex items-center gap-1 rounded-lg border border-slate-300 bg-white text-slate-600 px-2 py-1 text-xs font-medium hover:bg-slate-50"
-              >
-                <X className="h-3.5 w-3.5" />
-                지우기
-              </button>
-            )}
-          </div>
-        </div>
-
         {/* 안내 메시지 — 추가 모드 활성 */}
         {addMode && (
-          <div className="absolute top-28 left-1/2 -translate-x-1/2 z-20 rounded-full bg-slate-900/90 text-white text-xs px-3 py-1 shadow">
-            지도에서 {addMode} 마커를 추가할 위치를 클릭하세요. (취소: 같은 버튼 다시 누르기)
+          <div className="absolute top-3 left-1/2 -translate-x-1/2 z-20 rounded-full bg-slate-900/90 text-white text-xs px-3 py-1 shadow">
+            지도에서 {addMode} 마커를 추가할 위치를 클릭하세요. (취소: 상단 「{addMode}」 다시 누르기)
           </div>
         )}
 
@@ -858,6 +879,146 @@ export default function FieldNotesView({ projectId, notes, meId, meIsAdmin }: Pr
           }}
         />
       )}
+      </div>
+
+      {/* 사진 갤러리 모달 */}
+      {galleryOpen && (
+        <PhotoGalleryModal
+          notes={filteredNotes}
+          photoUrls={photoUrls}
+          onClose={() => setGalleryOpen(false)}
+          onJumpToNote={(id) => {
+            setGalleryOpen(false)
+            const n = notes.find((x) => x.id === id)
+            if (n) selectNote(n)
+          }}
+        />
+      )}
+    </div>
+  )
+}
+
+// =====================================================================
+// 상세 패널 사진 카드 — 썸네일 + 설명(caption) 표시·인라인 편집
+// =====================================================================
+function DetailPhotoCard({
+  photo,
+  url,
+  projectId,
+  canManage,
+  onDelete,
+}: {
+  photo: FieldNotePhoto
+  url: string | undefined
+  projectId: string | null
+  canManage: boolean
+  onDelete: () => void
+}) {
+  const router = useRouter()
+  const [editing, setEditing] = useState(false)
+  const [caption, setCaption] = useState(photo.caption ?? '')
+  const [saving, setSaving] = useState(false)
+
+  async function save() {
+    setSaving(true)
+    const fd = new FormData()
+    fd.append('photo_id', photo.id)
+    fd.append('project_id', projectId ?? '')
+    fd.append('caption', caption.trim())
+    const res = await updateFieldNotePhotoCaption(fd)
+    setSaving(false)
+    if (res.ok) {
+      setEditing(false)
+      toast.success('설명 저장됨')
+      router.refresh()
+    } else {
+      toast.error(res.error)
+    }
+  }
+
+  return (
+    <div className="rounded-lg overflow-hidden border border-slate-200 bg-white">
+      <div className="relative group aspect-square bg-slate-100">
+        {url ? (
+          <a href={url} target="_blank" rel="noopener">
+            <img src={url} alt="" className="w-full h-full object-cover" />
+          </a>
+        ) : (
+          <div className="w-full h-full flex items-center justify-center">
+            <Loader2 className="h-4 w-4 animate-spin text-slate-400" />
+          </div>
+        )}
+        {canManage && (
+          <button
+            onClick={onDelete}
+            className="absolute top-1 right-1 rounded bg-rose-600/80 p-1 text-white opacity-0 group-hover:opacity-100"
+            title="삭제"
+          >
+            <Trash2 className="h-3 w-3" />
+          </button>
+        )}
+        {photo.taken_at && (
+          <div className="absolute bottom-0 left-0 right-0 bg-black/60 text-white text-[9px] px-1 py-0.5">
+            {new Date(photo.taken_at).toLocaleString('ko-KR', {
+              month: '2-digit',
+              day: '2-digit',
+              hour: '2-digit',
+              minute: '2-digit',
+            })}
+          </div>
+        )}
+      </div>
+      {/* 설명 */}
+      <div className="px-1.5 py-1">
+        {editing ? (
+          <div className="space-y-1">
+            <textarea
+              value={caption}
+              onChange={(e) => setCaption(e.target.value)}
+              rows={2}
+              maxLength={200}
+              placeholder="어떤 사진인지 설명"
+              className="w-full rounded border border-slate-300 px-1.5 py-1 text-[11px] focus:border-indigo-500 focus:outline-none resize-none"
+              autoFocus
+            />
+            <div className="flex gap-1">
+              <button
+                onClick={save}
+                disabled={saving}
+                className="flex-1 rounded bg-indigo-600 text-white text-[10px] py-1 hover:bg-indigo-700 disabled:opacity-50"
+              >
+                {saving ? '저장 중' : '저장'}
+              </button>
+              <button
+                onClick={() => {
+                  setCaption(photo.caption ?? '')
+                  setEditing(false)
+                }}
+                className="rounded border border-slate-300 text-slate-600 text-[10px] px-2 py-1 hover:bg-slate-50"
+              >
+                취소
+              </button>
+            </div>
+          </div>
+        ) : (
+          <button
+            onClick={() => canManage && setEditing(true)}
+            className={
+              'block w-full text-left text-[11px] leading-tight ' +
+              (canManage ? 'hover:text-indigo-600' : 'cursor-default')
+            }
+            title={canManage ? '설명 편집' : undefined}
+          >
+            {photo.caption ? (
+              <span className="text-slate-700">{photo.caption}</span>
+            ) : canManage ? (
+              <span className="text-slate-400 italic">+ 설명 추가</span>
+            ) : (
+              <span className="text-slate-300">설명 없음</span>
+            )}
+          </button>
+        )}
+      </div>
     </div>
   )
 }
@@ -1025,46 +1186,17 @@ function NoteDetailPanel({
               사진 없음
             </div>
           ) : (
-            <div className="grid grid-cols-2 gap-1.5">
-              {note.photos.map((p) => {
-                const url = photoUrls[p.path]
-                return (
-                  <div key={p.id} className="relative group rounded overflow-hidden bg-slate-100 aspect-square">
-                    {url ? (
-                      <a href={url} target="_blank" rel="noopener">
-                        <img
-                          src={url}
-                          alt=""
-                          className="w-full h-full object-cover"
-                        />
-                      </a>
-                    ) : (
-                      <div className="w-full h-full flex items-center justify-center">
-                        <Loader2 className="h-4 w-4 animate-spin text-slate-400" />
-                      </div>
-                    )}
-                    {(meIsAdmin || p.uploaded_by === meId) && (
-                      <button
-                        onClick={() => onDeletePhoto(p.id)}
-                        className="absolute top-1 right-1 rounded bg-rose-600/80 p-1 text-white opacity-0 group-hover:opacity-100"
-                        title="삭제"
-                      >
-                        <Trash2 className="h-3 w-3" />
-                      </button>
-                    )}
-                    {p.taken_at && (
-                      <div className="absolute bottom-0 left-0 right-0 bg-black/60 text-white text-[9px] px-1 py-0.5">
-                        {new Date(p.taken_at).toLocaleString('ko-KR', {
-                          month: '2-digit',
-                          day: '2-digit',
-                          hour: '2-digit',
-                          minute: '2-digit',
-                        })}
-                      </div>
-                    )}
-                  </div>
-                )
-              })}
+            <div className="grid grid-cols-2 gap-2">
+              {note.photos.map((p) => (
+                <DetailPhotoCard
+                  key={p.id}
+                  photo={p}
+                  url={photoUrls[p.path]}
+                  projectId={projectId}
+                  canManage={meIsAdmin || p.uploaded_by === meId}
+                  onDelete={() => onDeletePhoto(p.id)}
+                />
+              ))}
             </div>
           )}
         </div>
@@ -1309,6 +1441,212 @@ function NoteFormModal({
           </div>
         </form>
       </div>
+    </div>
+  )
+}
+
+// =====================================================================
+// 사진 갤러리 모달 — 등록한 모든 사진을 한눈에 + 라이트박스
+// =====================================================================
+type GalleryItem = {
+  photo: FieldNotePhoto
+  note: FieldNoteData
+}
+
+function PhotoGalleryModal({
+  notes,
+  photoUrls,
+  onClose,
+  onJumpToNote,
+}: {
+  notes: FieldNoteData[]
+  photoUrls: Record<string, string>
+  onClose: () => void
+  onJumpToNote: (noteId: string) => void
+}) {
+  const [lightbox, setLightbox] = useState<number | null>(null)
+
+  useEffect(() => {
+    const prev = document.body.style.overflow
+    document.body.style.overflow = 'hidden'
+    return () => {
+      document.body.style.overflow = prev
+    }
+  }, [])
+
+  const items: GalleryItem[] = useMemo(() => {
+    const list: GalleryItem[] = []
+    for (const n of notes) {
+      for (const p of n.photos) list.push({ photo: p, note: n })
+    }
+    return list.sort(
+      (a, b) =>
+        new Date(b.photo.created_at).getTime() -
+        new Date(a.photo.created_at).getTime(),
+    )
+  }, [notes])
+
+  // ESC / 화살표
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') {
+        if (lightbox != null) setLightbox(null)
+        else onClose()
+      } else if (lightbox != null && e.key === 'ArrowRight') {
+        setLightbox((i) => (i == null ? i : Math.min(items.length - 1, i + 1)))
+      } else if (lightbox != null && e.key === 'ArrowLeft') {
+        setLightbox((i) => (i == null ? i : Math.max(0, i - 1)))
+      }
+    }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  }, [lightbox, items.length, onClose])
+
+  const cur = lightbox != null ? items[lightbox] : null
+
+  return (
+    <div className="fixed inset-0 z-[60] flex flex-col bg-black/80">
+      {/* 헤더 */}
+      <div className="flex items-center justify-between px-4 py-3 text-white">
+        <div className="flex items-center gap-2">
+          <ImageIcon className="h-5 w-5" />
+          <span className="font-semibold">사진 갤러리</span>
+          <span className="text-sm text-white/60">{items.length}장</span>
+        </div>
+        <button
+          onClick={onClose}
+          className="rounded-lg p-1.5 hover:bg-white/15"
+          aria-label="닫기"
+        >
+          <X className="h-5 w-5" />
+        </button>
+      </div>
+
+      {/* 그리드 */}
+      <div className="flex-1 overflow-y-auto p-3">
+        {items.length === 0 ? (
+          <div className="flex h-full items-center justify-center text-white/60 text-sm">
+            등록된 사진이 없습니다
+          </div>
+        ) : (
+          <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 gap-2">
+            {items.map((it, i) => {
+              const url = photoUrls[it.photo.path]
+              const c = FIELD_NOTE_KIND_COLOR[it.note.kind]
+              return (
+                <button
+                  key={it.photo.id}
+                  onClick={() => setLightbox(i)}
+                  className="group relative aspect-square overflow-hidden rounded-lg bg-slate-800 text-left"
+                >
+                  {url ? (
+                    <img src={url} alt="" className="h-full w-full object-cover" />
+                  ) : (
+                    <div className="flex h-full w-full items-center justify-center">
+                      <Loader2 className="h-5 w-5 animate-spin text-white/50" />
+                    </div>
+                  )}
+                  {/* 종류 dot */}
+                  <span
+                    className="absolute left-1.5 top-1.5 h-3 w-3 rounded-full border border-white/70"
+                    style={{ backgroundColor: c.fill }}
+                    title={it.note.kind}
+                  />
+                  {/* 캡션/제목 */}
+                  <div className="absolute inset-x-0 bottom-0 bg-gradient-to-t from-black/80 to-transparent px-1.5 pb-1 pt-4">
+                    <div className="truncate text-[11px] font-medium text-white">
+                      {it.photo.caption || it.note.title || it.note.kind}
+                    </div>
+                  </div>
+                </button>
+              )
+            })}
+          </div>
+        )}
+      </div>
+
+      {/* 라이트박스 */}
+      {cur && (
+        <div
+          className="absolute inset-0 z-10 flex flex-col bg-black/95"
+          onClick={(e) => {
+            if (e.target === e.currentTarget) setLightbox(null)
+          }}
+        >
+          <div className="flex items-center justify-between px-4 py-3 text-white">
+            <span className="text-sm text-white/60">
+              {lightbox != null ? lightbox + 1 : 0} / {items.length}
+            </span>
+            <button
+              onClick={() => setLightbox(null)}
+              className="rounded-lg p-1.5 hover:bg-white/15"
+              aria-label="닫기"
+            >
+              <X className="h-5 w-5" />
+            </button>
+          </div>
+
+          <div className="relative flex flex-1 items-center justify-center px-2">
+            {lightbox != null && lightbox > 0 && (
+              <button
+                onClick={() => setLightbox((i) => (i == null ? i : i - 1))}
+                className="absolute left-2 rounded-full bg-white/15 p-2 text-white hover:bg-white/25"
+                aria-label="이전"
+              >
+                <ChevronLeft className="h-6 w-6" />
+              </button>
+            )}
+            {photoUrls[cur.photo.path] ? (
+              <img
+                src={photoUrls[cur.photo.path]}
+                alt=""
+                className="max-h-full max-w-full object-contain"
+              />
+            ) : (
+              <Loader2 className="h-8 w-8 animate-spin text-white/60" />
+            )}
+            {lightbox != null && lightbox < items.length - 1 && (
+              <button
+                onClick={() => setLightbox((i) => (i == null ? i : i + 1))}
+                className="absolute right-2 rounded-full bg-white/15 p-2 text-white hover:bg-white/25"
+                aria-label="다음"
+              >
+                <ChevronRight className="h-6 w-6" />
+              </button>
+            )}
+          </div>
+
+          {/* 캡션·메타 */}
+          <div className="px-4 py-3 text-white">
+            <div className="mx-auto max-w-2xl space-y-1">
+              <div className="flex items-center gap-2">
+                <span
+                  className="inline-block h-3 w-3 rounded-full"
+                  style={{ backgroundColor: FIELD_NOTE_KIND_COLOR[cur.note.kind].fill }}
+                />
+                <span className="text-sm font-medium">
+                  {cur.photo.caption || '(설명 없음)'}
+                </span>
+              </div>
+              <div className="text-xs text-white/60">
+                {cur.note.kind}
+                {cur.note.title ? ` · ${cur.note.title}` : ''}
+                {cur.photo.uploaded_by_name ? ` · ${cur.photo.uploaded_by_name}` : ''}
+                {cur.photo.taken_at
+                  ? ` · 촬영 ${new Date(cur.photo.taken_at).toLocaleString('ko-KR', { month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' })}`
+                  : ''}
+              </div>
+              <button
+                onClick={() => onJumpToNote(cur.note.id)}
+                className="mt-1 inline-flex items-center gap-1 rounded-lg bg-white/15 px-3 py-1.5 text-xs font-medium text-white hover:bg-white/25"
+              >
+                <MapPin className="h-3.5 w-3.5" />
+                이 노트 위치 보기
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   )
 }
