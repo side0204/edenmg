@@ -609,16 +609,12 @@ function StationDetail({
         </button>
       </div>
 
-      {/* 전체 사진 갤러리 모달 */}
+      {/* 전체 사진 갤러리 모달 (전체화면 + 반응형 그리드 + 내부 라이트박스) */}
       {galleryOpen && (
         <StationGalleryModal
           stationName={station.name}
           photos={allPhotos}
           onClose={() => setGalleryOpen(false)}
-          onPick={(idx) => {
-            setGalleryOpen(false)
-            setLightboxIndex(idx)
-          }}
         />
       )}
 
@@ -796,75 +792,95 @@ function StationSectionCard({
 }
 
 // =====================================================================
-// 전체 사진 갤러리 모달
+// 전체 사진 갤러리 모달 — 전체화면 다크. 화면 크기에 따라 열 수가 동적으로
+//   늘어나는 반응형 그리드(2→3→4→5열). 썸네일 클릭 = 내부 라이트박스.
+//   지도 노트(PhotoGalleryModal) 와 동일 UX.
 // =====================================================================
 function StationGalleryModal({
   stationName,
   photos,
   onClose,
-  onPick,
 }: {
   stationName: string
   photos: PhotoWithUrl[]
   onClose: () => void
-  onPick: (idx: number) => void
 }) {
+  const [lightboxIndex, setLightboxIndex] = useState<number | null>(null)
+
   useEffect(() => {
     const prev = document.body.style.overflow
     document.body.style.overflow = 'hidden'
+    function onKey(e: KeyboardEvent) {
+      if (e.key === 'Escape' && lightboxIndex === null) onClose()
+    }
+    window.addEventListener('keydown', onKey)
     return () => {
       document.body.style.overflow = prev
+      window.removeEventListener('keydown', onKey)
     }
-  }, [])
+  }, [lightboxIndex, onClose])
 
   return (
-    <div
-      className="fixed inset-0 z-[60] flex flex-col bg-black/60"
-      onClick={(e) => {
-        if (e.target === e.currentTarget) onClose()
-      }}
-    >
-      <div className="mt-auto sm:my-auto mx-auto w-full sm:max-w-3xl max-h-[88vh] bg-white rounded-t-2xl sm:rounded-2xl shadow-2xl flex flex-col overflow-hidden">
-        <div className="flex items-center justify-between px-4 py-3 border-b border-slate-200">
-          <span className="flex items-center gap-2 font-semibold text-sm">
-            <Images className="h-4 w-4 text-rose-600" />
-            {stationName} — 사진 {photos.length}
-          </span>
-          <button
-            type="button"
-            onClick={onClose}
-            className="rounded p-1 text-slate-500 hover:bg-slate-100"
-            aria-label="닫기"
-          >
-            <X className="h-4 w-4" />
-          </button>
+    <div className="fixed inset-0 z-[60] flex flex-col bg-black/80">
+      <div className="flex items-center justify-between px-4 py-3 text-white">
+        <div className="flex items-center gap-2">
+          <Images className="h-5 w-5" />
+          <span className="font-semibold">{stationName} 사진 갤러리</span>
+          <span className="text-sm text-white/60">{photos.length}장</span>
         </div>
-        <div className="p-3 overflow-y-auto">
-          <div className="grid grid-cols-3 sm:grid-cols-4 gap-2">
+        <button
+          type="button"
+          onClick={onClose}
+          className="rounded-lg p-1.5 hover:bg-white/15"
+          aria-label="닫기"
+        >
+          <X className="h-5 w-5" />
+        </button>
+      </div>
+
+      <div className="flex-1 overflow-y-auto p-3">
+        {photos.length === 0 ? (
+          <div className="flex h-full items-center justify-center text-white/60 text-sm">
+            등록된 사진이 없습니다
+          </div>
+        ) : (
+          <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 gap-2">
             {photos.map((p, idx) => (
               <button
                 key={p.id}
                 type="button"
-                onClick={() => onPick(idx)}
-                className="group relative aspect-square overflow-hidden rounded-lg bg-slate-100"
+                onClick={() => setLightboxIndex(idx)}
+                className="group relative aspect-square overflow-hidden rounded-lg bg-slate-800 text-left"
               >
                 {p.url ? (
                   // eslint-disable-next-line @next/next/no-img-element
                   <img src={p.url} alt={p.caption ?? ''} className="h-full w-full object-cover" />
                 ) : (
                   <div className="flex h-full w-full items-center justify-center">
-                    <Loader2 className="h-4 w-4 animate-spin text-slate-300" />
+                    <Loader2 className="h-5 w-5 animate-spin text-white/50" />
                   </div>
                 )}
-                <span className="absolute inset-x-0 bottom-0 bg-black/55 px-1 py-0.5 text-[9px] text-white line-clamp-1">
-                  {p.sectionLabel}
-                  {p.caption ? ` · ${p.caption}` : ''}
-                </span>
+                <div className="absolute inset-x-0 bottom-0 bg-gradient-to-t from-black/80 to-transparent px-1.5 pb-1 pt-4">
+                  <div className="truncate text-[11px] font-medium text-white">
+                    {p.sectionLabel}
+                    {p.caption ? ` · ${p.caption}` : ''}
+                  </div>
+                </div>
               </button>
             ))}
           </div>
-        </div>
+        )}
       </div>
+
+      {/* 라이트박스 — 갤러리 위에 겹쳐 표시, 닫으면 그리드로 복귀 */}
+      {lightboxIndex !== null && photos[lightboxIndex] && (
+        <Lightbox
+          photos={photos}
+          index={lightboxIndex}
+          onIndex={setLightboxIndex}
+          onClose={() => setLightboxIndex(null)}
+        />
+      )}
     </div>
   )
 }
