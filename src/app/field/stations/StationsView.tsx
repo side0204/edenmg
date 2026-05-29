@@ -864,7 +864,7 @@ function StationGalleryModal({
                   </div>
                 )}
                 <div className="absolute inset-x-0 bottom-0 bg-gradient-to-t from-black/80 to-transparent px-1.5 pb-1 pt-4">
-                  <div className="truncate text-[11px] font-medium text-white">
+                  <div className="text-[14px] font-medium text-white whitespace-pre-wrap break-words">
                     {p.sectionLabel}
                     {p.caption ? ` · ${p.caption}` : ''}
                   </div>
@@ -975,7 +975,7 @@ function Lightbox({
 
         {(p.caption || p.uploadedByName || p.takenAt) && (
           <div className="px-4 pb-6 pt-1 text-center text-white/90">
-            {p.caption && <p className="text-sm">{p.caption}</p>}
+            {p.caption && <p className="text-[18px]">{p.caption}</p>}
             <p className="text-[11px] text-white/60 mt-0.5">
               {p.uploadedByName ?? ''}
               {p.takenAt
