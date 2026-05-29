@@ -2,6 +2,7 @@
 
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { useRouter } from 'next/navigation'
+import Link from 'next/link'
 import { toast } from 'sonner'
 import {
   Plus,
@@ -11,6 +12,7 @@ import {
   Building2,
   Images,
   MapPin,
+  Map as MapIcon,
   Loader2,
   Save,
   ChevronLeft,
@@ -584,6 +586,16 @@ function StationDetail({
                 주소로 검색
               </a>
             ) : null}
+            {(station.address || (station.lat != null && station.lng != null)) && (
+              <Link
+                href={`/field?station=${station.id}`}
+                className="inline-flex items-center gap-1.5 rounded-lg border border-teal-300 bg-teal-50 px-3 py-2 text-sm font-medium text-teal-700 hover:bg-teal-100"
+                title="지도 노트에서 이 국사 위치 보기 (핀 또는 주소)"
+              >
+                <MapIcon className="h-4 w-4" />
+                지도에서 보기
+              </Link>
+            )}
           </div>
           {infoDirty && (
             <p className="text-[11px] text-amber-600">변경된 내용이 있습니다. 「정보 저장」을 눌러 반영하세요.</p>

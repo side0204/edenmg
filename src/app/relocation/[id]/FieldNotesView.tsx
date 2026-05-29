@@ -20,7 +20,9 @@ import {
   Maximize2,
   Satellite,
   Camera,
+  Building2,
 } from 'lucide-react'
+import Link from 'next/link'
 import { toast } from 'sonner'
 import { useKakaoMap } from './useKakaoMap'
 import {
@@ -83,12 +85,25 @@ export type FieldNoteData = {
   projectTitle: string | null
 }
 
+// 지도 노트에 함께 표시할 국사 핀 (국사현황과 공유 — 좌표 있으면 핀, 없으면 주소로 이동)
+export type StationPin = {
+  id: string
+  name: string
+  address: string | null
+  lat: number | null
+  lng: number | null
+}
+
 type Props = {
   // 공사(프로젝트) 모드면 projectId 문자열, 최상위 현장관리(/field) 모드면 null
   projectId: string | null
   notes: FieldNoteData[]
   meId: string
   meIsAdmin: boolean
+  // 국사 핀 (최상위 /field 에서만 전달. 공사 모드는 미전달 → 빈 배열)
+  stations?: StationPin[]
+  // /field?station=<id> 진입 시 그 국사로 지도 이동 (핀 또는 주소)
+  focusStationId?: string | null
 }
 
 type LatLng = { lat: number; lng: number }
@@ -105,7 +120,14 @@ const KIND_BUTTON_TONE: Record<FieldNoteKind, string> = {
   위험: 'bg-rose-600 hover:bg-rose-700 text-white border-rose-700',
 }
 
-export default function FieldNotesView({ projectId, notes, meId, meIsAdmin }: Props) {
+export default function FieldNotesView({
+  projectId,
+  notes,
+  meId,
+  meIsAdmin,
+  stations = [],
+  focusStationId = null,
+}: Props) {
   const router = useRouter()
   const { setContainer, map, status, epoch } = useKakaoMap(true)
   const isGlobal = projectId === null
@@ -138,6 +160,15 @@ export default function FieldNotesView({ projectId, notes, meId, meIsAdmin }: Pr
   const [roadviewTitle, setRoadviewTitle] = useState<string | null>(null)
   const [roadviewCollapsed, setRoadviewCollapsed] = useState(false)
   const roadviewOpenRef = useRef(false)
+
+  // 국사 핀 — 보기 토글 + 선택. focus 1회 처리용 ref.
+  const [showStations, setShowStations] = useState(true)
+  const [selectedStationId, setSelectedStationId] = useState<string | null>(null)
+  const stationFocusedRef = useRef(false)
+  const selectedStation = useMemo(
+    () => stations.find((s) => s.id === selectedStationId) ?? null,
+    [stations, selectedStationId],
+  )
 
   // ===== 노트 필터·정렬 =================================================
   const filteredNotes = useMemo(() => {
@@ -263,13 +294,49 @@ export default function FieldNotesView({ projectId, notes, meId, meIsAdmin }: Pr
     [map],
   )
 
-  // 지도 준비 후 노트 범위로 1회 자동 fit
+  // 지도 준비 후 노트 범위로 1회 자동 fit. 단, 국사 포커스 진입이면 fit 생략.
   const fittedRef = useState({ done: false })[0]
   useEffect(() => {
     if (!map || fittedRef.done || notes.length === 0) return
+    if (focusStationId) {
+      fittedRef.done = true
+      return
+    }
     fittedRef.done = true
     fitToNotes(notes)
-  }, [map, notes, fittedRef, fitToNotes])
+  }, [map, notes, fittedRef, fitToNotes, focusStationId])
+
+  // /field?station=<id> 진입 — 그 국사로 지도 이동. 핀(좌표) 있으면 그 위치,
+  //   없으면 주소를 지오코딩해 이동.
+  useEffect(() => {
+    if (!map || !focusStationId || stationFocusedRef.current) return
+    const s = stations.find((x) => x.id === focusStationId)
+    if (!s) return
+    stationFocusedRef.current = true
+    setShowStations(true)
+    if (s.lat != null && s.lng != null) {
+      map.setCenter(new kakao.maps.LatLng(s.lat, s.lng))
+      map.setLevel(3)
+      setSelectedStationId(s.id)
+    } else if (s.address) {
+      try {
+        const geocoder = new kakao.maps.services.Geocoder()
+        geocoder.addressSearch(s.address, (res, gstatus) => {
+          if (gstatus === 'OK' && Array.isArray(res) && res.length > 0) {
+            map.setCenter(new kakao.maps.LatLng(Number(res[0].y), Number(res[0].x)))
+            map.setLevel(3)
+            setSelectedStationId(s.id)
+          } else {
+            toast.error('국사 주소의 위치를 찾을 수 없습니다. 주소를 확인하세요.')
+          }
+        })
+      } catch {
+        toast.error('지도 검색을 사용할 수 없습니다.')
+      }
+    } else {
+      toast.error('이 국사는 위치 정보가 없습니다.')
+    }
+  }, [map, focusStationId, stations])
 
   // ===== 노트 → 화면 픽셀 투영 (epoch 가 카카오맵 이동 시마다 증가하므로 캐시 무효화) =====
   const projectedMarkers = useMemo(() => {
@@ -320,6 +387,39 @@ export default function FieldNotesView({ projectId, notes, meId, meIsAdmin }: Pr
       return null
     }
   }, [map, showAddPin, epoch])
+
+  // 국사 핀 투영 — 좌표 있는 국사만. showStations 토글로 표시.
+  const projectedStations = useMemo(() => {
+    void epoch
+    if (!map || !showStations) {
+      return [] as Array<{ station: StationPin; x: number; y: number }>
+    }
+    const proj = map.getProjection()
+    if (!proj) return []
+    const results: Array<{ station: StationPin; x: number; y: number }> = []
+    for (const s of stations) {
+      if (s.lat == null || s.lng == null) continue
+      try {
+        const pt = proj.containerPointFromCoords(new kakao.maps.LatLng(s.lat, s.lng))
+        results.push({ station: s, x: pt.x, y: pt.y })
+      } catch {
+        // 좌표 외 — 무시
+      }
+    }
+    return results
+  }, [map, stations, showStations, epoch])
+
+  const selectStation = useCallback(
+    (s: StationPin) => {
+      setSelectedStationId(s.id)
+      setSelectedId(null)
+      if (map && s.lat != null && s.lng != null) {
+        map.setCenter(new kakao.maps.LatLng(s.lat, s.lng))
+        if (map.getLevel() > 5) map.setLevel(4)
+      }
+    },
+    [map],
+  )
 
   // ===== 「내 위치」 버튼 ================================================
   const locateMe = useCallback(() => {
@@ -482,6 +582,24 @@ export default function FieldNotesView({ projectId, notes, meId, meIsAdmin }: Pr
               </button>
             )
           })}
+          {stations.length > 0 && (
+            <button
+              onClick={() => setShowStations((v) => !v)}
+              title="국사 핀 표시/숨김"
+              className={
+                'inline-flex items-center gap-1 rounded-lg px-2 py-1 text-xs font-medium border transition ' +
+                (showStations
+                  ? 'bg-teal-100 text-teal-700 border-teal-300'
+                  : 'bg-white text-slate-400 border-slate-200 opacity-60')
+              }
+            >
+              <span
+                className="inline-block h-2 w-2 rounded-full"
+                style={{ backgroundColor: showStations ? '#0d9488' : '#cbd5e1' }}
+              />
+              국사 {stations.length}
+            </button>
+          )}
         </div>
 
         {/* 전체 보기 — 노트 범위로 지도 맞춤 (마커가 화면 밖으로 나갔을 때) */}
@@ -874,6 +992,66 @@ export default function FieldNotesView({ projectId, notes, meId, meIsAdmin }: Pr
             )
           })}
 
+          {/* 국사 핀 — teal '국' + 이름 라벨 */}
+          {projectedStations.map(({ station, x, y }) => {
+            const selected = selectedStationId === station.id
+            const headR = selected ? 15 : 13
+            const cy = y - 30
+            return (
+              <g
+                key={'st-' + station.id}
+                style={{ pointerEvents: 'auto', cursor: 'pointer' }}
+                onClick={(e) => {
+                  e.stopPropagation()
+                  selectStation(station)
+                }}
+              >
+                {selected && (
+                  <circle cx={x} cy={cy} r={headR + 7} fill="#0d9488" opacity={0.22} />
+                )}
+                <path
+                  d={`M ${x - headR * 0.62} ${cy + headR * 0.55} L ${x + headR * 0.62} ${cy + headR * 0.55} L ${x} ${y} Z`}
+                  fill="#0d9488"
+                  filter="url(#fieldPinShadow)"
+                />
+                <circle
+                  cx={x}
+                  cy={cy}
+                  r={headR}
+                  fill="#0d9488"
+                  stroke="white"
+                  strokeWidth={selected ? 3 : 2.5}
+                  filter="url(#fieldPinShadow)"
+                />
+                <text
+                  x={x}
+                  y={cy + 5}
+                  textAnchor="middle"
+                  fontSize={selected ? 14 : 12}
+                  fontWeight="800"
+                  fill="white"
+                  style={{ userSelect: 'none' }}
+                >
+                  국
+                </text>
+                <text
+                  x={x}
+                  y={y + 13}
+                  textAnchor="middle"
+                  fontSize="11"
+                  fontWeight="700"
+                  fill="#0f766e"
+                  stroke="white"
+                  strokeWidth="3"
+                  paintOrder="stroke"
+                  style={{ userSelect: 'none' }}
+                >
+                  {station.name}
+                </text>
+              </g>
+            )
+          })}
+
           {/* 내 위치 마커 — 펄스 링 + 핀(teardrop). 팁이 실제 위치를 가리킴 */}
           {myLocationPixel && (
             <g pointerEvents="none">
@@ -961,6 +1139,54 @@ export default function FieldNotesView({ projectId, notes, meId, meIsAdmin }: Pr
               >
                 <X className="h-3 w-3" />
               </button>
+            </div>
+          </div>
+        )}
+
+        {/* 선택한 국사 정보 카드 */}
+        {selectedStation && (
+          <div className="absolute bottom-3 left-1/2 z-20 w-[min(92%,360px)] -translate-x-1/2 rounded-xl border border-teal-200 bg-white p-3 shadow-lg">
+            <div className="flex items-start justify-between gap-2">
+              <div className="min-w-0">
+                <div className="flex items-center gap-1.5">
+                  <span className="inline-flex h-5 w-5 items-center justify-center rounded-full bg-teal-600 text-[11px] font-bold text-white">
+                    국
+                  </span>
+                  <span className="font-semibold text-sm text-slate-900 truncate">
+                    {selectedStation.name}
+                  </span>
+                </div>
+                {selectedStation.address && (
+                  <p className="mt-1 text-xs text-slate-500 flex items-start gap-1">
+                    <MapPin className="h-3.5 w-3.5 shrink-0 mt-0.5" />
+                    {selectedStation.address}
+                  </p>
+                )}
+              </div>
+              <button
+                type="button"
+                onClick={() => setSelectedStationId(null)}
+                className="shrink-0 rounded p-1 text-slate-400 hover:bg-slate-100"
+                aria-label="닫기"
+              >
+                <X className="h-4 w-4" />
+              </button>
+            </div>
+            <div className="mt-2 flex items-center gap-2">
+              {selectedStation.lat != null && selectedStation.lng != null && (
+                <NavLauncher
+                  lat={selectedStation.lat}
+                  lng={selectedStation.lng}
+                  name={selectedStation.name}
+                />
+              )}
+              <Link
+                href="/field/stations"
+                className="inline-flex items-center gap-1 rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50"
+              >
+                <Building2 className="h-4 w-4" />
+                국사현황
+              </Link>
             </div>
           </div>
         )}

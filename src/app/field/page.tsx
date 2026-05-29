@@ -4,6 +4,7 @@ import { createClient } from '@/lib/supabase/server'
 import FieldNotesView, {
   type FieldNoteData,
   type FieldNotePhoto,
+  type StationPin,
 } from '../relocation/[id]/FieldNotesView'
 import { isFieldNoteKind } from '@/lib/field-notes'
 import FieldTabs from './FieldTabs'
@@ -11,7 +12,14 @@ import FieldTabs from './FieldTabs'
 // 최상위 현장관리 — 회사 전체 노트를 한 지도에서. 공사 무관 독립 노트 +
 //   공사에서 「현장관리로 보내기」 한 노트(shared_to_field)를 모두 표시.
 
-export default async function FieldManagementPage() {
+export default async function FieldManagementPage({
+  searchParams,
+}: {
+  searchParams: Promise<{ station?: string }>
+}) {
+  const sp = await searchParams
+  const focusStationId = sp.station ?? null
+
   const supabase = await createClient()
   const {
     data: { user },
@@ -145,6 +153,29 @@ export default async function FieldManagementPage() {
       projectTitle: n.project_id ? projTitleById.get(n.project_id) ?? null : null,
     }))
 
+  // 국사 핀 — 좌표 있으면 지도에 표시. 좌표 없어도 「지도에서 보기」 진입 시 주소로 이동.
+  const { data: stationRows } = await supabase
+    .from('field_stations')
+    .select('id, name, address, lat, lng')
+    .eq('company_id', me.company_id)
+    .order('name', { ascending: true })
+    .limit(1000)
+  const stations = ((stationRows ?? []) as Array<{
+    id: string
+    name: string
+    address: string | null
+    lat: number | null
+    lng: number | null
+  }>).map(
+    (s): StationPin => ({
+      id: s.id,
+      name: s.name,
+      address: s.address,
+      lat: s.lat,
+      lng: s.lng,
+    }),
+  )
+
   return (
     <main className="px-3 sm:px-4 py-3 space-y-3">
       <header className="space-y-1">
@@ -164,6 +195,8 @@ export default async function FieldManagementPage() {
         notes={fieldNotes}
         meId={me.id}
         meIsAdmin={meIsAdmin}
+        stations={stations}
+        focusStationId={focusStationId}
       />
     </main>
   )
