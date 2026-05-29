@@ -6,6 +6,7 @@ import FieldNotesView, {
   type FieldNotePhoto,
 } from '../relocation/[id]/FieldNotesView'
 import { isFieldNoteKind } from '@/lib/field-notes'
+import FieldTabs from './FieldTabs'
 
 // 최상위 현장관리 — 회사 전체 노트를 한 지도에서. 공사 무관 독립 노트 +
 //   공사에서 「현장관리로 보내기」 한 노트(shared_to_field)를 모두 표시.
@@ -155,6 +156,8 @@ export default async function FieldManagementPage() {
           현장 특이점·주의·위험을 지도에 기록하고 외부 네비로 길찾기. 공사에서 「현장관리로 보내기」 한 노트도 함께 표시됩니다.
         </p>
       </header>
+
+      <FieldTabs />
 
       <FieldNotesView
         projectId={null}

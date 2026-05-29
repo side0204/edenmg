@@ -802,6 +802,30 @@ owner 추가 요구: 내 위치 시각화 강화, 종류 필터를 캔버스 밖
 - **사진 설명(caption)** — 업로더가 「선택 → 각 사진 설명 입력 → 업로드」 스테이징 방식으로 변경([`FieldPhotoUploader`](./src/app/relocation/[id]/FieldPhotoUploader.tsx)). 상세 패널 사진 카드에 caption 표시 + 인라인 편집(`updateFieldNotePhotoCaption`, 업로더 OR admin)
 - **운영 필요**: [`0087_field_note_photo_caption.sql`](./supabase/migrations/0087_field_note_photo_caption.sql) 실행 (완료)
 
+### ✅ 완료 (현장관리 — 국사현황 Phase D, 2026-05-29)
+
+owner 요구: 현장관리 안에 「국사현황」 서브탭. 국사별로 국사명·국사주소·상면도(사진)·장비랙정보(설명+사진)·OFD랙정보(설명+사진) + 추가정보(이름 변경 가능, 여러 개) 입력·관리. 국사별 사진 갤러리. 주소 입력 시 외부 네비 길찾기. 정보패널 마우스 드래그로 폭 조절.
+
+owner 결정사항:
+
+| 항목 | 결정 | 비고 |
+|---|---|---|
+| **메뉴 위치** | 현장관리(`/field`) 안 서브탭 (지도 노트 ↔ 국사현황) | [`FieldTabs`](./src/app/field/FieldTabs.tsx). 최상위 탭 아님 |
+| **권한** | 같은 회사 누구나 등록·수정·사진 추가 | 국사 삭제는 작성자 OR admin, 사진 삭제는 업로더 OR admin. RLS 강제 |
+| **추가정보** | 여러 개 추가 가능 (각 이름 변경·설명·사진) | 통합 섹션 모델 — 상면도·장비랙·OFD랙·추가정보 전부 1행씩. 생성 시 4개 seed |
+| **길찾기** | 주소 → 카카오 지오코딩(클라이언트) → lat/lng 저장 → 기존 NavLauncher 재사용 | 좌표 없으면 카카오맵 주소 검색 URL 폴백 |
+| **사진 버킷** | 기존 R2 `relocation-field-notes` 재사용 (키 prefix `stations/`) | 별도 버킷 생성 불필요 |
+
+- **마이그** [`0089_field_stations.sql`](./supabase/migrations/0089_field_stations.sql) — `field_stations`(국사명·주소·lat/lng·created_by) + `field_station_sections`(label·body·sort_order) + `field_station_photos`(1:N·caption·EXIF) + RLS (회사 스코프, 등록·수정 누구나, 삭제 본인/admin)
+- **공통 lib** [`src/lib/field-stations.ts`](./src/lib/field-stations.ts) — 버킷 상수(field-notes 재사용)·MIME·기본 섹션 4종(상면도·장비랙정보·OFD랙정보·추가정보)
+- **server actions** [`station-actions.ts`](./src/app/field/station-actions.ts) — createStation(기본 섹션 seed)·updateStation·deleteStation · addStationSection·updateStationSection·deleteStationSection · uploadStationPhoto(EXIF)·deleteStationPhoto·updateStationPhotoCaption · getStationPhotoUrls(30분 signedUrl)
+- **UI**
+  - [`/field/stations`](./src/app/field/stations/page.tsx) — 국사+섹션+사진 일괄 fetch + 업로더 이름 매핑
+  - [`StationsView`](./src/app/field/stations/StationsView.tsx) — 좌측 국사 목록(검색·카드) + 우측 정보패널. **패널 좌측 가장자리 드래그로 폭 조절**(320~960px, pointer capture). 패널: 기본정보(국사명·주소+길찾기·삭제) + 항목 카드들(이름·설명 인라인 편집 + 사진 그리드 + 업로더 + 삭제) + 「+ 항목 추가」 + 전체 사진 갤러리 모달 + 라이트박스(◀▶ ESC). 모바일은 stacked(패널 full width)
+  - [`AddressGeocodeField`](./src/app/field/stations/AddressGeocodeField.tsx) — 주소 input + 「좌표 찾기」(카카오 Geocoder+Places) 결과 선택 → address+lat/lng 채움. ✓ 좌표 확인 배지
+  - [`StationPhotoUploader`](./src/app/field/stations/StationPhotoUploader.tsx) — 섹션별 사진 업로더 (FieldPhotoUploader 동일 패턴: 스테이징+caption+EXIF)
+- **운영 필요**: Supabase 에서 [`0089_field_stations.sql`](./supabase/migrations/0089_field_stations.sql) 실행. R2 추가 작업 없음 (기존 버킷 재사용)
+
 ### ✅ 완료 (페이지 헤더 모바일 레이아웃 일괄 보정, 2026-05-19)
 
 owner 모바일 스크린샷 보고: `/vehicles` 헤더에서 "업무용 차량" 이 "업무 / 용 / 차량" 처럼 한 글자씩 세로로 깨짐.
@@ -1370,6 +1394,7 @@ owner 요구: "어느 메뉴를 많이 쓰는지" 페이지 단위 분석. 접�
   - [`0086_field_notes_standalone.sql`](./supabase/migrations/0086_field_notes_standalone.sql) — 현장관리 독립 모듈 승격: `relocation_field_notes.project_id` nullable + `shared_to_field` 플래그 (공사→현장관리 명시적 보내기)
   - [`0087_field_note_photo_caption.sql`](./supabase/migrations/0087_field_note_photo_caption.sql) — 현장관리 사진 설명: `relocation_field_note_photos.caption text`
   - [`0088_field_note_photo_update_policy.sql`](./supabase/migrations/0088_field_note_photo_update_policy.sql) — 현장관리 사진 설명 수정 권한: `relocation_field_note_photos` UPDATE GRANT + RLS (0085 에서 누락. 업로더 OR admin). 없으면 caption 수정이 RLS 에 막힘
+  - [`0089_field_stations.sql`](./supabase/migrations/0089_field_stations.sql) — 현장관리 국사현황(Phase D): `field_stations` + `field_station_sections` + `field_station_photos` + RLS (등록·수정 회사 누구나, 삭제 본인/admin). 사진은 기존 R2 버킷 재사용
 - **외선일보 별도 entity (v2)** — 접속일보와 동일 패턴으로 외선팀 전용 모듈. 외선 작업 특성(케이블 포설구간·전주번호 등)에 맞는 구조 별도 설계.
 - **접속일보 후속 (v2)** — segment-level 작업자 태그, 사진 첨부 + EXIF, 국사·함체 마스터 테이블화, 재접속 이력 조회, 지도 시각화
 - **M3 Phase 2 후속** — 사진 첨부 + EXIF·워터마크 (PRD M3-06), 일보 결재함 통합 (현재는 작업 상세에서 진입), 일반 일보 월별 CSV 리포트
