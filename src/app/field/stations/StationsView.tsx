@@ -16,7 +16,7 @@ import {
   ChevronLeft,
   ChevronRight,
 } from 'lucide-react'
-import NavLauncher from '../../relocation/[id]/NavLauncher'
+import NavLauncher, { NavPreferenceReset } from '../../relocation/[id]/NavLauncher'
 import AddressGeocodeField from './AddressGeocodeField'
 import StationPhotoUploader from './StationPhotoUploader'
 import {
@@ -567,7 +567,10 @@ function StationDetail({
               </button>
             )}
             {station.lat != null && station.lng != null ? (
-              <NavLauncher lat={station.lat} lng={station.lng} name={station.name} />
+              <>
+                <NavLauncher lat={station.lat} lng={station.lng} name={station.name} />
+                <NavPreferenceReset />
+              </>
             ) : station.address ? (
               <a
                 href={`https://map.kakao.com/?q=${encodeURIComponent(station.address)}`}

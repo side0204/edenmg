@@ -22,7 +22,7 @@ type Props = {
   name?: string
 }
 
-const APPS: NavApp[] = ['kakaomap', 'tmap', 'naver', 'google']
+const APPS: NavApp[] = ['kakaomap', 'kakaonavi', 'tmap', 'naver', 'google']
 
 export default function NavLauncher({ lat, lng, name }: Props) {
   const [open, setOpen] = useState(false)
@@ -34,7 +34,7 @@ export default function NavLauncher({ lat, lng, name }: Props) {
     setMounted(true)
     try {
       const v = localStorage.getItem(NAV_PREFERENCE_KEY)
-      if (v && (APPS as string[]).includes(v) && v !== 'kakaonavi') {
+      if (v && (APPS as string[]).includes(v)) {
         setPreferred(v as NavApp)
       }
     } catch {
