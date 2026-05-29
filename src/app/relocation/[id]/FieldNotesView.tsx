@@ -1,6 +1,6 @@
 'use client'
 
-import { useEffect, useState, useMemo, useCallback } from 'react'
+import { useEffect, useState, useMemo, useCallback, useRef } from 'react'
 import { useRouter } from 'next/navigation'
 import {
   Plus,
@@ -18,6 +18,8 @@ import {
   Map as MapIcon,
   Image as ImageIcon,
   Maximize2,
+  Satellite,
+  Camera,
 } from 'lucide-react'
 import { toast } from 'sonner'
 import { useKakaoMap } from './useKakaoMap'
@@ -31,6 +33,7 @@ import {
 } from '@/lib/field-notes'
 import NavLauncher, { NavPreferenceReset } from './NavLauncher'
 import FieldPhotoUploader from './FieldPhotoUploader'
+import RoadviewPanel from './RoadviewPanel'
 import {
   createFieldNote,
   updateFieldNote,
@@ -97,7 +100,7 @@ const KIND_ICON: Record<FieldNoteKind, typeof Info> = {
 }
 
 const KIND_BUTTON_TONE: Record<FieldNoteKind, string> = {
-  일반: 'bg-slate-700 hover:bg-slate-800 text-white border-slate-700',
+  일반: 'bg-violet-600 hover:bg-violet-700 text-white border-violet-600',
   주의: 'bg-amber-500 hover:bg-amber-600 text-white border-amber-600',
   위험: 'bg-rose-600 hover:bg-rose-700 text-white border-rose-700',
 }
@@ -127,6 +130,14 @@ export default function FieldNotesView({ projectId, notes, meId, meIsAdmin }: Pr
   const [sidebarOpen, setSidebarOpen] = useState(true)
   const [photoUrls, setPhotoUrls] = useState<Record<string, string>>({})
   const [galleryOpen, setGalleryOpen] = useState(false)
+
+  // 지도 보기 — 일반 / 위성(HYBRID) + 거리뷰(Roadview) 패널 (지장이설 캔버스에서 재사용)
+  const [mapTypeId, setMapTypeId] = useState<'roadmap' | 'hybrid'>('roadmap')
+  const [roadviewOpen, setRoadviewOpen] = useState(false)
+  const [roadviewPos, setRoadviewPos] = useState<LatLng | null>(null)
+  const [roadviewTitle, setRoadviewTitle] = useState<string | null>(null)
+  const [roadviewCollapsed, setRoadviewCollapsed] = useState(false)
+  const roadviewOpenRef = useRef(false)
 
   // ===== 노트 필터·정렬 =================================================
   const filteredNotes = useMemo(() => {
@@ -174,6 +185,12 @@ export default function FieldNotesView({ projectId, notes, meId, meIsAdmin }: Pr
       if (!e) return
       const lat = e.latLng.getLat()
       const lng = e.latLng.getLng()
+      // 거리뷰 모드 — 클릭 위치의 panorama 표시 (노트 추가/선택 해제 대신)
+      if (roadviewOpenRef.current) {
+        setRoadviewPos({ lat, lng })
+        setRoadviewTitle(null)
+        return
+      }
       if (addMode) {
         setShowAddPin({ lat, lng })
         setShowForm({ mode: 'create', kind: addMode, lat, lng })
@@ -186,6 +203,49 @@ export default function FieldNotesView({ projectId, notes, meId, meIsAdmin }: Pr
       kakao.maps.event.removeListener(map, 'click', handler)
     }
   }, [map, addMode])
+
+  // roadviewOpen 최신값을 click 리스너 클로저에서 읽기 위한 ref 동기화
+  useEffect(() => {
+    roadviewOpenRef.current = roadviewOpen
+  }, [roadviewOpen])
+
+  // 지도 타일 종류 — 일반(ROADMAP) / 위성+도로명(HYBRID)
+  useEffect(() => {
+    if (!map) return
+    try {
+      map.setMapTypeId(
+        mapTypeId === 'hybrid'
+          ? kakao.maps.MapTypeId.HYBRID
+          : kakao.maps.MapTypeId.ROADMAP,
+      )
+    } catch {
+      // ignore
+    }
+  }, [map, mapTypeId])
+
+  // 거리뷰 오버레이 — 켜질 때 지도 위 거리뷰 가능 도로(파란 선) 표시
+  useEffect(() => {
+    if (!map || !roadviewOpen) return
+    try {
+      map.addOverlayMapTypeId(kakao.maps.MapTypeId.ROADVIEW)
+    } catch {
+      // ignore
+    }
+    return () => {
+      try {
+        map.removeOverlayMapTypeId(kakao.maps.MapTypeId.ROADVIEW)
+      } catch {
+        // ignore
+      }
+    }
+  }, [map, roadviewOpen])
+
+  // 거리뷰 열린 상태에서 노트 선택 → 그 위치 panorama
+  useEffect(() => {
+    if (!roadviewOpen || !selectedNote) return
+    setRoadviewPos({ lat: selectedNote.lat, lng: selectedNote.lng })
+    setRoadviewTitle(selectedNote.title || selectedNote.kind)
+  }, [roadviewOpen, selectedNote])
 
   // ===== 노트 범위로 지도 맞춤 (수동 「전체 보기」 + 초기 1회) =============
   const fitToNotes = useCallback(
@@ -445,6 +505,49 @@ export default function FieldNotesView({ projectId, notes, meId, meIsAdmin }: Pr
           <ImageIcon className="h-3.5 w-3.5" />
           사진 갤러리 {totalPhotos}
         </button>
+
+        {/* 위성 / 거리뷰 — 지장이설 캔버스와 동일 */}
+        <div className="flex items-center gap-1">
+          <button
+            onClick={() => setMapTypeId((t) => (t === 'hybrid' ? 'roadmap' : 'hybrid'))}
+            title={mapTypeId === 'hybrid' ? '일반 지도로 전환' : '위성 + 도로명으로 전환'}
+            className={
+              'inline-flex items-center gap-1 rounded-lg border px-2 py-1 text-xs font-medium transition ' +
+              (mapTypeId === 'hybrid'
+                ? 'bg-slate-900 text-white border-slate-900'
+                : 'bg-white text-slate-700 border-slate-300 hover:bg-slate-50')
+            }
+          >
+            <Satellite className="h-3.5 w-3.5" />
+            위성
+          </button>
+          <button
+            onClick={() => {
+              const next = !roadviewOpen
+              setRoadviewOpen(next)
+              if (next) {
+                setRoadviewCollapsed(false)
+                if (selectedNote) {
+                  setRoadviewPos({ lat: selectedNote.lat, lng: selectedNote.lng })
+                  setRoadviewTitle(selectedNote.title || selectedNote.kind)
+                }
+              } else {
+                setRoadviewPos(null)
+                setRoadviewTitle(null)
+              }
+            }}
+            title={roadviewOpen ? '거리뷰 끄기' : '거리뷰 — 지도 위 파란 선/마커 클릭으로 표시'}
+            className={
+              'inline-flex items-center gap-1 rounded-lg border px-2 py-1 text-xs font-medium transition ' +
+              (roadviewOpen
+                ? 'bg-emerald-600 text-white border-emerald-600'
+                : 'bg-white text-slate-700 border-slate-300 hover:bg-slate-50')
+            }
+          >
+            <Camera className="h-3.5 w-3.5" />
+            거리뷰
+          </button>
+        </div>
 
         <div className="grow" />
 
@@ -878,6 +981,21 @@ export default function FieldNotesView({ projectId, notes, meId, meIsAdmin }: Pr
           onDelete={() => handleDelete(selectedNote.id)}
           onDeletePhoto={handleDeletePhoto}
           onSetShared={(shared) => handleSetShared(selectedNote.id, shared)}
+        />
+      )}
+
+      {/* 거리뷰 패널 — 우측 컬럼 (지장이설 캔버스 RoadviewPanel 재사용) */}
+      {roadviewOpen && (
+        <RoadviewPanel
+          position={roadviewPos}
+          title={roadviewTitle}
+          collapsed={roadviewCollapsed}
+          onToggleCollapse={() => setRoadviewCollapsed((c) => !c)}
+          onClose={() => {
+            setRoadviewOpen(false)
+            setRoadviewPos(null)
+            setRoadviewTitle(null)
+          }}
         />
       )}
 

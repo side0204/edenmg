@@ -18,12 +18,12 @@ export const FIELD_NOTE_KIND_COLOR: Record<FieldNoteKind, {
   badgeBorder: string
 }> = {
   일반: {
-    fill: '#475569',
-    stroke: '#1e293b',
-    text: '#f8fafc',
-    badgeBg: 'bg-slate-100',
-    badgeText: 'text-slate-700',
-    badgeBorder: 'border-slate-300',
+    fill: '#7c3aed',
+    stroke: '#5b21b6',
+    text: '#f5f3ff',
+    badgeBg: 'bg-violet-100',
+    badgeText: 'text-violet-700',
+    badgeBorder: 'border-violet-300',
   },
   주의: {
     fill: '#f59e0b',
