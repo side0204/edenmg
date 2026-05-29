@@ -44,7 +44,10 @@ export function buildNavUrl(app: NavApp, target: NavTarget): string {
       // by=CAR 자동차 길찾기. ep=목적지(end point) lat,lng.
       return `kakaomap://route?ep=${lat},${lng}&by=CAR`
     case 'kakaonavi':
-      // 출발지=현재위치 강제. coord_type=wgs84 권장.
+      // ⚠️ 이 deep link 단독으로는 "인증 실패 / 필수 파라메타 없음" 오류가 난다.
+      //   카카오내비 실행은 Kakao JS SDK 의 Kakao.Navi.start({name,x,y,coordType})
+      //   를 통한 인증이 필요 (Kakao.init + 카카오내비 제품 활성화). 현재 NavLauncher
+      //   선택 목록에서 제외. SDK 연동 시 이 빌더 대신 Kakao.Navi.start 사용.
       return `kakaonavi://navigate?name=${encName(name)}&x=${lng}&y=${lat}&coord_type=wgs84`
     case 'tmap':
       // goalname/goalx(lng)/goaly(lat)

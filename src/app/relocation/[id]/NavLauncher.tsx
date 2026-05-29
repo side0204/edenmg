@@ -22,7 +22,9 @@ type Props = {
   name?: string
 }
 
-const APPS: NavApp[] = ['kakaomap', 'kakaonavi', 'tmap', 'naver', 'google']
+// 카카오내비(kakaonavi)는 제외 — 단순 deep link 로는 "인증 실패 / 필수 파라메타 없음"
+//   오류. 실행하려면 Kakao JS SDK 의 Kakao.Navi.start() 인증이 필요 (별도 연동).
+const APPS: NavApp[] = ['kakaomap', 'tmap', 'naver', 'google']
 
 export default function NavLauncher({ lat, lng, name }: Props) {
   const [open, setOpen] = useState(false)
