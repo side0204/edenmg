@@ -21,6 +21,8 @@ import {
   Satellite,
   Camera,
   Building2,
+  Type,
+  Undo2,
 } from 'lucide-react'
 import Link from 'next/link'
 import { toast } from 'sonner'
@@ -39,6 +41,12 @@ import {
 import NavLauncher, { NavPreferenceReset } from './NavLauncher'
 import FieldPhotoUploader from './FieldPhotoUploader'
 import RoadviewPanel from './RoadviewPanel'
+import SketchOverlay, {
+  type SketchStroke,
+  type SketchText,
+  type SketchTool,
+  type SketchPen,
+} from './SketchOverlay'
 import {
   createFieldNote,
   updateFieldNote,
@@ -148,6 +156,22 @@ export default function FieldNotesView({
   >(null)
   const [capturing, setCapturing] = useState(false)
   const [canCapture, setCanCapture] = useState(false)
+
+  // 실사(sketch) — 펜으로 그리기 + 텍스트 메모. 캡처에 포함됨.
+  const [sketchMode, setSketchMode] = useState(false)
+  const [sketchTool, setSketchTool] = useState<SketchTool>('pen')
+  const [sketchPen, setSketchPen] = useState<SketchPen>({ color: '#ef4444', width: 3 })
+  const [sketchStrokes, setSketchStrokes] = useState<SketchStroke[]>([])
+  const [sketchTexts, setSketchTexts] = useState<SketchText[]>([])
+  // 지도 컨테이너 element — SketchOverlay 의 GPS↔픽셀 좌표 기준. setContainer 와 동시 보관.
+  const [mapEl, setMapEl] = useState<HTMLDivElement | null>(null)
+  const setMapContainer = useCallback(
+    (el: HTMLDivElement | null) => {
+      setMapEl(el)
+      setContainer(el)
+    },
+    [setContainer],
+  )
   const [myLocation, setMyLocation] = useState<LatLng | null>(null)
   const [locating, setLocating] = useState(false)
   const [kindFilter, setKindFilter] = useState<Record<FieldNoteKind, boolean>>({
@@ -349,6 +373,25 @@ export default function FieldNotesView({
   useEffect(() => {
     setCanCapture(displayMediaSupported())
   }, [])
+
+  // 실사(sketch) 모드 ON 시 카카오맵 드래그·줌 잠금 — SketchOverlay 가 pointer 캡처
+  useEffect(() => {
+    if (!map || !sketchMode) return
+    try {
+      map.setDraggable(false)
+      map.setZoomable(false)
+    } catch {
+      // SDK 거부 무시
+    }
+    return () => {
+      try {
+        map.setDraggable(true)
+        map.setZoomable(true)
+      } catch {
+        // SDK 거부 무시
+      }
+    }
+  }, [map, sketchMode])
 
   // 화면 캡처 → 캡처 이미지를 단 새 노트 폼 열기.
   //   위치: 거리뷰가 열려 있으면 거리뷰 위치, 아니면 지도 중앙.
@@ -727,6 +770,22 @@ export default function FieldNotesView({
               {capturing ? '캡처 중' : '화면 캡처'}
             </button>
           )}
+          <button
+            onClick={() => setSketchMode((v) => !v)}
+            title={sketchMode ? '그리기 끄기' : '지도·거리뷰 위에 펜으로 그리기 + 메모'}
+            className={
+              'inline-flex items-center gap-1 rounded-lg border px-2 py-1 text-xs font-medium transition ' +
+              (sketchMode
+                ? 'bg-slate-900 text-white border-slate-900'
+                : 'bg-white text-slate-700 border-slate-300 hover:bg-slate-50')
+            }
+          >
+            <Pencil className="h-3.5 w-3.5" />
+            그리기
+            {sketchStrokes.length + sketchTexts.length > 0
+              ? ` ${sketchStrokes.length + sketchTexts.length}`
+              : ''}
+          </button>
         </div>
 
         <div className="grow" />
@@ -928,7 +987,7 @@ export default function FieldNotesView({
 
         {/* 지도 컨테이너 — z-index 0 (배경). SVG 오버레이가 그 위에 z-index 1. */}
         <div
-          ref={setContainer}
+          ref={setMapContainer}
           className="absolute inset-0 bg-slate-200"
           style={{ cursor: addMode ? 'crosshair' : 'grab', zIndex: 0 }}
         />
@@ -1288,6 +1347,160 @@ export default function FieldNotesView({
             setRoadviewTitle(null)
           }}
         />
+      )}
+
+      {/* 실사 그리기 오버레이 — 영역(지도·거리뷰) 전체. 캡처에 포함됨 (실사입력 재사용) */}
+      <SketchOverlay
+        enabled={sketchMode}
+        tool={sketchTool}
+        pen={sketchPen}
+        strokes={sketchStrokes}
+        onStrokesChange={setSketchStrokes}
+        texts={sketchTexts}
+        onTextsChange={setSketchTexts}
+        coords="gps"
+        kakaoMap={map}
+        mapEpoch={epoch}
+        canvasContainerEl={mapEl}
+      />
+
+      {/* 실사 도구 바 — sketchMode ON 시 하단 중앙 floating. 캡처 중엔 숨김(PNG 에서 제외) */}
+      {sketchMode && (
+        <div
+          className="absolute bottom-3 left-1/2 z-50 -translate-x-1/2 flex flex-wrap items-center justify-center gap-1.5 rounded-2xl border border-slate-200 bg-white px-2.5 py-2 shadow-lg"
+          style={{
+            maxWidth: 'calc(100% - 1rem)',
+            visibility: capturing ? 'hidden' : undefined,
+          }}
+        >
+          <div className="flex items-center gap-1">
+            <button
+              type="button"
+              onClick={() => setSketchTool('pen')}
+              className={
+                'inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-md border ' +
+                (sketchTool === 'pen'
+                  ? 'bg-slate-900 border-slate-900 text-white'
+                  : 'bg-white border-slate-300 text-slate-700 hover:bg-slate-50')
+              }
+              title="펜 — 자유 그리기"
+              aria-label="펜"
+            >
+              <Pencil className="h-3.5 w-3.5" />
+            </button>
+            <button
+              type="button"
+              onClick={() => setSketchTool('text')}
+              className={
+                'inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-md border ' +
+                (sketchTool === 'text'
+                  ? 'bg-slate-900 border-slate-900 text-white'
+                  : 'bg-white border-slate-300 text-slate-700 hover:bg-slate-50')
+              }
+              title="텍스트 — 클릭한 위치에 글자(메모)"
+              aria-label="텍스트"
+            >
+              <Type className="h-3.5 w-3.5" />
+            </button>
+          </div>
+          <span className="mx-0.5 h-5 w-px bg-slate-200" />
+          <div className="flex items-center gap-1">
+            {['#ef4444', '#000000', '#2563eb', '#16a34a', '#eab308'].map((c) => (
+              <button
+                key={c}
+                type="button"
+                onClick={() => setSketchPen((p) => ({ ...p, color: c }))}
+                className={
+                  'inline-block h-6 w-6 shrink-0 rounded-full border-2 ' +
+                  (sketchPen.color === c ? 'border-slate-900' : 'border-slate-300')
+                }
+                style={{ backgroundColor: c }}
+                title={`색 ${c}`}
+                aria-label={`색 ${c}`}
+              />
+            ))}
+          </div>
+          <span className="mx-0.5 h-5 w-px bg-slate-200" />
+          <div className="flex items-center gap-1">
+            {[2, 3, 5, 8].map((w) => (
+              <button
+                key={w}
+                type="button"
+                onClick={() => setSketchPen((p) => ({ ...p, width: w }))}
+                className={
+                  'inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-md border ' +
+                  (sketchPen.width === w
+                    ? 'bg-slate-900 border-slate-900 text-white'
+                    : 'bg-white border-slate-300 text-slate-700 hover:bg-slate-50')
+                }
+                title={sketchTool === 'text' ? `글자 크기 ${w * 6}px` : `굵기 ${w}px`}
+                aria-label={`굵기 ${w}px`}
+              >
+                <span
+                  className="inline-block rounded-full bg-current"
+                  style={{ width: w, height: w }}
+                />
+              </button>
+            ))}
+          </div>
+          <span className="mx-0.5 h-5 w-px bg-slate-200" />
+          <div className="flex items-center gap-1">
+            <button
+              type="button"
+              onClick={() => {
+                const lastS = sketchStrokes[sketchStrokes.length - 1]
+                const lastT = sketchTexts[sketchTexts.length - 1]
+                if (!lastS && !lastT) return
+                const tsS = lastS ? Number(lastS.id.split('-')[1]) : 0
+                const tsT = lastT ? Number(lastT.id.split('-')[1]) : 0
+                if (tsS >= tsT) setSketchStrokes((s) => s.slice(0, -1))
+                else setSketchTexts((t) => t.slice(0, -1))
+              }}
+              disabled={sketchStrokes.length === 0 && sketchTexts.length === 0}
+              className="inline-flex items-center gap-1 shrink-0 rounded-md border border-slate-300 px-2 h-8 text-[11px] font-medium text-slate-700 hover:bg-slate-50 disabled:opacity-40"
+              title="마지막 항목 되돌리기"
+            >
+              <Undo2 className="h-3 w-3" />
+              되돌리기
+            </button>
+            <button
+              type="button"
+              onClick={() => {
+                if (sketchStrokes.length === 0 && sketchTexts.length === 0) return
+                if (!confirm('그림·메모를 모두 지웁니다. 계속할까요?')) return
+                setSketchStrokes([])
+                setSketchTexts([])
+              }}
+              disabled={sketchStrokes.length === 0 && sketchTexts.length === 0}
+              className="inline-flex items-center gap-1 shrink-0 rounded-md border border-rose-300 px-2 h-8 text-[11px] font-medium text-rose-700 hover:bg-rose-50 disabled:opacity-40"
+              title="전체 지우기"
+            >
+              <Trash2 className="h-3 w-3" />
+              지우기
+            </button>
+            {canCapture && (
+              <button
+                type="button"
+                onClick={handleCapture}
+                disabled={capturing}
+                className="inline-flex items-center gap-1 shrink-0 rounded-md bg-rose-600 px-2.5 h-8 text-[11px] font-semibold text-white hover:bg-rose-700 disabled:opacity-50"
+                title="현재 화면(그림 포함)을 캡처해 노트로 저장"
+              >
+                <Camera className="h-3 w-3" />
+                캡처해서 노트
+              </button>
+            )}
+            <button
+              type="button"
+              onClick={() => setSketchMode(false)}
+              className="inline-flex items-center gap-1 shrink-0 rounded-md border border-slate-300 bg-slate-100 px-2 h-8 text-[11px] font-medium text-slate-700 hover:bg-slate-200"
+              title="그리기 끄기"
+            >
+              <X className="h-3 w-3" />
+              끄기
+            </button>
+          </div>
+        </div>
       )}
 
       {/* 노트 생성/수정 폼 모달 */}
