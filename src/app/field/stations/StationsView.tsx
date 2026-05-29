@@ -918,13 +918,8 @@ function Lightbox({
   if (!p) return null
 
   return (
-    <div
-      className="fixed inset-0 z-[70] flex flex-col bg-black/90"
-      onClick={(e) => {
-        if (e.target === e.currentTarget) onClose()
-      }}
-    >
-      <div className="flex items-center justify-between px-4 py-3 text-white">
+    <div className="fixed inset-0 z-[70] flex flex-col bg-black/90">
+      <div className="shrink-0 flex items-center justify-between px-4 py-3 text-white">
         <span className="text-sm">
           {index + 1} / {photos.length} · {p.sectionLabel}
         </span>
@@ -932,45 +927,61 @@ function Lightbox({
           <X className="h-5 w-5" />
         </button>
       </div>
-      <div className="relative flex-1 flex items-center justify-center px-2">
-        {index > 0 && (
-          <button
-            type="button"
-            onClick={() => onIndex(index - 1)}
-            className="absolute left-2 rounded-full bg-white/10 p-2 text-white hover:bg-white/20"
-            aria-label="이전"
-          >
-            <ChevronLeft className="h-6 w-6" />
-          </button>
-        )}
-        {p.url ? (
-          // eslint-disable-next-line @next/next/no-img-element
-          <img src={p.url} alt={p.caption ?? ''} className="max-h-full max-w-full object-contain" />
-        ) : (
-          <Loader2 className="h-8 w-8 animate-spin text-white/60" />
-        )}
-        {index < photos.length - 1 && (
-          <button
-            type="button"
-            onClick={() => onIndex(index + 1)}
-            className="absolute right-2 rounded-full bg-white/10 p-2 text-white hover:bg-white/20"
-            aria-label="다음"
-          >
-            <ChevronRight className="h-6 w-6" />
-          </button>
+
+      {/* ◀ ▶ 는 화면에 고정 — 스크롤해도 항상 같은 위치 */}
+      {index > 0 && (
+        <button
+          type="button"
+          onClick={() => onIndex(index - 1)}
+          className="fixed left-2 top-1/2 z-10 -translate-y-1/2 rounded-full bg-white/10 p-2 text-white hover:bg-white/20"
+          aria-label="이전"
+        >
+          <ChevronLeft className="h-6 w-6" />
+        </button>
+      )}
+      {index < photos.length - 1 && (
+        <button
+          type="button"
+          onClick={() => onIndex(index + 1)}
+          className="fixed right-2 top-1/2 z-10 -translate-y-1/2 rounded-full bg-white/10 p-2 text-white hover:bg-white/20"
+          aria-label="다음"
+        >
+          <ChevronRight className="h-6 w-6" />
+        </button>
+      )}
+
+      {/* 본문 — 사진이 커서 캡션이 잘리면 세로 스크롤 */}
+      <div className="flex-1 min-h-0 overflow-y-auto">
+        <div
+          className="flex min-h-full items-center justify-center px-2 py-3"
+          onClick={(e) => {
+            if (e.target === e.currentTarget) onClose()
+          }}
+        >
+          {p.url ? (
+            // eslint-disable-next-line @next/next/no-img-element
+            <img
+              src={p.url}
+              alt={p.caption ?? ''}
+              className="max-w-full max-h-[82vh] object-contain"
+            />
+          ) : (
+            <Loader2 className="h-8 w-8 animate-spin text-white/60" />
+          )}
+        </div>
+
+        {(p.caption || p.uploadedByName || p.takenAt) && (
+          <div className="px-4 pb-6 pt-1 text-center text-white/90">
+            {p.caption && <p className="text-sm">{p.caption}</p>}
+            <p className="text-[11px] text-white/60 mt-0.5">
+              {p.uploadedByName ?? ''}
+              {p.takenAt
+                ? ` · 촬영 ${new Date(p.takenAt).toLocaleString('ko-KR', { timeZone: 'Asia/Seoul' })}`
+                : ''}
+            </p>
+          </div>
         )}
       </div>
-      {(p.caption || p.uploadedByName || p.takenAt) && (
-        <div className="px-4 py-3 text-center text-white/90">
-          {p.caption && <p className="text-sm">{p.caption}</p>}
-          <p className="text-[11px] text-white/60 mt-0.5">
-            {p.uploadedByName ?? ''}
-            {p.takenAt
-              ? ` · 촬영 ${new Date(p.takenAt).toLocaleString('ko-KR', { timeZone: 'Asia/Seoul' })}`
-              : ''}
-          </p>
-        </div>
-      )}
     </div>
   )
 }
