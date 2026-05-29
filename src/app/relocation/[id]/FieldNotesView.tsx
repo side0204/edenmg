@@ -25,10 +25,13 @@ import {
 import Link from 'next/link'
 import { toast } from 'sonner'
 import { useKakaoMap } from './useKakaoMap'
+import exifr from 'exifr'
 import {
   type FieldNoteKind,
   FIELD_NOTE_KIND_VALUES,
   FIELD_NOTE_KIND_COLOR,
+  FIELD_NOTE_PHOTO_MAX_BYTES,
+  FIELD_NOTE_PHOTO_MIME_WHITELIST,
   haversineMeters,
   formatDistance,
   isSameKstDate,
@@ -40,11 +43,13 @@ import {
   createFieldNote,
   updateFieldNote,
   deleteFieldNote,
+  uploadFieldNotePhoto,
   deleteFieldNotePhoto,
   getFieldNotePhotoUrls,
   setFieldNoteShared,
   updateFieldNotePhotoCaption,
 } from './field-note-actions'
+import { captureCanvasRegion, displayMediaSupported } from './capture-region'
 
 // 현장관리 — 지도 모드 전용 뷰.
 //   - 노트 마커 (일반/주의/위험) 지도 위에 표시
@@ -137,10 +142,12 @@ export default function FieldNotesView({
   const [selectedId, setSelectedId] = useState<string | null>(null)
   const [showAddPin, setShowAddPin] = useState<LatLng | null>(null)
   const [showForm, setShowForm] = useState<
-    | { mode: 'create'; kind: FieldNoteKind; lat: number; lng: number }
+    | { mode: 'create'; kind: FieldNoteKind; lat: number; lng: number; initialFiles?: File[] }
     | { mode: 'edit'; note: FieldNoteData }
     | null
   >(null)
+  const [capturing, setCapturing] = useState(false)
+  const [canCapture, setCanCapture] = useState(false)
   const [myLocation, setMyLocation] = useState<LatLng | null>(null)
   const [locating, setLocating] = useState(false)
   const [kindFilter, setKindFilter] = useState<Record<FieldNoteKind, boolean>>({
@@ -337,6 +344,41 @@ export default function FieldNotesView({
       toast.error('이 국사는 위치 정보가 없습니다.')
     }
   }, [map, focusStationId, stations])
+
+  // 화면 캡처 지원 여부 (마운트 후 — SSR mismatch 방지)
+  useEffect(() => {
+    setCanCapture(displayMediaSupported())
+  }, [])
+
+  // 화면 캡처 → 캡처 이미지를 단 새 노트 폼 열기.
+  //   위치: 거리뷰가 열려 있으면 거리뷰 위치, 아니면 지도 중앙.
+  const handleCapture = useCallback(async () => {
+    if (capturing || !map) return
+    let lat: number
+    let lng: number
+    if (roadviewOpen && roadviewPos) {
+      lat = roadviewPos.lat
+      lng = roadviewPos.lng
+    } else {
+      const c = map.getCenter()
+      lat = c.getLat()
+      lng = c.getLng()
+    }
+    setCapturing(true)
+    const res = await captureCanvasRegion('field-note')
+    setCapturing(false)
+    if (!res.ok) {
+      if (!res.cancelled) toast.error(res.error ?? '화면 캡처에 실패했습니다')
+      return
+    }
+    setShowForm({
+      mode: 'create',
+      kind: addMode ?? '일반',
+      lat,
+      lng,
+      initialFiles: [res.file],
+    })
+  }, [capturing, map, roadviewOpen, roadviewPos, addMode])
 
   // ===== 노트 → 화면 픽셀 투영 (epoch 가 카카오맵 이동 시마다 증가하므로 캐시 무효화) =====
   const projectedMarkers = useMemo(() => {
@@ -665,6 +707,26 @@ export default function FieldNotesView({
             <Camera className="h-3.5 w-3.5" />
             거리뷰
           </button>
+          {canCapture && (
+            <button
+              onClick={handleCapture}
+              disabled={capturing}
+              title="현재 지도·거리뷰 화면을 캡처해 노트로 저장 (화면 공유 창에서 현재 탭 선택)"
+              className={
+                'inline-flex items-center gap-1 rounded-lg border px-2 py-1 text-xs font-medium transition ' +
+                (capturing
+                  ? 'bg-rose-600 text-white border-rose-600'
+                  : 'bg-white text-slate-700 border-slate-300 hover:bg-slate-50')
+              }
+            >
+              {capturing ? (
+                <Loader2 className="h-3.5 w-3.5 animate-spin" />
+              ) : (
+                <Camera className="h-3.5 w-3.5" />
+              )}
+              {capturing ? '캡처 중' : '화면 캡처'}
+            </button>
+          )}
         </div>
 
         <div className="grow" />
@@ -722,7 +784,10 @@ export default function FieldNotesView({
         </div>
       </div>
 
-    <div className="relative flex h-[72vh] sm:h-[76vh] w-full overflow-hidden rounded-xl border border-slate-300 bg-slate-100">
+    <div
+      data-sketch-canvas-region
+      className="relative flex h-[72vh] sm:h-[76vh] w-full overflow-hidden rounded-xl border border-slate-300 bg-slate-100"
+    >
       {/* 좌측 사이드바 — 노트 목록 */}
       {sidebarOpen ? (
         <aside className="w-[280px] shrink-0 bg-white border-r border-slate-200 flex flex-col">
@@ -1613,7 +1678,7 @@ function NoteFormModal({
 }: {
   projectId: string | null
   state:
-    | { mode: 'create'; kind: FieldNoteKind; lat: number; lng: number }
+    | { mode: 'create'; kind: FieldNoteKind; lat: number; lng: number; initialFiles?: File[] }
     | { mode: 'edit'; note: FieldNoteData }
   onClose: () => void
   onSuccess: () => void
@@ -1632,6 +1697,14 @@ function NoteFormModal({
   const [address, setAddress] = useState(initialAddress)
   const [busy, setBusy] = useState(false)
 
+  // 사진 첨부 (생성 모드) — 캡처 이미지 또는 파일. 노트 생성 후 업로드.
+  const initialFiles = state.mode === 'create' ? state.initialFiles : undefined
+  type StagedPhoto = { file: File; previewUrl: string; caption: string }
+  const [staged, setStaged] = useState<StagedPhoto[]>([])
+  const [photoProgress, setPhotoProgress] = useState<{ done: number; total: number } | null>(null)
+  const fileInputRef = useRef<HTMLInputElement>(null)
+  const initStagedRef = useRef(false)
+
   // body scroll lock
   useEffect(() => {
     const prev = document.body.style.overflow
@@ -1640,6 +1713,57 @@ function NoteFormModal({
       document.body.style.overflow = prev
     }
   }, [])
+
+  // 캡처 등으로 전달된 초기 파일 스테이징 (1회)
+  useEffect(() => {
+    if (initStagedRef.current) return
+    initStagedRef.current = true
+    if (initialFiles && initialFiles.length > 0) {
+      setStaged(
+        initialFiles.map((f) => ({
+          file: f,
+          previewUrl: URL.createObjectURL(f),
+          caption: '',
+        })),
+      )
+    }
+  }, [initialFiles])
+
+  // object URL 정리
+  useEffect(() => {
+    return () => {
+      staged.forEach((s) => URL.revokeObjectURL(s.previewUrl))
+    }
+  }, [staged])
+
+  function handleSelectFiles(e: React.ChangeEvent<HTMLInputElement>) {
+    const files = Array.from(e.target.files ?? [])
+    e.target.value = ''
+    if (files.length === 0) return
+    const next: StagedPhoto[] = []
+    for (const file of files) {
+      if (file.size > FIELD_NOTE_PHOTO_MAX_BYTES) {
+        toast.error(`'${file.name}' — 10MB 초과`)
+        continue
+      }
+      if (!(FIELD_NOTE_PHOTO_MIME_WHITELIST as readonly string[]).includes(file.type)) {
+        toast.error(`'${file.name}' — 이미지 형식 아님`)
+        continue
+      }
+      next.push({ file, previewUrl: URL.createObjectURL(file), caption: '' })
+    }
+    if (next.length > 0) setStaged((prev) => [...prev, ...next])
+  }
+  function setStagedCaption(i: number, v: string) {
+    setStaged((prev) => prev.map((s, idx) => (idx === i ? { ...s, caption: v } : s)))
+  }
+  function removeStaged(i: number) {
+    setStaged((prev) => {
+      const t = prev[i]
+      if (t) URL.revokeObjectURL(t.previewUrl)
+      return prev.filter((_, idx) => idx !== i)
+    })
+  }
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault()
@@ -1667,7 +1791,54 @@ function NoteFormModal({
       } else {
         const res = await createFieldNote(fd)
         if (res.ok) {
-          toast.success(`${kind} 노트 추가됨`)
+          if (staged.length > 0) {
+            setPhotoProgress({ done: 0, total: staged.length })
+            for (let i = 0; i < staged.length; i++) {
+              const { file, caption } = staged[i]
+              let takenAt: string | null = null
+              let gpsLat: number | null = null
+              let gpsLng: number | null = null
+              try {
+                const exif = await exifr.parse(file, {
+                  gps: true,
+                  pick: ['DateTimeOriginal', 'CreateDate', 'latitude', 'longitude'],
+                })
+                if (exif) {
+                  const d = (exif.DateTimeOriginal ?? exif.CreateDate) as
+                    | Date
+                    | string
+                    | undefined
+                  if (d) {
+                    const dt = d instanceof Date ? d : new Date(d)
+                    if (!Number.isNaN(dt.getTime())) takenAt = dt.toISOString()
+                  }
+                  if (typeof exif.latitude === 'number') gpsLat = exif.latitude
+                  if (typeof exif.longitude === 'number') gpsLng = exif.longitude
+                }
+              } catch {
+                // EXIF 없는 파일(캡처 PNG 등)도 정상 업로드
+              }
+              const pfd = new FormData()
+              pfd.append('file', file)
+              pfd.append('note_id', res.id)
+              pfd.append('project_id', projectId ?? '')
+              if (caption.trim()) pfd.append('caption', caption.trim())
+              if (takenAt) pfd.append('taken_at', takenAt)
+              if (gpsLat !== null) pfd.append('gps_lat', String(gpsLat))
+              if (gpsLng !== null) pfd.append('gps_lng', String(gpsLng))
+              try {
+                await uploadFieldNotePhoto(pfd)
+              } catch {
+                toast.error(`'${file.name}' 사진 업로드 실패`)
+              }
+              setPhotoProgress({ done: i + 1, total: staged.length })
+            }
+          }
+          toast.success(
+            staged.length > 0
+              ? `${kind} 노트 추가됨 (사진 ${staged.length}장)`
+              : `${kind} 노트 추가됨`,
+          )
           onSuccess()
         } else {
           toast.error(res.error)
@@ -1764,6 +1935,68 @@ function NoteFormModal({
             />
           </div>
 
+          {!isEdit && (
+            <div>
+              <label className="text-xs font-medium text-slate-700">사진 (선택)</label>
+              <input
+                ref={fileInputRef}
+                type="file"
+                accept="image/jpeg,image/png,image/webp,image/heic,image/heif"
+                multiple
+                capture="environment"
+                onChange={handleSelectFiles}
+                disabled={busy}
+                className="hidden"
+              />
+              <div className="mt-1">
+                <button
+                  type="button"
+                  onClick={() => fileInputRef.current?.click()}
+                  disabled={busy}
+                  className="inline-flex items-center gap-1.5 rounded-lg border border-slate-300 bg-white px-3 py-1.5 text-xs font-medium text-slate-700 hover:bg-slate-50 disabled:opacity-50"
+                >
+                  <ImageIcon className="h-3.5 w-3.5" />
+                  사진 추가
+                </button>
+                <span className="ml-2 text-[10px] text-slate-400">
+                  카메라·갤러리 · 화면 캡처는 도구바 「화면 캡처」
+                </span>
+              </div>
+              {staged.length > 0 && (
+                <div className="mt-1.5 space-y-1.5">
+                  {staged.map((s, i) => (
+                    <div key={i} className="flex items-start gap-1.5">
+                      {/* eslint-disable-next-line @next/next/no-img-element */}
+                      <img
+                        src={s.previewUrl}
+                        alt=""
+                        className="h-12 w-12 shrink-0 rounded object-cover"
+                      />
+                      <textarea
+                        value={s.caption}
+                        onChange={(e) => setStagedCaption(i, e.target.value)}
+                        rows={2}
+                        maxLength={200}
+                        disabled={busy}
+                        placeholder="사진 설명 (선택)"
+                        className="flex-1 min-w-0 rounded border border-slate-300 px-1.5 py-1 text-[11px] resize-none focus:border-indigo-500 focus:outline-none disabled:opacity-60"
+                      />
+                      <button
+                        type="button"
+                        onClick={() => removeStaged(i)}
+                        disabled={busy}
+                        className="shrink-0 rounded p-1 text-slate-400 hover:bg-slate-200 disabled:opacity-50"
+                        aria-label="제거"
+                      >
+                        <X className="h-3.5 w-3.5" />
+                      </button>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+          )}
+
           <div className="rounded bg-slate-50 p-2 text-[11px] text-slate-500">
             위치: {initialLat.toFixed(5)}, {initialLng.toFixed(5)}
             {isEdit && (
@@ -1792,7 +2025,14 @@ function NoteFormModal({
               }
             >
               {busy ? (
-                <Loader2 className="h-4 w-4 animate-spin mx-auto" />
+                photoProgress ? (
+                  <span className="inline-flex items-center justify-center gap-1.5">
+                    <Loader2 className="h-4 w-4 animate-spin" />
+                    사진 {photoProgress.done}/{photoProgress.total}
+                  </span>
+                ) : (
+                  <Loader2 className="h-4 w-4 animate-spin mx-auto" />
+                )
               ) : isEdit ? (
                 '수정 저장'
               ) : (
