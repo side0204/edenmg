@@ -15,6 +15,8 @@ import {
   Save,
   ChevronLeft,
   ChevronRight,
+  ZoomIn,
+  ZoomOut,
 } from 'lucide-react'
 import NavLauncher, { NavPreferenceReset } from '../../relocation/[id]/NavLauncher'
 import AddressGeocodeField from './AddressGeocodeField'
@@ -902,6 +904,24 @@ function Lightbox({
   onIndex: (i: number) => void
   onClose: () => void
 }) {
+  const areaRef = useRef<HTMLDivElement>(null)
+  const [zoom, setZoom] = useState(1)
+  const [pan, setPan] = useState({ x: 0, y: 0 })
+  const [dragging, setDragging] = useState(false)
+  const dragStartRef = useRef<{ x: number; y: number } | null>(null)
+
+  // 사진이 바뀌면 줌·이동 초기화
+  useEffect(() => {
+    setZoom(1)
+    setPan({ x: 0, y: 0 })
+  }, [index])
+
+  // 줌이 1배로 돌아오면 이동도 초기화
+  useEffect(() => {
+    if (zoom === 1) setPan({ x: 0, y: 0 })
+  }, [zoom])
+
+  // 키보드 (ESC·◀▶) + body scroll lock
   useEffect(() => {
     const prev = document.body.style.overflow
     document.body.style.overflow = 'hidden'
@@ -917,21 +937,99 @@ function Lightbox({
     }
   }, [index, photos.length, onIndex, onClose])
 
+  // 마우스 휠 줌 (PC) — React onWheel 은 passive 라 preventDefault 안 됨 → native 리스너
+  useEffect(() => {
+    const el = areaRef.current
+    if (!el) return
+    function onWheel(e: WheelEvent) {
+      e.preventDefault()
+      setZoom((z) => {
+        const next = z * (e.deltaY < 0 ? 1.2 : 1 / 1.2)
+        return Math.min(5, Math.max(1, Math.round(next * 100) / 100))
+      })
+    }
+    el.addEventListener('wheel', onWheel, { passive: false })
+    return () => el.removeEventListener('wheel', onWheel)
+  }, [])
+
+  function applyZoom(factor: number) {
+    setZoom((z) => Math.min(5, Math.max(1, Math.round(z * factor * 100) / 100)))
+  }
+
+  // 드래그 이동 — 마우스(+펜) 이고 확대 상태에서만. 모바일 터치는 네이티브 핀치줌 유지.
+  function onPointerDown(e: React.PointerEvent) {
+    if (e.pointerType === 'touch' || zoom <= 1) return
+    dragStartRef.current = { x: e.clientX - pan.x, y: e.clientY - pan.y }
+    setDragging(true)
+    try {
+      ;(e.currentTarget as HTMLElement).setPointerCapture(e.pointerId)
+    } catch {
+      // ignore
+    }
+  }
+  function onPointerMove(e: React.PointerEvent) {
+    if (!dragStartRef.current) return
+    setPan({ x: e.clientX - dragStartRef.current.x, y: e.clientY - dragStartRef.current.y })
+  }
+  function onPointerUp(e: React.PointerEvent) {
+    dragStartRef.current = null
+    setDragging(false)
+    try {
+      ;(e.currentTarget as HTMLElement).releasePointerCapture(e.pointerId)
+    } catch {
+      // ignore
+    }
+  }
+
   const p = photos[index]
   if (!p) return null
 
   return (
     <div className="fixed inset-0 z-[70] flex flex-col bg-black/90">
-      <div className="shrink-0 flex items-center justify-between px-4 py-3 text-white">
-        <span className="text-sm">
+      <div className="shrink-0 flex items-center justify-between gap-2 px-3 py-3 text-white">
+        <span className="text-sm truncate">
           {index + 1} / {photos.length} · {p.sectionLabel}
         </span>
-        <button type="button" onClick={onClose} className="rounded p-1 hover:bg-white/10" aria-label="닫기">
+        {/* 확대/축소 컨트롤 (PC·모바일 공용) */}
+        <div className="flex shrink-0 items-center gap-0.5">
+          <button
+            type="button"
+            onClick={() => applyZoom(1 / 1.25)}
+            disabled={zoom <= 1}
+            className="rounded p-1.5 hover:bg-white/10 disabled:opacity-40"
+            aria-label="축소"
+          >
+            <ZoomOut className="h-5 w-5" />
+          </button>
+          <button
+            type="button"
+            onClick={() => setZoom(1)}
+            className="min-w-[3.25rem] rounded px-1 py-1 text-xs hover:bg-white/10"
+            title="원본 크기로"
+          >
+            {Math.round(zoom * 100)}%
+          </button>
+          <button
+            type="button"
+            onClick={() => applyZoom(1.25)}
+            disabled={zoom >= 5}
+            className="rounded p-1.5 hover:bg-white/10 disabled:opacity-40"
+            aria-label="확대"
+          >
+            <ZoomIn className="h-5 w-5" />
+          </button>
+        </div>
+        <button
+          type="button"
+          onClick={onClose}
+          className="shrink-0 rounded p-1 hover:bg-white/10"
+          aria-label="닫기"
+        >
           <X className="h-5 w-5" />
         </button>
       </div>
 
-      {/* ◀ ▶ 는 화면에 고정 — 스크롤해도 항상 같은 위치 */}
+      {/* ◀ ▶ 는 화면에 고정 */}
       {index > 0 && (
         <button
           type="button"
@@ -953,38 +1051,45 @@ function Lightbox({
         </button>
       )}
 
-      {/* 본문 — 사진이 커서 캡션이 잘리면 세로 스크롤 */}
-      <div className="flex-1 min-h-0 overflow-y-auto">
-        <div
-          className="flex min-h-full items-center justify-center px-2 py-3"
-          onClick={(e) => {
-            if (e.target === e.currentTarget) onClose()
-          }}
-        >
-          {p.url ? (
-            // eslint-disable-next-line @next/next/no-img-element
-            <img
-              src={p.url}
-              alt={p.caption ?? ''}
-              className="max-w-full max-h-[82vh] object-contain"
-            />
-          ) : (
-            <Loader2 className="h-8 w-8 animate-spin text-white/60" />
-          )}
-        </div>
-
-        {(p.caption || p.uploadedByName || p.takenAt) && (
-          <div className="px-4 pb-6 pt-1 text-center text-white/90">
-            {p.caption && <p className="text-[18px]">{p.caption}</p>}
-            <p className="text-[11px] text-white/60 mt-0.5">
-              {p.uploadedByName ?? ''}
-              {p.takenAt
-                ? ` · 촬영 ${new Date(p.takenAt).toLocaleString('ko-KR', { timeZone: 'Asia/Seoul' })}`
-                : ''}
-            </p>
-          </div>
+      {/* 이미지 영역 — 휠 줌 + 드래그 이동(확대 시) + 더블클릭 토글 */}
+      <div
+        ref={areaRef}
+        onPointerDown={onPointerDown}
+        onPointerMove={onPointerMove}
+        onPointerUp={onPointerUp}
+        onDoubleClick={() => setZoom((z) => (z > 1 ? 1 : 2.5))}
+        className="relative flex flex-1 min-h-0 items-center justify-center overflow-hidden px-2 select-none"
+        style={{ cursor: zoom > 1 ? (dragging ? 'grabbing' : 'grab') : 'default' }}
+      >
+        {p.url ? (
+          // eslint-disable-next-line @next/next/no-img-element
+          <img
+            src={p.url}
+            alt={p.caption ?? ''}
+            draggable={false}
+            style={{
+              transform: `translate(${pan.x}px, ${pan.y}px) scale(${zoom})`,
+              transition: dragging ? 'none' : 'transform 0.12s ease-out',
+            }}
+            className="max-h-full max-w-full object-contain"
+          />
+        ) : (
+          <Loader2 className="h-8 w-8 animate-spin text-white/60" />
         )}
       </div>
+
+      {/* 캡션 */}
+      {(p.caption || p.uploadedByName || p.takenAt) && (
+        <div className="shrink-0 max-h-[28vh] overflow-y-auto px-4 pb-6 pt-2 text-center text-white/90">
+          {p.caption && <p className="text-[18px]">{p.caption}</p>}
+          <p className="text-[11px] text-white/60 mt-0.5">
+            {p.uploadedByName ?? ''}
+            {p.takenAt
+              ? ` · 촬영 ${new Date(p.takenAt).toLocaleString('ko-KR', { timeZone: 'Asia/Seoul' })}`
+              : ''}
+          </p>
+        </div>
+      )}
     </div>
   )
 }
