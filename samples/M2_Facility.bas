@@ -1736,7 +1736,7 @@ End Sub
 Public Sub SnapToNetworkGrid(wsNw As Worksheet, ax As Double, ay As Double, _
                               ByRef nx As Double, ByRef ny As Double)
     Dim cw As Double: cw = wsNw.Cells(1, 1).Width
-    Dim rh As Double: rh = wsNw.Cells(1, 1).Height
+    Dim rh As Double: rh = wsNw.Cells(LEGEND_ROWS + 1, 1).Height   ' 격자 셀 높이 = 2행 (1행=검색바). owner 2026-06-10
     If cw <= 0 Then cw = CELL_PT
     If rh <= 0 Then rh = CELL_PT
     Dim gridW As Double: gridW = cw * 네트웍_격자_단위가로cells()
@@ -1744,20 +1744,19 @@ Public Sub SnapToNetworkGrid(wsNw As Worksheet, ax As Double, ay As Double, _
     If ax < 0 Then ax = 0
     If ay < 0 Then ay = 0
     Dim gridCol As Long: gridCol = CLng(ax / gridW)
-    Dim gridRow As Long: gridRow = CLng(ay / gridH)
+    ' owner 2026-06-10: 격자 원점 Y = NW_TOP_H (1행=검색바, 격자 2행부터). gridRow 0 = 첫 격자 행(Top=NW_TOP_H).
+    Dim gridRow As Long: gridRow = CLng((ay - NW_TOP_H) / gridH)
     ' owner 2026-06-07 (8-59): 첫 격자 열 (gridCol=0 = A열 영역) 스킵 — 행 클램프와 동일 정책.
     If gridCol < 1 Then gridCol = 1
+    If gridRow < 0 Then gridRow = 0
     ' 노랑 셀 (col = gridCol*20 + 1) 의 중앙 좌표
     nx = gridCol * gridW + cw / 2
-    ny = gridRow * gridH + rh / 2
-    ' 범례 영역(1행) 침범 방지 — owner 요구. 시설물 중심이 범례 행 아래로 가도록 클램프.
+    ny = NW_TOP_H + gridRow * gridH + rh / 2
+    ' 검색바(1행) 침범 방지 — 시설물 중심이 검색바 아래로 가도록 클램프.
     Dim minNy As Double
-    minNy = LEGEND_ROW_HEIGHT + FAC_DEFAULT_H / 2 + 8
+    minNy = NW_TOP_H + FAC_DEFAULT_H / 2 + 8
     If ny < minNy Then
-        ' 범례 아래 첫 격자 행으로 스냅
-        Dim minGridRow As Long
-        minGridRow = Int((LEGEND_ROW_HEIGHT + 1) / gridH) + 1
-        ny = minGridRow * gridH + rh / 2
+        ny = NW_TOP_H + gridH + rh / 2   ' 첫 격자 행이 검색바와 겹치면 다음 격자 행으로
         If ny < minNy Then ny = minNy
     End If
 End Sub
@@ -1886,7 +1885,7 @@ Public Function 네트웍_우선순위_배치(wsNw As Worksheet, refX As Double,
     네트웍_우선순위_배치 = False
 
     Dim cw As Double: cw = wsNw.Cells(1, 1).Width
-    Dim rh As Double: rh = wsNw.Cells(1, 1).Height
+    Dim rh As Double: rh = wsNw.Cells(LEGEND_ROWS + 1, 1).Height   ' 격자 셀 높이 = 2행 (1행=검색바). owner 2026-06-10
     If cw <= 0 Then cw = CELL_PT
     If rh <= 0 Then rh = CELL_PT
     Dim gw As Double: gw = cw * 네트웍_격자_단위가로cells()
@@ -1912,7 +1911,7 @@ Public Function 네트웍_우선순위_배치(wsNw As Worksheet, refX As Double,
     Next s
 
     ' 클램프 (범례·A열 회피 — 기존 빈격자 검색과 동일 정책)
-    Dim minTryY As Double: minTryY = LEGEND_ROW_HEIGHT + facH / 2 + 8
+    Dim minTryY As Double: minTryY = NW_TOP_H + facH / 2 + 8   ' owner 2026-06-10: 검색바(1행) 아래
     Dim minTryX As Double: minTryX = gw + cw / 2
 
     Dim ox(1 To 6) As Double, oy(1 To 6) As Double
@@ -1948,12 +1947,12 @@ Public Sub 네트웍_빈격자_찾기(wsNw As Worksheet, ByRef nx As Double, ByR
                               Optional adminY As Double = -1E+30, _
                               Optional wsAd As Worksheet = Nothing)
     Dim cw As Double: cw = wsNw.Cells(1, 1).Width
-    Dim rh As Double: rh = wsNw.Cells(1, 1).Height
+    Dim rh As Double: rh = wsNw.Cells(LEGEND_ROWS + 1, 1).Height   ' 격자 셀 높이 = 2행 (1행=검색바). owner 2026-06-10
     If cw <= 0 Then cw = CELL_PT
     If rh <= 0 Then rh = CELL_PT
     Dim gridW As Double: gridW = cw * 네트웍_격자_단위가로cells()
     Dim gridH As Double: gridH = rh * 네트웍_격자_단위세로cells()
-    Dim minTryY As Double: minTryY = LEGEND_ROW_HEIGHT + facH / 2 + 8
+    Dim minTryY As Double: minTryY = NW_TOP_H + facH / 2 + 8   ' owner 2026-06-10: 검색바(1행) 아래
     Dim minTryX As Double: minTryX = gridW + cw / 2
 
     ' === owner 2026-06-07 (8-75): 행정도 거리순 8-cell 탐색 ===
@@ -3214,43 +3213,48 @@ Public Sub 네트웍_격자_생성()
     Dim cellsX As Long: cellsX = 네트웍_격자_가로칸수()
     Dim cellsY As Long: cellsY = 네트웍_격자_세로칸수()
 
-    ' 격자 전체 영역 (col 1 ~ totalCols, row 1 ~ totalRows) 셀 배경 초기화
+    ' owner 2026-06-10: 격자는 2행부터 (1행 = 검색바 NW_TOP_H). 격자 행 = 2,22,42,...
+    Dim gridTop As Long: gridTop = LEGEND_ROWS + 1
     Dim totalCols As Long: totalCols = cellsX * 네트웍_격자_단위가로cells() + 1
-    Dim totalRows As Long: totalRows = cellsY * 네트웍_격자_단위세로cells() + 1
+    Dim gridRowsN As Long: gridRowsN = cellsY * 네트웍_격자_단위세로cells() + 1   ' 격자 행 수
+    Dim bottomRow As Long: bottomRow = gridTop + gridRowsN - 1
     On Error Resume Next
-    ws.Range(ws.Cells(1, 1), ws.Cells(totalRows, totalCols)).Interior.ColorIndex = xlNone
+    ws.Range(ws.Cells(gridTop, 1), ws.Cells(bottomRow, totalCols)).Interior.ColorIndex = xlNone
     On Error GoTo 0
 
-    ' owner 2026-06-07 (8-57): 방어적 보정 — 1행 포함 모든 행을 CELL_PT 균일.
-    '   기존 파일에서 LEGEND_ROW_HEIGHT 로 남아있던 1행 잔재 해소.
+    ' 행 높이 — 1행 = 검색바(NW_TOP_H), 격자 행(2~) = CELL_PT 균일
     On Error Resume Next
-    ws.Rows("1:" & totalRows).RowHeight = CELL_PT
+    ws.Rows(1).RowHeight = NW_TOP_H
+    ws.Rows(gridTop & ":" & bottomRow).RowHeight = CELL_PT
     On Error GoTo 0
 
-    ' 노랑 col — col 1, 21, 41, ..., (K*20 + 1). K = 0~cellsX 까지
+    ' 노랑 col — gridTop ~ bottomRow 범위 세로줄. col = K*units + 1
     Dim c As Long, colNo As Long
     For c = 0 To cellsX
         colNo = c * 네트웍_격자_단위가로cells() + 1
         If colNo >= 1 And colNo <= totalCols Then
             On Error Resume Next
-            ws.Range(ws.Cells(1, colNo), ws.Cells(totalRows, colNo)).Interior.Color = GRID_LINE_COLOR
+            ws.Range(ws.Cells(gridTop, colNo), ws.Cells(bottomRow, colNo)).Interior.Color = GRID_LINE_COLOR
             On Error GoTo 0
         End If
     Next c
 
-    ' 노랑 row — row 1, 21, 41, ..., (K*20 + 1)
+    ' 노랑 row — gridTop, gridTop+units, ... (2,22,42,...)
     Dim r As Long, rowNo As Long
     For r = 0 To cellsY
-        rowNo = r * 네트웍_격자_단위세로cells() + 1
-        If rowNo >= 1 And rowNo <= totalRows Then
+        rowNo = gridTop + r * 네트웍_격자_단위세로cells()
+        If rowNo >= gridTop And rowNo <= bottomRow Then
             On Error Resume Next
             ws.Range(ws.Cells(rowNo, 1), ws.Cells(rowNo, totalCols)).Interior.Color = GRID_LINE_COLOR
             On Error GoTo 0
         End If
     Next r
 
+    ' 검색 3버튼 (1행) — 격자 갱신마다 보장
+    네트웍_검색버튼_생성 ws
+
     If wasProt Then ApplySheetProtection ws
-    Application.StatusBar = "네트웍구성도 격자 채우기 완료 (" & cellsX & " x " & cellsY & " 칸, 셀 배경)."
+    Application.StatusBar = "네트웍구성도 격자 채우기 완료 (" & cellsX & " x " & cellsY & " 칸, 2행부터 · 검색바 포함)."
 End Sub
 
 ' owner 2026-06-07 (8-58): 격자 가로/세로 칸 수 — CustomDocumentProperty 에서 읽음.
@@ -3421,7 +3425,7 @@ Public Sub 네트웍_시설물_최대셀좌표(ws As Worksheet, ByRef maxCol As 
     maxCol = 0: maxRow = 0: facCnt = 0
     If ws Is Nothing Then Exit Sub
     Dim cw As Double: cw = ws.Cells(1, 1).Width
-    Dim rh As Double: rh = ws.Cells(1, 1).Height
+    Dim rh As Double: rh = ws.Cells(LEGEND_ROWS + 1, 1).Height   ' 격자 셀 높이 = 2행 (1행=검색바). owner 2026-06-10
     If cw <= 0 Then cw = CELL_PT
     If rh <= 0 Then rh = CELL_PT
     Dim gridW As Double: gridW = cw * 네트웍_격자_단위가로cells()
@@ -3903,7 +3907,7 @@ Public Sub 격자_추가확장_적용(direction As String, count As Long)
 
     ' 격자 칸수 + 셀 크기 갱신 — shift 전 셀 크기는 동일
     Dim cw As Double: cw = ws.Cells(1, 1).Width
-    Dim rh As Double: rh = ws.Cells(1, 1).Height
+    Dim rh As Double: rh = ws.Cells(LEGEND_ROWS + 1, 1).Height   ' 격자 셀 높이 = 2행 (1행=검색바). owner 2026-06-10
     If cw <= 0 Then cw = CELL_PT
     If rh <= 0 Then rh = CELL_PT
     Dim gridW As Double: gridW = cw * 네트웍_격자_단위가로cells()

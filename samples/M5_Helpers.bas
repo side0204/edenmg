@@ -5423,20 +5423,26 @@ Public Sub 검색_수행()
     Else
         Set sheetList(0) = wsAd: Set sheetList(1) = wsNw
     End If
+    ' owner 2026-06-10: 정확 일치 우선 — 정확히 일치하는 도형이 하나라도 있으면 부분 일치는 강조 제외.
+    '   (예: 「1」 검색 시 10·11·12 부분 일치는 「1」 정확 일치가 있으면 무시). 1차 수집(hit·exact) → 2차 강조.
+    Dim matches As Collection: Set matches = New Collection
+    Dim anyExact As Boolean: anyExact = False
     Dim si As Long
     For si = 0 To 1
         Dim ws As Worksheet: Set ws = sheetList(si)
         If Not ws Is Nothing Then
-            Dim sh As Shape, nm As String, txt As String, hit As Boolean
+            Dim sh As Shape, nm As String, txt As String, hit As Boolean, exact As Boolean
             Dim line1 As String, line2 As String, line3 As String
             For Each sh In ws.Shapes
                 nm = sh.Name
-                hit = False
+                hit = False: exact = False
 
                 If Left(nm, Len(PREFIX_BADGE)) = PREFIX_BADGE Then
                     If Len(qBadge) > 0 Then
                         txt = "": On Error Resume Next: txt = sh.TextFrame2.TextRange.Text: On Error GoTo 0
-                        If InStr(LCase(Trim(txt)), qBadge) > 0 Then hit = True
+                        Dim bt As String: bt = LCase(Trim(txt))
+                        If InStr(bt, qBadge) > 0 Then hit = True
+                        If bt = qBadge Then exact = True
                     End If
                 ElseIf Left(nm, Len(PREFIX_LABEL)) = PREFIX_LABEL Then
                     ' lbl_fac_* / lbl_cbl_* 분기 — Mid 로 두 번째 prefix 검증
@@ -5455,31 +5461,46 @@ Public Sub 검색_수행()
                         ' owner 2026-06-08 (8-84): 시설물 callout = 「구분/함체명/ID」 → 시설물명=line2, 시설물ID=line3
                         If Len(qFacId) > 0 Then
                             If InStr(LCase(line3), qFacId) > 0 Then hit = True
+                            If LCase(Trim(line3)) = qFacId Then exact = True
                         End If
-                        If Not hit And Len(qName) > 0 Then
+                        If Len(qName) > 0 Then
                             If InStr(LCase(line2), qName) > 0 Then hit = True
+                            If LCase(Trim(line2)) = qName Then exact = True
                         End If
                     ElseIf isCblLbl And Len(qCblId) > 0 Then
                         txt = "": On Error Resume Next: txt = sh.TextFrame2.TextRange.Text: On Error GoTo 0
                         검색_라인추출 txt, line1, line2, line3
                         ' 행정도 cable callout 은 3 줄 (선로ID/규격/거리), 네트웍은 1 줄 (선로ID) — 어느쪽이든 line1 매칭
                         If InStr(LCase(line1), qCblId) > 0 Then hit = True
+                        If LCase(Trim(line1)) = qCblId Then exact = True
                     End If
                 End If
 
                 If hit Then
-                    검색_강조_적용 ws, sh
-                    totalHits = totalHits + 1
-                    ' owner 2026-06-08 (8-105): 시트별 첫 매치 각각 추적
-                    If ws Is wsAd Then
-                        If firstShapeAd Is Nothing Then Set firstShapeAd = sh
-                    ElseIf ws Is wsNw Then
-                        If firstShapeNw Is Nothing Then Set firstShapeNw = sh
-                    End If
+                    matches.Add Array(ws, sh, exact)
+                    If exact Then anyExact = True
                 End If
             Next sh
         End If
     Next si
+
+    ' 2차: 강조 — 정확 일치가 있으면 정확만, 없으면 부분 포함 전부. 시트별 첫 매치 추적.
+    Dim mi As Long
+    For mi = 1 To matches.Count
+        Dim mEntry As Variant: mEntry = matches(mi)
+        Dim mws As Worksheet: Set mws = mEntry(0)
+        Dim msh As Shape: Set msh = mEntry(1)
+        Dim mex As Boolean: mex = mEntry(2)
+        If (Not anyExact) Or mex Then
+            검색_강조_적용 mws, msh
+            totalHits = totalHits + 1
+            If mws Is wsAd Then
+                If firstShapeAd Is Nothing Then Set firstShapeAd = msh
+            ElseIf mws Is wsNw Then
+                If firstShapeNw Is Nothing Then Set firstShapeNw = msh
+            End If
+        End If
+    Next mi
 
     If totalHits = 0 Then
         Dim msg As String: msg = "입력하신 조건과 일치하는 도형이 없습니다."
@@ -5730,42 +5751,48 @@ Public Sub 검색_도형으로_스크롤(shp As Shape)
     Dim ws As Worksheet: Set ws = shp.Parent
     On Error Resume Next: ws.Activate: On Error GoTo 0
 
-    Dim winW As Double, winH As Double
-    winW = 0: winH = 0
+    ' owner 2026-06-10: ScrollIntoView 는 1행 틀고정 환경에서 중앙 정렬이 자주 실패 →
+    '   ScrollRow/ScrollColumn 방식으로 변경. 도형이 들어있는 셀을 화면 중앙에 오도록 스크롤.
+    '   틀고정 행(1행) 아래로 ScrollRow 클램프 (틀고정 pane 은 ScrollRow 가 2 이상이어야 함).
+    Dim anchorRow As Long: anchorRow = 1
+    Dim anchorCol As Long: anchorCol = 1
+    On Error Resume Next
+    anchorRow = shp.TopLeftCell.Row
+    anchorCol = shp.TopLeftCell.Column
+    On Error GoTo 0
+
+    Dim winW As Double, winH As Double: winW = 0: winH = 0
     On Error Resume Next
     winW = ActiveWindow.UsableWidth
     winH = ActiveWindow.UsableHeight
     On Error GoTo 0
 
-    ' Window 크기 산출 실패 시 row/col 단순 폴백 (도형 약간 위·왼쪽)
-    If winW <= 0 Or winH <= 0 Then
-        Dim cellRow As Long: cellRow = 1
-        Dim cellCol As Long: cellCol = 1
-        On Error Resume Next
-        cellRow = shp.TopLeftCell.Row
-        cellCol = shp.TopLeftCell.Column
-        On Error GoTo 0
-        Dim srF As Long: srF = cellRow - 8: If srF < 1 Then srF = 1
-        Dim scF As Long: scF = cellCol - 4: If scF < 1 Then scF = 1
-        On Error Resume Next
-        ActiveWindow.ScrollRow = srF
-        ActiveWindow.ScrollColumn = scF
-        On Error GoTo 0
-        Exit Sub
-    End If
+    ' 화면에 보이는 행·열 수 추정 = Usable 크기 ÷ 셀 크기
+    Dim rhCell As Double: rhCell = CELL_PT
+    Dim cwCell As Double: cwCell = CELL_PT
+    On Error Resume Next
+    rhCell = ws.Cells(anchorRow, 1).Height
+    cwCell = ws.Cells(1, anchorCol).Width
+    On Error GoTo 0
+    If rhCell <= 0 Then rhCell = CELL_PT
+    If cwCell <= 0 Then cwCell = CELL_PT
 
-    ' 도형 중심을 viewport 중심에 — viewport 좌상단 좌표 = 도형 중심 - 윈도우 크기/2
-    Dim cx As Double, cy As Double
-    cx = shp.Left + shp.Width / 2
-    cy = shp.Top + shp.Height / 2
-    Dim vL As Double, vT As Double
-    vL = cx - winW / 2
-    vT = cy - winH / 2
-    If vL < 0 Then vL = 0
-    If vT < 0 Then vT = 0
+    Dim visRows As Long: visRows = 20
+    Dim visCols As Long: visCols = 20
+    If winH > 0 Then visRows = CLng(winH / rhCell)
+    If winW > 0 Then visCols = CLng(winW / cwCell)
+    If visRows < 2 Then visRows = 2
+    If visCols < 2 Then visCols = 2
+
+    Dim sr As Long: sr = anchorRow - visRows \ 2
+    Dim sc As Long: sc = anchorCol - visCols \ 2
+    Dim minRow As Long: minRow = LEGEND_ROWS + 1   ' 틀고정 1행 아래
+    If sr < minRow Then sr = minRow
+    If sc < 1 Then sc = 1
 
     On Error Resume Next
-    ActiveWindow.ScrollIntoView vL, vT, winW, winH, True
+    ActiveWindow.ScrollRow = sr
+    ActiveWindow.ScrollColumn = sc
     On Error GoTo 0
 End Sub
 

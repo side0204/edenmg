@@ -71,6 +71,9 @@ Public Const ADMIN_COMBO_LBL_W As Double = 60                        ' 명칭 �
 Public Const PREFIX_ADMIN_SEARCH_BTN As String = "_admin_sbtn_"      ' 검색 버튼 (xlButtonControl)
 Public Const ADMIN_SBTN_W As Double = 60
 Public Const ADMIN_SBTN_H As Double = 18
+' owner 2026-06-10: 네트웍구성도 1행 = 검색버튼 높이(격자는 2행부터). 네트웍 격자 원점 Y = NW_TOP_H.
+Public Const PREFIX_NW_SEARCH_BTN As String = "_nw_sbtn_"            ' 네트웍 검색 버튼
+Public Const NW_TOP_H As Double = 22                                 ' 네트웍 1행(검색바) 높이 = 버튼 18 + 여백
 
 ' 범례 옵션 콤보 — 선택된 범례 도형 옆에 표시. 시설물=크기% 4단계, 케이블=두께 가산 7단계.
 '   콤보값 → 그 범례 도형의 AlternativeText 에 저장 → FinalizeDrawnFacility/Cable 가 읽어 새 도형에 적용.
@@ -710,9 +713,20 @@ Public Sub 상단2행_틀고정()
     Dim wsNw As Worksheet
     Set wsNw = ThisWorkbook.Worksheets(SHEET_NETWORK)
     If Not wsNw Is Nothing Then
-        wsNw.Rows("1:" & LEGEND_ROWS).RowHeight = CELL_PT
+        wsNw.Rows("1:" & LEGEND_ROWS).RowHeight = NW_TOP_H   ' owner 2026-06-10: 네트웍 1행 = 검색버튼 높이 (격자는 2행부터)
         wsNw.Rows(LEGEND_ROWS + 1).RowHeight = CELL_PT
     End If
+    ' 네트웍구성도 1행(검색바) 틀고정 — owner 2026-06-10 (먼저 처리, 마지막에 행정도로 복귀)
+    If Not wsNw Is Nothing Then
+        wsNw.Activate
+        ActiveWindow.FreezePanes = False
+        ActiveWindow.ScrollRow = 1
+        ActiveWindow.ScrollColumn = 1
+        wsNw.Cells(LEGEND_ROWS + 1, 1).Select
+        ActiveWindow.FreezePanes = True
+    End If
+    ' 행정도 1행 틀고정 (마지막 — 행정도로 복귀)
+    ws.Activate
     ActiveWindow.FreezePanes = False         ' 기존 고정 해제 후 재설정
     ActiveWindow.ScrollRow = 1               ' 맨 위로 스크롤한 상태에서 고정해야 1행이 고정됨
     ActiveWindow.ScrollColumn = 1
@@ -4537,6 +4551,7 @@ Public Sub 시트_셀_클릭(Target As Range)
     If Target.Worksheet.Name = SHEET_NETWORK Then
         Dim oEvN As Boolean: oEvN = Application.EnableEvents
         Application.EnableEvents = False
+        네트웍_검색버튼_위치갱신 Target.Worksheet     ' owner 2026-06-10: 네트웍 검색버튼 가로·세로 스크롤 추종
         ' 일괄 동기화 — 케이블 재라우팅·박스·배지·콤보·태그
         네트웍_부속도형_정렬
         ' owner 2026-06-06 (8-28): 박스가 케이블 길이 범위 벗어나면 lastPos 로 복귀 — Cable_Chain_평행이동_처리 보다 먼저.
@@ -4937,7 +4952,7 @@ Public Function 방향키_hold_분기_처리(ptLeft As Double, ptTop As Double, 
     If wsNw Is Nothing Then Exit Function
 
     Dim cw As Double: cw = wsNw.Cells(1, 1).Width
-    Dim rh As Double: rh = wsNw.Cells(1, 1).Height
+    Dim rh As Double: rh = wsNw.Cells(LEGEND_ROWS + 1, 1).Height   ' 격자 셀 높이 = 2행 (1행은 검색바). owner 2026-06-10
     If cw <= 0 Then cw = CELL_PT
     If rh <= 0 Then rh = CELL_PT
     Dim gridW As Double: gridW = cw * 네트웍_격자_단위가로cells()
@@ -5202,6 +5217,79 @@ Public Sub 행정도_콤보_위치갱신(ws As Worksheet)
         If (isCombo Or isBtn) And Left(nm, Len(PREFIX_ADMIN_COMBO_PV)) <> PREFIX_ADMIN_COMBO_PV Then
             Dim alt As String: alt = ""
             On Error Resume Next: alt = sh.AlternativeText: On Error GoTo 0
+            Dim dxs As String: dxs = 행정도_콤보_alt파싱(alt, "dx")
+            If Len(dxs) > 0 And IsNumeric(dxs) Then
+                On Error Resume Next: sh.Left = baseLeft + CDbl(dxs): On Error GoTo 0
+            End If
+        End If
+    Next sh
+End Sub
+
+' 네트웍 1행 검색 3버튼 (포인트검색·명칭검색·ID검색) 생성. dx·dy 저장으로 스크롤 추종. owner 2026-06-10
+Public Sub 네트웍_검색버튼_생성(wsNw As Worksheet)
+    If wsNw Is Nothing Then Exit Sub
+    Dim wasProt As Boolean: wasProt = wsNw.ProtectContents Or wsNw.ProtectDrawingObjects
+    On Error Resume Next: wsNw.Unprotect: On Error GoTo 0
+    Dim defs As Variant
+    defs = Array(Array("포인트검색", "검색_배지번호"), _
+                 Array("명칭검색", "검색_시설물명"), _
+                 Array("ID검색", "검색_ID"))
+    Dim bx As Double: bx = wsNw.Cells(1, 1).Left + PANEL_OFFSET
+    Dim by As Double: by = wsNw.Cells(1, 1).Top + 2
+    Dim i As Long
+    For i = LBound(defs) To UBound(defs)
+        Dim bn As String: bn = PREFIX_NW_SEARCH_BTN & i
+        On Error Resume Next: wsNw.Shapes(bn).Delete: On Error GoTo 0
+        Dim btn As Shape: Set btn = Nothing
+        On Error Resume Next
+        Set btn = wsNw.Shapes.AddFormControl(xlButtonControl, bx, by, ADMIN_SBTN_W, ADMIN_SBTN_H)
+        On Error GoTo 0
+        If Not btn Is Nothing Then
+            btn.Name = bn
+            btn.Placement = 3
+            On Error Resume Next
+            btn.TextFrame.Characters.Text = defs(i)(0)
+            btn.TextFrame.Characters.Font.Size = 9
+            btn.OnAction = defs(i)(1)
+            btn.AlternativeText = "dx=" & CLng(bx - wsNw.Cells(1, 1).Left) & "|dy=" & CLng(by - wsNw.Cells(1, 1).Top)
+            On Error GoTo 0
+            bx = bx + ADMIN_SBTN_W + 3
+        End If
+    Next i
+    ' 1행(검색바) 틀고정 — 네트웍이 active 일 때만 (격자/버튼 생성은 보통 네트웍에서 실행).
+    '   틀고정으로 세로 스크롤에도 검색바 고정 + 가로는 _위치갱신 보강. 이벤트 가드(.Select 재귀 방지). owner 2026-06-10
+    On Error Resume Next
+    If ActiveSheet.Name = SHEET_NETWORK Then
+        Dim oEvF As Boolean: oEvF = Application.EnableEvents
+        Application.EnableEvents = False
+        ActiveWindow.FreezePanes = False
+        ActiveWindow.ScrollRow = 1
+        ActiveWindow.ScrollColumn = 1
+        wsNw.Cells(LEGEND_ROWS + 1, 1).Select
+        ActiveWindow.FreezePanes = True
+        Application.EnableEvents = oEvF
+    End If
+    On Error GoTo 0
+    네트웍_검색버튼_위치갱신 wsNw
+    If wasProt Then ApplySheetProtection wsNw
+End Sub
+
+' 네트웍 검색버튼을 현재 화면 좌상단 기준 재배치 (가로·세로 스크롤 추종 — 네트웍은 틀고정 없음). owner 2026-06-10
+Public Sub 네트웍_검색버튼_위치갱신(wsNw As Worksheet)
+    If wsNw Is Nothing Then Exit Sub
+    If wsNw.Name <> SHEET_NETWORK Then Exit Sub
+    ' 가로 기준 = 화면에 보이는 가장 왼쪽 열의 Left (ScrollColumn). 틀고정 시 VisibleRange.Left 가
+    '   고정 셀(A1)을 가리켜 안 따라오는 문제 회피 — ScrollColumn 은 스크롤 영역 첫 열이라 가로 스크롤 추종. owner 2026-06-10
+    Dim leftCol As Long: leftCol = 1
+    On Error Resume Next: leftCol = ActiveWindow.ScrollColumn: On Error GoTo 0
+    If leftCol < 1 Then leftCol = 1
+    Dim baseLeft As Double: baseLeft = wsNw.Cells(1, leftCol).Left
+    Dim sh As Shape
+    For Each sh In wsNw.Shapes
+        If Left(sh.Name, Len(PREFIX_NW_SEARCH_BTN)) = PREFIX_NW_SEARCH_BTN Then
+            Dim alt As String: alt = ""
+            On Error Resume Next: alt = sh.AlternativeText: On Error GoTo 0
+            ' Top 은 1행 틀고정으로 고정 — 가로(dx)만 추종 (행정도와 동일).
             Dim dxs As String: dxs = 행정도_콤보_alt파싱(alt, "dx")
             If Len(dxs) > 0 And IsNumeric(dxs) Then
                 On Error Resume Next: sh.Left = baseLeft + CDbl(dxs): On Error GoTo 0
@@ -7926,7 +8014,7 @@ End Sub
 Public Sub SnapToNetworkGrid(wsNw As Worksheet, ax As Double, ay As Double, _
                               ByRef nx As Double, ByRef ny As Double)
     Dim cw As Double: cw = wsNw.Cells(1, 1).Width
-    Dim rh As Double: rh = wsNw.Cells(1, 1).Height
+    Dim rh As Double: rh = wsNw.Cells(LEGEND_ROWS + 1, 1).Height   ' 격자 셀 높이 = 2행 (1행=검색바). owner 2026-06-10
     If cw <= 0 Then cw = CELL_PT
     If rh <= 0 Then rh = CELL_PT
     Dim gridW As Double: gridW = cw * 네트웍_격자_단위가로cells()
@@ -7934,20 +8022,19 @@ Public Sub SnapToNetworkGrid(wsNw As Worksheet, ax As Double, ay As Double, _
     If ax < 0 Then ax = 0
     If ay < 0 Then ay = 0
     Dim gridCol As Long: gridCol = CLng(ax / gridW)
-    Dim gridRow As Long: gridRow = CLng(ay / gridH)
+    ' owner 2026-06-10: 격자 원점 Y = NW_TOP_H (1행=검색바, 격자 2행부터). gridRow 0 = 첫 격자 행(Top=NW_TOP_H).
+    Dim gridRow As Long: gridRow = CLng((ay - NW_TOP_H) / gridH)
     ' owner 2026-06-07 (8-59): 첫 격자 열 (gridCol=0 = A열 영역) 스킵 — 행 클램프와 동일 정책.
     If gridCol < 1 Then gridCol = 1
+    If gridRow < 0 Then gridRow = 0
     ' 노랑 셀 (col = gridCol*20 + 1) 의 중앙 좌표
     nx = gridCol * gridW + cw / 2
-    ny = gridRow * gridH + rh / 2
-    ' 범례 영역(1행) 침범 방지 — owner 요구. 시설물 중심이 범례 행 아래로 가도록 클램프.
+    ny = NW_TOP_H + gridRow * gridH + rh / 2
+    ' 검색바(1행) 침범 방지 — 시설물 중심이 검색바 아래로 가도록 클램프.
     Dim minNy As Double
-    minNy = LEGEND_ROW_HEIGHT + FAC_DEFAULT_H / 2 + 8
+    minNy = NW_TOP_H + FAC_DEFAULT_H / 2 + 8
     If ny < minNy Then
-        ' 범례 아래 첫 격자 행으로 스냅
-        Dim minGridRow As Long
-        minGridRow = Int((LEGEND_ROW_HEIGHT + 1) / gridH) + 1
-        ny = minGridRow * gridH + rh / 2
+        ny = NW_TOP_H + gridH + rh / 2   ' 첫 격자 행이 검색바와 겹치면 다음 격자 행으로
         If ny < minNy Then ny = minNy
     End If
 End Sub
@@ -8076,7 +8163,7 @@ Public Function 네트웍_우선순위_배치(wsNw As Worksheet, refX As Double,
     네트웍_우선순위_배치 = False
 
     Dim cw As Double: cw = wsNw.Cells(1, 1).Width
-    Dim rh As Double: rh = wsNw.Cells(1, 1).Height
+    Dim rh As Double: rh = wsNw.Cells(LEGEND_ROWS + 1, 1).Height   ' 격자 셀 높이 = 2행 (1행=검색바). owner 2026-06-10
     If cw <= 0 Then cw = CELL_PT
     If rh <= 0 Then rh = CELL_PT
     Dim gw As Double: gw = cw * 네트웍_격자_단위가로cells()
@@ -8102,7 +8189,7 @@ Public Function 네트웍_우선순위_배치(wsNw As Worksheet, refX As Double,
     Next s
 
     ' 클램프 (범례·A열 회피 — 기존 빈격자 검색과 동일 정책)
-    Dim minTryY As Double: minTryY = LEGEND_ROW_HEIGHT + facH / 2 + 8
+    Dim minTryY As Double: minTryY = NW_TOP_H + facH / 2 + 8   ' owner 2026-06-10: 검색바(1행) 아래
     Dim minTryX As Double: minTryX = gw + cw / 2
 
     Dim ox(1 To 6) As Double, oy(1 To 6) As Double
@@ -8138,12 +8225,12 @@ Public Sub 네트웍_빈격자_찾기(wsNw As Worksheet, ByRef nx As Double, ByR
                               Optional adminY As Double = -1E+30, _
                               Optional wsAd As Worksheet = Nothing)
     Dim cw As Double: cw = wsNw.Cells(1, 1).Width
-    Dim rh As Double: rh = wsNw.Cells(1, 1).Height
+    Dim rh As Double: rh = wsNw.Cells(LEGEND_ROWS + 1, 1).Height   ' 격자 셀 높이 = 2행 (1행=검색바). owner 2026-06-10
     If cw <= 0 Then cw = CELL_PT
     If rh <= 0 Then rh = CELL_PT
     Dim gridW As Double: gridW = cw * 네트웍_격자_단위가로cells()
     Dim gridH As Double: gridH = rh * 네트웍_격자_단위세로cells()
-    Dim minTryY As Double: minTryY = LEGEND_ROW_HEIGHT + facH / 2 + 8
+    Dim minTryY As Double: minTryY = NW_TOP_H + facH / 2 + 8   ' owner 2026-06-10: 검색바(1행) 아래
     Dim minTryX As Double: minTryX = gridW + cw / 2
 
     ' === owner 2026-06-07 (8-75): 행정도 거리순 8-cell 탐색 ===
@@ -9403,43 +9490,48 @@ Public Sub 네트웍_격자_생성()
     Dim cellsX As Long: cellsX = 네트웍_격자_가로칸수()
     Dim cellsY As Long: cellsY = 네트웍_격자_세로칸수()
 
-    ' 격자 전체 영역 (col 1 ~ totalCols, row 1 ~ totalRows) 셀 배경 초기화
+    ' owner 2026-06-10: 격자는 2행부터 (1행 = 검색바 NW_TOP_H). 격자 행 = 2,22,42,...
+    Dim gridTop As Long: gridTop = LEGEND_ROWS + 1
     Dim totalCols As Long: totalCols = cellsX * 네트웍_격자_단위가로cells() + 1
-    Dim totalRows As Long: totalRows = cellsY * 네트웍_격자_단위세로cells() + 1
+    Dim gridRowsN As Long: gridRowsN = cellsY * 네트웍_격자_단위세로cells() + 1   ' 격자 행 수
+    Dim bottomRow As Long: bottomRow = gridTop + gridRowsN - 1
     On Error Resume Next
-    ws.Range(ws.Cells(1, 1), ws.Cells(totalRows, totalCols)).Interior.ColorIndex = xlNone
+    ws.Range(ws.Cells(gridTop, 1), ws.Cells(bottomRow, totalCols)).Interior.ColorIndex = xlNone
     On Error GoTo 0
 
-    ' owner 2026-06-07 (8-57): 방어적 보정 — 1행 포함 모든 행을 CELL_PT 균일.
-    '   기존 파일에서 LEGEND_ROW_HEIGHT 로 남아있던 1행 잔재 해소.
+    ' 행 높이 — 1행 = 검색바(NW_TOP_H), 격자 행(2~) = CELL_PT 균일
     On Error Resume Next
-    ws.Rows("1:" & totalRows).RowHeight = CELL_PT
+    ws.Rows(1).RowHeight = NW_TOP_H
+    ws.Rows(gridTop & ":" & bottomRow).RowHeight = CELL_PT
     On Error GoTo 0
 
-    ' 노랑 col — col 1, 21, 41, ..., (K*20 + 1). K = 0~cellsX 까지
+    ' 노랑 col — gridTop ~ bottomRow 범위 세로줄. col = K*units + 1
     Dim c As Long, colNo As Long
     For c = 0 To cellsX
         colNo = c * 네트웍_격자_단위가로cells() + 1
         If colNo >= 1 And colNo <= totalCols Then
             On Error Resume Next
-            ws.Range(ws.Cells(1, colNo), ws.Cells(totalRows, colNo)).Interior.Color = GRID_LINE_COLOR
+            ws.Range(ws.Cells(gridTop, colNo), ws.Cells(bottomRow, colNo)).Interior.Color = GRID_LINE_COLOR
             On Error GoTo 0
         End If
     Next c
 
-    ' 노랑 row — row 1, 21, 41, ..., (K*20 + 1)
+    ' 노랑 row — gridTop, gridTop+units, ... (2,22,42,...)
     Dim r As Long, rowNo As Long
     For r = 0 To cellsY
-        rowNo = r * 네트웍_격자_단위세로cells() + 1
-        If rowNo >= 1 And rowNo <= totalRows Then
+        rowNo = gridTop + r * 네트웍_격자_단위세로cells()
+        If rowNo >= gridTop And rowNo <= bottomRow Then
             On Error Resume Next
             ws.Range(ws.Cells(rowNo, 1), ws.Cells(rowNo, totalCols)).Interior.Color = GRID_LINE_COLOR
             On Error GoTo 0
         End If
     Next r
 
+    ' 검색 3버튼 (1행) — 격자 갱신마다 보장
+    네트웍_검색버튼_생성 ws
+
     If wasProt Then ApplySheetProtection ws
-    Application.StatusBar = "네트웍구성도 격자 채우기 완료 (" & cellsX & " x " & cellsY & " 칸, 셀 배경)."
+    Application.StatusBar = "네트웍구성도 격자 채우기 완료 (" & cellsX & " x " & cellsY & " 칸, 2행부터 · 검색바 포함)."
 End Sub
 
 ' owner 2026-06-07 (8-58): 격자 가로/세로 칸 수 — CustomDocumentProperty 에서 읽음.
@@ -9607,7 +9699,7 @@ Public Sub 네트웍_시설물_최대셀좌표(ws As Worksheet, ByRef maxCol As 
     maxCol = 0: maxRow = 0: facCnt = 0
     If ws Is Nothing Then Exit Sub
     Dim cw As Double: cw = ws.Cells(1, 1).Width
-    Dim rh As Double: rh = ws.Cells(1, 1).Height
+    Dim rh As Double: rh = ws.Cells(LEGEND_ROWS + 1, 1).Height   ' 격자 셀 높이 = 2행 (1행=검색바). owner 2026-06-10
     If cw <= 0 Then cw = CELL_PT
     If rh <= 0 Then rh = CELL_PT
     Dim gridW As Double: gridW = cw * 네트웍_격자_단위가로cells()
@@ -10032,7 +10124,7 @@ Public Sub 격자_추가확장_적용(direction As String, count As Long)
     격자_확장_Undo_백업 ws
 
     Dim cw As Double: cw = ws.Cells(1, 1).Width
-    Dim rh As Double: rh = ws.Cells(1, 1).Height
+    Dim rh As Double: rh = ws.Cells(LEGEND_ROWS + 1, 1).Height   ' 격자 셀 높이 = 2행 (1행=검색바). owner 2026-06-10
     If cw <= 0 Then cw = CELL_PT
     If rh <= 0 Then rh = CELL_PT
     Dim gridW As Double: gridW = cw * 네트웍_격자_단위가로cells()
@@ -26345,20 +26437,26 @@ Public Sub 검색_수행()
     Else
         Set sheetList(0) = wsAd: Set sheetList(1) = wsNw
     End If
+    ' owner 2026-06-10: 정확 일치 우선 — 정확히 일치하는 도형이 하나라도 있으면 부분 일치는 강조 제외.
+    '   (예: 「1」 검색 시 10·11·12 부분 일치는 「1」 정확 일치가 있으면 무시). 1차 수집(hit·exact) → 2차 강조.
+    Dim matches As Collection: Set matches = New Collection
+    Dim anyExact As Boolean: anyExact = False
     Dim si As Long
     For si = 0 To 1
         Dim ws As Worksheet: Set ws = sheetList(si)
         If Not ws Is Nothing Then
-            Dim sh As Shape, nm As String, txt As String, hit As Boolean
+            Dim sh As Shape, nm As String, txt As String, hit As Boolean, exact As Boolean
             Dim line1 As String, line2 As String, line3 As String
             For Each sh In ws.Shapes
                 nm = sh.Name
-                hit = False
+                hit = False: exact = False
 
                 If Left(nm, Len(PREFIX_BADGE)) = PREFIX_BADGE Then
                     If Len(qBadge) > 0 Then
                         txt = "": On Error Resume Next: txt = sh.TextFrame2.TextRange.Text: On Error GoTo 0
-                        If InStr(LCase(Trim(txt)), qBadge) > 0 Then hit = True
+                        Dim bt As String: bt = LCase(Trim(txt))
+                        If InStr(bt, qBadge) > 0 Then hit = True
+                        If bt = qBadge Then exact = True
                     End If
                 ElseIf Left(nm, Len(PREFIX_LABEL)) = PREFIX_LABEL Then
                     ' lbl_fac_* / lbl_cbl_* 분기 — Mid 로 두 번째 prefix 검증
@@ -26377,31 +26475,46 @@ Public Sub 검색_수행()
                         ' owner 2026-06-08 (8-84): 시설물 callout = 「구분/함체명/ID」 → 시설물명=line2, 시설물ID=line3
                         If Len(qFacId) > 0 Then
                             If InStr(LCase(line3), qFacId) > 0 Then hit = True
+                            If LCase(Trim(line3)) = qFacId Then exact = True
                         End If
-                        If Not hit And Len(qName) > 0 Then
+                        If Len(qName) > 0 Then
                             If InStr(LCase(line2), qName) > 0 Then hit = True
+                            If LCase(Trim(line2)) = qName Then exact = True
                         End If
                     ElseIf isCblLbl And Len(qCblId) > 0 Then
                         txt = "": On Error Resume Next: txt = sh.TextFrame2.TextRange.Text: On Error GoTo 0
                         검색_라인추출 txt, line1, line2, line3
                         ' 행정도 cable callout 은 3 줄 (선로ID/규격/거리), 네트웍은 1 줄 (선로ID) — 어느쪽이든 line1 매칭
                         If InStr(LCase(line1), qCblId) > 0 Then hit = True
+                        If LCase(Trim(line1)) = qCblId Then exact = True
                     End If
                 End If
 
                 If hit Then
-                    검색_강조_적용 ws, sh
-                    totalHits = totalHits + 1
-                    ' owner 2026-06-08 (8-105): 시트별 첫 매치 각각 추적
-                    If ws Is wsAd Then
-                        If firstShapeAd Is Nothing Then Set firstShapeAd = sh
-                    ElseIf ws Is wsNw Then
-                        If firstShapeNw Is Nothing Then Set firstShapeNw = sh
-                    End If
+                    matches.Add Array(ws, sh, exact)
+                    If exact Then anyExact = True
                 End If
             Next sh
         End If
     Next si
+
+    ' 2차: 강조 — 정확 일치가 있으면 정확만, 없으면 부분 포함 전부. 시트별 첫 매치 추적.
+    Dim mi As Long
+    For mi = 1 To matches.Count
+        Dim mEntry As Variant: mEntry = matches(mi)
+        Dim mws As Worksheet: Set mws = mEntry(0)
+        Dim msh As Shape: Set msh = mEntry(1)
+        Dim mex As Boolean: mex = mEntry(2)
+        If (Not anyExact) Or mex Then
+            검색_강조_적용 mws, msh
+            totalHits = totalHits + 1
+            If mws Is wsAd Then
+                If firstShapeAd Is Nothing Then Set firstShapeAd = msh
+            ElseIf mws Is wsNw Then
+                If firstShapeNw Is Nothing Then Set firstShapeNw = msh
+            End If
+        End If
+    Next mi
 
     If totalHits = 0 Then
         Dim msg As String: msg = "입력하신 조건과 일치하는 도형이 없습니다."
@@ -26652,42 +26765,48 @@ Public Sub 검색_도형으로_스크롤(shp As Shape)
     Dim ws As Worksheet: Set ws = shp.Parent
     On Error Resume Next: ws.Activate: On Error GoTo 0
 
-    Dim winW As Double, winH As Double
-    winW = 0: winH = 0
+    ' owner 2026-06-10: ScrollIntoView 는 1행 틀고정 환경에서 중앙 정렬이 자주 실패 →
+    '   ScrollRow/ScrollColumn 방식으로 변경. 도형이 들어있는 셀을 화면 중앙에 오도록 스크롤.
+    '   틀고정 행(1행) 아래로 ScrollRow 클램프 (틀고정 pane 은 ScrollRow 가 2 이상이어야 함).
+    Dim anchorRow As Long: anchorRow = 1
+    Dim anchorCol As Long: anchorCol = 1
+    On Error Resume Next
+    anchorRow = shp.TopLeftCell.Row
+    anchorCol = shp.TopLeftCell.Column
+    On Error GoTo 0
+
+    Dim winW As Double, winH As Double: winW = 0: winH = 0
     On Error Resume Next
     winW = ActiveWindow.UsableWidth
     winH = ActiveWindow.UsableHeight
     On Error GoTo 0
 
-    ' Window 크기 산출 실패 시 row/col 단순 폴백 (도형 약간 위·왼쪽)
-    If winW <= 0 Or winH <= 0 Then
-        Dim cellRow As Long: cellRow = 1
-        Dim cellCol As Long: cellCol = 1
-        On Error Resume Next
-        cellRow = shp.TopLeftCell.Row
-        cellCol = shp.TopLeftCell.Column
-        On Error GoTo 0
-        Dim srF As Long: srF = cellRow - 8: If srF < 1 Then srF = 1
-        Dim scF As Long: scF = cellCol - 4: If scF < 1 Then scF = 1
-        On Error Resume Next
-        ActiveWindow.ScrollRow = srF
-        ActiveWindow.ScrollColumn = scF
-        On Error GoTo 0
-        Exit Sub
-    End If
+    ' 화면에 보이는 행·열 수 추정 = Usable 크기 ÷ 셀 크기
+    Dim rhCell As Double: rhCell = CELL_PT
+    Dim cwCell As Double: cwCell = CELL_PT
+    On Error Resume Next
+    rhCell = ws.Cells(anchorRow, 1).Height
+    cwCell = ws.Cells(1, anchorCol).Width
+    On Error GoTo 0
+    If rhCell <= 0 Then rhCell = CELL_PT
+    If cwCell <= 0 Then cwCell = CELL_PT
 
-    ' 도형 중심을 viewport 중심에 — viewport 좌상단 좌표 = 도형 중심 - 윈도우 크기/2
-    Dim cx As Double, cy As Double
-    cx = shp.Left + shp.Width / 2
-    cy = shp.Top + shp.Height / 2
-    Dim vL As Double, vT As Double
-    vL = cx - winW / 2
-    vT = cy - winH / 2
-    If vL < 0 Then vL = 0
-    If vT < 0 Then vT = 0
+    Dim visRows As Long: visRows = 20
+    Dim visCols As Long: visCols = 20
+    If winH > 0 Then visRows = CLng(winH / rhCell)
+    If winW > 0 Then visCols = CLng(winW / cwCell)
+    If visRows < 2 Then visRows = 2
+    If visCols < 2 Then visCols = 2
+
+    Dim sr As Long: sr = anchorRow - visRows \ 2
+    Dim sc As Long: sc = anchorCol - visCols \ 2
+    Dim minRow As Long: minRow = LEGEND_ROWS + 1   ' 틀고정 1행 아래
+    If sr < minRow Then sr = minRow
+    If sc < 1 Then sc = 1
 
     On Error Resume Next
-    ActiveWindow.ScrollIntoView vL, vT, winW, winH, True
+    ActiveWindow.ScrollRow = sr
+    ActiveWindow.ScrollColumn = sc
     On Error GoTo 0
 End Sub
 

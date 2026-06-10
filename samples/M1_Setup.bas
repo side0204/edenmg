@@ -61,6 +61,9 @@ Public Const ADMIN_COMBO_LBL_W As Double = 60                        ' 명칭 �
 Public Const PREFIX_ADMIN_SEARCH_BTN As String = "_admin_sbtn_"      ' 검색 버튼 (xlButtonControl)
 Public Const ADMIN_SBTN_W As Double = 60
 Public Const ADMIN_SBTN_H As Double = 18
+' owner 2026-06-10: 네트웍구성도 1행 = 검색버튼 높이(격자는 2행부터). 네트웍 격자 원점 Y = NW_TOP_H.
+Public Const PREFIX_NW_SEARCH_BTN As String = "_nw_sbtn_"            ' 네트웍 검색 버튼
+Public Const NW_TOP_H As Double = 22                                 ' 네트웍 1행(검색바) 높이 = 버튼 18 + 여백
 
 ' 범례 옵션 콤보 — 선택된 범례 도형 옆에 표시. 시설물=크기% 4단계, 케이블=두께 가산 7단계.
 '   콤보값 → 그 범례 도형의 AlternativeText 에 저장 → FinalizeDrawnFacility/Cable 가 읽어 새 도형에 적용.
@@ -694,9 +697,20 @@ Public Sub 상단2행_틀고정()
     Dim wsNw As Worksheet
     Set wsNw = ThisWorkbook.Worksheets(SHEET_NETWORK)
     If Not wsNw Is Nothing Then
-        wsNw.Rows("1:" & LEGEND_ROWS).RowHeight = CELL_PT
+        wsNw.Rows("1:" & LEGEND_ROWS).RowHeight = NW_TOP_H   ' owner 2026-06-10: 네트웍 1행 = 검색버튼 높이 (격자는 2행부터)
         wsNw.Rows(LEGEND_ROWS + 1).RowHeight = CELL_PT
     End If
+    ' 네트웍구성도 1행(검색바) 틀고정 — owner 2026-06-10 (먼저 처리, 마지막에 행정도로 복귀)
+    If Not wsNw Is Nothing Then
+        wsNw.Activate
+        ActiveWindow.FreezePanes = False
+        ActiveWindow.ScrollRow = 1
+        ActiveWindow.ScrollColumn = 1
+        wsNw.Cells(LEGEND_ROWS + 1, 1).Select
+        ActiveWindow.FreezePanes = True
+    End If
+    ' 행정도 1행 틀고정 (마지막 — 행정도로 복귀)
+    ws.Activate
     ActiveWindow.FreezePanes = False         ' 기존 고정 해제 후 재설정
     ActiveWindow.ScrollRow = 1               ' 맨 위로 스크롤한 상태에서 고정해야 1행이 고정됨
     ActiveWindow.ScrollColumn = 1
@@ -4526,6 +4540,7 @@ Public Sub 시트_셀_클릭(Target As Range)
     If Target.Worksheet.Name = SHEET_NETWORK Then
         Dim oEvN As Boolean: oEvN = Application.EnableEvents
         Application.EnableEvents = False
+        네트웍_검색버튼_위치갱신 Target.Worksheet     ' owner 2026-06-10: 네트웍 검색버튼 가로·세로 스크롤 추종
         ' 일괄 동기화 — 케이블 재라우팅·박스·배지·콤보·태그
         네트웍_부속도형_정렬
         ' owner 2026-06-06 (8-28): 박스가 케이블 길이 범위 벗어나면 lastPos 로 복귀 — Cable_Chain_평행이동_처리 보다 먼저.
@@ -4887,7 +4902,7 @@ Public Function 방향키_hold_분기_처리(ptLeft As Double, ptTop As Double, 
 
     ' 격자 셀 크기
     Dim cw As Double: cw = wsNw.Cells(1, 1).Width
-    Dim rh As Double: rh = wsNw.Cells(1, 1).Height
+    Dim rh As Double: rh = wsNw.Cells(LEGEND_ROWS + 1, 1).Height   ' 격자 셀 높이 = 2행 (1행은 검색바). owner 2026-06-10
     If cw <= 0 Then cw = CELL_PT
     If rh <= 0 Then rh = CELL_PT
     Dim gridW As Double: gridW = cw * 네트웍_격자_단위가로cells()
@@ -5161,6 +5176,79 @@ Public Sub 행정도_콤보_위치갱신(ws As Worksheet)
         If (isCombo Or isBtn) And Left(nm, Len(PREFIX_ADMIN_COMBO_PV)) <> PREFIX_ADMIN_COMBO_PV Then
             Dim alt As String: alt = ""
             On Error Resume Next: alt = sh.AlternativeText: On Error GoTo 0
+            Dim dxs As String: dxs = 행정도_콤보_alt파싱(alt, "dx")
+            If Len(dxs) > 0 And IsNumeric(dxs) Then
+                On Error Resume Next: sh.Left = baseLeft + CDbl(dxs): On Error GoTo 0
+            End If
+        End If
+    Next sh
+End Sub
+
+' 네트웍 1행 검색 3버튼 (포인트검색·명칭검색·ID검색) 생성. dx·dy 저장으로 스크롤 추종. owner 2026-06-10
+Public Sub 네트웍_검색버튼_생성(wsNw As Worksheet)
+    If wsNw Is Nothing Then Exit Sub
+    Dim wasProt As Boolean: wasProt = wsNw.ProtectContents Or wsNw.ProtectDrawingObjects
+    On Error Resume Next: wsNw.Unprotect: On Error GoTo 0
+    Dim defs As Variant
+    defs = Array(Array("포인트검색", "검색_배지번호"), _
+                 Array("명칭검색", "검색_시설물명"), _
+                 Array("ID검색", "검색_ID"))
+    Dim bx As Double: bx = wsNw.Cells(1, 1).Left + PANEL_OFFSET
+    Dim by As Double: by = wsNw.Cells(1, 1).Top + 2
+    Dim i As Long
+    For i = LBound(defs) To UBound(defs)
+        Dim bn As String: bn = PREFIX_NW_SEARCH_BTN & i
+        On Error Resume Next: wsNw.Shapes(bn).Delete: On Error GoTo 0
+        Dim btn As Shape: Set btn = Nothing
+        On Error Resume Next
+        Set btn = wsNw.Shapes.AddFormControl(xlButtonControl, bx, by, ADMIN_SBTN_W, ADMIN_SBTN_H)
+        On Error GoTo 0
+        If Not btn Is Nothing Then
+            btn.Name = bn
+            btn.Placement = 3
+            On Error Resume Next
+            btn.TextFrame.Characters.Text = defs(i)(0)
+            btn.TextFrame.Characters.Font.Size = 9
+            btn.OnAction = defs(i)(1)
+            btn.AlternativeText = "dx=" & CLng(bx - wsNw.Cells(1, 1).Left) & "|dy=" & CLng(by - wsNw.Cells(1, 1).Top)
+            On Error GoTo 0
+            bx = bx + ADMIN_SBTN_W + 3
+        End If
+    Next i
+    ' 1행(검색바) 틀고정 — 네트웍이 active 일 때만 (격자/버튼 생성은 보통 네트웍에서 실행).
+    '   틀고정으로 세로 스크롤에도 검색바 고정 + 가로는 _위치갱신 보강. 이벤트 가드(.Select 재귀 방지). owner 2026-06-10
+    On Error Resume Next
+    If ActiveSheet.Name = SHEET_NETWORK Then
+        Dim oEvF As Boolean: oEvF = Application.EnableEvents
+        Application.EnableEvents = False
+        ActiveWindow.FreezePanes = False
+        ActiveWindow.ScrollRow = 1
+        ActiveWindow.ScrollColumn = 1
+        wsNw.Cells(LEGEND_ROWS + 1, 1).Select
+        ActiveWindow.FreezePanes = True
+        Application.EnableEvents = oEvF
+    End If
+    On Error GoTo 0
+    네트웍_검색버튼_위치갱신 wsNw
+    If wasProt Then ApplySheetProtection wsNw
+End Sub
+
+' 네트웍 검색버튼을 현재 화면 좌상단 기준 재배치 (가로·세로 스크롤 추종 — 네트웍은 틀고정 없음). owner 2026-06-10
+Public Sub 네트웍_검색버튼_위치갱신(wsNw As Worksheet)
+    If wsNw Is Nothing Then Exit Sub
+    If wsNw.Name <> SHEET_NETWORK Then Exit Sub
+    ' 가로 기준 = 화면에 보이는 가장 왼쪽 열의 Left (ScrollColumn). 틀고정 시 VisibleRange.Left 가
+    '   고정 셀(A1)을 가리켜 안 따라오는 문제 회피 — ScrollColumn 은 스크롤 영역 첫 열이라 가로 스크롤 추종. owner 2026-06-10
+    Dim leftCol As Long: leftCol = 1
+    On Error Resume Next: leftCol = ActiveWindow.ScrollColumn: On Error GoTo 0
+    If leftCol < 1 Then leftCol = 1
+    Dim baseLeft As Double: baseLeft = wsNw.Cells(1, leftCol).Left
+    Dim sh As Shape
+    For Each sh In wsNw.Shapes
+        If Left(sh.Name, Len(PREFIX_NW_SEARCH_BTN)) = PREFIX_NW_SEARCH_BTN Then
+            Dim alt As String: alt = ""
+            On Error Resume Next: alt = sh.AlternativeText: On Error GoTo 0
+            ' Top 은 1행 틀고정으로 고정 — 가로(dx)만 추종 (행정도와 동일).
             Dim dxs As String: dxs = 행정도_콤보_alt파싱(alt, "dx")
             If Len(dxs) > 0 And IsNumeric(dxs) Then
                 On Error Resume Next: sh.Left = baseLeft + CDbl(dxs): On Error GoTo 0
