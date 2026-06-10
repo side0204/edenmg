@@ -67,6 +67,10 @@ Public Const PREFIX_ADMIN_COMBO_PV As String = "_admin_combo_pv_"    ' 선택 �
 Public Const ADMIN_COMBO_W As Double = 66                            ' 110 * 0.6
 Public Const ADMIN_COMBO_H As Double = 13.2                          ' 22 * 0.6
 Public Const ADMIN_COMBO_LBL_W As Double = 60                        ' 명칭 라벨 — 잘림 방지 (콤보만 0.6, 라벨은 명칭 길이 맞춤)
+' owner 2026-06-10: 행정도 1행 검색 3버튼 (콤보 다음 배치) — 콤보·버튼 모두 가로 스크롤 추종(_콤보_위치갱신).
+Public Const PREFIX_ADMIN_SEARCH_BTN As String = "_admin_sbtn_"      ' 검색 버튼 (xlButtonControl)
+Public Const ADMIN_SBTN_W As Double = 60
+Public Const ADMIN_SBTN_H As Double = 18
 
 ' 범례 옵션 콤보 — 선택된 범례 도형 옆에 표시. 시설물=크기% 4단계, 케이블=두께 가산 7단계.
 '   콤보값 → 그 범례 도형의 AlternativeText 에 저장 → FinalizeDrawnFacility/Cable 가 읽어 새 도형에 적용.
@@ -293,7 +297,8 @@ Public g_mode As String                       ' "" / "place_facility" / "place_c
 Public g_legendShape As String                ' 선택된 범례 도형 이름
 Public g_legendLabel As String                ' 범례 라벨 (사용자 입력)
 Public g_cableFromId As String                ' 케이블 시작 시설물 도형 이름
-Public g_cableSpec As String                  ' 케이블 규격 라벨
+Public g_cableSpec As String                  ' 케이블 규격 라벨 (메타 spec 4번 컬럼 — 코어연결 코어수 파싱원. 깨끗하게 유지)
+Public g_cableGubun As String                 ' 케이블 구분 (메타 7번 컬럼 별도 저장 — 기별명세서 추출용. owner 2026-06-10)
 Public g_cableWaypoints As Collection         ' 경로점 ((Left, Top) Array)
 ' owner 2026-06-08 (8-118): 방향키 hold chain 의 「기준 시설물」 — 마지막 그린 시설물 자동 / 「기준 시설물 설정」 메뉴로 점프.
 '   비어있으면 (= "") 다음 키 hold + 빈셀 클릭 시 「시작 격자 좌표」 InputBox 진입.
@@ -342,7 +347,7 @@ Public Sub 행정도_초기화()
     EnsureSheet SHEET_META_FAC, xlSheetVeryHidden, _
                 Array("id", "type", "name", "created_at", "badge_no")
     EnsureSheet SHEET_META_CBL, xlSheetVeryHidden, _
-                Array("id", "from_id", "to_id", "spec", "waypoints_csv", "created_at")
+                Array("id", "from_id", "to_id", "spec", "waypoints_csv", "created_at", "gubun")
     EnsureSheet SHEET_META_LEG, xlSheetVeryHidden, _
                 Array("legend_shape_name", "kind", "label", "created_at")
 
@@ -807,14 +812,13 @@ Private Function RibbonGroupDefs() As Variant
             Array("라이센스 발급", "라이센스_발급", "[관리자] 새 사용자용 라이센스 + 배포본 SaveAs (DEV 모드 master 에서)"), _
             Array("라이센스 갱신", "라이센스_갱신", "[관리자] 만료된/임박 라이센스 만료일 연장")), False)
 
-    ' owner 2026-06-08 (8-81 → 8-88 → 8-109): 검색 — 4 필드별 단일 InputBox 버튼 4 개.
-    '   8-109: forceFlat=True → False — 「검색」 메뉴 1개로 합쳐 클릭 시 4 버튼 세로 드롭다운 (owner 요구).
+    ' owner 2026-06-08 (8-81 → 8-88 → 8-109 → 2026-06-10): 검색 — 3 버튼 통합.
+    '   포인트검색 / 명칭검색(옛 시설물검색) / ID검색(옛 시설물ID+선로ID 통합 — 한 검색어로 둘 다 강조).
     Dim g10 As Variant
     g10 = Array("검색", Array( _
             Array("포인트검색", "검색_배지번호", "포인트번호 단일 InputBox 검색"), _
-            Array("시설물검색", "검색_시설물명", "시설물명 단일 InputBox 검색"), _
-            Array("시설물ID검색", "검색_시설물ID", "시설물ID 단일 InputBox 검색"), _
-            Array("선로ID검색", "검색_선로ID", "선로ID 단일 InputBox 검색")), False)
+            Array("명칭검색", "검색_시설물명", "시설물 명칭 단일 InputBox 검색"), _
+            Array("ID검색", "검색_ID", "시설물ID·선로ID 동시 검색 (부분 일치)")), False)
 
     ' owner 2026-06-08 (8-103 → 8-108): 시설물 포인트 번호 토글 — 양 시트 일괄 삭제/재추가.
     '   선택 도형 종류와 무관 (fac_/badge_/lbl_fac_ 어느쪽이든 facId 추출). 메타의 badge_no 우선,
@@ -2596,7 +2600,15 @@ Public Sub FinalizeDrawnCable(ln As Shape)
         If wasProtNw Then ApplySheetProtection wsNw
     End If
 
-    AppendMetaRow SHEET_META_CBL, Array(cblId, fromId, toId, spec, "", Now)
+    ' 메타 헤더에 구분(7번) 컬럼 보장 — 기존 워크북(6컬럼)도 MetaFindRow 가 7번을 읽게. owner 2026-06-10
+    On Error Resume Next
+    Dim wsCblHdr As Worksheet: Set wsCblHdr = ThisWorkbook.Worksheets(SHEET_META_CBL)
+    If Not wsCblHdr Is Nothing Then
+        If Len(CStr(wsCblHdr.Cells(1, 7).Value)) = 0 Then wsCblHdr.Cells(1, 7).Value = "gubun"
+    End If
+    On Error GoTo 0
+    ' spec(4)=규격(코어연결·코어수 파싱) · gubun(7)=구분(기별명세서). 화면 표시 아님 — 저장만. owner 2026-06-10
+    AppendMetaRow SHEET_META_CBL, Array(cblId, fromId, toId, spec, "", Now, g_cableGubun)
 
     ' owner 2026-06-09 (8-125): 철거 케이블 — 케이블 위에 X자 마크 배치 (간격 균등, 기울기 추종)
     '   판단: 범례 메타의 「구분」(MetaLookupLabel) 에 "철거" 포함 시
@@ -4492,6 +4504,7 @@ Public Sub 시트_셀_클릭(Target As Range)
         Dim oEvP As Boolean: oEvP = Application.EnableEvents
         Application.EnableEvents = False
         UpdateFloatingPanelPosition Target.Worksheet
+        행정도_콤보_위치갱신 Target.Worksheet     ' owner 2026-06-10: Step C 콤보·검색버튼 가로 스크롤 추종
         배지_위치_동기화 Target.Worksheet
         행정도_시설물_callout_추종 Target.Worksheet     ' owner 2026-06-10: 설명박스를 시설물 테두리에 붙여 따라오게 (callout 박스 이동 먼저)
         시설물_leader_재라우팅 Target.Worksheet         ' 시설물 이동 시 callout 연결선 자동 재배치 (callout 새 위치 기준)
@@ -4748,6 +4761,7 @@ Public Sub ResetMode()
     g_legendLabel = ""
     g_cableFromId = ""
     g_cableSpec = ""
+    g_cableGubun = ""
     Set g_cableWaypoints = Nothing
 
     ' 그리기 자동 감지 중단
@@ -5109,6 +5123,7 @@ NextR:
         On Error GoTo 0
         Dim lblW As Double: lblW = ADMIN_COMBO_LBL_W
         On Error Resume Next: lblW = lbl.Width: On Error GoTo 0
+        On Error Resume Next: lbl.AlternativeText = "dx=" & CLng(lbl.Left - ws.Cells(1, 1).Left): On Error GoTo 0   ' 가로 스크롤 추종
         curX = lbl.Left + lblW + 3
 
         ' 데이터 있는 콤보만 생성 (규격 없으면 규격 콤보 X — owner 2026-06-10)
@@ -5130,8 +5145,69 @@ NextR:
         curX = curX + 12
     Next ni
 
+    ' 검색 3버튼 — 마지막 콤보 + 콤보 1개 폭 간격 두고 (owner 2026-06-10)
+    curX = curX + ADMIN_COMBO_W
+    행정도_검색버튼_생성 ws, curX, curY
+
+    ' 콤보·버튼 가로 스크롤 추종 위치 적용 (현재 보이는 영역 기준)
+    행정도_콤보_위치갱신 ws
+
     If wasProt Then ApplySheetProtection ws
-    Application.StatusBar = "행정도 콤보박스 생성 완료 — 명칭별 구분·규격을 선택하면 그 도형으로 그리기."
+    Application.StatusBar = "행정도 콤보박스 생성 완료 — 명칭별 구분·규격을 선택하면 그 도형으로 그리기. (검색 버튼 포함)"
+End Sub
+
+' 검색 3버튼 (포인트검색·명칭검색·ID검색) 생성 — 콤보 다음에 배치. dx 저장으로 스크롤 추종. owner 2026-06-10
+Public Sub 행정도_검색버튼_생성(ws As Worksheet, x As Double, y As Double)
+    Dim defs As Variant
+    defs = Array(Array("포인트검색", "검색_배지번호"), _
+                 Array("명칭검색", "검색_시설물명"), _
+                 Array("ID검색", "검색_ID"))
+    Dim bx As Double: bx = x
+    Dim i As Long
+    For i = LBound(defs) To UBound(defs)
+        Dim bn As String: bn = PREFIX_ADMIN_SEARCH_BTN & i
+        On Error Resume Next: ws.Shapes(bn).Delete: On Error GoTo 0
+        Dim btn As Shape: Set btn = Nothing
+        On Error Resume Next
+        Set btn = ws.Shapes.AddFormControl(xlButtonControl, bx, y, ADMIN_SBTN_W, ADMIN_SBTN_H)
+        On Error GoTo 0
+        If Not btn Is Nothing Then
+            btn.Name = bn
+            btn.Placement = 3
+            On Error Resume Next
+            btn.TextFrame.Characters.Text = defs(i)(0)
+            btn.TextFrame.Characters.Font.Size = 9
+            btn.OnAction = defs(i)(1)
+            btn.AlternativeText = "dx=" & CLng(bx - ws.Cells(1, 1).Left)
+            On Error GoTo 0
+            bx = bx + ADMIN_SBTN_W + 3
+        End If
+    Next i
+End Sub
+
+' 콤보·검색버튼을 현재 화면 좌측 기준으로 재배치 (가로 스크롤 추종). 셀 클릭마다 호출. owner 2026-06-10
+'   각 도형 AlternativeText 의 dx(=생성 시 A열 기준 오프셋) 를 vr.Left 에 더해 위치 갱신. Top 은 1행 고정이라 불변.
+Public Sub 행정도_콤보_위치갱신(ws As Worksheet)
+    If ws Is Nothing Then Exit Sub
+    If ws.Name <> SHEET_ADMIN Then Exit Sub
+    Dim vr As Range
+    On Error Resume Next: Set vr = ActiveWindow.VisibleRange: On Error GoTo 0
+    If vr Is Nothing Then Exit Sub
+    Dim baseLeft As Double: baseLeft = vr.Left
+    Dim sh As Shape
+    For Each sh In ws.Shapes
+        Dim nm As String: nm = sh.Name
+        Dim isCombo As Boolean: isCombo = (Left(nm, Len(PREFIX_ADMIN_COMBO)) = PREFIX_ADMIN_COMBO)
+        Dim isBtn As Boolean: isBtn = (Left(nm, Len(PREFIX_ADMIN_SEARCH_BTN)) = PREFIX_ADMIN_SEARCH_BTN)
+        If (isCombo Or isBtn) And Left(nm, Len(PREFIX_ADMIN_COMBO_PV)) <> PREFIX_ADMIN_COMBO_PV Then
+            Dim alt As String: alt = ""
+            On Error Resume Next: alt = sh.AlternativeText: On Error GoTo 0
+            Dim dxs As String: dxs = 행정도_콤보_alt파싱(alt, "dx")
+            If Len(dxs) > 0 And IsNumeric(dxs) Then
+                On Error Resume Next: sh.Left = baseLeft + CDbl(dxs): On Error GoTo 0
+            End If
+        End If
+    Next sh
 End Sub
 
 ' 콤보 1개 생성 + 옵션 채움.
@@ -5175,7 +5251,7 @@ Public Sub 행정도_콤보_하나생성(ws As Worksheet, 명칭 As String, tp A
         End If
     End If
     cb.ControlFormat.Value = 1
-    cb.AlternativeText = "nm=" & 명칭 & "|tp=" & tp
+    cb.AlternativeText = "nm=" & 명칭 & "|tp=" & tp & "|dx=" & CLng(x - ws.Cells(1, 1).Left)   ' dx = 가로 스크롤 추종 오프셋(정수 px)
     On Error GoTo 0
     cb.OnAction = "행정도_콤보_변경"
 End Sub
@@ -5219,7 +5295,8 @@ Public Sub 행정도_콤보_제거(ws As Worksheet)
     Dim names As Collection: Set names = New Collection
     Dim sh As Shape
     For Each sh In ws.Shapes
-        If Left(sh.Name, Len(PREFIX_ADMIN_COMBO)) = PREFIX_ADMIN_COMBO Then names.Add sh.Name
+        If Left(sh.Name, Len(PREFIX_ADMIN_COMBO)) = PREFIX_ADMIN_COMBO _
+           Or Left(sh.Name, Len(PREFIX_ADMIN_SEARCH_BTN)) = PREFIX_ADMIN_SEARCH_BTN Then names.Add sh.Name
     Next sh
     Dim i As Long
     For i = 1 To names.Count
@@ -5301,7 +5378,14 @@ NextSh:
         If isCable Then
             ' 케이블 = 선 그리기 (시설물 도형 X — owner)
             g_legendShape = shapeName
-            g_cableSpec = MetaLookupLabel(shapeName)
+            ' 케이블 규격 = 선택한 규격만 (메타 spec 4번 컬럼 = 코어연결이 코어수 파싱 → 깨끗하게 유지). owner 2026-06-10
+            '   규격 콤보 없으면 구분 폴백, 그것도 없으면 메타 구분(MetaLookupLabel).
+            '   구분은 g_cableGubun 에 별도 보존 → 메타 7번 컬럼(기별명세서 추출용). 화면(선로ID) 표시는 안 바뀜.
+            Dim cblSpec As String: cblSpec = selGyuk
+            If Len(cblSpec) = 0 Then cblSpec = selGubun
+            If Len(cblSpec) = 0 Then cblSpec = MetaLookupLabel(shapeName)
+            g_cableSpec = cblSpec
+            g_cableGubun = selGubun
             g_mode = "draw_cable"
             HighlightSelectedLegend shapeName
             UpdateModeIndicator
@@ -8468,7 +8552,7 @@ Public Sub AddFacilityStatusBox(ws As Worksheet, facId As String)
         .WordWrap = msoFalse
         .AutoSize = msoAutoSizeShapeToFitText
         .VerticalAnchor = msoAnchorMiddle
-        .MarginLeft = 0.1: .MarginRight = 0.1: .MarginTop = 0: .MarginBottom = 0
+        .MarginLeft = Application.CentimetersToPoints(0.1): .MarginRight = Application.CentimetersToPoints(0.1): .MarginTop = 0: .MarginBottom = 0   ' 좌·우 0.1cm (owner 2026-06-10)
         .TextRange.Text = " " & vbCr & " " & vbCr & " "      ' 빈 3줄 placeholder
         .TextRange.Font.Name = CALLOUT_FONT_NAME
         .TextRange.Font.Size = 6                             ' 주간·야간 글자 크기 (owner 요구)
@@ -8600,7 +8684,7 @@ Public Sub 상태박스_값_쓰기(ws As Worksheet, facId As String, dayV As Str
     ' 줄별 폰트·색상 명시 적용 (LG스마트체 줄별 누락 우회) + 박스 좌·우 여백 0.1 강제 (owner 요구, 값 갱신 시도 마다 보장)
     On Error Resume Next
     With box.TextFrame2
-        .MarginLeft = 0.1: .MarginRight = 0.1: .MarginTop = 0: .MarginBottom = 0
+        .MarginLeft = Application.CentimetersToPoints(0.1): .MarginRight = Application.CentimetersToPoints(0.1): .MarginTop = 0: .MarginBottom = 0   ' 좌·우 0.1cm (owner 2026-06-10)
     End With
     On Error GoTo 0
     For i = 1 To n
@@ -26516,11 +26600,24 @@ End Sub
 
 Public Sub 검색_시설물명()
     Dim s As String
-    s = InputBox("시설물명 (부분 일치):", "시설물명 검색")
+    s = InputBox("명칭 (부분 일치):", "명칭 검색")
     If StrPtr(s) = 0 Or Len(Trim(s)) = 0 Then Exit Sub
     On Error Resume Next: 검색_강조_해제: On Error GoTo 0
     g_search_form_qBadge = "": g_search_form_qName = Trim(s)
     g_search_form_qFacId = "": g_search_form_qCblId = ""
+    g_search_form_confirmed = True
+    검색_수행
+End Sub
+
+' owner 2026-06-10: ID검색 — 시설물ID·선로ID 통합. 한 검색어를 qFacId·qCblId 둘 다 세팅 →
+'   검색_수행 이 시설물 라벨(시설물ID 매칭)·케이블 라벨(선로ID 매칭) 양쪽을 OR 로 강조.
+Public Sub 검색_ID()
+    Dim s As String
+    s = InputBox("ID (시설물ID·선로ID 부분 일치):", "ID 검색")
+    If StrPtr(s) = 0 Or Len(Trim(s)) = 0 Then Exit Sub
+    On Error Resume Next: 검색_강조_해제: On Error GoTo 0
+    g_search_form_qBadge = "": g_search_form_qName = ""
+    g_search_form_qFacId = Trim(s): g_search_form_qCblId = Trim(s)
     g_search_form_confirmed = True
     검색_수행
 End Sub

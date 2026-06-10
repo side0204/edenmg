@@ -5678,11 +5678,24 @@ End Sub
 
 Public Sub 검색_시설물명()
     Dim s As String
-    s = InputBox("시설물명 (부분 일치):", "시설물명 검색")
+    s = InputBox("명칭 (부분 일치):", "명칭 검색")
     If StrPtr(s) = 0 Or Len(Trim(s)) = 0 Then Exit Sub
     On Error Resume Next: 검색_강조_해제: On Error GoTo 0
     g_search_form_qBadge = "": g_search_form_qName = Trim(s)
     g_search_form_qFacId = "": g_search_form_qCblId = ""
+    g_search_form_confirmed = True
+    검색_수행
+End Sub
+
+' owner 2026-06-10: ID검색 — 시설물ID·선로ID 통합. 한 검색어를 qFacId·qCblId 둘 다 세팅 →
+'   검색_수행 이 시설물 라벨(시설물ID 매칭)·케이블 라벨(선로ID 매칭) 양쪽을 OR 로 강조.
+Public Sub 검색_ID()
+    Dim s As String
+    s = InputBox("ID (시설물ID·선로ID 부분 일치):", "ID 검색")
+    If StrPtr(s) = 0 Or Len(Trim(s)) = 0 Then Exit Sub
+    On Error Resume Next: 검색_강조_해제: On Error GoTo 0
+    g_search_form_qBadge = "": g_search_form_qName = ""
+    g_search_form_qFacId = Trim(s): g_search_form_qCblId = Trim(s)
     g_search_form_confirmed = True
     검색_수행
 End Sub

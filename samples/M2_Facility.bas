@@ -2362,7 +2362,7 @@ Public Sub AddFacilityStatusBox(ws As Worksheet, facId As String)
         .WordWrap = msoFalse
         .AutoSize = msoAutoSizeShapeToFitText
         .VerticalAnchor = msoAnchorMiddle
-        .MarginLeft = 0.1: .MarginRight = 0.1: .MarginTop = 0: .MarginBottom = 0
+        .MarginLeft = Application.CentimetersToPoints(0.1): .MarginRight = Application.CentimetersToPoints(0.1): .MarginTop = 0: .MarginBottom = 0   ' 좌·우 0.1cm (owner 2026-06-10)
         .TextRange.Text = " " & vbCr & " " & vbCr & " "      ' 빈 3줄 placeholder
         .TextRange.Font.Name = CALLOUT_FONT_NAME
         .TextRange.Font.Size = 6                             ' 주간·야간 글자 크기 (owner 요구)
@@ -2494,7 +2494,7 @@ Public Sub 상태박스_값_쓰기(ws As Worksheet, facId As String, dayV As Str
     ' 줄별 폰트·색상 명시 적용 (LG스마트체 줄별 누락 우회) + 박스 좌·우 여백 0.1 강제 (owner 요구, 값 갱신 시도 마다 보장)
     On Error Resume Next
     With box.TextFrame2
-        .MarginLeft = 0.1: .MarginRight = 0.1: .MarginTop = 0: .MarginBottom = 0
+        .MarginLeft = Application.CentimetersToPoints(0.1): .MarginRight = Application.CentimetersToPoints(0.1): .MarginTop = 0: .MarginBottom = 0   ' 좌·우 0.1cm (owner 2026-06-10)
     End With
     On Error GoTo 0
     For i = 1 To n
