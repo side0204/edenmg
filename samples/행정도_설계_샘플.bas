@@ -1004,14 +1004,19 @@ Public Sub 그리기_종료()
     UpdateModeIndicator
     Dim ws As Worksheet: Set ws = ThisWorkbook.Worksheets(SHEET_ADMIN)
     If Not ws Is Nothing Then
-        ' owner 2026-06-10: 행정도 콤보 값 placeholder 로 리셋 — 같은 규격 재선택 시에도 OnAction 발동하게
+        ' owner 2026-06-10: 행정도 콤보 값 placeholder 로 리셋 — 같은 규격 재선택 시에도 OnAction 발동하게.
+        '   단 크기/굵기(size) 콤보는 유지 — 한 번 정하면 다시 바꿀 때까지 보존 (owner 2026-06-10).
         Dim cbr As Shape
         For Each cbr In ws.Shapes
             Dim cn As String: cn = cbr.Name
             If Left(cn, Len(PREFIX_ADMIN_COMBO)) = PREFIX_ADMIN_COMBO _
                And Left(cn, Len(PREFIX_ADMIN_COMBO_LBL)) <> PREFIX_ADMIN_COMBO_LBL _
                And Left(cn, Len(PREFIX_ADMIN_COMBO_PV)) <> PREFIX_ADMIN_COMBO_PV Then
-                On Error Resume Next: cbr.ControlFormat.Value = 1: On Error GoTo 0
+                Dim altr As String: altr = ""
+                On Error Resume Next: altr = cbr.AlternativeText: On Error GoTo 0
+                If 행정도_콤보_alt파싱(altr, "tp") <> "size" Then
+                    On Error Resume Next: cbr.ControlFormat.Value = 1: On Error GoTo 0
+                End If
             End If
         Next cbr
         행정도_콤보_미리보기 ws, "", Nothing   ' 미리보기 제거
@@ -5072,9 +5077,11 @@ NextR:
         Dim hasGubun As Boolean: hasGubun = (Len(CStr(gubunMap(nmv))) > 0)
         Dim hasGyuk As Boolean: hasGyuk = (Len(CStr(gyukMap(nmv))) > 0)
         Dim hasChuga As Boolean: hasChuga = (Len(CStr(chugaMap(nmv))) > 0)
-        Dim comboN As Long: comboN = IIf(hasGubun, 1, 0) + IIf(hasGyuk, 1, 0) + IIf(hasChuga, 1, 0)
         Dim groupW As Double
-        groupW = ADMIN_COMBO_LBL_W + (ADMIN_COMBO_W + 2) * comboN + 12
+        groupW = ADMIN_COMBO_LBL_W + 12 + (행정도_콤보_폭("size") + 2)   ' 라벨 + size 콤보(항상)
+        If hasGubun Then groupW = groupW + 행정도_콤보_폭("gubun") + 2
+        If hasGyuk Then groupW = groupW + 행정도_콤보_폭("gyuk") + 2
+        If hasChuga Then groupW = groupW + 행정도_콤보_폭("chuga") + 2
         If curX + groupW > maxX Then
             curX = startX
             curY = curY + rowH
@@ -5107,16 +5114,19 @@ NextR:
         ' 데이터 있는 콤보만 생성 (규격 없으면 규격 콤보 X — owner 2026-06-10)
         If hasGubun Then
             행정도_콤보_하나생성 ws, nmv, "gubun", CStr(gubunMap(nmv)), curX, curY, seq
-            curX = curX + ADMIN_COMBO_W + 2: seq = seq + 1
+            curX = curX + 행정도_콤보_폭("gubun") + 2: seq = seq + 1
         End If
         If hasGyuk Then
             행정도_콤보_하나생성 ws, nmv, "gyuk", CStr(gyukMap(nmv)), curX, curY, seq
-            curX = curX + ADMIN_COMBO_W + 2: seq = seq + 1
+            curX = curX + 행정도_콤보_폭("gyuk") + 2: seq = seq + 1
         End If
         If hasChuga Then
             행정도_콤보_하나생성 ws, nmv, "chuga", CStr(chugaMap(nmv)), curX, curY, seq
-            curX = curX + ADMIN_COMBO_W + 2: seq = seq + 1
+            curX = curX + 행정도_콤보_폭("chuga") + 2: seq = seq + 1
         End If
+        ' 크기/굵기 콤보 (항상) — 시설물 크기% / 케이블 굵기 가산. owner 2026-06-10 ⑤
+        행정도_콤보_하나생성 ws, nmv, "size", "", curX, curY, seq
+        curX = curX + 행정도_콤보_폭("size") + 2: seq = seq + 1
         curX = curX + 12
     Next ni
 
@@ -5128,21 +5138,41 @@ End Sub
 Public Sub 행정도_콤보_하나생성(ws As Worksheet, 명칭 As String, tp As String, optList As String, x As Double, y As Double, seq As Long)
     Dim cb As Shape: Set cb = Nothing
     On Error Resume Next
-    Set cb = ws.Shapes.AddFormControl(xlDropDown, x, y, ADMIN_COMBO_W, ADMIN_COMBO_H)
+    Set cb = ws.Shapes.AddFormControl(xlDropDown, x, y, 행정도_콤보_폭(tp), ADMIN_COMBO_H)
     On Error GoTo 0
     If cb Is Nothing Then Exit Sub
     cb.Name = PREFIX_ADMIN_COMBO & seq
     cb.Placement = 3
     On Error Resume Next
     cb.ControlFormat.RemoveAllItems
-    cb.ControlFormat.AddItem "(" & 행정도_콤보_타입라벨(tp) & ")"
-    Dim parts() As String
-    If Len(optList) > 0 Then
-        parts = Split(optList, "|")
-        Dim i As Long
-        For i = LBound(parts) To UBound(parts)
-            If Len(parts(i)) > 0 Then cb.ControlFormat.AddItem parts(i)
-        Next i
+    If tp = "size" Then
+        ' 크기/굵기 — 명칭이 케이블이면 굵기 가산, 아니면 크기%. (index1=placeholder=기본)
+        If InStr(명칭, "케이블") > 0 Then
+            cb.ControlFormat.AddItem "(굵기)"
+            cb.ControlFormat.AddItem "+0t"
+            cb.ControlFormat.AddItem "+0.5t"
+            cb.ControlFormat.AddItem "+1t"
+            cb.ControlFormat.AddItem "+1.5t"
+            cb.ControlFormat.AddItem "+2t"
+            cb.ControlFormat.AddItem "+2.5t"
+            cb.ControlFormat.AddItem "+3t"
+        Else
+            cb.ControlFormat.AddItem "(크기)"
+            cb.ControlFormat.AddItem "100%"
+            cb.ControlFormat.AddItem "80%"
+            cb.ControlFormat.AddItem "60%"
+            cb.ControlFormat.AddItem "40%"
+        End If
+    Else
+        cb.ControlFormat.AddItem "(" & 행정도_콤보_타입라벨(tp) & ")"
+        Dim parts() As String
+        If Len(optList) > 0 Then
+            parts = Split(optList, "|")
+            Dim i As Long
+            For i = LBound(parts) To UBound(parts)
+                If Len(parts(i)) > 0 Then cb.ControlFormat.AddItem parts(i)
+            Next i
+        End If
     End If
     cb.ControlFormat.Value = 1
     cb.AlternativeText = "nm=" & 명칭 & "|tp=" & tp
@@ -5172,6 +5202,14 @@ Public Function 행정도_콤보_타입라벨(tp As String) As String
         Case "gyuk":  행정도_콤보_타입라벨 = "규격"
         Case "chuga": 행정도_콤보_타입라벨 = "추가"
         Case Else:    행정도_콤보_타입라벨 = "선택"
+    End Select
+End Function
+
+' 콤보 타입별 폭 — 규격·크기(size)는 0.5배로 좁게. owner 2026-06-10
+Public Function 행정도_콤보_폭(tp As String) As Double
+    Select Case tp
+        Case "gyuk", "size": 행정도_콤보_폭 = ADMIN_COMBO_W * 0.5
+        Case Else:           행정도_콤보_폭 = ADMIN_COMBO_W
     End Select
 End Function
 
@@ -5219,7 +5257,8 @@ Public Sub 행정도_콤보_변경()
 
     ' 같은 명칭 콤보 수집 + 전체/선택 개수 (owner: 마지막 콤보까지 다 골라야 그리기)
     Dim selGubun As String, selGyuk As String, selChuga As String
-    selGubun = "": selGyuk = "": selChuga = ""
+    Dim selSize As String
+    selGubun = "": selGyuk = "": selChuga = "": selSize = ""
     Dim totalCnt As Long: totalCnt = 0
     Dim selCnt As Long: selCnt = 0
     Dim sh As Shape
@@ -5231,15 +5270,19 @@ Public Sub 행정도_콤보_변경()
         Dim a2 As String: a2 = ""
         On Error Resume Next: a2 = sh.AlternativeText: On Error GoTo 0
         If 행정도_콤보_alt파싱(a2, "nm") <> 명칭 Then GoTo NextSh
-        totalCnt = totalCnt + 1
         Dim tp As String: tp = 행정도_콤보_alt파싱(a2, "tp")
         Dim selV As String: selV = 행정도_콤보_선택값(sh)
-        If Len(selV) > 0 Then selCnt = selCnt + 1
-        Select Case tp
-            Case "gubun": selGubun = selV
-            Case "gyuk":  selGyuk = selV
-            Case "chuga": selChuga = selV
-        End Select
+        If tp = "size" Then
+            selSize = selV   ' 크기/굵기 — 선택 필수 아님 (totalCnt 제외)
+        Else
+            totalCnt = totalCnt + 1
+            If Len(selV) > 0 Then selCnt = selCnt + 1
+            Select Case tp
+                Case "gubun": selGubun = selV
+                Case "gyuk":  selGyuk = selV
+                Case "chuga": selChuga = selV
+            End Select
+        End If
 NextSh:
     Next sh
 
@@ -5251,6 +5294,9 @@ NextSh:
 
     ' 모든 콤보 선택 완료 + 도형 있을 때만 미리보기 + 그리기 (구분만 골라선 진입 안 함 — owner)
     If totalCnt > 0 And selCnt >= totalCnt And Len(shapeName) > 0 Then
+        행정도_콤보_크기적용 shapeName, selSize, isCable   ' ⑤ 크기/굵기 → 양식 도형 AlternativeText (그리기 시점에 읽힘)
+        Dim szTxt As String
+        If Len(selSize) > 0 Then szTxt = " · " & IIf(isCable, "굵기 ", "크기 ") & selSize Else szTxt = ""
         행정도_콤보_미리보기 ws, shapeName, cb, isCable
         If isCable Then
             ' 케이블 = 선 그리기 (시설물 도형 X — owner)
@@ -5260,7 +5306,7 @@ NextSh:
             HighlightSelectedLegend shapeName
             UpdateModeIndicator
             BeginCableDraw shapeName
-            Application.StatusBar = "[" & 명칭 & "] 케이블 — 시작 시설물에서 클릭 → 도착 시설물 더블클릭. ESC=종료."
+            Application.StatusBar = "[" & 명칭 & "]" & szTxt & " 케이블 — 시작 시설물에서 클릭 → 도착 시설물 더블클릭. ESC=종료."
         Else
             g_legendShape = shapeName
             g_legendLabel = MetaLookupLabel(shapeName)
@@ -5268,7 +5314,7 @@ NextSh:
             HighlightSelectedLegend shapeName
             UpdateModeIndicator
             BeginFacilityDraw shapeName
-            Application.StatusBar = "[" & 명칭 & "] 그리기 — 행정도에 클릭/드래그로 배치. ESC=종료."
+            Application.StatusBar = "[" & 명칭 & "]" & szTxt & " 그리기 — 행정도에 클릭/드래그로 배치. ESC=종료."
         End If
     Else
         행정도_콤보_미리보기 ws, "", cb, isCable   ' 미완료 — 미리보기 제거, 그리기 안 함
@@ -5301,6 +5347,44 @@ Public Function 행정도_콤보_선택값(cb As Shape) As String
     Dim idx As Long: idx = cb.ControlFormat.Value
     If idx >= 2 Then 행정도_콤보_선택값 = cb.ControlFormat.List(idx)
     On Error GoTo 0
+End Function
+
+' ⑤ 크기/굵기 콤보 선택값 → 양식 도형 AlternativeText 의 scale/weight 에 기록.
+'   BeginFacilityDraw·FinalizeDrawnCable 이 그리기 시점에 범례_옵션_읽기 로 가져옴.
+'   placeholder(selSize="") 이면 기본(시설물 100% · 케이블 +0t) 적용.
+Public Sub 행정도_콤보_크기적용(shapeName As String, selSize As String, isCable As Boolean)
+    If Len(shapeName) = 0 Then Exit Sub
+    Dim wsForm As Worksheet: Set wsForm = Nothing
+    On Error Resume Next: Set wsForm = ThisWorkbook.Worksheets(SHEET_LEGEND_FORM): On Error GoTo 0
+    If wsForm Is Nothing Then Exit Sub
+    Dim leg As Shape: Set leg = Nothing
+    On Error Resume Next: Set leg = wsForm.Shapes(shapeName): On Error GoTo 0
+    If leg Is Nothing Then Exit Sub
+    Dim scalePct As Long, weightDelta As Double
+    범례_옵션_읽기 leg, scalePct, weightDelta
+    If isCable Then
+        weightDelta = 행정도_콤보_굵기값(selSize)
+    Else
+        scalePct = 행정도_콤보_크기값(selSize)
+    End If
+    범례_옵션_쓰기 leg, scalePct, weightDelta
+End Sub
+
+' "100%"/"80%"/… → 크기%. 빈 값·해석 불가 = 기본 100.
+Public Function 행정도_콤보_크기값(selSize As String) As Long
+    행정도_콤보_크기값 = 100
+    Dim s As String: s = Trim(Replace(selSize, "%", ""))
+    If IsNumeric(s) Then 행정도_콤보_크기값 = CLng(s)
+    If 행정도_콤보_크기값 <= 0 Then 행정도_콤보_크기값 = 100
+End Function
+
+' "+0.5t"/"+1t"/… → 굵기 가산 t. 빈 값·해석 불가 = 기본 0.
+Public Function 행정도_콤보_굵기값(selSize As String) As Double
+    행정도_콤보_굵기값 = 0
+    Dim s As String: s = Replace(selSize, "t", "")
+    s = Trim(Replace(s, "+", ""))
+    If IsNumeric(s) Then 행정도_콤보_굵기값 = CDbl(s)
+    If 행정도_콤보_굵기값 < 0 Then 행정도_콤보_굵기값 = 0
 End Function
 
 ' 명칭+구분+규격+추가(선택된 것만)로 양식 도형 이름 특정. 더 많이 매칭하는 행 우선.
