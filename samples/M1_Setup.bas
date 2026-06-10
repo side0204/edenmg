@@ -834,6 +834,10 @@ Public Function RibbonGroupDefs() As Variant
             Array("격자 한 칸 기본",  "격자_단위_기본",           "한 격자 칸 = 20×20 cell (기본값) 복원."), _
             Array("격자 한 칸 직접",  "격자_단위_직접입력",       "한 격자 칸 안 가로/세로 cell 수 InputBox."), _
             Array("격자 칸수 입력",   "네트웍_격자_확장",         "가로/세로 격자 칸 수 변경 (한 칸 cell 수와 별개). 최소 1."), _
+            Array("가로 축소 −2",     "격자_줌_가로_축소",        "가로 격자 한 칸 −2 cell (좁게). 시설물 위치만, 케이블 다시 그림. 최소 4."), _
+            Array("가로 확대 +2",     "격자_줌_가로_확대",        "가로 격자 한 칸 +2 cell (넓게). 최대 40."), _
+            Array("세로 축소 −2",     "격자_줌_세로_축소",        "세로 격자 한 칸 −2 cell (좁게). 최소 4."), _
+            Array("세로 확대 +2",     "격자_줌_세로_확대",        "세로 격자 한 칸 +2 cell (넓게). 최대 40."), _
             Array("내부확장 ×2",      "격자_내부확장_2",          "시설물 간격 2배. 좌표·격자 모두 ×2. 「확장 되돌리기」로 원복."), _
             Array("내부확장 ×3",      "격자_내부확장_3",          "시설물 간격 3배. 좌표·격자 모두 ×3. 「확장 되돌리기」로 원복."), _
             Array("내부확장 직접",    "격자_내부확장_직접입력",   "내부확장 배수 InputBox (정수 ≥2)."), _
@@ -5184,35 +5188,59 @@ Public Sub 행정도_콤보_위치갱신(ws As Worksheet)
     Next sh
 End Sub
 
-' 네트웍 1행 검색 3버튼 (포인트검색·명칭검색·ID검색) 생성. dx·dy 저장으로 스크롤 추종. owner 2026-06-10
+' 네트웍 1행 검색3 + 코어3 + 포인트2 + 전체줌2(축소·확대) + 시설물만 토글, 각 그룹 0.5칸 띄움. 가로/세로 줌은 리본. dx 스크롤 추종. owner 2026-06-10
 Public Sub 네트웍_검색버튼_생성(wsNw As Worksheet)
     If wsNw Is Nothing Then Exit Sub
     Dim wasProt As Boolean: wasProt = wsNw.ProtectContents Or wsNw.ProtectDrawingObjects
     On Error Resume Next: wsNw.Unprotect: On Error GoTo 0
+    ' 기존 검색버튼 일괄 제거 (버튼 수 변경 시 orphan 방지). owner 2026-06-10
+    Dim oldSh As Shape, j As Long
+    For j = wsNw.Shapes.Count To 1 Step -1
+        Set oldSh = wsNw.Shapes(j)
+        If Left(oldSh.Name, Len(PREFIX_NW_SEARCH_BTN)) = PREFIX_NW_SEARCH_BTN Then
+            On Error Resume Next: oldSh.Delete: On Error GoTo 0
+        End If
+    Next j
+    ' 검색 3버튼 + 0.5칸 간격 + 코어 3버튼 + 포인트 2버튼 + 전체줌 2버튼 + 시설물만. owner 2026-06-10
     Dim defs As Variant
     defs = Array(Array("포인트검색", "검색_배지번호"), _
                  Array("명칭검색", "검색_시설물명"), _
-                 Array("ID검색", "검색_ID"))
+                 Array("ID검색", "검색_ID"), _
+                 Array("__gap__", ""), _
+                 Array("코어연결", "선번연결_도구"), _
+                 Array("코어추적", "코어_추적_도구"), _
+                 Array("추적지우기", "코어_추적_지우기"), _
+                 Array("__gap__", ""), _
+                 Array("포인트추가", "배지_추가"), _
+                 Array("포인트삭제", "배지_삭제"), _
+                 Array("__gap__", ""), _
+                 Array("전체축소", "격자_줌_전체_축소"), _
+                 Array("전체확대", "격자_줌_전체_확대"), _
+                 Array("시설물만", "시설물만보기_토글"))
     Dim bx As Double: bx = wsNw.Cells(1, 1).Left + PANEL_OFFSET
     Dim by As Double: by = wsNw.Cells(1, 1).Top + 2
     Dim i As Long
     For i = LBound(defs) To UBound(defs)
-        Dim bn As String: bn = PREFIX_NW_SEARCH_BTN & i
-        On Error Resume Next: wsNw.Shapes(bn).Delete: On Error GoTo 0
-        Dim btn As Shape: Set btn = Nothing
-        On Error Resume Next
-        Set btn = wsNw.Shapes.AddFormControl(xlButtonControl, bx, by, ADMIN_SBTN_W, ADMIN_SBTN_H)
-        On Error GoTo 0
-        If Not btn Is Nothing Then
-            btn.Name = bn
-            btn.Placement = 3
+        If defs(i)(0) = "__gap__" Then
+            bx = bx + ADMIN_SBTN_W * 0.5 + 3       ' 버튼 0.5개 간격 (owner 2026-06-10)
+        Else
+            Dim bn As String: bn = PREFIX_NW_SEARCH_BTN & i
+            On Error Resume Next: wsNw.Shapes(bn).Delete: On Error GoTo 0
+            Dim btn As Shape: Set btn = Nothing
             On Error Resume Next
-            btn.TextFrame.Characters.Text = defs(i)(0)
-            btn.TextFrame.Characters.Font.Size = 9
-            btn.OnAction = defs(i)(1)
-            btn.AlternativeText = "dx=" & CLng(bx - wsNw.Cells(1, 1).Left) & "|dy=" & CLng(by - wsNw.Cells(1, 1).Top)
+            Set btn = wsNw.Shapes.AddFormControl(xlButtonControl, bx, by, ADMIN_SBTN_W, ADMIN_SBTN_H)
             On Error GoTo 0
-            bx = bx + ADMIN_SBTN_W + 3
+            If Not btn Is Nothing Then
+                btn.Name = bn
+                btn.Placement = 3
+                On Error Resume Next
+                btn.TextFrame.Characters.Text = defs(i)(0)
+                btn.TextFrame.Characters.Font.Size = 9
+                btn.OnAction = defs(i)(1)
+                btn.AlternativeText = "dx=" & CLng(bx - wsNw.Cells(1, 1).Left) & "|dy=" & CLng(by - wsNw.Cells(1, 1).Top)
+                On Error GoTo 0
+                bx = bx + ADMIN_SBTN_W + 3
+            End If
         End If
     Next i
     ' 1행(검색바) 틀고정 — 네트웍이 active 일 때만 (격자/버튼 생성은 보통 네트웍에서 실행).
