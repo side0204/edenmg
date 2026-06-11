@@ -317,6 +317,8 @@ Public g_placementMode As Boolean
 Public g_facOnlyMode As Boolean
 Public Const META_PLACEMENT_UNDO As String = "_placement_undo"
 Public Const SHEET_LEGEND_FORM As String = "범례"
+' owner 2026-06-10: 격자 한 칸(가로·세로 중 작은 값)이 이 cell 수 미만으로 축소되면 선번박스·코어화살표 자동 숨김 (겹침 방지)
+Public Const NW_BOX_HIDE_UNITS As Long = 10
 
 ' ===== 네이티브 그리기(십자) 자동 감지 상태 (휘발성) =====
 Public g_drawKind As String                   ' 그리기 대기 시설물 종류(라벨)
@@ -8270,6 +8272,46 @@ Public Sub 격자_교차점_스냅(wsNw As Worksheet, ByRef x As Double, ByRef y
     y = NW_TOP_H + gr * gridH + rh / 2
 End Sub
 
+' 격자 한 칸이 임계(NW_BOX_HIDE_UNITS) 미만으로 축소되면 선번박스·코어화살표 자동 숨김, 이상으로 확대되면 자동 복원.
+'   숨긴 도형만 alt 에 "zoomhid=1" 표식 — 설계상 invisible 인 cascade anchor(8-25)는 안 건드림 (보이는 것만 숨기고, 표식 있는 것만 복원).
+'   반환 = 현재 숨김 모드 여부. owner 2026-06-10 (축소 시 박스 겹침 → 숨기는 게 낫다)
+Public Function 격자_줌_박스가시성_갱신(ws As Worksheet) As Boolean
+    격자_줌_박스가시성_갱신 = False
+    If ws Is Nothing Then Exit Function
+    Dim minU As Long: minU = 네트웍_격자_단위가로cells()
+    If 네트웍_격자_단위세로cells() < minU Then minU = 네트웍_격자_단위세로cells()
+    Dim hideMode As Boolean: hideMode = (minU < NW_BOX_HIDE_UNITS)
+    격자_줌_박스가시성_갱신 = hideMode
+    Dim sh As Shape, alt As String
+    For Each sh In ws.Shapes
+        If Left(sh.Name, Len(PREFIX_PAIRBOX)) = PREFIX_PAIRBOX Or _
+           Left(sh.Name, Len(PREFIX_PAIRARROW)) = PREFIX_PAIRARROW Then
+            alt = "": On Error Resume Next: alt = sh.AlternativeText: On Error GoTo 0
+            If hideMode Then
+                Dim isVis As Boolean: isVis = False
+                On Error Resume Next: isVis = (sh.Visible = msoTrue): On Error GoTo 0
+                If isVis Then
+                    On Error Resume Next
+                    sh.Visible = msoFalse
+                    If InStr(alt, "zoomhid=1") = 0 Then
+                        If Len(alt) = 0 Then sh.AlternativeText = "zoomhid=1" Else sh.AlternativeText = alt & "|zoomhid=1"
+                    End If
+                    On Error GoTo 0
+                End If
+            Else
+                If InStr(alt, "zoomhid=1") > 0 Then
+                    On Error Resume Next
+                    sh.Visible = msoTrue
+                    alt = Replace(alt, "|zoomhid=1", "")
+                    alt = Replace(alt, "zoomhid=1", "")
+                    sh.AlternativeText = alt
+                    On Error GoTo 0
+                End If
+            End If
+        End If
+    Next sh
+End Function
+
 Public Sub 네트웍_빈격자_찾기(wsNw As Worksheet, ByRef nx As Double, ByRef ny As Double, _
                               facW As Double, facH As Double, _
                               Optional excludeFacId As String = "", _
@@ -9816,6 +9858,7 @@ Public Sub 격자_최소화_4x4()
     On Error GoTo 0
 
     네트웍_격자_생성
+    격자_줌_박스가시성_갱신 ws      ' 4×4 는 임계 미만 — 선번박스·화살표 자동 숨김. owner 2026-06-10
     If wasProt Then ApplySheetProtection ws
 
     MsgBox "작은 격자 (한 칸 " & TARGET_CELLS_PER_GRID & "×" & TARGET_CELLS_PER_GRID & " cell) 적용 완료." & vbLf & vbLf & _
@@ -9840,6 +9883,7 @@ Public Sub 격자_단위_기본()
     Dim newTotalRows As Long: newTotalRows = cellsY * GRID_ROWS_PER_CELL + 1
     On Error Resume Next: UniformCellSize ws, newTotalCols, newTotalRows: On Error GoTo 0
     네트웍_격자_생성
+    격자_줌_박스가시성_갱신 ws      ' 기본(20×20) 복원 = 임계 이상 — 숨긴 선번박스·화살표 자동 복원. owner 2026-06-10
     If wasProt Then ApplySheetProtection ws
     MsgBox "한 격자 칸 = " & GRID_COLS_PER_CELL & "×" & GRID_ROWS_PER_CELL & " Excel cell (기본값) 으로 복원.", _
            vbInformation, "격자 한 칸 기본"
@@ -9874,6 +9918,7 @@ Public Sub 격자_단위_직접입력()
     Dim newTotalRows As Long: newTotalRows = cellsY * newY + 1
     On Error Resume Next: UniformCellSize ws, newTotalCols, newTotalRows: On Error GoTo 0
     네트웍_격자_생성
+    격자_줌_박스가시성_갱신 ws      ' 임계 기준 선번박스·화살표 자동 숨김/복원. owner 2026-06-10
     If wasProt Then ApplySheetProtection ws
     MsgBox "한 격자 칸 = " & newX & "×" & newY & " cell 적용 완료.", vbInformation, "격자 한 칸 직접 입력"
 End Sub
@@ -10073,6 +10118,9 @@ Public Sub 격자_줌_적용(axisX As Boolean, axisY As Boolean, delta As Long)
     On Error Resume Next: 시설물_leader_재라우팅 ws: On Error GoTo 0
     On Error Resume Next: 선번화살표_재라우팅 ws: On Error GoTo 0
 
+    ' 임계 미만 축소 시 선번박스·화살표 자동 숨김 / 임계 이상 확대 시 자동 복원. owner 2026-06-10
+    Dim boxHidden As Boolean: boxHidden = 격자_줌_박스가시성_갱신(ws)
+
     ' 줌 후 화면을 선택 셀 중심으로 이동(커서도 그 셀로 복원) + 검색버튼 가로추종 재계산. owner 2026-06-10
     격자_줌_화면중심이동 ws, selRow, selCol
     On Error Resume Next: 네트웍_검색버튼_위치갱신 ws: On Error GoTo 0
@@ -10082,7 +10130,8 @@ Public Sub 격자_줌_적용(axisX As Boolean, axisY As Boolean, delta As Long)
     Application.ScreenUpdating = oUpd
 
     On Error Resume Next
-    Application.StatusBar = "격자 한 칸 = " & newX & "×" & newY & " cell"
+    Application.StatusBar = "격자 한 칸 = " & newX & "×" & newY & " cell" & _
+                            IIf(boxHidden, " · 선번박스·화살표 숨김 (한 칸 " & NW_BOX_HIDE_UNITS & " cell 이상 확대 시 자동 복원)", "")
     On Error GoTo 0
 End Sub
 
@@ -10259,13 +10308,21 @@ Public Sub 시설물만보기_가시성_적용(ws As Worksheet, vis As Boolean)
     Dim sh As Shape
     For Each sh In ws.Shapes
         ' 케이블 라인·선번박스·코어 화살표는 숨기지 않음 — 항상 강제 표시 (owner: 케이블·선번박스는 보여야 해.
-        '   이전 버전이 숨겨둔 박스도 토글 한 번이면 복구되도록 sh.Visible = msoTrue 명시)
-        If Left(sh.Name, Len(PREFIX_CBL)) = PREFIX_CBL Or _
-           Left(sh.Name, Len(PREFIX_PAIRBOX)) = PREFIX_PAIRBOX Or _
-           Left(sh.Name, Len(PREFIX_PAIRARROW)) = PREFIX_PAIRARROW Then
+        '   이전 버전이 숨겨둔 박스도 토글 한 번이면 복구되도록 sh.Visible = msoTrue 명시.
+        '   단 줌 자동 숨김(zoomhid=1) 상태는 존중 — 격자 확대 시 자동 복원이 담당. owner 2026-06-10)
+        If Left(sh.Name, Len(PREFIX_CBL)) = PREFIX_CBL Then
             On Error Resume Next
             sh.Visible = msoTrue
             On Error GoTo 0
+        ElseIf Left(sh.Name, Len(PREFIX_PAIRBOX)) = PREFIX_PAIRBOX Or _
+               Left(sh.Name, Len(PREFIX_PAIRARROW)) = PREFIX_PAIRARROW Then
+            Dim altFx As String: altFx = ""
+            On Error Resume Next: altFx = sh.AlternativeText: On Error GoTo 0
+            If InStr(altFx, "zoomhid=1") = 0 Then
+                On Error Resume Next
+                sh.Visible = msoTrue
+                On Error GoTo 0
+            End If
         ElseIf 데코_prefix_여부(sh.Name) Or Left(sh.Name, Len(PREFIX_BADGE)) = PREFIX_BADGE Then
             On Error Resume Next
             sh.Visible = msoVis
