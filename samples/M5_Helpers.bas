@@ -105,6 +105,79 @@ Public Sub 선번연결_도구_연결삭제()
     wsNw.Unprotect
     On Error GoTo 0
 
+    ' owner 2026-06-11: 삭제 코어를 도구_연결삭제_1건 으로 분리 — 매핑전체삭제 (Step 2 일괄) 와 공용.
+    도구_연결삭제_1건 wsNw, arrName
+
+    ' owner 2026-06-06 (8-22): cable-cable 의 cascade 그룹에서 한 페어 삭제 후 즉시 재정렬.
+    페어화살표_시설물페어_재정렬 wsNw
+
+    If wasProt Then ApplySheetProtection wsNw
+
+    ' 기존 정보 다시 수집 + 시트 재빌드 — step 별 분기 (owner 요구: Step 1 에서도 삭제 가능)
+    선번연결_도구_기존수집
+    If g_pt_step = 2 Then
+        선번연결_도구_시트빌드
+        선번연결_도구_시각갱신
+    Else
+        ' Step 1 — 방사형 + 기존 연결 목록 재빌드
+        선번연결_도구_방사형빌드 g_pt_facId
+    End If
+    ' owner 2026-06-08 (8-113): 기존 연결 삭제 후 주간/야간 박스 자동 갱신.
+    On Error Resume Next
+    시설물_상태박스_주간_자동갱신 wsNw, g_pt_facId
+    On Error GoTo 0
+    Application.StatusBar = "기존 연결 1건 삭제 — 잠금 코어 해제."
+End Sub
+
+' owner 2026-06-11: Step 2 매핑 전체 삭제 — 기존 연결 목록(g_pt_existingConns)의 모든 건 일괄 삭제.
+'   Step 2 [기존 연결 N 건] 헤더 옆 「매핑 전체 X」 버튼에서 호출. RN 그룹 entry 도 처리.
+Public Sub 선번연결_도구_매핑전체삭제()
+    If g_pt_existingConns Is Nothing Then Exit Sub
+    Dim nAll As Long: nAll = g_pt_existingConns.Count
+    If nAll = 0 Then
+        MsgBox "삭제할 기존 연결이 없습니다.", vbInformation, "매핑 전체 삭제"
+        Exit Sub
+    End If
+    If MsgBox("기존 연결 " & nAll & " 건의 매핑을 모두 삭제하시겠습니까?" & vbLf & vbLf & _
+              "박스·화살표가 네트웍구성도에서 영구 삭제됩니다.", _
+              vbYesNo + vbExclamation, "매핑 전체 삭제") <> vbYes Then Exit Sub
+
+    Dim wsNw As Worksheet: Set wsNw = ThisWorkbook.Worksheets(SHEET_NETWORK)
+    Dim wasProt As Boolean: wasProt = wsNw.ProtectContents Or wsNw.ProtectDrawingObjects
+    On Error Resume Next
+    wsNw.Unprotect
+    On Error GoTo 0
+
+    ' 키 snapshot (삭제 중 dict 변형 회피)
+    Dim keysArr() As String
+    ReDim keysArr(0 To nAll - 1)
+    Dim kAll As Variant, kiAll As Long: kiAll = 0
+    For Each kAll In g_pt_existingConns.Keys
+        keysArr(kiAll) = CStr(kAll): kiAll = kiAll + 1
+    Next kAll
+    For kiAll = 0 To nAll - 1
+        도구_연결삭제_1건 wsNw, keysArr(kiAll)
+    Next kiAll
+
+    페어화살표_시설물페어_재정렬 wsNw
+    If wasProt Then ApplySheetProtection wsNw
+
+    선번연결_도구_기존수집
+    If g_pt_step = 2 Then
+        선번연결_도구_시트빌드
+        선번연결_도구_시각갱신
+    Else
+        선번연결_도구_방사형빌드 g_pt_facId
+    End If
+    On Error Resume Next
+    시설물_상태박스_주간_자동갱신 wsNw, g_pt_facId
+    On Error GoTo 0
+    Application.StatusBar = "기존 연결 " & nAll & " 건 매핑 전체 삭제 완료."
+End Sub
+
+' owner 2026-06-11: 연결 1건 삭제 코어 (RN 그룹 포함) — 연결삭제(단건)·매핑전체삭제(일괄) 공용.
+'   wsNw 는 unprotect 된 상태로 호출. confirm·재정렬·기존수집·시트 재빌드는 호출측 책임.
+Public Sub 도구_연결삭제_1건(wsNw As Worksheet, arrName As String)
     ' RN 그룹 ID 감지 — 같은 rngrp 의 모든 박스·화살표 일괄 삭제 (owner 요구: 수정/삭제)
     Dim arrShp As Shape: Set arrShp = Nothing
     On Error Resume Next
@@ -120,19 +193,6 @@ Public Sub 선번연결_도구_연결삭제()
             If gEnd = 0 Then gEnd = Len(arrAlt) + 1
             Dim rnGrpId As String: rnGrpId = Mid(arrAlt, pGrp + 6, gEnd - (pGrp + 6))
             선번연결_도구_RNgrp_삭제 wsNw, rnGrpId
-            If wasProt Then ApplySheetProtection wsNw
-            선번연결_도구_기존수집
-            If g_pt_step = 2 Then
-                선번연결_도구_시트빌드
-                선번연결_도구_시각갱신
-            Else
-                선번연결_도구_방사형빌드 g_pt_facId
-            End If
-            ' owner 2026-06-08 (8-113): RN 그룹 삭제 후 주간/야간 박스 자동 갱신.
-            On Error Resume Next
-            시설물_상태박스_주간_자동갱신 wsNw, g_pt_facId
-            On Error GoTo 0
-            Application.StatusBar = "RN 연결 그룹 1건 삭제 — 모든 박스·화살표 일괄 제거."
             Exit Sub
         End If
     End If
@@ -220,29 +280,7 @@ Public Sub 선번연결_도구_연결삭제()
         wsNw.Shapes(CStr(delK)).Delete
         On Error GoTo 0
     Next delK
-
-    ' owner 2026-06-06 (8-22): cable-cable 의 cascade 그룹에서 한 페어 삭제 후 즉시 재정렬.
-    '   남은 anchor 개수가 ≥2 → 새 visible main 생성 (다음 closest-to-facility 박스로)
-    '   남은 anchor 개수가 1 → 그 anchor 자체가 visible (단일 그룹 동작)
-    '   남은 anchor 가 0 → 아무것도 안 함
-    페어화살표_시설물페어_재정렬 wsNw
-
-    If wasProt Then ApplySheetProtection wsNw
-
-    ' 기존 정보 다시 수집 + 시트 재빌드 — step 별 분기 (owner 요구: Step 1 에서도 삭제 가능)
-    선번연결_도구_기존수집
-    If g_pt_step = 2 Then
-        선번연결_도구_시트빌드
-        선번연결_도구_시각갱신
-    Else
-        ' Step 1 — 방사형 + 기존 연결 목록 재빌드
-        선번연결_도구_방사형빌드 g_pt_facId
-    End If
-    ' owner 2026-06-08 (8-113): 기존 연결 삭제 후 주간/야간 박스 자동 갱신.
-    On Error Resume Next
-    시설물_상태박스_주간_자동갱신 wsNw, g_pt_facId
-    On Error GoTo 0
-    Application.StatusBar = "기존 연결 1건 삭제 — 잠금 코어 해제."
+    ' (재정렬·기존수집·시트 재빌드는 호출측 — 연결삭제/매핑전체삭제 — 가 1회 수행)
 End Sub
 
 ' owner 2026-06-07 (8-64-fix): 케이블이 관여한 모든 PAIR (양쪽 박스 + 화살표) 일괄 삭제.

@@ -1064,6 +1064,48 @@ Public Function 선번연결_도구_시설물도형_복제(ws As Worksheet, base
         On Error GoTo 0
     End If
 
+    ' owner 2026-06-11: 그룹·자유형 (AutoShapeType 무효 — 양식 등록 복합 도형) 은 Copy/Paste 로 충실 재현.
+    '   옛 동작은 fallback ⊗ 로 떨어져 「일부 시설물이 네트웍구성도 모양과 다르게」 보이던 원인.
+    '   8-125-fix25 패턴: Paste 전 이름 집합 기록 → 새 이름 도형 = 진짜 pasted (폼컨트롤 오인 차단).
+    If Not nwShape Is Nothing Then
+        If shapeType <= 0 Then
+            Dim beforeP As Object: Set beforeP = CreateObject("Scripting.Dictionary")
+            Dim bsP As Shape
+            On Error Resume Next
+            For Each bsP In ws.Shapes
+                beforeP(bsP.Name) = True
+            Next bsP
+            nwShape.Copy
+            ws.Paste
+            Dim pastedP As Shape: Set pastedP = Nothing
+            For Each bsP In ws.Shapes
+                If Not beforeP.Exists(bsP.Name) Then Set pastedP = bsP: Exit For
+            Next bsP
+            On Error GoTo 0
+            If Not pastedP Is Nothing Then
+                Dim clrDP As String: clrDP = ""
+                On Error Resume Next
+                ClearShapeOnActionRecursive pastedP, clrDP    ' 원본 핸들러·하이퍼링크 제거 (8-125-fix23)
+                ' 크기 = diameter 에 맞춰 비례 축소 (큰 변 기준)
+                Dim maxDimP As Double: maxDimP = pastedP.Width
+                If pastedP.Height > maxDimP Then maxDimP = pastedP.Height
+                If maxDimP > 0.001 Then
+                    Dim scaleP As Double: scaleP = diameter / maxDimP
+                    pastedP.LockAspectRatio = msoFalse
+                    pastedP.Width = pastedP.Width * scaleP
+                    pastedP.Height = pastedP.Height * scaleP
+                End If
+                pastedP.Left = cx - pastedP.Width / 2
+                pastedP.Top = cy - pastedP.Height / 2
+                pastedP.Name = baseName
+                pastedP.Placement = 3
+                On Error GoTo 0
+                Set 선번연결_도구_시설물도형_복제 = pastedP
+                Exit Function
+            End If
+        End If
+    End If
+
     ' 도형 생성 — AutoShapeType 유효하면 그대로, 0 이면 fallback Oval+X
     If shapeType > 0 Then
         On Error Resume Next
@@ -1784,6 +1826,30 @@ NextShape:
         End If
     End With
     On Error GoTo 0
+
+    ' owner 2026-06-11: 「매핑 전체 X」 — Step 2 에서도 기존 연결 일괄 삭제 (owner 요청).
+    '   [기존 연결 N 건] 헤더 우측. 목록의 모든 건 (RN 그룹 포함) 을 confirm 후 한 번에 삭제.
+    If exCount > 0 Then
+        Dim exDelAllBtn As Shape
+        Set exDelAllBtn = ws.Shapes.AddShape(msoShapeRoundedRectangle, EX_X + EX_W + 8, EX_TOP - 24, 96, 20)
+        exDelAllBtn.Name = PREFIX_PT_BTN & "exDelAll"
+        exDelAllBtn.OnAction = "선번연결_도구_매핑전체삭제"
+        exDelAllBtn.Placement = 3
+        On Error Resume Next
+        With exDelAllBtn.Line: .Visible = msoFalse: End With
+        With exDelAllBtn.Fill: .ForeColor.RGB = RGB(220, 38, 38): .Visible = msoTrue: End With
+        With exDelAllBtn.TextFrame2
+            .MarginLeft = 2: .MarginRight = 2: .MarginTop = 0: .MarginBottom = 0
+            .VerticalAnchor = msoAnchorMiddle
+            .TextRange.Text = "매핑 전체 X"
+            .TextRange.Font.Name = CALLOUT_FONT_NAME
+            .TextRange.Font.Size = 9
+            .TextRange.Font.Bold = msoTrue
+            .TextRange.Font.Fill.ForeColor.RGB = RGB(255, 255, 255)
+            .TextRange.ParagraphFormat.Alignment = 1
+        End With
+        On Error GoTo 0
+    End If
 
     If exCount > 0 Then
         Dim k As Variant, idx As Long: idx = 0
