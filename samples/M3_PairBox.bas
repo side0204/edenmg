@@ -931,8 +931,8 @@ End Sub
 '    케이블 3방향 이상 모이는 시설물의 cable-cable 선번박스를 각 케이블 각도 주변 부채꼴 슬롯에 재배치.
 '    슬롯: 같은 케이블 k번째 박스 = 케이블 각도 ±13°×(1+0.55×ring), 반지름 115+ring×26pt (ring=k\2, 좌우 교대).
 '    충돌(시설물·케이블 선분·다른 박스) 시 반지름 +20pt 씩 밖으로 양보 (최대 8회).
-'    배치 후 페어화살표_시설물페어_재정렬 이 화살표 재생성 — 허브 전용 경로(선번박스_경로_허브):
-'    끝 segment 케이블 평행 + 경로 전체 모든 박스 안쪽 (owner 조건). side = 짝 케이블 쪽 (v2).
+'    배치 후 페어화살표_시설물페어_재정렬 이 화살표 재생성 — L-shape (꺾임 1회·양끝 케이블 평행, owner 조건).
+'    계단식 perp offset 덕에 짝마다 corner 가 분리(nested) → 화살표끼리 교차 0. side = 짝 케이블 쪽 (v2).
 '    2방향 이하(공선 체인·캐스케이드 stack)는 손대지 않음 — 기존 동작 보호. 복원 = 이 Sub + 헬퍼 + 호출 5곳 삭제.
 ' ============================================================================
 Public Sub 선번박스_방사형_정렬(ws As Worksheet, facId As String)
@@ -2761,9 +2761,6 @@ Public Sub 페어화살표_시설물페어_재정렬(ws As Worksheet)
     Dim ccGroupAnchors As Object: Set ccGroupAnchors = CreateObject("Scripting.Dictionary")
     Dim ccGroupMeta As Object: Set ccGroupMeta = CreateObject("Scripting.Dictionary")
     Dim ccAnchorKey As Object: Set ccAnchorKey = CreateObject("Scripting.Dictionary")    ' anchor name → group key
-    Dim hubCache As Object: Set hubCache = CreateObject("Scripting.Dictionary")          ' facId → 케이블 수 (owner 2026-06-11 v4: 허브 전용 경로)
-    Dim hubLaneCnt As Object: Set hubLaneCnt = CreateObject("Scripting.Dictionary")      ' facId → 다음 lane 번호 (v5: 짝마다 꺾는 반경 분리)
-    Dim ccLane As Long, gLane As Long
 
     Dim shPre As Shape, altPre As String
     For Each shPre In ws.Shapes
@@ -3004,18 +3001,12 @@ Public Sub 페어화살표_시설물페어_재정렬(ws As Worksheet)
             If ccFacShp Is Nothing Then GoTo NextCand            ' facility 못 찾으면 skip — anchor 그대로 두기
 
             ' 원본 path 계산 — 케이블 방향 따라 L-shape 또는 직선 자동 선택
-            ' owner 2026-06-11 v4: 3방향+ 허브는 전용 경로 (선번박스_경로_허브) — 끝 segment 케이블 평행
-            '   + 경로 전체가 모든 박스보다 안쪽 (owner 조건 2개). 2방향 이하는 기존 L-shape.
+            ' owner 2026-06-11 v6: 허브도 L-shape (꺾임 1회·양끝 케이블 평행 — owner 조건).
+            '   corner = 두 박스 평행선의 교점. 케이블 밀착 배치(v4)의 계단식 offset 덕에 짝마다
+            '   corner 가 분리(nested)되어 같은 wedge 안 화살표끼리 교차 0.
+            '   (v4 투영점·v5 lane 다중 꺾임은 「꺾임 1회」 조건 위반 + 허브 수렴이라 폐기)
             Dim ccPts As Variant
-            If Not hubCache.Exists(ccFacId) Then hubCache(ccFacId) = 선번박스_허브_케이블수(ws, ccFacId)
-            If CLng(hubCache(ccFacId)) >= 3 Then
-                ccLane = 0
-                If hubLaneCnt.Exists(ccFacId) Then ccLane = CLng(hubLaneCnt(ccFacId))
-                hubLaneCnt(ccFacId) = ccLane + 1
-                ccPts = 선번박스_경로_허브(ws, ccCblA, box1, ccCblB, box2, ccFacShp, ccLane)
-            Else
-                ccPts = 선번박스_경로_계산(ws, "cable", ccCblA, box1, "cable", ccCblB, box2, ccFacShp)
-            End If
+            ccPts = 선번박스_경로_계산(ws, "cable", ccCblA, box1, "cable", ccCblB, box2, ccFacShp)
 
             On Error Resume Next: arrShp.Delete: On Error GoTo 0
 
@@ -3226,17 +3217,9 @@ NextCand:
                     Next gBxKey
 
                     If Not gTopA Is Nothing And Not gTopB Is Nothing Then
-                        ' L-shape path 계산 — 케이블 방향에 평행한 L (owner 2026-06-11 v4: 허브는 전용 경로)
+                        ' L-shape path 계산 — 케이블 방향에 평행한 L (owner 2026-06-11 v6: 허브도 동일 — 꺾임 1회)
                         Dim gPts As Variant
-                        If Not hubCache.Exists(gFac) Then hubCache(gFac) = 선번박스_허브_케이블수(ws, gFac)
-                        If CLng(hubCache(gFac)) >= 3 Then
-                            gLane = 0
-                            If hubLaneCnt.Exists(gFac) Then gLane = CLng(hubLaneCnt(gFac))
-                            hubLaneCnt(gFac) = gLane + 1
-                            gPts = 선번박스_경로_허브(ws, gCA, gTopA, gCB, gTopB, gFacShp, gLane)
-                        Else
-                            gPts = 선번박스_경로_계산(ws, "cable", gCA, gTopA, "cable", gCB, gTopB, gFacShp)
-                        End If
+                        gPts = 선번박스_경로_계산(ws, "cable", gCA, gTopA, "cable", gCB, gTopB, gFacShp)
 
                         ' 기존 keep candidate main 있으면 삭제 + 재생성 (path 갱신)
                         Dim gMainName As String: gMainName = ""
@@ -4028,79 +4011,6 @@ Public Function 선번박스_화살표생성(ws As Worksheet, arrPts As Variant)
     Next pi
     Set 선번박스_화살표생성 = ffb.ConvertToShape
     On Error GoTo 0
-End Function
-
-' owner 2026-06-11 v4: 3방향+ 허브 전용 경로 — [box1 edge → P1 → P2 → box2 edge].
-'   P = 박스 중심을 지나는 「자기 케이블 평행선」 위에서 시설물 중심에 가장 가까운 점 (허브 바로 옆).
-'   끝 segment(박스→P)는 케이블과 정확히 평행 (owner 조건 1) + P1·P2 가 허브 옆이라
-'   경로 전체가 모든 선번박스보다 안쪽 (owner 조건 2). P1≈P2 면 3점으로 단순화.
-Public Function 선번박스_경로_허브(ws As Worksheet, cblAName As String, box1 As Shape, _
-                                    cblBName As String, box2 As Shape, facShp As Shape, _
-                                    Optional ByVal laneIdx As Long = 0) As Variant
-    Dim fcx As Double, fcy As Double
-    fcx = facShp.Left + facShp.Width / 2
-    fcy = facShp.Top + facShp.Height / 2
-    Dim b1x As Double, b1y As Double, b2x As Double, b2y As Double
-    b1x = box1.Left + box1.Width / 2: b1y = box1.Top + box1.Height / 2
-    b2x = box2.Left + box2.Width / 2: b2y = box2.Top + box2.Height / 2
-    Dim u1x As Double, u1y As Double, u2x As Double, u2y As Double
-    선번박스_방향계산 ws, "cable", cblAName, b1x, b1y, fcx, fcy, u1x, u1y
-    선번박스_방향계산 ws, "cable", cblBName, b2x, b2y, fcx, fcy, u2x, u2y
-    Dim t1 As Double, t2 As Double
-    t1 = (fcx - b1x) * u1x + (fcy - b1y) * u1y
-    t2 = (fcx - b2x) * u2x + (fcy - b2y) * u2y
-    ' v5 (owner 2026-06-11): 짝마다 「꺾는 반경」 분리 — 모든 경로가 허브 최근접점 한 군데로 몰리면
-    '   어떤 화살표가 어느 짝인지 파악 불가 (owner 보고). lane 마다 허브에서 20+6×lane pt 지점에서
-    '   꺾어 경로가 동심(양파) 모양으로 분리. 박스 along ≥ 115 라 여전히 모든 박스 안쪽.
-    Dim dTurn As Double: dTurn = 20 + laneIdx * 6
-    Dim a1 As Double: a1 = t1 + dTurn
-    If a1 > -16 Then a1 = -16              ' 박스 직전 16pt 까지만 (박스를 넘어가지 않게)
-    Dim a2 As Double: a2 = t2 + dTurn
-    If a2 > -16 Then a2 = -16
-    Dim p1x As Double, p1y As Double, p2x As Double, p2y As Double
-    p1x = b1x + a1 * u1x: p1y = b1y + a1 * u1y
-    p2x = b2x + a2 * u2x: p2y = b2y + a2 * u2y
-    Dim e1x As Double, e1y As Double, e2x As Double, e2y As Double
-    선번박스_경계점 box1, p1x, p1y, e1x, e1y
-    선번박스_경계점 box2, p2x, p2y, e2x, e2y
-    If (p1x - p2x) * (p1x - p2x) + (p1y - p2y) * (p1y - p2y) < 4 Then
-        Dim pts3() As Double
-        ReDim pts3(1 To 3, 1 To 2)
-        pts3(1, 1) = e1x: pts3(1, 2) = e1y
-        pts3(2, 1) = p1x: pts3(2, 2) = p1y
-        pts3(3, 1) = e2x: pts3(3, 2) = e2y
-        선번박스_경로_허브 = pts3
-    Else
-        Dim pts4() As Double
-        ReDim pts4(1 To 4, 1 To 2)
-        pts4(1, 1) = e1x: pts4(1, 2) = e1y
-        pts4(2, 1) = p1x: pts4(2, 2) = p1y
-        pts4(3, 1) = p2x: pts4(3, 2) = p2y
-        pts4(4, 1) = e2x: pts4(4, 2) = e2y
-        선번박스_경로_허브 = pts4
-    End If
-End Function
-
-' 시설물에 모이는 케이블 방향 수 — cable-cable 선번박스(fac=facId)의 서로 다른 cbl_* 개수.
-'   3 이상 = 허브 → 케이블 밀착 배치 + 허브 전용 경로. (RN·facility 측 박스 제외)
-Public Function 선번박스_허브_케이블수(ws As Worksheet, facId As String) As Long
-    선번박스_허브_케이블수 = 0
-    If ws Is Nothing Then Exit Function
-    If Len(facId) = 0 Then Exit Function
-    Dim cnt As Object: Set cnt = CreateObject("Scripting.Dictionary")
-    Dim sh As Shape, altS As String, cblNm As String
-    For Each sh In ws.Shapes
-        If Left(sh.Name, Len(PREFIX_PAIRBOX)) = PREFIX_PAIRBOX Then
-            altS = "": On Error Resume Next: altS = sh.AlternativeText: On Error GoTo 0
-            If InStr(altS, "|rn=") = 0 And InStr(altS, "rn=") <> 1 Then
-                If AltParseField(altS, "fac=") = facId Then
-                    cblNm = AltParseField(altS, "cbl=")
-                    If Left(cblNm, Len(PREFIX_CBL)) = PREFIX_CBL Then cnt(cblNm) = True
-                End If
-            End If
-        End If
-    Next sh
-    선번박스_허브_케이블수 = cnt.Count
 End Function
 
 ' 박스가 속한 케이블의 단위벡터 (시설물 → 케이블 끝점). facility 모드면 (시설물 → 박스) 방향.
