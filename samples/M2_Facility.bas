@@ -5298,7 +5298,11 @@ Public Sub 선번화살표_재라우팅(Optional wsArg As Worksheet)
                 .Weight = lineWeight
                 .DashStyle = msoLineRoundDot                              ' owner — 둥근 점선
                 .BeginArrowheadStyle = msoArrowheadTriangle
+                .BeginArrowheadLength = msoArrowheadShort
+                .BeginArrowheadWidth = msoArrowheadNarrow
                 .EndArrowheadStyle = msoArrowheadTriangle
+                .EndArrowheadLength = msoArrowheadShort
+                .EndArrowheadWidth = msoArrowheadNarrow
             End With
             On Error GoTo 0
         End If

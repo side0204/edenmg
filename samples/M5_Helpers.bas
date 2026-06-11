@@ -1512,7 +1512,11 @@ Public Sub 선번연결_도구_박스정렬_silent(silent As Boolean)
         .Weight = 0.5
         .DashStyle = msoLineRoundDot
         .BeginArrowheadStyle = msoArrowheadTriangle
+        .BeginArrowheadLength = msoArrowheadShort
+        .BeginArrowheadWidth = msoArrowheadNarrow
         .EndArrowheadStyle = msoArrowheadTriangle
+        .EndArrowheadLength = msoArrowheadShort
+        .EndArrowheadWidth = msoArrowheadNarrow
     End With
     On Error GoTo 0
 
@@ -1637,6 +1641,8 @@ Public Function 선번박스_cascading_화살표(ws As Worksheet, ByVal prevBox 
         .DashStyle = msoLineRoundDot
         .BeginArrowheadStyle = msoArrowheadNone
         .EndArrowheadStyle = msoArrowheadTriangle
+        .EndArrowheadLength = msoArrowheadShort
+        .EndArrowheadWidth = msoArrowheadNarrow
     End With
     On Error GoTo 0
     Set 선번박스_cascading_화살표 = arr

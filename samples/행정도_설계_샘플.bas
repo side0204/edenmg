@@ -11680,7 +11680,11 @@ Public Sub 선번화살표_재라우팅(Optional wsArg As Worksheet)
                 .Weight = lineWeight
                 .DashStyle = msoLineRoundDot                              ' owner — 둥근 점선
                 .BeginArrowheadStyle = msoArrowheadTriangle
+                .BeginArrowheadLength = msoArrowheadShort
+                .BeginArrowheadWidth = msoArrowheadNarrow
                 .EndArrowheadStyle = msoArrowheadTriangle
+                .EndArrowheadLength = msoArrowheadShort
+                .EndArrowheadWidth = msoArrowheadNarrow
             End With
             On Error GoTo 0
         End If
@@ -13868,7 +13872,11 @@ Public Sub 선번박스_쌍_생성(Optional ByVal initialTxt1 As String = "1", O
         .Weight = 0.5                                ' owner 요구 — 얇게
         .DashStyle = msoLineRoundDot                 ' owner — 둥근 점선
         .BeginArrowheadStyle = msoArrowheadTriangle
+        .BeginArrowheadLength = msoArrowheadShort
+        .BeginArrowheadWidth = msoArrowheadNarrow
         .EndArrowheadStyle = msoArrowheadTriangle
+        .EndArrowheadLength = msoArrowheadShort
+        .EndArrowheadWidth = msoArrowheadNarrow
     End With
     On Error GoTo 0
 
@@ -14169,7 +14177,11 @@ Public Sub 선번박스_쌍_생성_직접(side1Type As String, side1Name As Stri
             .Weight = 0.5
             .DashStyle = msoLineRoundDot
             .BeginArrowheadStyle = msoArrowheadTriangle
+            .BeginArrowheadLength = msoArrowheadShort
+            .BeginArrowheadWidth = msoArrowheadNarrow
             .EndArrowheadStyle = msoArrowheadTriangle
+            .EndArrowheadLength = msoArrowheadShort
+            .EndArrowheadWidth = msoArrowheadNarrow
         End With
         On Error GoTo 0
 
@@ -14359,7 +14371,11 @@ CascadeArrowOnly:
             .Weight = 0.5
             .DashStyle = msoLineRoundDot
             .BeginArrowheadStyle = msoArrowheadTriangle
+            .BeginArrowheadLength = msoArrowheadShort
+            .BeginArrowheadWidth = msoArrowheadNarrow
             .EndArrowheadStyle = msoArrowheadTriangle
+            .EndArrowheadLength = msoArrowheadShort
+            .EndArrowheadWidth = msoArrowheadNarrow
         End With
         On Error GoTo 0
         End If
@@ -15068,7 +15084,11 @@ Private Function 선번박스_RN2_화살표(ws As Worksheet, leftBox As Shape, r
         .Weight = 0.75
         .DashStyle = msoLineRoundDot
         .BeginArrowheadStyle = msoArrowheadTriangle
+        .BeginArrowheadLength = msoArrowheadShort
+        .BeginArrowheadWidth = msoArrowheadNarrow
         .EndArrowheadStyle = msoArrowheadTriangle
+        .EndArrowheadLength = msoArrowheadShort
+        .EndArrowheadWidth = msoArrowheadNarrow
     End With
     arr.ZOrder msoSendToBack
     On Error GoTo 0
@@ -15105,7 +15125,11 @@ Private Function 선번박스_RN_화살표Ret(ws As Worksheet, topBox As Shape, 
         .Weight = 0.75
         .DashStyle = msoLineRoundDot                 ' owner — 둥근 점선
         .BeginArrowheadStyle = msoArrowheadTriangle
+        .BeginArrowheadLength = msoArrowheadShort
+        .BeginArrowheadWidth = msoArrowheadNarrow
         .EndArrowheadStyle = msoArrowheadTriangle
+        .EndArrowheadLength = msoArrowheadShort
+        .EndArrowheadWidth = msoArrowheadNarrow
     End With
     arr.ZOrder msoSendToBack
     On Error GoTo 0
@@ -16269,7 +16293,11 @@ Private Sub 선번박스_케이블페어_main재정렬(ws As Worksheet)
                 .Weight = 0.5
                 .DashStyle = msoLineRoundDot
                 .BeginArrowheadStyle = msoArrowheadTriangle
+                .BeginArrowheadLength = msoArrowheadShort
+                .BeginArrowheadWidth = msoArrowheadNarrow
                 .EndArrowheadStyle = msoArrowheadTriangle
+                .EndArrowheadLength = msoArrowheadShort
+                .EndArrowheadWidth = msoArrowheadNarrow
             End With
             newM.ZOrder msoBringToFront
             On Error GoTo 0
@@ -16439,8 +16467,13 @@ Public Sub 페어화살표_시설물페어_재정렬(ws As Worksheet)
                 mFc = AltParseField(altMm, "fac=")
                 mAa = AltParseField(altMm, "cblA=")
                 mBb = AltParseField(altMm, "cblB=")
-                ' cable-cable 만 (RN 의 main=1 은 보존)
-                If mAa <> mFc And mBb <> mFc Then
+                If mAa = mFc Or mBb = mFc Then
+                    ' owner 2026-06-11: cable-facility main 은 신모델에서 미생성 (anchor 자체가 visible 화살표)
+                    '   — 구버전 잔재라 무조건 삭제. 잔재 main + anchor 가 겹쳐 「휜 선 + 양끝 화살촉 크기 다름」
+                    '   으로 보이던 문제의 청소. RN 은 main=1 을 만들지 않음 (M4 에 생성처 없음 — 영향 0).
+                    ccMainsDel.Add shMm.Name
+                Else
+                    ' cable-cable — 그룹 크기별 main 정리 (기존 로직)
                     Dim mKA As String, mKB As String
                     If mAa < mBb Then mKA = mAa: mKB = mBb Else mKA = mBb: mKB = mAa
                     Dim mKey As String: mKey = mFc & "|" & mKA & "|" & mKB
@@ -17398,7 +17431,11 @@ Private Sub 선번박스_RN_화살표(ws As Worksheet, topBox As Shape, bottomBo
         .Weight = 0.75
         .DashStyle = msoLineRoundDot                 ' owner — 둥근 점선
         .BeginArrowheadStyle = msoArrowheadTriangle
+        .BeginArrowheadLength = msoArrowheadShort
+        .BeginArrowheadWidth = msoArrowheadNarrow
         .EndArrowheadStyle = msoArrowheadTriangle
+        .EndArrowheadLength = msoArrowheadShort
+        .EndArrowheadWidth = msoArrowheadNarrow
     End With
     arr.ZOrder msoSendToBack
     On Error GoTo 0
@@ -24510,7 +24547,11 @@ Public Sub 선번연결_도구_박스정렬_silent(silent As Boolean)
         .Weight = 0.5
         .DashStyle = msoLineRoundDot
         .BeginArrowheadStyle = msoArrowheadTriangle
+        .BeginArrowheadLength = msoArrowheadShort
+        .BeginArrowheadWidth = msoArrowheadNarrow
         .EndArrowheadStyle = msoArrowheadTriangle
+        .EndArrowheadLength = msoArrowheadShort
+        .EndArrowheadWidth = msoArrowheadNarrow
     End With
     On Error GoTo 0
 
@@ -24635,6 +24676,8 @@ Private Function 선번박스_cascading_화살표(ws As Worksheet, ByVal prevBox
         .DashStyle = msoLineRoundDot
         .BeginArrowheadStyle = msoArrowheadNone
         .EndArrowheadStyle = msoArrowheadTriangle
+        .EndArrowheadLength = msoArrowheadShort
+        .EndArrowheadWidth = msoArrowheadNarrow
     End With
     On Error GoTo 0
     Set 선번박스_cascading_화살표 = arr
