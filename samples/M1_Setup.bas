@@ -783,6 +783,7 @@ Public Function RibbonGroupDefs() As Variant
 
     g5 = Array("정렬·서식", Array( _
             Array("부속 정렬", "네트웍_부속도형_정렬", "네트웍 케이블·배지·콤보 일괄 동기화"), _
+            Array("설명박스 정리", "행정도_설명박스_일괄정리", "행정도 모든 설명박스를 시설물·케이블과 충돌 없는 접점 가까운 자리로 일괄 재배치"), _
             Array("박스 통일", "케이블박스_일괄적용", "네트웍 케이블 박스 스타일 통일"), _
             Array("설명선 통일", "설명선_일괄적용", "시설물 설명선 스타일 통일"), _
             Array("설명선 여백 0.1cm", "설명선_여백_적용", "양 시트 모든 시설물 설명선 좌우 여백 0.1cm 일괄 적용"), _
@@ -5909,8 +5910,13 @@ Public Sub AddFacilityCallout(ws As Worksheet, fac As Shape, facId As String, Op
     On Error GoTo 0
     시설물_leader_site설정 cn, fac, tb
 
-    ' 다른 callout 과 겹치면 빈 자리로 자동 이동 (행정도·네트웍 양쪽 — ws 인자로 분기)
-    callout_겹침회피 ws, tb, tb.Name
+    ' 겹침 회피 — 행정도는 시설물·케이블·설명박스 모두 피해 접점 가장 가까운 방향 (owner 2026-06-10),
+    '   네트웍은 기존 (설명박스끼리만 회피 — 격자 기반이라 기존 규칙 유지).
+    If ws.Name = SHEET_NETWORK Then
+        callout_겹침회피 ws, tb, tb.Name
+    Else
+        설명박스_최적배치 ws, tb, fac.Left + fac.Width / 2, fac.Top + fac.Height / 2, tb.Name
+    End If
     Exit Sub
 
 CalloutErr:

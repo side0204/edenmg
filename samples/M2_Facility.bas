@@ -2243,6 +2243,174 @@ Public Function callout_겹침(ws As Worksheet, x As Double, y As Double, _
     Next sh
 End Function
 
+' ===== owner 2026-06-10: 행정도 설명박스 충돌 회피 배치 =====
+'   요구: 시설물·케이블 설명박스가 다른 시설물·케이블·설명박스와 충돌하지 않는 방향으로,
+'         최대한 접점(시설물 / 케이블 꼬리가 만나는 점)에 붙어서 그려지게.
+
+' 선분 (x1,y1)-(x2,y2) 와 사각형 (L,T,R,B) 교차/포함 여부 — Liang-Barsky 클리핑.
+Public Function 선분_사각형_교차(x1 As Double, y1 As Double, x2 As Double, y2 As Double, _
+                                  L As Double, T As Double, R As Double, B As Double) As Boolean
+    선분_사각형_교차 = False
+    Dim ddx As Double: ddx = x2 - x1
+    Dim ddy As Double: ddy = y2 - y1
+    Dim t0 As Double: t0 = 0
+    Dim t1 As Double: t1 = 1
+    Dim p(1 To 4) As Double, q(1 To 4) As Double
+    p(1) = -ddx: q(1) = x1 - L
+    p(2) = ddx:  q(2) = R - x1
+    p(3) = -ddy: q(3) = y1 - T
+    p(4) = ddy:  q(4) = B - y1
+    Dim i As Long, r As Double
+    For i = 1 To 4
+        If Abs(p(i)) < 0.000001 Then
+            If q(i) < 0 Then Exit Function          ' 평행 + 사각형 밖
+        Else
+            r = q(i) / p(i)
+            If p(i) < 0 Then
+                If r > t1 Then Exit Function
+                If r > t0 Then t0 = r
+            Else
+                If r < t0 Then Exit Function
+                If r < t1 Then t1 = r
+            End If
+        End If
+    Next i
+    선분_사각형_교차 = True
+End Function
+
+' (x,y) 좌상단 w×h 박스가 「장애물」 과 겹치는지 — 다른 설명박스(lbl_) + 시설물(fac_) + 케이블(cbl_ 선분).
+Public Function 설명박스_장애물충돌(ws As Worksheet, x As Double, y As Double, _
+                                     w As Double, h As Double, Optional excludeName As String = "") As Boolean
+    설명박스_장애물충돌 = True
+    If callout_겹침(ws, x, y, w, h, excludeName) Then Exit Function
+    Dim R As Double: R = x + w
+    Dim B As Double: B = y + h
+    Dim sh As Shape
+    For Each sh In ws.Shapes
+        If Left(sh.Name, Len(PREFIX_FAC)) = PREFIX_FAC Then
+            If Not (R <= sh.Left Or x >= sh.Left + sh.Width Or B <= sh.Top Or y >= sh.Top + sh.Height) Then Exit Function
+        ElseIf Left(sh.Name, Len(PREFIX_CBL)) = PREFIX_CBL Then
+            ' 케이블 — polyline 각 segment vs 사각형. 노드 없으면 (AddLine) bbox 양 끝점.
+            Dim nc As Long: nc = 0
+            On Error Resume Next: nc = sh.Nodes.Count: On Error GoTo 0
+            If nc >= 2 Then
+                Dim k As Long, pPrev As Variant, pCur As Variant
+                pPrev = Empty
+                On Error Resume Next: pPrev = sh.Nodes(1).Points: On Error GoTo 0
+                For k = 2 To nc
+                    pCur = Empty
+                    On Error Resume Next: pCur = sh.Nodes(k).Points: On Error GoTo 0
+                    If Not IsEmpty(pPrev) And Not IsEmpty(pCur) Then
+                        If 선분_사각형_교차(CDbl(pPrev(1, 1)), CDbl(pPrev(1, 2)), _
+                                            CDbl(pCur(1, 1)), CDbl(pCur(1, 2)), x, y, R, B) Then Exit Function
+                    End If
+                    pPrev = pCur
+                Next k
+            Else
+                Dim lax As Double, lay As Double, lbx As Double, lby As Double
+                On Error Resume Next
+                GetLineEndpoints sh, lax, lay, lbx, lby
+                On Error GoTo 0
+                If 선분_사각형_교차(lax, lay, lbx, lby, x, y, R, B) Then Exit Function
+            End If
+        End If
+    Next sh
+    설명박스_장애물충돌 = False
+End Function
+
+' 설명박스를 anchor(시설물 중심 / 케이블 중간점) 주변 8방향 × 거리 단계 중
+'   「충돌 없는 가장 가까운 자리」 로 이동. 우선순위: 위 → 아래 → 우 → 좌 → 대각 4방.
+'   자기 시설물·케이블도 충돌 대상이라 가장 가까운 무충돌 단계 = 접점 바로 바깥에 자동 안착.
+'   전부 충돌이면 기존 callout_겹침회피 (설명박스끼리만 회피) 로 폴백.
+Public Sub 설명박스_최적배치(ws As Worksheet, cl As Shape, anchorX As Double, anchorY As Double, _
+                              Optional excludeName As String = "")
+    If cl Is Nothing Then Exit Sub
+    Dim w As Double, h As Double
+    On Error Resume Next
+    w = cl.Width: h = cl.Height
+    On Error GoTo 0
+    If w <= 0 Or h <= 0 Then Exit Sub
+    Const GAP As Double = 3
+    Dim topLimit As Double: topLimit = ws.Cells(LEGEND_ROWS + 1, 1).Top
+    Dim dirX As Variant, dirY As Variant
+    dirX = Array(0, 0, 1, -1, 1, -1, 1, -1)
+    dirY = Array(-1, 1, 0, 0, -1, -1, 1, 1)
+    Dim stepN As Long, d As Long
+    For stepN = 0 To 6
+        Dim dist As Double: dist = GAP + stepN * 12
+        For d = 0 To 7
+            Dim tx As Double, ty As Double
+            tx = anchorX + dirX(d) * (dist + w / 2) - w / 2
+            ty = anchorY + dirY(d) * (dist + h / 2) - h / 2
+            If ty >= topLimit And tx >= 0 Then
+                If Not 설명박스_장애물충돌(ws, tx, ty, w, h, excludeName) Then
+                    On Error Resume Next
+                    cl.Left = tx
+                    cl.Top = ty
+                    On Error GoTo 0
+                    Exit Sub
+                End If
+            End If
+        Next d
+    Next stepN
+    callout_겹침회피 ws, cl, excludeName
+End Sub
+
+' 행정도 모든 설명박스 일괄 재배치 — 기존 도면 정리용 (리본 「설명박스 정리」).
+'   시설물 callout = 시설물 중심 anchor / 케이블 callout = 케이블 중간점 anchor + 꼬리 재조준.
+Public Sub 행정도_설명박스_일괄정리()
+    Dim ws As Worksheet
+    On Error Resume Next: Set ws = ThisWorkbook.Worksheets(SHEET_ADMIN): On Error GoTo 0
+    If ws Is Nothing Then Exit Sub
+    Dim wasProt As Boolean: wasProt = ws.ProtectContents Or ws.ProtectDrawingObjects
+    On Error Resume Next: ws.Unprotect: On Error GoTo 0
+    Dim oUpd As Boolean: oUpd = Application.ScreenUpdating
+    Application.ScreenUpdating = False
+
+    Dim names As Collection: Set names = New Collection
+    Dim sh As Shape
+    For Each sh In ws.Shapes
+        If Left(sh.Name, Len(PREFIX_LABEL)) = PREFIX_LABEL Then names.Add sh.Name
+    Next sh
+
+    Dim i As Long, cnt As Long: cnt = 0
+    For i = 1 To names.Count
+        Dim cl As Shape: Set cl = Nothing
+        On Error Resume Next: Set cl = ws.Shapes(names(i)): On Error GoTo 0
+        If Not cl Is Nothing Then
+            Dim ownerId As String: ownerId = Mid(cl.Name, Len(PREFIX_LABEL) + 1)
+            Dim tgt As Shape: Set tgt = Nothing
+            On Error Resume Next: Set tgt = ws.Shapes(ownerId): On Error GoTo 0
+            If Not tgt Is Nothing Then
+                If Left(ownerId, Len(PREFIX_CBL)) = PREFIX_CBL Then
+                    Dim pt As Variant: pt = CableCenterPoint(tgt)
+                    If IsArray(pt) Then
+                        설명박스_최적배치 ws, cl, CDbl(pt(0)), CDbl(pt(1)), cl.Name
+                        On Error Resume Next
+                        If cl.Width > 0 Then cl.Adjustments(1) = (CDbl(pt(0)) - (cl.Left + cl.Width / 2)) / cl.Width
+                        If cl.Height > 0 Then cl.Adjustments(2) = (CDbl(pt(1)) - (cl.Top + cl.Height / 2)) / cl.Height
+                        On Error GoTo 0
+                        cnt = cnt + 1
+                    End If
+                ElseIf Left(ownerId, Len(PREFIX_FAC)) = PREFIX_FAC Then
+                    설명박스_최적배치 ws, cl, tgt.Left + tgt.Width / 2, tgt.Top + tgt.Height / 2, cl.Name
+                    cnt = cnt + 1
+                End If
+            End If
+        End If
+    Next i
+
+    ' 배지·leader 가 새 callout 위치로 따라오게
+    On Error Resume Next
+    배지_위치_동기화 ws
+    시설물_leader_재라우팅 ws
+    On Error GoTo 0
+
+    Application.ScreenUpdating = oUpd
+    If wasProt Then ApplySheetProtection ws
+    Application.StatusBar = "설명박스 정리 완료 — " & cnt & "개 재배치 (충돌 회피·접점 인접)."
+End Sub
+
 ' ============================================================================
 '  네트웍구성도 시설물 callout 위 「태그 콤보박스」
 '    - AddFacilityTagCombo: 시설물 신규 생성 + PlaceFacility 에서 호출
@@ -5220,8 +5388,13 @@ Public Sub AddCableCallout(ws As Worksheet, cbl As Shape, cblId As String, Optio
     End With
     On Error GoTo 0
 
-    ' 다른 callout 과 겹치면 빈 자리로 자동 이동
-    callout_겹침회피 ws, cal, cal.Name
+    ' owner 2026-06-10: 시설물·케이블·다른 설명박스와 충돌하지 않는, 케이블 중간점에 가장 가까운 자리로 배치
+    '   + 꼬리(Adjustments)가 어느 방향에서든 중간점을 가리키게 재조준 (행정도_케이블_꼬리_재정렬과 동일식).
+    설명박스_최적배치 ws, cal, mx, my, cal.Name
+    On Error Resume Next
+    If cal.Width > 0 Then cal.Adjustments(1) = (mx - (cal.Left + cal.Width / 2)) / cal.Width
+    If cal.Height > 0 Then cal.Adjustments(2) = (my - (cal.Top + cal.Height / 2)) / cal.Height
+    On Error GoTo 0
     Exit Sub
 
 CcErr:
