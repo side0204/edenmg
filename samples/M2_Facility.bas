@@ -1942,6 +1942,25 @@ End Function
 '     1.(-1,-1) 2.(-1,0) 3.(-1,1) 4.(0,1) 5.(1,1) 6.(1,0) 7.(1,-1) 8.(0,-1)
 '   행정도 좌표 없으면 기존 spiral 흐름 폴백.
 '   (nx, ny) = 시설물 중심 좌표 (in/out). facW/facH = 시설물 크기. excludeFacId = 자기 자신 제외.
+' 좌표를 가장 가까운 노랑 격자 교차점(십자 중심)으로 스냅 — 기준 시설물이 드래그로 어긋나 있어도
+'   신규 배치 후보는 항상 십자 위에 오게. SnapToNetworkGrid 와 동일 공식 (원점 Y = NW_TOP_H). owner 2026-06-10
+Public Sub 격자_교차점_스냅(wsNw As Worksheet, ByRef x As Double, ByRef y As Double)
+    If wsNw Is Nothing Then Exit Sub
+    Dim cw As Double: cw = wsNw.Cells(1, 1).Width
+    Dim rh As Double: rh = wsNw.Cells(LEGEND_ROWS + 1, 1).Height
+    If cw <= 0 Then cw = CELL_PT
+    If rh <= 0 Then rh = CELL_PT
+    Dim gridW As Double: gridW = cw * 네트웍_격자_단위가로cells()
+    Dim gridH As Double: gridH = rh * 네트웍_격자_단위세로cells()
+    If gridW <= 0 Or gridH <= 0 Then Exit Sub
+    Dim gc As Long: gc = CLng((x - cw / 2) / gridW)
+    Dim gr As Long: gr = CLng((y - NW_TOP_H - rh / 2) / gridH)
+    If gc < 1 Then gc = 1
+    If gr < 0 Then gr = 0
+    x = gc * gridW + cw / 2
+    y = NW_TOP_H + gr * gridH + rh / 2
+End Sub
+
 Public Sub 네트웍_빈격자_찾기(wsNw As Worksheet, ByRef nx As Double, ByRef ny As Double, _
                               facW As Double, facH As Double, _
                               Optional excludeFacId As String = "", _
@@ -2029,6 +2048,7 @@ Public Sub 네트웍_빈격자_찾기(wsNw As Worksheet, ByRef nx As Double, ByR
                         Dim tx As Double, ty As Double
                         tx = refX + dxs(k) * gridW
                         ty = refY + dys(k) * gridH
+                        격자_교차점_스냅 wsNw, tx, ty       ' 기준이 어긋나 있어도 후보는 정확히 십자 위. owner 2026-06-10
                         If tx >= minTryX And ty >= minTryY Then
                             If Not 격자셀_시설물겹침(wsNw, tx, ty, facW, facH, excludeFacId) Then
                                 nx = tx: ny = ty
@@ -2051,6 +2071,7 @@ Public Sub 네트웍_빈격자_찾기(wsNw As Worksheet, ByRef nx As Double, ByR
     End If
 
     ' === 기존 spiral 폴백 ===
+    격자_교차점_스냅 wsNw, nx, ny       ' 시작 후보를 십자에 정렬 (8-cell 전부 점유 폴백 등). owner 2026-06-10
     If Not 격자셀_시설물겹침(wsNw, nx, ny, facW, facH, excludeFacId) Then Exit Sub
 
     Dim ring As Long, dx As Long, dy As Long
@@ -3970,19 +3991,24 @@ Public Sub 시설물만보기_토글()
     On Error GoTo 0
 End Sub
 
-' (ws, vis=True 면 보임 / vis=False 면 숨김). 데코 prefix 전체 + 배지 — 단 케이블(cbl_)은 제외(항상 표시).
+' (ws, vis=True 면 보임 / vis=False 면 숨김). 데코 prefix 전체 + 배지 — 단 케이블(cbl_)·선번박스(_pairbox_)·코어화살표(_pairarrow_)는 제외(항상 표시).
 Public Sub 시설물만보기_가시성_적용(ws As Worksheet, vis As Boolean)
     If ws Is Nothing Then Exit Sub
     Dim msoVis As Long: msoVis = IIf(vis, msoTrue, msoFalse)
     Dim sh As Shape
     For Each sh In ws.Shapes
-        ' 케이블 라인은 숨기지 않음 (owner: 케이블은 보여야 해)
-        If Left(sh.Name, Len(PREFIX_CBL)) <> PREFIX_CBL Then
-            If 데코_prefix_여부(sh.Name) Or Left(sh.Name, Len(PREFIX_BADGE)) = PREFIX_BADGE Then
-                On Error Resume Next
-                sh.Visible = msoVis
-                On Error GoTo 0
-            End If
+        ' 케이블 라인·선번박스·코어 화살표는 숨기지 않음 — 항상 강제 표시 (owner: 케이블·선번박스는 보여야 해.
+        '   이전 버전이 숨겨둔 박스도 토글 한 번이면 복구되도록 sh.Visible = msoTrue 명시)
+        If Left(sh.Name, Len(PREFIX_CBL)) = PREFIX_CBL Or _
+           Left(sh.Name, Len(PREFIX_PAIRBOX)) = PREFIX_PAIRBOX Or _
+           Left(sh.Name, Len(PREFIX_PAIRARROW)) = PREFIX_PAIRARROW Then
+            On Error Resume Next
+            sh.Visible = msoTrue
+            On Error GoTo 0
+        ElseIf 데코_prefix_여부(sh.Name) Or Left(sh.Name, Len(PREFIX_BADGE)) = PREFIX_BADGE Then
+            On Error Resume Next
+            sh.Visible = msoVis
+            On Error GoTo 0
         End If
     Next sh
 End Sub

@@ -4946,9 +4946,9 @@ Public Function 방향키_hold_분기_처리(ptLeft As Double, ptTop As Double, 
             방향키_hold_분기_처리 = True
             Exit Function
         End If
-        ' gc, gr 격자의 중앙 좌표
+        ' gc, gr 격자의 중앙 좌표 — Y 원점 = NW_TOP_H (1행 검색바, 격자 2행부터). owner 2026-06-10 십자 어긋남 수정
         nwCenterX = gc * gridW + cw / 2
-        nwCenterY = gr * gridH + rh / 2
+        nwCenterY = NW_TOP_H + gr * gridH + rh / 2
     Else
         ' chain — 기준 시설물 + 키 offset
         Dim refShp As Shape: Set refShp = Nothing
@@ -4967,6 +4967,8 @@ Public Function 방향키_hold_분기_처리(ptLeft As Double, ptTop As Double, 
         방향키_offset dirKey, dx, dy
         nwCenterX = refCX + dx * gridW
         nwCenterY = refCY + dy * gridH
+        ' 기준 시설물이 어긋나 있어도 신규는 정확히 십자 위 (M2 헬퍼). owner 2026-06-10
+        격자_교차점_스냅 wsNw, nwCenterX, nwCenterY
     End If
 
     ' 점유 검사
@@ -4978,11 +4980,11 @@ Public Function 방향키_hold_분기_처리(ptLeft As Double, ptTop As Double, 
         Exit Function
     End If
 
-    ' 격자 범위 검사 — 새 시설물의 셀 좌표가 격자 안인가
+    ' 격자 범위 검사 — 새 시설물의 셀 좌표가 격자 안인가 (Y 원점 = NW_TOP_H. owner 2026-06-10)
     Dim newGc As Long, newGr As Long
-    newGc = CLng(nwCenterX / gridW)
-    newGr = CLng(nwCenterY / gridH)
-    If newGc < 1 Or newGc > 네트웍_격자_가로칸수() Or newGr < 1 Or newGr > 네트웍_격자_세로칸수() Then
+    newGc = CLng((nwCenterX - cw / 2) / gridW)
+    newGr = CLng((nwCenterY - NW_TOP_H - rh / 2) / gridH)
+    If newGc < 1 Or newGc > 네트웍_격자_가로칸수() Or newGr < 0 Or newGr > 네트웍_격자_세로칸수() Then
         MsgBox dirKey & " " & 방향키_라벨(dirKey) & " 방향이 격자 밖입니다. (셀 좌표 " & newGc & "," & newGr & ")" & vbLf & vbLf & _
                "「격자 추가확장」 으로 그 방향으로 격자 확장 후 다시 시도하세요.", _
                vbExclamation, "방향키 — 격자 밖"
