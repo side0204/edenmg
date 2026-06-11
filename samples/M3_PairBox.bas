@@ -1039,11 +1039,23 @@ Public Sub 선번박스_방사형_정렬(ws As Worksheet, facId As String)
                     If 방사형_케이블방향(ws, CStr(partnerCbl(fanBx.Name)), fcx, fcy, pux, puy) Then hasPartner = True
                 End If
                 If hasPartner Then
-                    cpx = ux * Cos(FAN_DELTA) - uy * Sin(FAN_DELTA)       ' +13° 후보
-                    cpy = ux * Sin(FAN_DELTA) + uy * Cos(FAN_DELTA)
-                    cmx = ux * Cos(FAN_DELTA) + uy * Sin(FAN_DELTA)       ' -13° 후보
-                    cmy = -ux * Sin(FAN_DELTA) + uy * Cos(FAN_DELTA)
-                    If (cpx * pux + cpy * puy) >= (cmx * pux + cmy * puy) Then useSide = 1 Else useSide = -1
+                    If ux * pux + uy * puy < -0.966 Then
+                        ' 내각 165° 이상 (거의 일직선 통과) — 짝 방향 수직성분이 미미해 side 가 임의로 갈려
+                        '   방향을 읽을 수 없음 (owner 2026-06-11 검정·빨강 표시).
+                        '   고정 규칙: 수평(가로) 케이블 → 아래쪽, 수직·대각 케이블 → 오른쪽.
+                        '   (+side 의 perp 오프셋 = (-uy, ux) 방향 — 단일생성의 공선 fallback 과 같은 규칙)
+                        If Abs(ux) > Abs(uy) Then
+                            If ux > 0 Then useSide = 1 Else useSide = -1      ' +side perp Y = ux → 아래쪽 선택
+                        Else
+                            If uy < 0 Then useSide = 1 Else useSide = -1      ' +side perp X = -uy → 오른쪽 선택
+                        End If
+                    Else
+                        cpx = ux * Cos(FAN_DELTA) - uy * Sin(FAN_DELTA)       ' +13° 후보
+                        cpy = ux * Sin(FAN_DELTA) + uy * Cos(FAN_DELTA)
+                        cmx = ux * Cos(FAN_DELTA) + uy * Sin(FAN_DELTA)       ' -13° 후보
+                        cmy = -ux * Sin(FAN_DELTA) + uy * Cos(FAN_DELTA)
+                        If (cpx * pux + cpy * puy) >= (cmx * pux + cmy * puy) Then useSide = 1 Else useSide = -1
+                    End If
                 Else
                     If (cntP + cntM) Mod 2 = 0 Then useSide = 1 Else useSide = -1   ' 짝 정보 없으면 좌우 교대
                 End If
