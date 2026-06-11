@@ -2622,7 +2622,12 @@ Public Sub FinalizeDrawnCable(ln As Shape)
     End If
     ' 케이블 설명선(말풍선) — 행정도 중간점에. 규격은 범례 선택값(spec) 자동, ID·거리는 사용자가 채움.
     ' owner 2026-06-08 (8-84): 「케이블ID」 → 「선로ID」 (네트웍구성도와 라벨 통일)
-    AddCableCallout ws, ln, cblId, "선로ID" & vbCr & spec & vbCr & "거리", spec
+    ' owner 2026-06-11: 규격 줄 = 「규격/구분」 (예: 36C/가공). 구분 콤보 미선택·규격과 동일하면 규격만.
+    Dim specDisp As String: specDisp = spec
+    If Len(g_cableGubun) > 0 Then
+        If g_cableGubun <> spec Then specDisp = spec & "/" & g_cableGubun
+    End If
+    AddCableCallout ws, ln, cblId, "선로ID" & vbCr & specDisp & vbCr & "거리", spec
 
     ' 레이어 정렬 — 배경(맨뒤) < 케이블 < 시설물 < 설명선 < 범례·버튼 (검증된 순서 함수 재사용)
     레이어_정리_시트 ws
@@ -25835,30 +25840,9 @@ Public Sub 정보_적용()
                 End If
 
                 If isCableCallout Then
-                    ' 케이블 callout — 행정도→네트웍 한방향 sync. 행정도 ID 는 보존 (라운드 6 의 「비움」 동작 제거)
-                    '   사용자가 행정도 callout 첫줄에 선로ID 입력 → 네트웍 callout (1줄) 이 같은 ID 로 갱신
-                    Dim adTC As String, nwTC As String
-                    adTC = "": nwTC = ""
-                    On Error Resume Next
-                    adTC = sh.TextFrame2.TextRange.Text
-                    nwTC = peer.TextFrame2.TextRange.Text
-                    On Error GoTo 0
-
-                    Dim adIdLine As String, adRest As String
-                    SplitFirstLine adTC, adIdLine, adRest
-                    Dim adIdTrim As String: adIdTrim = Trim(adIdLine)
-
-                    ' 사용자가 행정도에서 ID 수정함 = 첫줄이 비어있지 않고 「선로ID」(템플릿) 도 아님
-                    '   owner 2026-06-08 (8-84): legacy 「케이블ID」 도 템플릿으로 같이 인식 (이미 만든 도면 호환)
-                    If Len(adIdTrim) > 0 And adIdTrim <> "선로ID" And adIdTrim <> "케이블ID" Then
-                        Dim newNwText As String: newNwText = adIdTrim    ' 네트웍은 1줄 (선로ID)
-                        If Trim(nwTC) <> newNwText Then
-                            On Error Resume Next
-                            peer.TextFrame2.TextRange.Text = newNwText
-                            On Error GoTo 0
-                            calloutSynced = calloutSynced + 1
-                        End If
-                    End If
+                    ' owner 2026-06-11: 행정도 callout 첫줄에 실제 선로ID 입력 → 네트웍 1줄 박스로 보내고
+                    '   행정도 박스에서는 선로ID 줄을 숨김(제거) — 행정도는 규격/구분·거리만 표시 (공용 헬퍼)
+                    If 케이블callout_ID동기화(sh, peer) Then calloutSynced = calloutSynced + 1
                 Else
                     ' 시설물 callout — 양 시트 중 「수정된 쪽」(템플릿이 아닌 쪽) 으로 양쪽 일치.
                     Dim adT As String, nwT As String, winner As String
@@ -25985,33 +25969,15 @@ Public Sub 정보_적용_silent(Optional ByVal sourceSheetName As String = "")
                     If Mid(nm, Len(PREFIX_LABEL) + 1, Len(PREFIX_CBL)) = PREFIX_CBL Then isCableCallout = True
                 End If
                 If isCableCallout Then
-                    ' 케이블 callout: 행정도=3줄 (선로ID/규격/거리), 네트웍=1줄 (선로ID).
-                    '   src 의 1번째 줄(선로ID) → dst 1번째 줄. dst 의 2,3번째 줄은 보존.
-                    '   src 가 템플릿 (선로ID/케이블ID/빈문자열) 이면 sync skip.
-                    Dim srcT As String, dstT As String
-                    srcT = "": dstT = ""
-                    On Error Resume Next
-                    srcT = sh.TextFrame2.TextRange.Text
-                    dstT = peer.TextFrame2.TextRange.Text
-                    On Error GoTo 0
-                    Dim srcIdLine As String, srcRest As String
-                    SplitFirstLine srcT, srcIdLine, srcRest
-                    Dim srcIdTrim As String: srcIdTrim = Trim(srcIdLine)
-                    If Len(srcIdTrim) > 0 And srcIdTrim <> "선로ID" And srcIdTrim <> "케이블ID" Then
-                        Dim dstIdLine As String, dstRest As String
-                        SplitFirstLine dstT, dstIdLine, dstRest
-                        If Trim(dstIdLine) <> srcIdTrim Then
-                            Dim newDstText As String
-                            If Len(dstRest) > 0 Then
-                                newDstText = srcIdTrim & vbCr & dstRest
-                            Else
-                                newDstText = srcIdTrim
-                            End If
-                            On Error Resume Next
-                            peer.TextFrame2.TextRange.Text = newDstText
-                            On Error GoTo 0
-                        End If
+                    ' owner 2026-06-11: 케이블 callout — 행정도에 실제 선로ID 입력 시 네트웍 1줄 박스로 보내고
+                    '   행정도 박스에서는 선로ID 줄 숨김(제거). 공용 헬퍼가 양방향 모두 처리 (src/dst 무관).
+                    Dim adBoxS As Shape, nwBoxS As Shape
+                    If wsSrc.Name = SHEET_NETWORK Then
+                        Set adBoxS = peer: Set nwBoxS = sh
+                    Else
+                        Set adBoxS = sh: Set nwBoxS = peer
                     End If
+                    케이블callout_ID동기화 adBoxS, nwBoxS
                 Else
                     ' 시설물 callout: 양 시트 모두 3줄. src 가 템플릿이고 dst 가 실데이터면 dst → src
                     '   (편집 진원지가 잘못 잡힘 = dst 가 실제 진원지). 그 외엔 src → dst.
@@ -26060,6 +26026,51 @@ Public Sub 정보_적용_silent(Optional ByVal sourceSheetName As String = "")
         End If
     Next sh
 End Sub
+
+' owner 2026-06-11: 케이블 callout ID 동기화 + 행정도 선로ID 줄 숨김 (정보_적용 · 정보_적용_silent 공용).
+'   행정도 박스(3줄: 선로ID/규격/거리)에 실제 선로ID 를 입력하면 → 네트웍 1줄 박스로 보내고
+'   행정도 박스에서는 선로ID 줄을 제거 — 행정도는 규격/구분·거리만 표시, ID 는 네트웍구성도가 보관.
+'   네트웍 쪽에 이미 실제 ID 가 있으면 행정도의 템플릿 「선로ID」 줄도 제거 (네트웍에서 직접 입력한 경우).
+'   3줄 이상일 때만 1번째 줄을 선로ID 자리로 취급 — 2줄 이하 = 이미 숨김 상태 (절대 안 건드림.
+'   숨긴 뒤 1번째 줄은 규격/구분이라 네트웍으로 push 하면 ID 가 오염됨 — 줄수 가드가 차단).
+Public Function 케이블callout_ID동기화(adBox As Shape, nwBox As Shape) As Boolean
+    케이블callout_ID동기화 = False
+    If adBox Is Nothing Then Exit Function
+    If nwBox Is Nothing Then Exit Function
+    Dim adT As String, nwT As String
+    adT = "": nwT = ""
+    On Error Resume Next
+    adT = adBox.TextFrame2.TextRange.Text
+    nwT = nwBox.TextFrame2.TextRange.Text
+    On Error GoTo 0
+    ' 줄수 — vbCrLf/vbLf 정규화 후 vbCr 기준
+    Dim normT As String: normT = Replace(Replace(adT, vbCrLf, vbCr), vbLf, vbCr)
+    Dim lineCnt As Long: lineCnt = 0
+    If Len(normT) > 0 Then lineCnt = UBound(Split(normT, vbCr)) + 1
+    If lineCnt < 3 Then Exit Function
+    Dim idLine As String, restT As String
+    SplitFirstLine adT, idLine, restT
+    Dim idT As String: idT = Trim(idLine)
+    Dim nwTrim As String: nwTrim = Trim(nwT)
+    If Len(idT) > 0 And idT <> "선로ID" And idT <> "케이블ID" Then
+        ' 행정도에 실제 ID 입력됨 → 네트웍 push + 행정도에서 줄 제거
+        If nwTrim <> idT Then
+            On Error Resume Next
+            nwBox.TextFrame2.TextRange.Text = idT
+            On Error GoTo 0
+        End If
+        On Error Resume Next
+        adBox.TextFrame2.TextRange.Text = restT
+        On Error GoTo 0
+        케이블callout_ID동기화 = True
+    ElseIf Len(nwTrim) > 0 And nwTrim <> "선로ID" And nwTrim <> "케이블ID" Then
+        ' 네트웍 쪽에 이미 실제 ID (행정도는 아직 템플릿 줄) → 행정도 템플릿 줄만 제거
+        On Error Resume Next
+        adBox.TextFrame2.TextRange.Text = restT
+        On Error GoTo 0
+        케이블callout_ID동기화 = True
+    End If
+End Function
 
 ' 텍스트를 첫 줄 / 나머지로 분리. vbCr / vbLf / vbCrLf 모두 처리.
 Public Sub SplitFirstLine(t As String, ByRef first As String, ByRef rest As String)

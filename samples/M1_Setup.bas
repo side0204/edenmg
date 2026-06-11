@@ -2599,7 +2599,12 @@ Public Sub FinalizeDrawnCable(ln As Shape)
     End If
     ' 케이블 설명선(말풍선) — 행정도 중간점에. 규격은 범례 선택값(spec) 자동, ID·거리는 사용자가 채움.
     ' owner 2026-06-08 (8-84): 「케이블ID」 → 「선로ID」 (네트웍구성도와 라벨 통일)
-    AddCableCallout ws, ln, cblId, "선로ID" & vbCr & spec & vbCr & "거리", spec
+    ' owner 2026-06-11: 규격 줄 = 「규격/구분」 (예: 36C/가공). 구분 콤보 미선택·규격과 동일하면 규격만.
+    Dim specDisp As String: specDisp = spec
+    If Len(g_cableGubun) > 0 Then
+        If g_cableGubun <> spec Then specDisp = spec & "/" & g_cableGubun
+    End If
+    AddCableCallout ws, ln, cblId, "선로ID" & vbCr & specDisp & vbCr & "거리", spec
 
     ' 레이어 정렬 — 배경(맨뒤) < 케이블 < 시설물 < 설명선 < 범례·버튼 (검증된 순서 함수 재사용)
     레이어_정리_시트 ws
