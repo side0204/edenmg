@@ -2648,6 +2648,9 @@ Public Sub FinalizeDrawnCable(ln As Shape)
     ' spec(4)=규격(코어연결·코어수 파싱) · gubun(7)=구분(기별명세서). 화면 표시 아님 — 저장만. owner 2026-06-10
     AppendMetaRow SHEET_META_CBL, Array(cblId, fromId, toId, spec, "", Now, g_cableGubun)
 
+    ' owner 2026-06-11: 같은 구간 다조 케이블 — 메타 등록 직후 ㄷ자/L자 분리 즉시 적용
+    If Len(fromId) > 0 And Len(toId) > 0 Then 네트웍_케이블_재라우팅 wsNw
+
     ' owner 2026-06-09 (8-125): 철거 케이블 — 케이블 위에 X자 마크 배치 (간격 균등, 기울기 추종)
     '   판단: 범례 메타의 「구분」(MetaLookupLabel) 에 "철거" 포함 시
     '   적용: 행정도(Freeform 경로) + 네트웍구성도(직선) 양 시트 모두
@@ -3007,6 +3010,30 @@ End Sub
 ' 선/커넥터의 두 끝점 (flip 고려한 대각선)
 Public Sub GetLineEndpoints(sh As Shape, ByRef ax As Double, ByRef ay As Double, _
                             ByRef bx As Double, ByRef by As Double)
+    ' owner 2026-06-11 다조: ㄷ자/L자 케이블(freeform) — 첫/마지막 「노드」 가 실제 끝점.
+    '   bbox+flip 방식은 꺾인 도형에서 끝점이 어긋남. 노드 있으면 노드 우선, 직선 line 은 기존 방식 (무변경).
+    Dim ncGLE As Long: ncGLE = 0
+    On Error Resume Next
+    ncGLE = sh.Nodes.Count
+    On Error GoTo 0
+    If ncGLE >= 2 Then
+        Dim nodeOK As Boolean: nodeOK = False
+        Dim pvGLE As Variant
+        On Error Resume Next
+        Err.Clear
+        pvGLE = sh.Nodes.Item(1).Points
+        If Err.Number = 0 Then
+            ax = pvGLE(1, 1): ay = pvGLE(1, 2)
+            pvGLE = sh.Nodes.Item(ncGLE).Points
+            If Err.Number = 0 Then
+                bx = pvGLE(1, 1): by = pvGLE(1, 2)
+                nodeOK = True
+            End If
+        End If
+        Err.Clear
+        On Error GoTo 0
+        If nodeOK Then Exit Sub
+    End If
     ax = sh.Left: ay = sh.Top
     bx = sh.Left + sh.Width: by = sh.Top + sh.Height
     Dim hf As Boolean, vf As Boolean

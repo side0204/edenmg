@@ -5341,6 +5341,8 @@ Public Sub 네트웍_케이블_재라우팅(Optional wsArg As Worksheet)
     If wsMeta Is Nothing Then Exit Sub
     Dim metaFrom As Object: Set metaFrom = CreateObject("Scripting.Dictionary")
     Dim metaTo As Object: Set metaTo = CreateObject("Scripting.Dictionary")
+    Dim spanCnt As Object: Set spanCnt = CreateObject("Scripting.Dictionary")   ' 구간키 → 케이블 수 (owner 2026-06-11 다조)
+    Dim cblSlot As Object: Set cblSlot = CreateObject("Scripting.Dictionary")   ' cblId → 구간 내 slot (메타 행 순서)
     Dim lastR As Long: lastR = wsMeta.Cells(wsMeta.Rows.Count, 1).End(xlUp).Row
     Dim r As Long, cId As String
     For r = 2 To lastR
@@ -5348,6 +5350,23 @@ Public Sub 네트웍_케이블_재라우팅(Optional wsArg As Worksheet)
         If Len(cId) > 0 Then
             metaFrom(cId) = CStr(wsMeta.Cells(r, 2).Value)
             metaTo(cId) = CStr(wsMeta.Cells(r, 3).Value)
+            ' owner 2026-06-11 다조: 같은 구간(시설물 쌍) 케이블 slot 부여 — 도형이 실존하는 것만 (메타 행 순서 = 생성 순서)
+            Dim fM As String, tM As String
+            fM = CStr(metaFrom(cId)): tM = CStr(metaTo(cId))
+            If Len(fM) > 0 Then
+                If Len(tM) > 0 Then
+                    Dim exShp As Shape: Set exShp = Nothing
+                    On Error Resume Next: Set exShp = ws.Shapes(cId): On Error GoTo 0
+                    If Not exShp Is Nothing Then
+                        Dim spanKey As String
+                        If fM < tM Then spanKey = fM & "|" & tM Else spanKey = tM & "|" & fM
+                        Dim kSlot As Long: kSlot = 0
+                        If spanCnt.Exists(spanKey) Then kSlot = CLng(spanCnt(spanKey))
+                        spanCnt(spanKey) = kSlot + 1
+                        cblSlot(cId) = kSlot
+                    End If
+                End If
+            End If
         End If
     Next r
 
@@ -5361,6 +5380,14 @@ Public Sub 네트웍_케이블_재라우팅(Optional wsArg As Worksheet)
     '   Shape.Line.Visible / Line.ForeColor 는 line 도형의 line 속성. 좌표는 도형의 bbox
     '   line 의 두 끝점은 (Left, Top) 과 (Left+Width, Top+Height) — 단 한쪽 끝이 다른 쪽보다 크면 flip
     '   가장 안전한 방식 — line 도형 삭제 후 동일 이름 + 색·두께로 재생성
+    ' 노랑격자 1칸 크기 (ㄷ자 우회 폭) — owner 2026-06-11 다조
+    Dim cwR As Double: cwR = ws.Cells(1, 1).Width
+    Dim rhR As Double: rhR = ws.Cells(LEGEND_ROWS + 1, 1).Height
+    If cwR <= 0 Then cwR = CELL_PT
+    If rhR <= 0 Then rhR = CELL_PT
+    Dim gridWR As Double: gridWR = cwR * 네트웍_격자_단위가로cells()
+    Dim gridHR As Double: gridHR = rhR * 네트웍_격자_단위세로cells()
+
     Dim sh As Shape, fromId As String, toId As String
     Dim toRebuild As Collection: Set toRebuild = New Collection
     For Each sh In ws.Shapes
@@ -5389,32 +5416,49 @@ Public Sub 네트웍_케이블_재라우팅(Optional wsArg As Worksheet)
         If fSh Is Nothing Or tSh Is Nothing Then GoTo NextCbl
         Dim lc As Long: lc = 0
         Dim lwt As Double: lwt = 1
+        Dim lds As Long: lds = msoLineSolid
+        Dim altKeep As String: altKeep = ""
         On Error Resume Next
         lc = oldLine.Line.ForeColor.RGB
         lwt = oldLine.Line.Weight
+        lds = oldLine.Line.DashStyle
+        altKeep = oldLine.AlternativeText
         On Error GoTo 0
         Dim fcx As Double, fcy As Double, tcx As Double, tcy As Double
         fcx = fSh.Left + fSh.Width / 2: fcy = fSh.Top + fSh.Height / 2
         tcx = tSh.Left + tSh.Width / 2: tcy = tSh.Top + tSh.Height / 2
-        ' 이미 정 중앙에 있으면 skip (line 양 끝과 일치)
-        Dim curX1 As Double, curY1 As Double, curX2 As Double, curY2 As Double
-        curX1 = oldLine.Left: curY1 = oldLine.Top
-        curX2 = oldLine.Left + oldLine.Width: curY2 = oldLine.Top + oldLine.Height
-        Dim aligned As Boolean
-        aligned = (Abs(curX1 - fcx) < 0.5 And Abs(curY1 - fcy) < 0.5 And _
-                   Abs(curX2 - tcx) < 0.5 And Abs(curY2 - tcy) < 0.5) Or _
-                  (Abs(curX1 - tcx) < 0.5 And Abs(curY1 - tcy) < 0.5 And _
-                   Abs(curX2 - fcx) < 0.5 And Abs(curY2 - fcy) < 0.5)
-        If aligned Then GoTo NextCbl
+        ' owner 2026-06-11 다조: canonical 방향 (id 순) — 같은 구간 케이블들의 우회 side 일관
+        If fromId > toId Then
+            Dim swpX As Double, swpY As Double
+            swpX = fcx: swpY = fcy
+            fcx = tcx: fcy = tcy
+            tcx = swpX: tcy = swpY
+        End If
+        Dim slot As Long: slot = 0
+        If cblSlot.Exists(nm) Then slot = CLng(cblSlot(nm))
+        ' 기대 경로 — slot 0 = 직선 (현행 그대로) / 가로·세로 다조 = ㄷ자 1칸 우회 / 대각 다조 = L자 (owner 2026-06-11)
+        Dim ptsE() As Double, nE As Long
+        네트웍_다조_경로점 fcx, fcy, tcx, tcy, slot, gridWR, gridHR, ptsE, nE
+        ' 이미 기대 경로에 있으면 skip
+        If 케이블_경로_일치(oldLine, ptsE, nE) Then GoTo NextCbl
         ' 재생성 — line 끝점 직접 set 불가 (AutoShape 와 달리) → 삭제 후 새로 그림
         oldLine.Delete
-        Dim newLine As Shape
-        Set newLine = ws.Shapes.AddLine(fcx, fcy, tcx, tcy)
+        Dim newLine As Shape: Set newLine = Nothing
+        If nE = 2 Then
+            Set newLine = ws.Shapes.AddLine(ptsE(1, 1), ptsE(1, 2), ptsE(2, 1), ptsE(2, 2))
+        Else
+            Set newLine = 네트웍_폴리라인_생성(ws, ptsE, nE)
+        End If
+        If newLine Is Nothing Then GoTo NextCbl
         newLine.Name = nm
         newLine.OnAction = ""
         newLine.Placement = 3
+        On Error Resume Next
         newLine.Line.ForeColor.RGB = lc
         newLine.Line.Weight = lwt
+        newLine.Line.DashStyle = lds
+        If Len(altKeep) > 0 Then newLine.AlternativeText = altKeep
+        On Error GoTo 0
         ' owner 2026-06-09 (8-125-fix13): 철거 X 마크 추종 — 네트웍 케이블은 정의상 양 끝 시설물 (True, True)
         On Error Resume Next
         철거_X마크_케이블_갱신 ws, newLine, True, True
@@ -5426,6 +5470,125 @@ NextCbl:
     레이어_정리_시트 ws
     If wasProt Then ApplySheetProtection ws
 End Sub
+
+' ============================================================================
+'  owner 2026-06-11: 같은 구간(시설물 쌍) 다조 케이블 분리 — 네트웍구성도
+'    slot 0 (구간 첫 케이블) = 직선 (현행 그대로 — 1조 구간 무변경).
+'    slot 1+ : 가로·세로 구간 = ㄷ자 우회 (노랑격자 1칸씩 — slot1 +1칸, slot2 -1칸, slot3 +2칸 ...)
+'              대각 구간 = L자 (slot1 = 가로→세로, slot2 = 세로→가로, slot3+ = ㄷ자 평행 우회)
+'    slot 은 메타(_케이블) 행 순서 = 생성 순서. 재라우팅이 매번 기대 경로로 재구축 → 영구 유지.
+' ============================================================================
+Private Sub 네트웍_다조_경로점(fcx As Double, fcy As Double, tcx As Double, tcy As Double, _
+                               slot As Long, gridW As Double, gridH As Double, _
+                               ByRef pts() As Double, ByRef nPts As Long)
+    If slot <= 0 Then
+        nPts = 2
+        ReDim pts(1 To 2, 1 To 2)
+        pts(1, 1) = fcx: pts(1, 2) = fcy
+        pts(2, 1) = tcx: pts(2, 2) = tcy
+        Exit Sub
+    End If
+    Dim dx As Double, dy As Double
+    dx = tcx - fcx: dy = tcy - fcy
+    Dim isAxis As Boolean: isAxis = (Abs(dx) < 2 Or Abs(dy) < 2)
+    If Not isAxis Then
+        If slot = 1 Then
+            ' L자 — 가로 먼저 (owner: 대각인 경우는 L자 형식)
+            nPts = 3
+            ReDim pts(1 To 3, 1 To 2)
+            pts(1, 1) = fcx: pts(1, 2) = fcy
+            pts(2, 1) = tcx: pts(2, 2) = fcy
+            pts(3, 1) = tcx: pts(3, 2) = tcy
+            Exit Sub
+        ElseIf slot = 2 Then
+            ' L자 — 세로 먼저
+            nPts = 3
+            ReDim pts(1 To 3, 1 To 2)
+            pts(1, 1) = fcx: pts(1, 2) = fcy
+            pts(2, 1) = fcx: pts(2, 2) = tcy
+            pts(3, 1) = tcx: pts(3, 2) = tcy
+            Exit Sub
+        End If
+    End If
+    ' ㄷ자 평행 우회 — 가로·세로 구간 slot1+, 대각 구간 slot3+ (L 2개 소진 후)
+    Dim eff As Long: eff = slot
+    If Not isAxis Then eff = slot - 2
+    Dim m As Long: m = (eff + 1) \ 2
+    Dim sgn As Double
+    If eff Mod 2 = 1 Then sgn = 1 Else sgn = -1
+    Dim ulen As Double: ulen = Sqr(dx * dx + dy * dy)
+    If ulen < 0.001 Then ulen = 1
+    Dim px As Double, py As Double
+    px = -dy / ulen: py = dx / ulen
+    Dim cellSpan As Double: cellSpan = Abs(px) * gridW + Abs(py) * gridH   ' 노랑격자 1칸 (perp 축 기준)
+    Dim ox As Double, oy As Double
+    ox = px * sgn * m * cellSpan: oy = py * sgn * m * cellSpan
+    nPts = 4
+    ReDim pts(1 To 4, 1 To 2)
+    pts(1, 1) = fcx: pts(1, 2) = fcy
+    pts(2, 1) = fcx + ox: pts(2, 2) = fcy + oy
+    pts(3, 1) = tcx + ox: pts(3, 2) = tcy + oy
+    pts(4, 1) = tcx: pts(4, 2) = tcy
+End Sub
+
+' 케이블 도형이 기대 경로(pts)와 일치하는지 — 노드(freeform) 또는 끝점(직선), 정/역방향 모두 허용.
+Private Function 케이블_경로_일치(sh As Shape, pts() As Double, nPts As Long) As Boolean
+    케이블_경로_일치 = False
+    Dim i As Long
+    Dim cur() As Double, nCur As Long: nCur = 0
+    Dim nc As Long: nc = 0
+    On Error Resume Next
+    nc = sh.Nodes.Count
+    On Error GoTo 0
+    If nc >= 2 Then
+        ReDim cur(1 To nc, 1 To 2)
+        Dim pv As Variant
+        On Error Resume Next
+        For i = 1 To nc
+            pv = sh.Nodes.Item(i).Points
+            cur(i, 1) = pv(1, 1): cur(i, 2) = pv(1, 2)
+        Next i
+        On Error GoTo 0
+        nCur = nc
+    Else
+        ReDim cur(1 To 2, 1 To 2)
+        Dim ax As Double, ay As Double, bx As Double, by As Double
+        GetLineEndpoints sh, ax, ay, bx, by
+        cur(1, 1) = ax: cur(1, 2) = ay
+        cur(2, 1) = bx: cur(2, 2) = by
+        nCur = 2
+    End If
+    If nCur <> nPts Then Exit Function
+    Dim fwd As Boolean: fwd = True
+    Dim rev As Boolean: rev = True
+    For i = 1 To nPts
+        If Abs(cur(i, 1) - pts(i, 1)) > 0.5 Then fwd = False
+        If Abs(cur(i, 2) - pts(i, 2)) > 0.5 Then fwd = False
+        If Abs(cur(i, 1) - pts(nPts - i + 1, 1)) > 0.5 Then rev = False
+        If Abs(cur(i, 2) - pts(nPts - i + 1, 2)) > 0.5 Then rev = False
+    Next i
+    케이블_경로_일치 = (fwd Or rev)
+End Function
+
+' 다점 폴리라인 케이블 생성 — FreeformBuilder (선번박스_화살표생성 과 동일 패턴).
+Private Function 네트웍_폴리라인_생성(ws As Worksheet, pts() As Double, nPts As Long) As Shape
+    Set 네트웍_폴리라인_생성 = Nothing
+    If nPts < 2 Then Exit Function
+    Dim ffb As FreeformBuilder
+    On Error Resume Next
+    Set ffb = ws.Shapes.BuildFreeform(msoEditingAuto, pts(1, 1), pts(1, 2))
+    On Error GoTo 0
+    If ffb Is Nothing Then Exit Function
+    Dim i As Long
+    On Error Resume Next
+    For i = 2 To nPts
+        ffb.AddNodes msoSegmentLine, msoEditingAuto, pts(i, 1), pts(i, 2)
+    Next i
+    Dim shp As Shape: Set shp = ffb.ConvertToShape
+    If Not shp Is Nothing Then shp.Fill.Visible = msoFalse
+    On Error GoTo 0
+    Set 네트웍_폴리라인_생성 = shp
+End Function
 
 ' 행정도 케이블의 양 끝점이 항상 from/to 시설물 중심을 따라가게 동기화.
 '   메타(_케이블) 의 from_id/to_id 로 매핑 → 시설물 도형 현재 좌표 → Freeform 의 1번/마지막 노드 갱신.
