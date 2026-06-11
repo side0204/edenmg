@@ -2378,10 +2378,97 @@ Public Function 선번박스_단일생성(ws As Worksheet, cbl As Shape, fcx As 
     box.ZOrder msoBringToFront
     On Error GoTo 0
 
+    ' ============================================================
+    '  owner 2026-06-11: 다케이블 허브 충돌회피 — 기본 위치가 시설물·다른 케이블·다른 선번박스와
+    '    겹칠 때만 「자기 케이블 방향 우선」 후보 탐색으로 빈 자리 재배치.
+    '    (시설물에 케이블 6~7방향 수렴 시 박스가 시설물 위·다른 케이블 위에 겹치던 문제)
+    '    기본 위치가 비어 있으면 종전 동작 100% 그대로 — 공선 캐스케이드 체인·cluster snap 보호.
+    '    복원 = 이 블록 + 선번박스_위치충돌 함수 삭제 (변경 전 = 커밋 7dc1b1b).
+    On Error Resume Next
+    Dim fnlW As Double, fnlH As Double
+    fnlW = box.Width: fnlH = box.Height
+    If 선번박스_위치충돌(ws, box.Left, box.Top, fnlW, fnlH, cbl.Name, box.Name) Then
+        Const RB_ALONG As Double = 26      ' 케이블 방향 한 단계 (박스 폭보다 약간 크게)
+        Const RB_PERP As Double = 18       ' 수직 방향 한 단계
+        Dim rbT As Long, rbK As Long, rbM As Long, rbS As Long
+        Dim rbPx As Double, rbPy As Double, rbCx As Double, rbCy As Double
+        Dim rbDone As Boolean: rbDone = False
+        For rbT = 1 To 12
+            ' 같은 단계 안에서는 케이블 방향(rbK) 이동을 수직(rbM) 이동보다 우선 — 박스가 자기 케이블 따라 분산
+            For rbK = rbT To 0 Step -1
+                rbM = rbT - rbK
+                For rbS = 0 To 1
+                    If rbS = 0 Then
+                        rbPx = perpX: rbPy = perpY        ' 기본 side 우선 (침범 기준 일관)
+                    Else
+                        rbPx = -perpX: rbPy = -perpY      ' 반대 side
+                    End If
+                    rbCx = fcx + ux * (totalDist + rbK * RB_ALONG) + rbPx * (perpDist + rbM * RB_PERP)
+                    rbCy = fcy + uy * (totalDist + rbK * RB_ALONG) + rbPy * (perpDist + rbM * RB_PERP)
+                    If Not 선번박스_위치충돌(ws, rbCx - fnlW / 2, rbCy - fnlH / 2, fnlW, fnlH, cbl.Name, box.Name) Then
+                        box.Left = rbCx - fnlW / 2
+                        box.Top = rbCy - fnlH / 2
+                        rbDone = True
+                        Exit For
+                    End If
+                Next rbS
+                If rbDone Then Exit For
+            Next rbK
+            If rbDone Then Exit For
+        Next rbT
+        ' 후보 전부 점유 — 기본 위치 그대로 (드묾)
+    End If
+    On Error GoTo 0
+    ' ============================================================
+
     ' owner 2026-06-06 (8-23): lastPos 메타 즉시 초기화 — chain 평행 이동 처리에서 첫 비교 기준.
     On Error Resume Next: AltSetLastPos box, box.Left, box.Top: On Error GoTo 0
 
     Set 선번박스_단일생성 = box
+End Function
+
+' (bxL,bxT) 좌상단 w×h 선번박스가 장애물과 겹치는지 — 시설물(fac_) + 케이블(cbl_ 선분, 자기 케이블 제외) + 다른 선번박스.
+'   자기 케이블은 perp 간격(PERP_OFFSET)이 이미 보장하므로 제외. cluster snap 의 0.2cm 간격 stack 은 inflate 1pt 라 통과.
+'   owner 2026-06-11: 다케이블 허브 충돌회피용 (선번박스_단일생성 전용).
+Private Function 선번박스_위치충돌(ws As Worksheet, bxL As Double, bxT As Double, _
+                                    w As Double, h As Double, ownCblName As String, selfName As String) As Boolean
+    선번박스_위치충돌 = True
+    Dim bxR As Double: bxR = bxL + w
+    Dim bxB As Double: bxB = bxT + h
+    Dim sh As Shape
+    Dim nm As String
+    Dim cax As Double, cay As Double, cbx As Double, cby As Double
+    For Each sh In ws.Shapes
+        nm = sh.Name
+        If nm <> selfName Then
+            If Left(nm, Len(PREFIX_FAC)) = PREFIX_FAC Then
+                ' 시설물 — bbox 겹침 (2pt 여유)
+                If sh.Left - 2 < bxR Then
+                    If sh.Left + sh.Width + 2 > bxL Then
+                        If sh.Top - 2 < bxB Then
+                            If sh.Top + sh.Height + 2 > bxT Then Exit Function
+                        End If
+                    End If
+                End If
+            ElseIf Left(nm, Len(PREFIX_PAIRBOX)) = PREFIX_PAIRBOX Then
+                ' 다른 선번박스 — bbox 겹침 (1pt 여유)
+                If sh.Left - 1 < bxR Then
+                    If sh.Left + sh.Width + 1 > bxL Then
+                        If sh.Top - 1 < bxB Then
+                            If sh.Top + sh.Height + 1 > bxT Then Exit Function
+                        End If
+                    End If
+                End If
+            ElseIf Left(nm, Len(PREFIX_CBL)) = PREFIX_CBL Then
+                ' 다른 케이블 선분 — Liang-Barsky (M2 선분_사각형_교차)
+                If nm <> ownCblName Then
+                    GetLineEndpoints sh, cax, cay, cbx, cby
+                    If 선분_사각형_교차(cax, cay, cbx, cby, bxL - 1, bxT - 1, bxR + 1, bxB + 1) Then Exit Function
+                End If
+            End If
+        End If
+    Next sh
+    선번박스_위치충돌 = False
 End Function
 
 ' ============================================================================
