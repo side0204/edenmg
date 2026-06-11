@@ -8307,8 +8307,45 @@ Public Sub 격자_교차점_스냅(wsNw As Worksheet, ByRef x As Double, ByRef y
     Dim gr As Long: gr = CLng((y - origY - rh / 2) / gridH)
     If gc < 1 Then gc = 1
     If gr < 0 Then gr = 0
-    x = gc * gridW + cw / 2
-    y = origY + gr * gridH + rh / 2
+    ' 최종 좌표 = 「실제 셀」 중심 — Excel 열폭이 문자단위→픽셀 반올림으로 15pt 와 달라져(열폭≠행높이)
+    '   곱셈식 좌표가 노랑 십자에서 누적 어긋나던 원인. 노랑 격자(셀 채우기)와 항상 정확히 일치. owner 2026-06-10
+    '   역산(균일 근사)이 한 칸 빗나갈 수 있어 ±2 후보 중 입력 좌표 최근접 십자 선택.
+    Dim unitsX As Long: unitsX = 네트웍_격자_단위가로cells()
+    Dim unitsY As Long: unitsY = 네트웍_격자_단위세로cells()
+    Dim gridTop As Long: gridTop = LEGEND_ROWS + 1
+    Dim bestGc As Long: bestGc = gc
+    Dim bestDx As Double: bestDx = 1E+30
+    Dim g As Long
+    For g = gc - 2 To gc + 2
+        If g >= 1 Then
+            Dim ccx As Double
+            On Error Resume Next
+            ccx = wsNw.Cells(1, g * unitsX + 1).Left + wsNw.Cells(1, g * unitsX + 1).Width / 2
+            On Error GoTo 0
+            If Abs(ccx - x) < bestDx Then
+                bestDx = Abs(ccx - x)
+                bestGc = g
+            End If
+        End If
+    Next g
+    Dim bestGr As Long: bestGr = gr
+    Dim bestDy As Double: bestDy = 1E+30
+    For g = gr - 2 To gr + 2
+        If g >= 0 Then
+            Dim ccy As Double
+            On Error Resume Next
+            ccy = wsNw.Cells(gridTop + g * unitsY, 1).Top + wsNw.Cells(gridTop + g * unitsY, 1).Height / 2
+            On Error GoTo 0
+            If Abs(ccy - y) < bestDy Then
+                bestDy = Abs(ccy - y)
+                bestGr = g
+            End If
+        End If
+    Next g
+    On Error Resume Next
+    x = wsNw.Cells(1, bestGc * unitsX + 1).Left + wsNw.Cells(1, bestGc * unitsX + 1).Width / 2
+    y = wsNw.Cells(gridTop + bestGr * unitsY, 1).Top + wsNw.Cells(gridTop + bestGr * unitsY, 1).Height / 2
+    On Error GoTo 0
 End Sub
 
 ' owner 2026-06-10: 격자 종횡비를 행정도 배경지도에 자동 정합 — 균일배율이 가로·세로 양 축을 모두 채우게.
