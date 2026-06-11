@@ -1971,8 +1971,7 @@ End Sub
 '   첫 시설물 그릴 때 네트웍_비례_배치 가 자동 호출 — 격자가 지도 비율로 다시 그려짐.
 Public Function 네트웍_격자_종횡비정합(wsAd As Worksheet, wsNw As Worksheet) As Boolean
     네트웍_격자_종횡비정합 = False
-    Dim bg As Shape: Set bg = Nothing
-    On Error Resume Next: Set bg = wsAd.Shapes(BG_NAME): On Error GoTo 0
+    Dim bg As Shape: Set bg = 행정도_배경_도형(wsAd)
     If bg Is Nothing Then Exit Function
     If bg.Width <= 0 Or bg.Height <= 0 Then Exit Function
     Dim cw As Double: cw = wsNw.Cells(1, 1).Width
@@ -2002,6 +2001,19 @@ Public Function 네트웍_격자_종횡비정합(wsAd As Worksheet, wsNw As Work
     네트웍_격자_종횡비정합 = True
 End Function
 
+' 행정도 배경지도 도형 — BG_NAME(「배경_잠그기」 등록분) 우선, 없으면 잠그기 전 붙여넣은 큰 이미지를
+'   자동 인식 (FindBackgroundCandidate 폴백 — 200pt 이상 최대 면적). 비례 배치 계열이 공용. owner 2026-06-10
+Public Function 행정도_배경_도형(wsAd As Worksheet) As Shape
+    Set 행정도_배경_도형 = Nothing
+    If wsAd Is Nothing Then Exit Function
+    Dim bg As Shape: Set bg = Nothing
+    On Error Resume Next: Set bg = wsAd.Shapes(BG_NAME): On Error GoTo 0
+    If bg Is Nothing Then
+        On Error Resume Next: Set bg = FindBackgroundCandidate(wsAd): On Error GoTo 0
+    End If
+    Set 행정도_배경_도형 = bg
+End Function
+
 ' owner 2026-06-10(정정): 네트웍구성도 = 「확대된 행정도」 모델 — 행정도는 축소된 지도이고
 '   네트웍은 그것을 균일 배율로 확대한 것. 축별 독립 정규화(모양 왜곡) 대신 가로·세로 「같은 배율」 사용.
 '   배율 = min(격자 가로span/배경폭, 격자 세로span/배경높이), 원점 = 배경 좌상단 → 격자 첫 교차점(가로1·세로0).
@@ -2012,8 +2024,7 @@ Public Function 행정도_비례_네트웍좌표(wsAd As Worksheet, wsNw As Work
                                         ByRef nx As Double, ByRef ny As Double) As Boolean
     행정도_비례_네트웍좌표 = False
     If wsAd Is Nothing Or wsNw Is Nothing Then Exit Function
-    Dim bg As Shape: Set bg = Nothing
-    On Error Resume Next: Set bg = wsAd.Shapes(BG_NAME): On Error GoTo 0
+    Dim bg As Shape: Set bg = 행정도_배경_도형(wsAd)
     If bg Is Nothing Then Exit Function
     If bg.Width <= 0 Or bg.Height <= 0 Then Exit Function
     Dim cw As Double: cw = wsNw.Cells(1, 1).Width
@@ -2103,8 +2114,7 @@ Public Function 네트웍_비례_배치(wsAd As Worksheet, wsNw As Worksheet, _
     If 네트웍_링_재배치(wsNw, nx, ny, facW, facH, excludeFacId, adx, ady, 1, 1) Then Exit Function
 
     ' 1링 실패 = 밀집 → 격자 자동 확장 (단, 지도상 사실상 동일 지점이면 확장 무의미 — 가드)
-    Dim bgE As Shape: Set bgE = Nothing
-    On Error Resume Next: Set bgE = wsAd.Shapes(BG_NAME): On Error GoTo 0
+    Dim bgE As Shape: Set bgE = 행정도_배경_도형(wsAd)
     Dim canExpand As Boolean: canExpand = False
     If Not bgE Is Nothing Then
         If adminDistMin < 1E+29 Then
@@ -2194,8 +2204,7 @@ End Function
 ' 밀집 해소 — 최근접 쌍이 1칸 이상 벌어지는 배율이 되도록 격자 칸수 자동 확장 (양축 비율 유지, 상한 80).
 Public Function 네트웍_격자_자동확장(wsAd As Worksheet, wsNw As Worksheet, adminDistMin As Double) As Boolean
     네트웍_격자_자동확장 = False
-    Dim bg As Shape: Set bg = Nothing
-    On Error Resume Next: Set bg = wsAd.Shapes(BG_NAME): On Error GoTo 0
+    Dim bg As Shape: Set bg = 행정도_배경_도형(wsAd)
     If bg Is Nothing Then Exit Function
     If adminDistMin <= 0 Then Exit Function
     Dim cw As Double: cw = wsNw.Cells(1, 1).Width
@@ -2244,10 +2253,11 @@ Public Sub 네트웍_비례_전체재배치_silent(silent As Boolean)
     On Error GoTo 0
     If wsAd Is Nothing Then Exit Sub
     If wsNw Is Nothing Then Exit Sub
-    Dim bgChk As Shape: Set bgChk = Nothing
-    On Error Resume Next: Set bgChk = wsAd.Shapes(BG_NAME): On Error GoTo 0
+    Dim bgChk As Shape: Set bgChk = 행정도_배경_도형(wsAd)
     If bgChk Is Nothing Then
-        If Not silent Then MsgBox "행정도에 배경 지도가 없어 비례 재배치를 할 수 없습니다.", vbExclamation, "비례 재배치"
+        If Not silent Then MsgBox "행정도에서 배경 지도를 찾지 못했습니다." & vbLf & vbLf & _
+                                  "행정도 시트에 지도 이미지(200pt 이상)를 붙여넣은 뒤 다시 실행하세요." & vbLf & _
+                                  "(붙여넣기만 해도 자동 인식됩니다 — 「배경_잠그기」는 선택)", vbExclamation, "비례 재배치"
         Exit Sub
     End If
 
