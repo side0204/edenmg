@@ -1955,13 +1955,52 @@ Public Sub 격자_교차점_스냅(wsNw As Worksheet, ByRef x As Double, ByRef y
     Dim gridW As Double: gridW = cw * 네트웍_격자_단위가로cells()
     Dim gridH As Double: gridH = rh * 네트웍_격자_단위세로cells()
     If gridW <= 0 Or gridH <= 0 Then Exit Sub
+    ' Y 원점 = 「실제」 2행 Top (상수 NW_TOP_H 대신 — Excel 이 행 높이를 픽셀 단위로 반올림해 22pt 가 21.75pt 등으로
+    '   미세하게 달라질 수 있음 → 시설물이 십자 중심보다 약간 아래 배치되던 원인). owner 2026-06-10
+    Dim origY As Double: origY = wsNw.Cells(LEGEND_ROWS + 1, 1).Top
     Dim gc As Long: gc = CLng((x - cw / 2) / gridW)
-    Dim gr As Long: gr = CLng((y - NW_TOP_H - rh / 2) / gridH)
+    Dim gr As Long: gr = CLng((y - origY - rh / 2) / gridH)
     If gc < 1 Then gc = 1
     If gr < 0 Then gr = 0
     x = gc * gridW + cw / 2
-    y = NW_TOP_H + gr * gridH + rh / 2
+    y = origY + gr * gridH + rh / 2
 End Sub
+
+' owner 2026-06-10: 격자 종횡비를 행정도 배경지도에 자동 정합 — 균일배율이 가로·세로 양 축을 모두 채우게.
+'   세로 칸수 = (가로칸수−1)·gridW·지도세로 ÷ (지도가로·gridH). 변경 시 격자 재생성 + True 반환.
+'   첫 시설물 그릴 때 네트웍_비례_배치 가 자동 호출 — 격자가 지도 비율로 다시 그려짐.
+Public Function 네트웍_격자_종횡비정합(wsAd As Worksheet, wsNw As Worksheet) As Boolean
+    네트웍_격자_종횡비정합 = False
+    Dim bg As Shape: Set bg = Nothing
+    On Error Resume Next: Set bg = wsAd.Shapes(BG_NAME): On Error GoTo 0
+    If bg Is Nothing Then Exit Function
+    If bg.Width <= 0 Or bg.Height <= 0 Then Exit Function
+    Dim cw As Double: cw = wsNw.Cells(1, 1).Width
+    Dim rh As Double: rh = wsNw.Cells(LEGEND_ROWS + 1, 1).Height
+    If cw <= 0 Then cw = CELL_PT
+    If rh <= 0 Then rh = CELL_PT
+    Dim gridW As Double: gridW = cw * 네트웍_격자_단위가로cells()
+    Dim gridH As Double: gridH = rh * 네트웍_격자_단위세로cells()
+    Dim cellsX As Long: cellsX = 네트웍_격자_가로칸수()
+    Dim curY As Long: curY = 네트웍_격자_세로칸수()
+    Dim wantY As Long
+    wantY = CLng(((cellsX - 1) * gridW * bg.Height) / (bg.Width * gridH))
+    If wantY < 2 Then wantY = 2
+    If wantY > 80 Then wantY = 80
+    If wantY = curY Then Exit Function
+    Dim wasProt As Boolean: wasProt = wsNw.ProtectContents Or wsNw.ProtectDrawingObjects
+    On Error Resume Next: wsNw.Unprotect: On Error GoTo 0
+    네트웍_격자_칸수_저장 cellsX, wantY
+    Dim totC As Long: totC = cellsX * 네트웍_격자_단위가로cells() + 1
+    Dim totR As Long: totR = wantY * 네트웍_격자_단위세로cells() + 1
+    On Error Resume Next: UniformCellSize wsNw, totC, totR: On Error GoTo 0
+    네트웍_격자_생성
+    If wasProt Then ApplySheetProtection wsNw
+    On Error Resume Next
+    Application.StatusBar = "격자 종횡비 정합 — 세로 칸수 " & curY & " → " & wantY & " (지도 비율 맞춤)"
+    On Error GoTo 0
+    네트웍_격자_종횡비정합 = True
+End Function
 
 ' owner 2026-06-10(정정): 네트웍구성도 = 「확대된 행정도」 모델 — 행정도는 축소된 지도이고
 '   네트웍은 그것을 균일 배율로 확대한 것. 축별 독립 정규화(모양 왜곡) 대신 가로·세로 「같은 배율」 사용.
@@ -1992,19 +2031,21 @@ Public Function 행정도_비례_네트웍좌표(wsAd As Worksheet, wsNw As Work
     Dim scl As Double: scl = spanX / bg.Width
     If spanY / bg.Height < scl Then scl = spanY / bg.Height
     ' 원점: 배경 좌상단 = 격자 첫 교차점 (가로 1번째 — 0열 스킵 정책, 세로 0번째)
+    '   Y 는 「실제」 2행 Top 기준 (상수 NW_TOP_H 대신 — 행 높이 픽셀 반올림 오차 회피). owner 2026-06-10
+    Dim topY As Double: topY = wsNw.Cells(LEGEND_ROWS + 1, 1).Top
     Dim origX As Double: origX = gridW + cw / 2
-    Dim origY As Double: origY = NW_TOP_H + rh / 2
+    Dim origY As Double: origY = topY + rh / 2
     nx = origX + (adminX - bg.Left) * scl
     ny = origY + (adminY - bg.Top) * scl
     ' 최근접 격자 교차점으로
     격자_교차점_스냅 wsNw, nx, ny
     ' 격자 범위 클램프 + 검색바(1행) 침범 방지
     Dim maxNx As Double: maxNx = cellsX * gridW + cw / 2
-    Dim maxNy As Double: maxNy = NW_TOP_H + cellsY * gridH + rh / 2
+    Dim maxNy As Double: maxNy = topY + cellsY * gridH + rh / 2
     If nx > maxNx Then nx = maxNx
     If ny > maxNy Then ny = maxNy
-    Dim minNy As Double: minNy = NW_TOP_H + FAC_DEFAULT_H / 2 + 8
-    If ny < minNy Then ny = NW_TOP_H + gridH + rh / 2
+    Dim minNy As Double: minNy = topY + FAC_DEFAULT_H / 2 + 8
+    If ny < minNy Then ny = topY + gridH + rh / 2
     행정도_비례_네트웍좌표 = True
 End Function
 
@@ -2017,6 +2058,18 @@ Public Function 네트웍_비례_배치(wsAd As Worksheet, wsNw As Worksheet, _
                                   facW As Double, facH As Double, excludeFacId As String, _
                                   ByRef nx As Double, ByRef ny As Double) As Boolean
     네트웍_비례_배치 = False
+    ' 격자 종횡비를 지도에 자동 정합 — 첫 시설물 포함 (owner 2026-06-10). 변경 시 기존 시설물은 전체재배치.
+    If 네트웍_격자_종횡비정합(wsAd, wsNw) Then
+        Dim hasFac As Boolean: hasFac = False
+        Dim shH As Shape
+        For Each shH In wsNw.Shapes
+            If Left(shH.Name, Len(PREFIX_FAC)) = PREFIX_FAC Then
+                hasFac = True
+                Exit For
+            End If
+        Next shH
+        If hasFac Then 네트웍_비례_전체재배치_silent True
+    End If
     If Not 행정도_비례_네트웍좌표(wsAd, wsNw, adminX, adminY, nx, ny) Then Exit Function   ' 배경지도 없음 → 레거시 흐름
     네트웍_비례_배치 = True
     If Not 격자셀_시설물겹침(wsNw, nx, ny, facW, facH, excludeFacId) Then Exit Function    ' 이상위치가 빈자리
@@ -2207,6 +2260,9 @@ Public Sub 네트웍_비례_전체재배치_silent(silent As Boolean)
 
     ' 복원용 백업 (좌표 + 격자 칸수) — 「격자 확장 되돌리기」 가 이 백업을 복원
     On Error Resume Next: 격자_확장_Undo_백업 wsNw: On Error GoTo 0
+
+    ' 격자 종횡비 정합 (리본 수동 실행 대비 — 비례_배치 경유 시 이미 정합돼 no-op). owner 2026-06-10
+    On Error Resume Next: 네트웍_격자_종횡비정합 wsAd, wsNw: On Error GoTo 0
 
     ' 기록 — 시설물 중심(+Placement=3 강제) + 부속(설명·배지·주야·콤보·선번박스)
     Dim facOldCx As Object: Set facOldCx = CreateObject("Scripting.Dictionary")

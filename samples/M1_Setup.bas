@@ -2367,6 +2367,14 @@ Public Sub FinalizeDrawnFacility(shp As Shape)
     shNw.Locked = False
     shNw.Placement = 3
     On Error GoTo 0
+    ' owner 2026-06-10: 복제 도형의 「실제」 크기가 lw/lh 와 미세하게 달라질 수 있어(그룹 스케일 등)
+    '   좌상단 기준 배치 시 중심이 십자보다 약간 아래/옆으로 어긋남 → 실제 bbox 기준 중앙 재정렬.
+    If Not shNw Is Nothing Then
+        On Error Resume Next
+        shNw.Left = nwCenterX - shNw.Width / 2
+        shNw.Top = nwCenterY - shNw.Height / 2
+        On Error GoTo 0
+    End If
     ' 네트웍구성도 시설물 — 설명선 + 배지 + 상태 박스 + 태그 콤보 부착 (행정도와 같은 번호)
     '   legLab 은 calloutText 생성 시 이미 계산됨
     If Not shNw Is Nothing Then
