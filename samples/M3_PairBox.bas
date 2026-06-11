@@ -2853,7 +2853,10 @@ Public Sub 페어화살표_시설물페어_재정렬(ws As Worksheet)
             If uvlenRA < 0.001 Then uvxRA = 1: uvyRA = 0: uvlenRA = 1
             Dim ucxRA As Double, ucyRA As Double
             ucxRA = uvxRA / uvlenRA: ucyRA = uvyRA / uvlenRA
-            Const PAIR_GAP_RA As Double = 28
+            ' owner 2026-06-10 「간격 기억」 — 28pt 고정 대신 현재 간격(케이블 방향 투영)을 유지하고 방향만 재정렬.
+            '   드래그로 늘린 간격·줌이 스케일한 간격이 셀클릭 후에도 유지. 겹침 방지 최소 간격만 강제.
+            '   ※ 복원 방법: cdRA 계산을 「cdRA = extARA + extBRA + PAIR_GAP_RA」 로 바꾸면 옛(28pt 고정) 동작. (변경 전 = 커밋 98a88d0)
+            Const PAIR_GAP_RA As Double = 28          ' (복원용 보존 — 간격 기억 방식에선 미사용)
             ' anchor = rnBox 현재 위치 (facility 쪽)
             Dim anchorXRA As Double, anchorYRA As Double
             anchorXRA = rnBoxRA.Left + rnBoxRA.Width / 2
@@ -2861,11 +2864,22 @@ Public Sub 페어화살표_시설물페어_재정렬(ws As Worksheet)
             Dim extARA As Double, extBRA As Double
             extARA = (rnBoxRA.Width / 2) * Abs(ucxRA) + (rnBoxRA.Height / 2) * Abs(ucyRA)
             extBRA = (cblBoxRA.Width / 2) * Abs(ucxRA) + (cblBoxRA.Height / 2) * Abs(ucyRA)
-            Dim cdRA As Double: cdRA = extARA + extBRA + PAIR_GAP_RA
-            On Error Resume Next
-            cblBoxRA.Left = (anchorXRA + ucxRA * cdRA) - cblBoxRA.Width / 2
-            cblBoxRA.Top = (anchorYRA + ucyRA * cdRA) - cblBoxRA.Height / 2
-            On Error GoTo 0
+            Dim minGapRA As Double: minGapRA = extARA + extBRA + 8
+            Dim curProjRA As Double
+            curProjRA = ((cblBoxRA.Left + cblBoxRA.Width / 2) - anchorXRA) * ucxRA + _
+                        ((cblBoxRA.Top + cblBoxRA.Height / 2) - anchorYRA) * ucyRA
+            Dim cdRA As Double: cdRA = curProjRA
+            If cdRA < minGapRA Then cdRA = minGapRA
+            Dim newLRA As Double, newTRA As Double
+            newLRA = (anchorXRA + ucxRA * cdRA) - cblBoxRA.Width / 2
+            newTRA = (anchorYRA + ucyRA * cdRA) - cblBoxRA.Height / 2
+            If Abs(newLRA - cblBoxRA.Left) > 0.5 Or Abs(newTRA - cblBoxRA.Top) > 0.5 Then
+                On Error Resume Next
+                cblBoxRA.Left = newLRA
+                cblBoxRA.Top = newTRA
+                AltSetLastPos cblBoxRA, cblBoxRA.Left, cblBoxRA.Top   ' 재정렬 이동을 다음 클릭 chain 평행이동이 「드래그」로 오인 방지
+                On Error GoTo 0
+            End If
         End If
 
         ' 새 spec 으로 좌표 재계산 (위치 재정렬 후)
@@ -3626,6 +3640,19 @@ Public Function 선번박스_경로_계산(ws As Worksheet, _
         '   하위 케이스 2: 평행 같은 방향 (u1·u2 > 0.5) → 4점 stair 유지
         Dim u1u2 As Double: u1u2 = u1x * u2x + u1y * u2y
         If u1u2 < -0.5 Then
+            ' 대각 공선 (owner 2026-06-10 약점1) — 아래 axis 가정(가로/세로 edge 선택)이 대각 케이블엔 안 맞음
+            '   → 상대 박스를 향한 경계점끼리 직선 연결. 수평/수직 공선은 기존 튜닝 그대로 유지. (변경 전 = 커밋 98a88d0)
+            If Abs(u1x) > 0.35 And Abs(u1y) > 0.35 Then
+                Dim dgAx As Double, dgAy As Double, dgBx As Double, dgBy As Double
+                선번박스_경계점 box1, b2x, b2y, dgAx, dgAy
+                선번박스_경계점 box2, b1x, b1y, dgBx, dgBy
+                Dim ptsD() As Double
+                ReDim ptsD(1 To 2, 1 To 2)
+                ptsD(1, 1) = dgAx: ptsD(1, 2) = dgAy
+                ptsD(2, 1) = dgBx: ptsD(2, 2) = dgBy
+                선번박스_경로_계산 = ptsD
+                Exit Function
+            End If
             ' 공선 — 양 박스의 「케이블 쪽 edge」 (cable-facing corner) 를 잇는 직선 (owner: 화살표가 박스 아래쪽 = 케이블 쪽 에 붙어야).
             '   x: 상대 박스 방향 edge (right or left)
             '   y: 케이블 (facility) 쪽 edge — 박스가 케이블 위에 있으면 box bottom, 아래에 있으면 box top

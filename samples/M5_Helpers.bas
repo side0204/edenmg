@@ -2220,13 +2220,23 @@ Public Function 선번박스_단일생성(ws As Worksheet, cbl As Shape, fcx As 
         End If
 
         If Not chooseByOther Then
-            ' 공선 (anti-parallel) 또는 otherCbl 없음 — owner 규칙 (2026-06-05 변경):
-            '   수평 케이블 (|ux| > |uy|) → perp = 아래쪽 (0,+1)  ← 이전: 위쪽
-            '   수직 케이블 (|uy| ≥ |ux|) → perp = 오른쪽 (1,0)
+            ' 공선 (anti-parallel) 또는 otherCbl 없음 — owner 규칙 (2026-06-05) 의 일반화 (2026-06-10 약점1):
+            '   수평 성향 (|ux| > |uy|) → 케이블 「진짜 수직」 중 아래쪽 (perpY > 0)
+            '   수직 성향 (|uy| ≥ |ux|) → 케이블 「진짜 수직」 중 오른쪽 (perpX > 0)
+            '   수평/수직 케이블은 기존 (0,1)/(1,0) 과 동일 결과. 대각 케이블만 축 방향 대신 진짜 수직으로 개선.
+            '   (변경 전 = 커밋 98a88d0: 항상 (0,1)/(1,0) 축 고정)
             If Abs(ux) > Abs(uy) Then
-                perpX = 0: perpY = 1
+                If perpAY > 0 Then
+                    perpX = perpAX: perpY = perpAY
+                Else
+                    perpX = perpBX: perpY = perpBY
+                End If
             Else
-                perpX = 1: perpY = 0
+                If perpAX > 0 Then
+                    perpX = perpAX: perpY = perpAY
+                Else
+                    perpX = perpBX: perpY = perpBY
+                End If
             End If
         End If
     Else
