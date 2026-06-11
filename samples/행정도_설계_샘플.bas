@@ -8401,10 +8401,51 @@ Public Sub 네트웍_빈격자_찾기(wsNw As Worksheet, ByRef nx As Double, ByR
                     Dim refX As Double, refY As Double
                     refX = nwShp.Left + nwShp.Width / 2
                     refY = nwShp.Top + nwShp.Height / 2
+                    ' owner 2026-06-10 (B안): 8 후보를 「행정도에서 기준→새 시설물 방향」 과 일치하는 순서로 정렬 —
+                    '   행정도 배치 방향이 네트웍에도 반영. 방향 못 구하면 기존 고정 순서 유지.
+                    Dim ordIdx(1 To 8) As Long
+                    Dim scArr(1 To 8) As Double
+                    Dim refAdmShp As Shape: Set refAdmShp = Nothing
+                    On Error Resume Next: Set refAdmShp = wsAd.Shapes(ids(r)): On Error GoTo 0
+                    Dim adx As Double, ady As Double, adLen As Double
+                    adx = 0: ady = 0: adLen = 0
+                    If Not refAdmShp Is Nothing Then
+                        adx = adminX - (refAdmShp.Left + refAdmShp.Width / 2)
+                        ady = adminY - (refAdmShp.Top + refAdmShp.Height / 2)
+                        adLen = Sqr(adx * adx + ady * ady)
+                    End If
+                    For k = 1 To 8
+                        ordIdx(k) = k
+                        If adLen > 0.001 Then
+                            ' 방향 일치도 = 정규화 dot (대각 offset 은 길이 √2 보정)
+                            Dim odLen As Double
+                            If dxs(k) <> 0 And dys(k) <> 0 Then odLen = 1.41421356 Else odLen = 1
+                            scArr(k) = (dxs(k) * adx + dys(k) * ady) / odLen
+                        Else
+                            scArr(k) = 0
+                        End If
+                    Next k
+                    If adLen > 0.001 Then
+                        ' 일치도 내림차순 (insertion sort — ii/jj 재사용)
+                        For ii = 2 To 8
+                            Dim tIdx As Long: tIdx = ordIdx(ii)
+                            Dim tSc As Double: tSc = scArr(tIdx)
+                            jj = ii - 1
+                            Do While jj >= 1
+                                If scArr(ordIdx(jj)) < tSc Then
+                                    ordIdx(jj + 1) = ordIdx(jj)
+                                    jj = jj - 1
+                                Else
+                                    Exit Do
+                                End If
+                            Loop
+                            ordIdx(jj + 1) = tIdx
+                        Next ii
+                    End If
                     For k = 1 To 8
                         Dim tx As Double, ty As Double
-                        tx = refX + dxs(k) * gridW
-                        ty = refY + dys(k) * gridH
+                        tx = refX + dxs(ordIdx(k)) * gridW
+                        ty = refY + dys(ordIdx(k)) * gridH
                         격자_교차점_스냅 wsNw, tx, ty       ' 기준이 어긋나 있어도 후보는 정확히 십자 위. owner 2026-06-10
                         If tx >= minTryX And ty >= minTryY Then
                             If Not 격자셀_시설물겹침(wsNw, tx, ty, facW, facH, excludeFacId) Then
