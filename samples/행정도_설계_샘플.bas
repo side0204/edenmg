@@ -9928,10 +9928,13 @@ Public Sub 격자_줌_적용(axisX As Boolean, axisY As Boolean, delta As Long)
     Dim boxOldL As Object: Set boxOldL = CreateObject("Scripting.Dictionary")
     Dim boxOldT As Object: Set boxOldT = CreateObject("Scripting.Dictionary")
     Dim shRec As Shape
-    ' Pass A — 시설물 중심·크기 기록 + Placement=3 강제 (셀 크기변경에 안 휘말려 찌그러짐 방지). owner 2026-06-10
+    ' Pass A — 「전 도형」 Placement=3 강제 + 시설물 중심·크기 기록.
+    '   UniformCellSize 가 매 줌마다 ColumnWidth=2 임시 축소→복원 + 1행 높이 22↔15 진동을 일으켜
+    '   Placement=이동·크기조정 도형(rename 실패 legend_fac_* 등 fac_ 보호 밖 도형 포함)을 찌그러뜨림 →
+    '   시설물만이 아니라 시트 전체에 강제해 원천 차단. owner 2026-06-10 (일부 시설물 찌그러짐 보고)
     For Each shRec In ws.Shapes
+        On Error Resume Next: shRec.Placement = 3: On Error GoTo 0
         If Left(shRec.Name, Len(PREFIX_FAC)) = PREFIX_FAC Then
-            On Error Resume Next: shRec.Placement = 3: On Error GoTo 0
             facOldCx(shRec.Name) = shRec.Left + shRec.Width / 2
             facOldCy(shRec.Name) = shRec.Top + shRec.Height / 2
             facOldW(shRec.Name) = shRec.Width
