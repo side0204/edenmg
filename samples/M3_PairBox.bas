@@ -745,6 +745,51 @@ Public Sub 선번박스_쌍_생성_직접(side1Type As String, side1Name As Stri
         '   visible main 화살표는 alt 에 main=1 태그 (box1=|box2= 없음) → Phase 2 skip.
         '   invisible anchor = box1=|box2= alt 가짐 (Phase 2 entry 생성).
         Dim canonAnchor As Shape
+        Dim arrPts As Variant
+        If isCableFacility Then
+            ' owner 2026-06-11: cable-facility — RN 과 동일하게 anchor 자체가 visible 화살표 (main 별도 생성 X).
+            '   재정렬(페어화살표_시설물페어_재정렬)이 box1=|box2= anchor 를 visible 로 재생성하는 구조라
+            '   invisible anchor + visible main 조합이면 화살표가 2개로 중복되던 문제 해결.
+            Dim cableSideName_a As String
+            If side1Type = "cable" Then cableSideName_a = side1Name Else cableSideName_a = side2Name
+            Dim cableShp_a As Shape: Set cableShp_a = Nothing
+            On Error Resume Next
+            Set cableShp_a = ws.Shapes(cableSideName_a)
+            On Error GoTo 0
+            If Not cableShp_a Is Nothing Then
+                arrPts = 선번박스_경로_시설물페어(cableShp_a, box1, box2)
+            Else
+                arrPts = 선번박스_경로_계산(ws, side1Type, side1Name, box1, side2Type, side2Name, box2, facShp)
+            End If
+            Set canonAnchor = 선번박스_화살표생성(ws, arrPts)
+            If canonAnchor Is Nothing Then
+                Set canonAnchor = ws.Shapes.AddLine(box1.Left + box1.Width / 2, box1.Top + box1.Height / 2, _
+                                                     box2.Left + box2.Width / 2, box2.Top + box2.Height / 2)
+            End If
+            canonAnchor.Name = arrName & "_anchor"
+            canonAnchor.OnAction = ""
+            canonAnchor.Placement = 3
+            On Error Resume Next
+            canonAnchor.AlternativeText = "box1=" & box1.Name & "|box2=" & box2.Name
+            With canonAnchor.Line
+                .ForeColor.RGB = 0
+                .Weight = 0.5
+                .DashStyle = msoLineRoundDot
+                .BeginArrowheadStyle = msoArrowheadTriangle
+                .BeginArrowheadLength = msoArrowheadShort
+                .BeginArrowheadWidth = msoArrowheadNarrow
+                .EndArrowheadStyle = msoArrowheadTriangle
+                .EndArrowheadLength = msoArrowheadShort
+                .EndArrowheadWidth = msoArrowheadNarrow
+            End With
+            On Error GoTo 0
+            선번박스_alt_peer스탬프 box1, box2, False    ' owner 2026-06-05: anchor 손실 대비 박스에 peer stamp
+            Set arr = canonAnchor
+
+            Action_저장 "pairbox_add", _
+                        "box1=" & box1.Name & "`box2=" & box2.Name & "`arr=" & canonAnchor.Name, _
+                        "코어 박스 + visible anchor (cable-facility — RN 동일, main 없음)"
+        Else
         Set canonAnchor = ws.Shapes.AddLine(box1.Left + box1.Width / 2, box1.Top + box1.Height / 2, _
                                              box2.Left + box2.Width / 2, box2.Top + box2.Height / 2)
         canonAnchor.Name = arrName & "_anchor"
@@ -764,24 +809,8 @@ Public Sub 선번박스_쌍_생성_직접(side1Type As String, side1Name As Stri
         선번박스_alt_peer스탬프 box1, box2, False    ' owner 2026-06-05: anchor 손실 대비 박스에 peer stamp
         Set arr = canonAnchor                                ' arr 변수에는 anchor 보관 (z-order 호환)
 
-        ' visible main 화살표 — alt = main=1 (Phase 2 가 box1= 없으니 skip)
-        ' owner 2026-06-06 v3: cable-facility 면 새 시설물페어 spec 적용. cable-cable 은 기존 path 유지.
-        Dim arrPts As Variant
-        If side1Type = "facility" Or side2Type = "facility" Then
-            Dim cableSideName_a As String
-            If side1Type = "cable" Then cableSideName_a = side1Name Else cableSideName_a = side2Name
-            Dim cableShp_a As Shape: Set cableShp_a = Nothing
-            On Error Resume Next
-            Set cableShp_a = ws.Shapes(cableSideName_a)
-            On Error GoTo 0
-            If Not cableShp_a Is Nothing Then
-                arrPts = 선번박스_경로_시설물페어(cableShp_a, box1, box2)
-            Else
-                arrPts = 선번박스_경로_계산(ws, side1Type, side1Name, box1, side2Type, side2Name, box2, facShp)
-            End If
-        Else
-            arrPts = 선번박스_경로_계산(ws, side1Type, side1Name, box1, side2Type, side2Name, box2, facShp)
-        End If
+        ' visible main 화살표 — alt = main=1 (Phase 2 가 box1= 없으니 skip). cable-cable 전용 (facility 는 위 분기).
+        arrPts = 선번박스_경로_계산(ws, side1Type, side1Name, box1, side2Type, side2Name, box2, facShp)
         Dim canonMain As Shape: Set canonMain = 선번박스_화살표생성(ws, arrPts)
         If canonMain Is Nothing Then
             Set canonMain = ws.Shapes.AddLine(box1.Left + box1.Width / 2, box1.Top + box1.Height / 2, _
@@ -804,13 +833,46 @@ Public Sub 선번박스_쌍_생성_직접(side1Type As String, side1Name As Stri
         Action_저장 "pairbox_add", _
                     "box1=" & box1.Name & "`box2=" & box2.Name & "`arr=" & arrName, _
                     "코어 박스 + visible main + invisible anchor (cascade 후 entry 보존)"
+        End If
     Else
         ' owner 2026-06-05 후속2 (두번째 첨부처럼): 케이블 페어당 화살표 1개만 — 양 stack 의 맨 아래박스 사이 L-shape.
         '   cascade 추가 시: (1) 이 케이블 페어의 기존 visible pair 화살표 찾아 삭제. (2) cascade 박스 사이 새 visible pair 화살표.
         '   (3) cascade invisible anchor 별도 생성 — 기존 연결 list 추적용 (각 cascade 마다 1개).
         '   ※ reposition 은 이 If 블록 밖에서 일어남 — 여기서는 단지 anchor·visible 화살표 생성. visible 화살표는 reposition 후 그려야 정확.
 
-        ' (3-안1) invisible anchor 먼저 생성 (메타 추적, 위치는 reposition 이후 갱신됨)
+        ' (3-안1) anchor 먼저 생성 (메타 추적, 위치는 reposition 이후 갱신됨)
+        '   owner 2026-06-11: cable-facility 는 RN 과 동일 — anchor 자체가 그 짝의 visible 화살표 (main 없음).
+        '   cable-cable 은 기존 그대로 invisible (visible 은 그룹당 main 1개).
+        If isCableFacility Then
+            Dim cascArrPts As Variant
+            Dim cfCascCbl As Shape: Set cfCascCbl = Nothing
+            If side1Type = "cable" Then Set cfCascCbl = cbl1 Else Set cfCascCbl = cbl2
+            If Not cfCascCbl Is Nothing Then
+                cascArrPts = 선번박스_경로_시설물페어(cfCascCbl, box1, box2)
+                Set arr = 선번박스_화살표생성(ws, cascArrPts)
+            End If
+            If arr Is Nothing Then
+                Set arr = ws.Shapes.AddLine(box1.Left + box1.Width / 2, box1.Top + box1.Height / 2, _
+                                             box2.Left + box2.Width / 2, box2.Top + box2.Height / 2)
+            End If
+            arr.Name = arrName
+            arr.OnAction = ""
+            arr.Placement = 3
+            On Error Resume Next
+            arr.AlternativeText = "box1=" & box1.Name & "|box2=" & box2.Name & "|cascade=1"
+            With arr.Line
+                .ForeColor.RGB = 0
+                .Weight = 0.5
+                .DashStyle = msoLineRoundDot
+                .BeginArrowheadStyle = msoArrowheadTriangle
+                .BeginArrowheadLength = msoArrowheadShort
+                .BeginArrowheadWidth = msoArrowheadNarrow
+                .EndArrowheadStyle = msoArrowheadTriangle
+                .EndArrowheadLength = msoArrowheadShort
+                .EndArrowheadWidth = msoArrowheadNarrow
+            End With
+            On Error GoTo 0
+        Else
         Set arr = ws.Shapes.AddLine(box1.Left + box1.Width / 2, box1.Top + box1.Height / 2, _
                                      box2.Left + box2.Width / 2, box2.Top + box2.Height / 2)
         arr.Name = arrName
@@ -827,6 +889,7 @@ Public Sub 선번박스_쌍_생성_직접(side1Type As String, side1Name As Stri
         ' owner 2026-06-06 (8-25): Shape.Visible=msoFalse 로 마퀴/클릭 선택 차단.
         arr.Visible = msoFalse
         On Error GoTo 0
+        End If
         선번박스_alt_peer스탬프 box1, box2, True     ' owner 2026-06-05: anchor 손실 대비 박스에 peer stamp (cascade)
         Action_저장 "pairbox_add_cascade", _
                     "box1=" & box1.Name & "`box2=" & box2.Name & "`arr=" & arrName, _
@@ -933,19 +996,11 @@ CascadeArrowOnly:
         End If
 
         ' 새 visible main 화살표 — cascade 박스 사이 L-shape, alt 에 main=1 태그 (box1=|box2= 없음 → Phase 2 skip)
-        '   owner 2026-06-11: cable-facility 는 RN 과 동일 — 케이블 평행 직선 (경로_시설물페어)
+        '   owner 2026-06-11: cable-facility 는 main 생성 안 함 — anchor 자체가 visible 화살표 (RN 동일).
+        '   위 old main 삭제는 cable-facility 도 수행 (구버전이 만든 잔재 main 청소).
+        If Not isCableFacility Then
         Dim arrPtsMain As Variant
-        If isCableFacility Then
-            Dim cfMainCbl As Shape: Set cfMainCbl = Nothing
-            If side1Type = "cable" Then Set cfMainCbl = cbl1 Else Set cfMainCbl = cbl2
-            If Not cfMainCbl Is Nothing Then
-                arrPtsMain = 선번박스_경로_시설물페어(cfMainCbl, box1, box2)
-            Else
-                arrPtsMain = 선번박스_경로_계산(ws, side1Type, side1Name, box1, side2Type, side2Name, box2, facShp)
-            End If
-        Else
-            arrPtsMain = 선번박스_경로_계산(ws, side1Type, side1Name, box1, side2Type, side2Name, box2, facShp)
-        End If
+        arrPtsMain = 선번박스_경로_계산(ws, side1Type, side1Name, box1, side2Type, side2Name, box2, facShp)
         Dim mainArrC As Shape: Set mainArrC = 선번박스_화살표생성(ws, arrPtsMain)
         If mainArrC Is Nothing Then
             Set mainArrC = ws.Shapes.AddLine(box1.Left + box1.Width / 2, box1.Top + box1.Height / 2, _
@@ -964,6 +1019,7 @@ CascadeArrowOnly:
             .EndArrowheadStyle = msoArrowheadTriangle
         End With
         On Error GoTo 0
+        End If
 
         Application.StatusBar = "박스추가 — cascade 박스 stack + 이전 main 화살표 삭제 + 새 main 화살표 (맨 아래박스 사이)."
     End If
@@ -3274,19 +3330,12 @@ Public Sub 페어화살표_시설물페어_재정렬(ws As Worksheet)
             Dim fcxRA As Double, fcyRA As Double
             fcxRA = facShpRA.Left + facShpRA.Width / 2
             fcyRA = facShpRA.Top + facShpRA.Height / 2
-            Dim caxRA As Double, cayRA As Double, cbxRA As Double, cbyRA As Double
-            GetLineEndpoints cableShp, caxRA, cayRA, cbxRA, cbyRA
-            Dim dAARA As Double, dBBRA As Double
-            dAARA = (caxRA - fcxRA) * (caxRA - fcxRA) + (cayRA - fcyRA) * (cayRA - fcyRA)
-            dBBRA = (cbxRA - fcxRA) * (cbxRA - fcxRA) + (cbyRA - fcyRA) * (cbyRA - fcyRA)
-            Dim farXRA As Double, farYRA As Double
-            If dAARA > dBBRA Then farXRA = caxRA: farYRA = cayRA Else farXRA = cbxRA: farYRA = cbyRA
-            Dim uvxRA As Double, uvyRA As Double
-            uvxRA = farXRA - fcxRA: uvyRA = farYRA - fcyRA
-            Dim uvlenRA As Double: uvlenRA = Sqr(uvxRA * uvxRA + uvyRA * uvyRA)
-            If uvlenRA < 0.001 Then uvxRA = 1: uvyRA = 0: uvlenRA = 1
+            ' owner 2026-06-11: 케이블_허브방향 — 직선은 기존(far-end) 과 동일 결과, ㄷ자/L자 폴리라인은
+            '   시설물 쪽 첫 segment 방향 (다조 분리 후속. 박스가 보이는 선분 따라 정렬).
             Dim ucxRA As Double, ucyRA As Double
-            ucxRA = uvxRA / uvlenRA: ucyRA = uvyRA / uvlenRA
+            If Not 케이블_허브방향(cableShp, fcxRA, fcyRA, ucxRA, ucyRA) Then
+                ucxRA = 1: ucyRA = 0
+            End If
             ' owner 2026-06-10 「간격 기억」 — 28pt 고정 대신 현재 간격(케이블 방향 투영)을 유지하고 방향만 재정렬.
             '   드래그로 늘린 간격·줌이 스케일한 간격이 셀클릭 후에도 유지. 겹침 방지 최소 간격만 강제.
             '   ※ 복원 방법: cdRA 계산을 「cdRA = extARA + extBRA + PAIR_GAP_RA」 로 바꾸면 옛(28pt 고정) 동작. (변경 전 = 커밋 98a88d0)
