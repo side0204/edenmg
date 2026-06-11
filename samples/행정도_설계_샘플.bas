@@ -13568,6 +13568,7 @@ Public Sub 선번박스_쌍_생성(Optional ByVal initialTxt1 As String = "1", O
         선번박스_텍스트_합치기 mergeMatch(1), initialTxt1
         선번박스_텍스트_합치기 mergeMatch(2), initialTxt2
         선번박스_페어_재포맷 mergeMatch(1), ws         ' owner 2026-06-05: 양쪽 합친 후 매핑 순서 기반 compact
+        선번박스_방사형_정렬 ws, commonFacId           ' owner 2026-06-11: 합침으로 박스 폭 변동 — 3방향+ 허브면 재정렬
         If wasProt Then ApplySheetProtection ws
         Application.StatusBar = "기존 짝에 코어 합침 — 박스 텍스트 갱신."
         Exit Sub
@@ -13622,6 +13623,9 @@ Public Sub 선번박스_쌍_생성(Optional ByVal initialTxt1 As String = "1", O
     box1.ZOrder msoBringToFront
     box2.ZOrder msoBringToFront
     On Error GoTo 0
+
+    ' owner 2026-06-11: 케이블 3방향+ 허브 — 선번박스 방사형 정렬 + 화살표 재생성 (2방향 이하는 내부에서 즉시 복귀)
+    선번박스_방사형_정렬 ws, commonFacId
 
     If wasProt Then ApplySheetProtection ws
     Application.StatusBar = "코어 박스 생성 — 박스 클릭해 코어 번호 입력 (예: 1-12)."
@@ -13717,6 +13721,7 @@ Public Sub 선번박스_쌍_생성_직접(side1Type As String, side1Name As Stri
                     End If
                     선번박스_페어_재포맷 mtB1Shp, ws    ' owner 2026-06-05: 양쪽 합친 후 매핑 순서 기반 compact
                     g_pt_mergeTargetArrName = ""        ' 1회 사용 후 reset
+                    선번박스_방사형_정렬 ws, facId      ' owner 2026-06-11: 3방향+ 허브면 재정렬
                     If wasProt Then ApplySheetProtection ws
                     Application.StatusBar = "머지 타깃 entry 에 코어 추가 완료."
                     Exit Sub
@@ -13744,6 +13749,7 @@ Public Sub 선번박스_쌍_생성_직접(side1Type As String, side1Name As Stri
             선번박스_텍스트_합치기 mergeMatch(1), initialTxt1
             선번박스_텍스트_합치기 mergeMatch(2), initialTxt2
             선번박스_페어_재포맷 mergeMatch(1), ws     ' owner 2026-06-05: 양쪽 합친 후 매핑 순서 기반 compact
+            선번박스_방사형_정렬 ws, facId             ' owner 2026-06-11: 합침으로 박스 폭 변동 — 3방향+ 허브면 재정렬
             If wasProt Then ApplySheetProtection ws
             Application.StatusBar = "기존 짝에 코어 합침 — 박스 텍스트 갱신."
             Exit Sub
@@ -14002,9 +14008,151 @@ Public Sub 선번박스_쌍_생성_직접(side1Type As String, side1Name As Stri
     box1.ZOrder msoBringToFront
     box2.ZOrder msoBringToFront
     On Error GoTo 0
+    ' owner 2026-06-11: 케이블 3방향+ 허브 — 선번박스 방사형 정렬 + 화살표 재생성 (2방향 이하는 내부에서 즉시 복귀)
+    선번박스_방사형_정렬 ws, facId
+
     If wasProt Then ApplySheetProtection ws
     If Not IsArray(cascadePrev) Then Application.StatusBar = "코어 박스 생성 — 박스 클릭해 코어 번호 편집."
 End Sub
+
+' ============================================================================
+'  owner 2026-06-11: 다방향 케이블 허브 — 선번박스 방사형(부채꼴) 정렬
+'    케이블 3방향 이상 모이는 시설물의 cable-cable 선번박스를 각 케이블 각도 주변 부채꼴 슬롯에 재배치.
+'    슬롯: 같은 케이블 k번째 박스 = 케이블 각도 ±13°×(1+0.55×ring), 반지름 115+ring×26pt (ring=k\2, 좌우 교대).
+'    충돌(시설물·케이블 선분·다른 박스) 시 반지름 +20pt 씩 밖으로 양보 (최대 8회).
+'    배치 후 페어화살표_시설물페어_재정렬 이 화살표 재생성 — L-shape corner(두 케이블 방향선 교점)가
+'    시설물 근처에 떨어져 방사형 수렴 모양이 됨 (owner 첨부 이미지 2026-06-11).
+'    2방향 이하(공선 체인·캐스케이드 stack)는 손대지 않음 — 기존 동작 보호. 복원 = 이 Sub + 헬퍼 + 호출 5곳 삭제.
+' ============================================================================
+Public Sub 선번박스_방사형_정렬(ws As Worksheet, facId As String)
+    If ws Is Nothing Then Exit Sub
+    If Len(facId) = 0 Then Exit Sub
+    Dim facShp As Shape: Set facShp = Nothing
+    On Error Resume Next: Set facShp = ws.Shapes(facId): On Error GoTo 0
+    If facShp Is Nothing Then Exit Sub
+    Dim fcx As Double, fcy As Double
+    fcx = facShp.Left + facShp.Width / 2
+    fcy = facShp.Top + facShp.Height / 2
+
+    ' --- 1. fan 대상 박스 수집 — fac=facId + cbl=cbl_* (RN·facility 측 박스 제외), 케이블별 그룹 (생성 순서 유지) ---
+    Dim byCbl As Object: Set byCbl = CreateObject("Scripting.Dictionary")    ' cblName → Collection(box Shape)
+    Dim fanSet As Object: Set fanSet = CreateObject("Scripting.Dictionary")  ' boxName → True (장애물 수집에서 제외용)
+    Dim sh As Shape, altS As String, cblNm As String
+    For Each sh In ws.Shapes
+        If Left(sh.Name, Len(PREFIX_PAIRBOX)) = PREFIX_PAIRBOX Then
+            altS = "": On Error Resume Next: altS = sh.AlternativeText: On Error GoTo 0
+            If InStr(altS, "|rn=") = 0 And InStr(altS, "rn=") <> 1 Then        ' RN 박스 제외 (기존 코드와 동일 패턴)
+                If AltParseField(altS, "fac=") = facId Then
+                    cblNm = AltParseField(altS, "cbl=")
+                    If Left(cblNm, Len(PREFIX_CBL)) = PREFIX_CBL Then
+                        If Not byCbl.Exists(cblNm) Then byCbl.Add cblNm, New Collection
+                        byCbl(cblNm).Add sh
+                        fanSet(sh.Name) = True
+                    End If
+                End If
+            End If
+        End If
+    Next sh
+    If byCbl.Count < 3 Then Exit Sub      ' 2방향 이하 = 기존 공선 체인·캐스케이드 동작 유지
+
+    ' --- 2. 정적 장애물 수집 — 시설물 bbox + 케이블 선분 + fan 외 선번박스 bbox ---
+    Dim obs As New Collection      ' Array(L, T, R, B)
+    Dim segs As New Collection     ' Array(x1, y1, x2, y2)
+    Dim cax As Double, cay As Double, cbx As Double, cby As Double
+    For Each sh In ws.Shapes
+        If Left(sh.Name, Len(PREFIX_FAC)) = PREFIX_FAC Then
+            obs.Add Array(sh.Left - 2, sh.Top - 2, sh.Left + sh.Width + 2, sh.Top + sh.Height + 2)
+        ElseIf Left(sh.Name, Len(PREFIX_CBL)) = PREFIX_CBL Then
+            GetLineEndpoints sh, cax, cay, cbx, cby
+            segs.Add Array(cax, cay, cbx, cby)
+        ElseIf Left(sh.Name, Len(PREFIX_PAIRBOX)) = PREFIX_PAIRBOX Then
+            If Not fanSet.Exists(sh.Name) Then
+                obs.Add Array(sh.Left - 1, sh.Top - 1, sh.Left + sh.Width + 1, sh.Top + sh.Height + 1)
+            End If
+        End If
+    Next sh
+
+    ' --- 3. 케이블별 부채꼴 슬롯 배치 ---
+    Const FAN_R As Double = 115           ' 시설물 중심 → 첫 ring 박스 중심
+    Const FAN_RING_STEP As Double = 26    ' ring 마다 밖으로
+    Const FAN_DELTA As Double = 0.2269    ' 13° (라디안) — 케이블 축에서 좌우로 벌어지는 기본 각
+    Const FAN_BUMP As Double = 20         ' 충돌 시 반지름 양보 폭
+    Dim ck As Variant
+    Dim cShp As Shape
+    Dim dA As Double, dB As Double
+    Dim ux As Double, uy As Double, ulen As Double
+    Dim fanBx As Shape
+    Dim k As Long, ring As Long, bump As Long
+    Dim sideSgn As Double, phi As Double
+    Dim rx As Double, ry As Double, rr As Double
+    Dim hw As Double, hh As Double, ccx As Double, ccy As Double
+    For Each ck In byCbl.Keys
+        Set cShp = Nothing
+        On Error Resume Next: Set cShp = ws.Shapes(CStr(ck)): On Error GoTo 0
+        If Not cShp Is Nothing Then
+            ' 케이블 방향 단위벡터 (시설물 → far end)
+            GetLineEndpoints cShp, cax, cay, cbx, cby
+            dA = (cax - fcx) * (cax - fcx) + (cay - fcy) * (cay - fcy)
+            dB = (cbx - fcx) * (cbx - fcx) + (cby - fcy) * (cby - fcy)
+            If dA > dB Then
+                ux = cax - fcx: uy = cay - fcy
+            Else
+                ux = cbx - fcx: uy = cby - fcy
+            End If
+            ulen = Sqr(ux * ux + uy * uy)
+            If ulen < 0.001 Then
+                ux = 1: uy = 0
+            Else
+                ux = ux / ulen: uy = uy / ulen
+            End If
+
+            k = 0
+            For Each fanBx In byCbl(ck)
+                ring = k \ 2
+                If k Mod 2 = 0 Then sideSgn = 1 Else sideSgn = -1
+                phi = sideSgn * FAN_DELTA * (1 + 0.55 * ring)
+                rx = ux * Cos(phi) - uy * Sin(phi)        ' u 를 phi 만큼 회전
+                ry = ux * Sin(phi) + uy * Cos(phi)
+                hw = fanBx.Width / 2: hh = fanBx.Height / 2
+                For bump = 0 To 8
+                    rr = FAN_R + ring * FAN_RING_STEP + bump * FAN_BUMP
+                    ccx = fcx + rx * rr
+                    ccy = fcy + ry * rr
+                    If Not 방사형_슬롯충돌(ccx - hw, ccy - hh, ccx + hw, ccy + hh, obs, segs) Then Exit For
+                Next bump
+                ' 전부 충돌이면 마지막 후보 그대로 (드묾)
+                fanBx.Left = ccx - hw
+                fanBx.Top = ccy - hh
+                On Error Resume Next: AltSetLastPos fanBx, fanBx.Left, fanBx.Top: On Error GoTo 0
+                obs.Add Array(fanBx.Left - 1, fanBx.Top - 1, fanBx.Left + fanBx.Width + 1, fanBx.Top + fanBx.Height + 1)
+                k = k + 1
+            Next fanBx
+        End If
+    Next ck
+
+    ' --- 4. 화살표 재생성 — 현 박스 위치 기준 (single anchor·cascade main 모두 기존 로직이 처리) ---
+    페어화살표_시설물페어_재정렬 ws
+End Sub
+
+' (rcL,rcT,rcR,rcB) 박스가 장애물 rect / 케이블 선분과 겹치는지 — 방사형 정렬 전용.
+Private Function 방사형_슬롯충돌(rcL As Double, rcT As Double, rcR As Double, rcB As Double, _
+                                  obs As Collection, segs As Collection) As Boolean
+    방사형_슬롯충돌 = True
+    Dim o As Variant
+    For Each o In obs
+        If o(0) < rcR Then
+            If o(2) > rcL Then
+                If o(1) < rcB Then
+                    If o(3) > rcT Then Exit Function
+                End If
+            End If
+        End If
+    Next o
+    For Each o In segs
+        If 선분_사각형_교차(CDbl(o(0)), CDbl(o(1)), CDbl(o(2)), CDbl(o(3)), rcL - 1, rcT - 1, rcR + 1, rcB + 1) Then Exit Function
+    Next o
+    방사형_슬롯충돌 = False
+End Function
 
 ' RN 모드 박스+화살표 생성 — owner 사양 (i_1차/m_2차/s_3차 그림 참조).
 '   RN 시설물 양쪽에 IN 그룹 (라벨 "IN" + 코어 박스 N개) / P 그룹 (라벨 "P" + 코어 박스 N개) 배치.
