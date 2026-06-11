@@ -1963,8 +1963,11 @@ Public Sub 격자_교차점_스냅(wsNw As Worksheet, ByRef x As Double, ByRef y
     y = NW_TOP_H + gr * gridH + rh / 2
 End Sub
 
-' owner 2026-06-10: 행정도 배경지도(BG_NAME) 안 위치를 네트웍 격자에 비례 매핑 — 첫 시설물(기준 없음) 배치용.
-'   u,v = 배경 그림 내 정규화 좌표(0~1) → 격자 교차점 (가로 1..칸수, 세로 0..칸수). 배경 없으면 False (호출측 기존 좌표 유지).
+' owner 2026-06-10(정정): 네트웍구성도 = 「확대된 행정도」 모델 — 행정도는 축소된 지도이고
+'   네트웍은 그것을 균일 배율로 확대한 것. 축별 독립 정규화(모양 왜곡) 대신 가로·세로 「같은 배율」 사용.
+'   배율 = min(격자 가로span/배경폭, 격자 세로span/배경높이), 원점 = 배경 좌상단 → 격자 첫 교차점(가로1·세로0).
+'   모든 시설물에 적용 (첫 시설물뿐 아니라) — 행정도에서 먼 시설물은 네트웍에서도 비례만큼 떨어짐.
+'   배경 없으면 False (호출측 기존 좌표 유지).
 Public Function 행정도_비례_네트웍좌표(wsAd As Worksheet, wsNw As Worksheet, _
                                         adminX As Double, adminY As Double, _
                                         ByRef nx As Double, ByRef ny As Double) As Boolean
@@ -1974,13 +1977,6 @@ Public Function 행정도_비례_네트웍좌표(wsAd As Worksheet, wsNw As Work
     On Error Resume Next: Set bg = wsAd.Shapes(BG_NAME): On Error GoTo 0
     If bg Is Nothing Then Exit Function
     If bg.Width <= 0 Or bg.Height <= 0 Then Exit Function
-    Dim u As Double, v As Double
-    u = (adminX - bg.Left) / bg.Width
-    v = (adminY - bg.Top) / bg.Height
-    If u < 0 Then u = 0
-    If u > 1 Then u = 1
-    If v < 0 Then v = 0
-    If v > 1 Then v = 1
     Dim cw As Double: cw = wsNw.Cells(1, 1).Width
     Dim rh As Double: rh = wsNw.Cells(LEGEND_ROWS + 1, 1).Height
     If cw <= 0 Then cw = CELL_PT
@@ -1989,15 +1985,24 @@ Public Function 행정도_비례_네트웍좌표(wsAd As Worksheet, wsNw As Work
     Dim gridH As Double: gridH = rh * 네트웍_격자_단위세로cells()
     Dim cellsX As Long: cellsX = 네트웍_격자_가로칸수()
     Dim cellsY As Long: cellsY = 네트웍_격자_세로칸수()
-    Dim gc As Long: gc = 1 + CLng(u * (cellsX - 1))     ' 1..칸수 (0열 스킵 정책 유지)
-    Dim gr As Long: gr = CLng(v * cellsY)               ' 0..칸수
-    If gc < 1 Then gc = 1
-    If gc > cellsX Then gc = cellsX
-    If gr < 0 Then gr = 0
-    If gr > cellsY Then gr = cellsY
-    nx = gc * gridW + cw / 2
-    ny = NW_TOP_H + gr * gridH + rh / 2
-    ' 검색바(1행) 침범 방지 — SnapToNetworkGrid 와 동일 클램프
+    ' 균일 배율 — 배경 전체가 격자 안에 들어가는 최대 등배 확대
+    Dim spanX As Double: spanX = (cellsX - 1) * gridW     ' 가로 교차점 1..칸수 구간
+    Dim spanY As Double: spanY = cellsY * gridH           ' 세로 교차점 0..칸수 구간
+    If spanX <= 0 Or spanY <= 0 Then Exit Function
+    Dim scl As Double: scl = spanX / bg.Width
+    If spanY / bg.Height < scl Then scl = spanY / bg.Height
+    ' 원점: 배경 좌상단 = 격자 첫 교차점 (가로 1번째 — 0열 스킵 정책, 세로 0번째)
+    Dim origX As Double: origX = gridW + cw / 2
+    Dim origY As Double: origY = NW_TOP_H + rh / 2
+    nx = origX + (adminX - bg.Left) * scl
+    ny = origY + (adminY - bg.Top) * scl
+    ' 최근접 격자 교차점으로
+    격자_교차점_스냅 wsNw, nx, ny
+    ' 격자 범위 클램프 + 검색바(1행) 침범 방지
+    Dim maxNx As Double: maxNx = cellsX * gridW + cw / 2
+    Dim maxNy As Double: maxNy = NW_TOP_H + cellsY * gridH + rh / 2
+    If nx > maxNx Then nx = maxNx
+    If ny > maxNy Then ny = maxNy
     Dim minNy As Double: minNy = NW_TOP_H + FAC_DEFAULT_H / 2 + 8
     If ny < minNy Then ny = NW_TOP_H + gridH + rh / 2
     행정도_비례_네트웍좌표 = True
