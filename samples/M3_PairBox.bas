@@ -1,6 +1,14 @@
 Attribute VB_Name = "M3_PairBox"
 Option Explicit
 
+' ===== 케이블 밀착 배치 상수 — v7 (owner 2026-06-11) =====
+Private Const FANP_R As Double = 115          ' 시설물 중심 → 첫 박스 (케이블 따라)
+Private Const FANP_RING As Double = 30        ' 같은 side 다음 박스마다 케이블 따라 밖으로
+Private Const FANP_GAP As Double = 12         ' 케이블 ↔ 박스 가장자리 수직 간격
+Private Const FANP_PERP As Double = 18        ' 같은 side 다음 박스마다 추가 perp (화살표 통로)
+Private Const FANP_BUMP As Double = 20        ' 충돌 시 케이블 따라 양보 폭
+Private Const FANP_MIN_LEG As Double = 57     ' 화살표 한쪽 선 최소 길이 ≈ 2cm (owner 조건)
+
 '   dedup 은 양쪽 페어 단위 (a,b) 로 _compact_쌍 에서 처리 (단일 박스만 보면 의미 없음).
 Public Sub 선번박스_텍스트_파싱(ByVal txt As String, ByRef outArr() As Long, ByRef outCount As Long)
     outCount = 0
@@ -1198,14 +1206,6 @@ Private Function 방사형_케이블방향(ws As Worksheet, cblName As String, f
     oux = vx / vlen: ouy = vy / vlen
     방사형_케이블방향 = True
 End Function
-
-' ===== 케이블 밀착 배치 상수 — v7 (owner 2026-06-11) =====
-Private Const FANP_R As Double = 115          ' 시설물 중심 → 첫 박스 (케이블 따라)
-Private Const FANP_RING As Double = 30        ' 같은 side 다음 박스마다 케이블 따라 밖으로
-Private Const FANP_GAP As Double = 12         ' 케이블 ↔ 박스 가장자리 수직 간격
-Private Const FANP_PERP As Double = 18        ' 같은 side 다음 박스마다 추가 perp (화살표 통로)
-Private Const FANP_BUMP As Double = 20        ' 충돌 시 케이블 따라 양보 폭
-Private Const FANP_MIN_LEG As Double = 57     ' 화살표 한쪽 선 최소 길이 ≈ 2cm (owner 조건)
 
 ' 박스 side 결정 — 짝 케이블 쪽 (v2) · 내각 165°+ 는 가로→아래/수직·대각→오른쪽 고정 (eb537a3).
 '   +side 의 perp 오프셋 방향 = (-uy, ux).
