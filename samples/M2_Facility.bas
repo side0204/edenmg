@@ -2247,19 +2247,20 @@ End Function
 '   요구: 시설물·케이블 설명박스가 다른 시설물·케이블·설명박스와 충돌하지 않는 방향으로,
 '         최대한 접점(시설물 / 케이블 꼬리가 만나는 점)에 붙어서 그려지게.
 
-' 선분 (x1,y1)-(x2,y2) 와 사각형 (L,T,R,B) 교차/포함 여부 — Liang-Barsky 클리핑.
+' 선분 (x1,y1)-(x2,y2) 와 사각형 (좌,상,우,하) 교차/포함 여부 — Liang-Barsky 클리핑.
+'   ※ 파라미터를 L/T/R/B 로 하면 VBA 대소문자 무시로 지역변수 r(비율) 과 「선언 중복」 컴파일 오류 — rc* 접두 사용. owner 2026-06-10
 Public Function 선분_사각형_교차(x1 As Double, y1 As Double, x2 As Double, y2 As Double, _
-                                  L As Double, T As Double, R As Double, B As Double) As Boolean
+                                  rcL As Double, rcT As Double, rcR As Double, rcB As Double) As Boolean
     선분_사각형_교차 = False
     Dim ddx As Double: ddx = x2 - x1
     Dim ddy As Double: ddy = y2 - y1
     Dim t0 As Double: t0 = 0
     Dim t1 As Double: t1 = 1
     Dim p(1 To 4) As Double, q(1 To 4) As Double
-    p(1) = -ddx: q(1) = x1 - L
-    p(2) = ddx:  q(2) = R - x1
-    p(3) = -ddy: q(3) = y1 - T
-    p(4) = ddy:  q(4) = B - y1
+    p(1) = -ddx: q(1) = x1 - rcL
+    p(2) = ddx:  q(2) = rcR - x1
+    p(3) = -ddy: q(3) = y1 - rcT
+    p(4) = ddy:  q(4) = rcB - y1
     Dim i As Long, r As Double
     For i = 1 To 4
         If Abs(p(i)) < 0.000001 Then
