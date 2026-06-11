@@ -2350,6 +2350,9 @@ Public Sub FinalizeDrawnFacility(shp As Shape)
     ' 격자 중앙 좌표 산출 → 시설물 좌상단 = 중앙 - 크기/2
     Dim nwCenterX As Double, nwCenterY As Double
     SnapToNetworkGrid wsNw, cLeft + lw / 2, cTop + lh / 2, nwCenterX, nwCenterY
+    ' owner 2026-06-10: 행정도 배경지도 내 위치 비례로 보정 — 첫 시설물도 지도 상대 위치가 격자에 반영.
+    '   기존 시설물 있으면 아래 빈격자_찾기의 기준-방향 배치(B안)가 우선이라 이 좌표는 폴백 시작점일 뿐.
+    행정도_비례_네트웍좌표 ws, wsNw, cLeft + lw / 2, cTop + lh / 2, nwCenterX, nwCenterY
     ' owner 2026-06-07 (8-75): 행정도 좌표 전달 → 행정도 거리순 8 cell 안에서만 배치
     네트웍_빈격자_찾기 wsNw, nwCenterX, nwCenterY, lw, lh, facId, cLeft + lw / 2, cTop + lh / 2, ws
     Dim nwLeft As Double, nwTop As Double

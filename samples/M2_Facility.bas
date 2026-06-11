@@ -1963,6 +1963,46 @@ Public Sub 격자_교차점_스냅(wsNw As Worksheet, ByRef x As Double, ByRef y
     y = NW_TOP_H + gr * gridH + rh / 2
 End Sub
 
+' owner 2026-06-10: 행정도 배경지도(BG_NAME) 안 위치를 네트웍 격자에 비례 매핑 — 첫 시설물(기준 없음) 배치용.
+'   u,v = 배경 그림 내 정규화 좌표(0~1) → 격자 교차점 (가로 1..칸수, 세로 0..칸수). 배경 없으면 False (호출측 기존 좌표 유지).
+Public Function 행정도_비례_네트웍좌표(wsAd As Worksheet, wsNw As Worksheet, _
+                                        adminX As Double, adminY As Double, _
+                                        ByRef nx As Double, ByRef ny As Double) As Boolean
+    행정도_비례_네트웍좌표 = False
+    If wsAd Is Nothing Or wsNw Is Nothing Then Exit Function
+    Dim bg As Shape: Set bg = Nothing
+    On Error Resume Next: Set bg = wsAd.Shapes(BG_NAME): On Error GoTo 0
+    If bg Is Nothing Then Exit Function
+    If bg.Width <= 0 Or bg.Height <= 0 Then Exit Function
+    Dim u As Double, v As Double
+    u = (adminX - bg.Left) / bg.Width
+    v = (adminY - bg.Top) / bg.Height
+    If u < 0 Then u = 0
+    If u > 1 Then u = 1
+    If v < 0 Then v = 0
+    If v > 1 Then v = 1
+    Dim cw As Double: cw = wsNw.Cells(1, 1).Width
+    Dim rh As Double: rh = wsNw.Cells(LEGEND_ROWS + 1, 1).Height
+    If cw <= 0 Then cw = CELL_PT
+    If rh <= 0 Then rh = CELL_PT
+    Dim gridW As Double: gridW = cw * 네트웍_격자_단위가로cells()
+    Dim gridH As Double: gridH = rh * 네트웍_격자_단위세로cells()
+    Dim cellsX As Long: cellsX = 네트웍_격자_가로칸수()
+    Dim cellsY As Long: cellsY = 네트웍_격자_세로칸수()
+    Dim gc As Long: gc = 1 + CLng(u * (cellsX - 1))     ' 1..칸수 (0열 스킵 정책 유지)
+    Dim gr As Long: gr = CLng(v * cellsY)               ' 0..칸수
+    If gc < 1 Then gc = 1
+    If gc > cellsX Then gc = cellsX
+    If gr < 0 Then gr = 0
+    If gr > cellsY Then gr = cellsY
+    nx = gc * gridW + cw / 2
+    ny = NW_TOP_H + gr * gridH + rh / 2
+    ' 검색바(1행) 침범 방지 — SnapToNetworkGrid 와 동일 클램프
+    Dim minNy As Double: minNy = NW_TOP_H + FAC_DEFAULT_H / 2 + 8
+    If ny < minNy Then ny = NW_TOP_H + gridH + rh / 2
+    행정도_비례_네트웍좌표 = True
+End Function
+
 ' 격자 한 칸이 임계(NW_BOX_HIDE_UNITS) 미만으로 축소되면 선번박스·코어화살표 자동 숨김, 이상으로 확대되면 자동 복원.
 '   숨긴 도형만 alt 에 "zoomhid=1" 표식 — 설계상 invisible 인 cascade anchor(8-25)는 안 건드림 (보이는 것만 숨기고, 표식 있는 것만 복원).
 '   반환 = 현재 숨김 모드 여부. owner 2026-06-10 (축소 시 박스 겹침 → 숨기는 게 낫다)
