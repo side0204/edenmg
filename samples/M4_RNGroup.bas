@@ -233,22 +233,19 @@ Public Sub 선번연결_도구_방사형빌드(facName As String)
         On Error GoTo 0
         Dim angCbl As Double: angCbl = -PI_DBL / 2 + si_pos * 2 * PI_DBL / nKeys  ' fallback: 균등 분포
         If Not cblNw Is Nothing And Not facShp_pos Is Nothing Then
-            Dim ax_p As Double, ay_p As Double, bx_p As Double, by_p As Double
-            GetLineEndpoints cblNw, ax_p, ay_p, bx_p, by_p
-            Dim dA_p As Double, dB_p As Double
-            dA_p = (ax_p - facCx_pos) * (ax_p - facCx_pos) + (ay_p - facCy_pos) * (ay_p - facCy_pos)
-            dB_p = (bx_p - facCx_pos) * (bx_p - facCx_pos) + (by_p - facCy_pos) * (by_p - facCy_pos)
-            Dim farX_p As Double, farY_p As Double
-            If dA_p > dB_p Then farX_p = ax_p: farY_p = ay_p Else farX_p = bx_p: farY_p = by_p
+            ' owner 2026-06-11: 스포크 방향 = 네트웍구성도에서 기준 시설물을 「나가는」 첫 segment 방향.
+            '   ㄷ자/L자 다조 케이블도 실제 보이는 방향 그대로 (chord 금지 — 다조끼리 겹침의 원인).
             Dim dxA As Double, dyA As Double
-            dxA = farX_p - facCx_pos: dyA = farY_p - facCy_pos
-            ' atan2 (VBA 에 없으므로 분기 구현)
-            If Abs(dxA) < 0.001 Then
-                If dyA >= 0 Then angCbl = PI_DBL / 2 Else angCbl = -PI_DBL / 2
-            Else
-                angCbl = Atn(dyA / dxA)
-                If dxA < 0 Then
-                    If dyA >= 0 Then angCbl = angCbl + PI_DBL Else angCbl = angCbl - PI_DBL
+            Dim hubOK_p As Boolean: hubOK_p = 케이블_허브방향(cblNw, facCx_pos, facCy_pos, dxA, dyA)
+            If hubOK_p Then
+                ' atan2 (VBA 에 없으므로 분기 구현)
+                If Abs(dxA) < 0.001 Then
+                    If dyA >= 0 Then angCbl = PI_DBL / 2 Else angCbl = -PI_DBL / 2
+                Else
+                    angCbl = Atn(dyA / dxA)
+                    If dxA < 0 Then
+                        If dyA >= 0 Then angCbl = angCbl + PI_DBL Else angCbl = angCbl - PI_DBL
+                    End If
                 End If
             End If
         End If
@@ -273,8 +270,9 @@ Public Sub 선번연결_도구_방사형빌드(facName As String)
         sortedAngs(jj_s + 1) = aTmp
     Next ii_s
 
-    ' owner 2026-06-11 다조: 같은 각도(같은 구간 다조 케이블 등) 스포크가 정확히 겹쳐 한 조만 보이던 문제 —
-    '   정렬 후 근사 동일 각도(±0.03 rad) 그룹을 ±15°(0.26 rad) 부채꼴로 벌려 각 케이블이 따로 보이고 클릭되게.
+    ' owner 2026-06-11 다조: 스포크 방향은 위에서 「나가는 첫 segment」 기준이라 다조도 대부분 자연 분리.
+    '   그래도 첫 segment 까지 같은 방향(예: 가로 구간 3조의 같은 쪽 ㄷ자 slot1·slot3)이면 정확히 겹치므로
+    '   안전망: 근사 동일 각도(±0.03 rad) 그룹을 ±15°(0.26 rad) 부채꼴로 벌려 따로 보이고 클릭되게.
     '   (±π 경계 wrap 케이스는 미처리 — 정확히 뒤로 향한 다조는 희귀)
     Dim grpStart As Long: grpStart = 0
     Dim grpEnd As Long, gN As Long, gAvg As Double, gI As Long
