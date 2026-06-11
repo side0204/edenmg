@@ -799,7 +799,8 @@ Public Function RibbonGroupDefs() As Variant
 
     g7 = Array("진단", Array( _
             Array("배지 진단", "배지_진단", "메타·도형·배지 상태 확인"), _
-            Array("메타 정리", "메타_정리", "옛 잔재 row 삭제")), False)
+            Array("메타 정리", "메타_정리", "옛 잔재 row 삭제"), _
+            Array("이벤트 복구", "이벤트_복구", "셀클릭 추종(배지·설명박스·콤보 동기화)이 멈췄을 때 — 이벤트·화면갱신 강제 복구")), False)
 
     g8 = Array("내보내기", Array( _
             Array("새 파일 내보내기", "새파일_내보내기", "제출·공유용 매크로 없는 .xlsx 생성")), False)
@@ -853,6 +854,23 @@ Public Function RibbonGroupDefs() As Variant
 
     RibbonGroupDefs = Array(g0, g1, g2, g3, g4, g5, g6, g7, g8, g9, g10, g11, g12)
 End Function
+
+' owner 2026-06-10: 셀클릭 추종(배지·설명박스·콤보 동기화)이 안 될 때 복구.
+'   어떤 매크로가 에러로 중단되면 Application.EnableEvents=False 가 잔류 → SelectionChange 가 안 와서
+'   모든 셀클릭 동기화(배지 추종 등)가 멈춤. 증상: 빈 셀 클릭해도 상태표시줄 「셀 클릭 [...]」 문구가 안 갱신됨.
+'   리본 「진단 > 이벤트 복구」 또는 Alt+F8 로 실행. (Excel 완전 재시작도 같은 효과)
+Public Sub 이벤트_복구()
+    On Error Resume Next
+    Application.EnableEvents = True
+    Application.ScreenUpdating = True
+    Application.Cursor = xlDefault
+    Application.StatusBar = False
+    On Error GoTo 0
+    MsgBox "이벤트·화면 갱신 복구 완료." & vbLf & vbLf & _
+           "이제 셀 클릭 시 배지·설명박스 동기화가 다시 작동합니다." & vbLf & _
+           "(빈 셀 클릭 시 상태표시줄에 「셀 클릭 [...]」 문구가 갱신되면 정상)", _
+           vbInformation, "이벤트 복구"
+End Sub
 
 ' owner 2026-06-07 (8-76 → 8-77): 사용기간 만료 검사 — Workbook_Open 에서 자동 호출.
 '   - master 파일 (LicenseDevMode=True) 은 skip
