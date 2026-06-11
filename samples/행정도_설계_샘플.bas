@@ -14039,6 +14039,44 @@ Public Sub 선번박스_쌍_생성_직접(side1Type As String, side1Name As Stri
         Exit Sub
     End If
 
+    ' owner 2026-06-11: cable-facility 페어 — RN 코어연결과 동일 배치 (RN 요청내역 참고).
+    '   시설물 박스 = 케이블 박스(단일생성)가 정한 케이블 밀착 anchor 로 이동 (시설물 가까이),
+    '   케이블 박스 = anchor 에서 케이블 따라 바깥쪽 (ext+ext+28pt — RN PAIR_GAP 와 동일).
+    '   화살표는 두 박스 사이 케이블 평행 점선 (경로_시설물페어). cascade(박스추가)도 동일 —
+    '   단일생성의 같은 케이블 stack 이 다음 짝 자리를 케이블 따라 확보.
+    Dim isCableFacility As Boolean
+    isCableFacility = (side1Type = "facility" Or side2Type = "facility")
+    If isCableFacility Then
+        Dim cfCblBox As Shape, cfFacBox As Shape, cfCblShp As Shape
+        If side1Type = "cable" Then
+            Set cfCblBox = box1: Set cfFacBox = box2: Set cfCblShp = cbl1
+        Else
+            Set cfCblBox = box2: Set cfFacBox = box1: Set cfCblShp = cbl2
+        End If
+        If Not cfCblShp Is Nothing Then
+            Dim cfUx As Double, cfUy As Double
+            If 케이블_허브방향(cfCblShp, fcx, fcy, cfUx, cfUy) Then
+                Dim cfAx As Double, cfAy As Double          ' anchor = 단일생성이 정한 케이블 밀착 위치
+                cfAx = cfCblBox.Left + cfCblBox.Width / 2
+                cfAy = cfCblBox.Top + cfCblBox.Height / 2
+                On Error Resume Next
+                cfFacBox.Left = cfAx - cfFacBox.Width / 2
+                cfFacBox.Top = cfAy - cfFacBox.Height / 2
+                On Error GoTo 0
+                Dim cfExtF As Double, cfExtC As Double
+                cfExtF = (cfFacBox.Width / 2) * Abs(cfUx) + (cfFacBox.Height / 2) * Abs(cfUy)
+                cfExtC = (cfCblBox.Width / 2) * Abs(cfUx) + (cfCblBox.Height / 2) * Abs(cfUy)
+                Dim cfDist As Double: cfDist = cfExtF + cfExtC + 28
+                On Error Resume Next
+                cfCblBox.Left = (cfAx + cfUx * cfDist) - cfCblBox.Width / 2
+                cfCblBox.Top = (cfAy + cfUy * cfDist) - cfCblBox.Height / 2
+                AltSetLastPos cfFacBox, cfFacBox.Left, cfFacBox.Top
+                AltSetLastPos cfCblBox, cfCblBox.Left, cfCblBox.Top
+                On Error GoTo 0
+            End If
+        End If
+    End If
+
     ' L-shape 라우팅 — 각 segment 가 케이블과 평행 (owner 요구).
     '   AddPolyline 이 silent 실패할 수 있어 FreeformBuilder 로 명시적 다중 segment 생성.
     '   owner 2026-06-05: 박스추가 cascade 페어는 자체 pair 화살표 X — 케이블과 가장 가까운 첫 박스만 pair 화살표 보유.
@@ -14149,6 +14187,10 @@ Public Sub 선번박스_쌍_생성_직접(side1Type As String, side1Name As Stri
     If IsArray(cascadePrev) Then
         Const CASCADE_GAP_VERT As Double = 5.67           ' 0.2 cm (≈ 5.67 pt). owner 2026-06-06 (8-26): 시인성 확보 + outermost 박스 식별 용이.
 
+        ' owner 2026-06-11: cable-facility cascade 는 세로 stack 미적용 — RN-style (케이블 따라 일렬) 배치는
+        '   위 isCableFacility 블록이 이미 처리 (단일생성 stack 이 케이블 따라 다음 자리 확보). anchor·main 갱신만 진행.
+        If isCableFacility Then GoTo CascadeArrowOnly
+
         ' per-side outermost 박스 찾기 (max bottomY, 새 box1/box2 자기 자신은 제외)
         Dim aOuter As Shape: Set aOuter = Nothing
         Dim bOuter As Shape: Set bOuter = Nothing
@@ -14202,6 +14244,7 @@ Public Sub 선번박스_쌍_생성_직접(side1Type As String, side1Name As Stri
         AltSetLastPos box2, box2.Left, box2.Top
         On Error GoTo 0
 
+CascadeArrowOnly:
         ' invisible anchor line 위치도 새 박스 중심에 맞춰 갱신 (메타 일관성)
         On Error Resume Next
         If Not arr Is Nothing Then
@@ -14233,8 +14276,19 @@ Public Sub 선번박스_쌍_생성_직접(side1Type As String, side1Name As Stri
         End If
 
         ' 새 visible main 화살표 — cascade 박스 사이 L-shape, alt 에 main=1 태그 (box1=|box2= 없음 → Phase 2 skip)
+        '   owner 2026-06-11: cable-facility 는 RN 과 동일 — 케이블 평행 직선 (경로_시설물페어)
         Dim arrPtsMain As Variant
-        arrPtsMain = 선번박스_경로_계산(ws, side1Type, side1Name, box1, side2Type, side2Name, box2, facShp)
+        If isCableFacility Then
+            Dim cfMainCbl As Shape: Set cfMainCbl = Nothing
+            If side1Type = "cable" Then Set cfMainCbl = cbl1 Else Set cfMainCbl = cbl2
+            If Not cfMainCbl Is Nothing Then
+                arrPtsMain = 선번박스_경로_시설물페어(cfMainCbl, box1, box2)
+            Else
+                arrPtsMain = 선번박스_경로_계산(ws, side1Type, side1Name, box1, side2Type, side2Name, box2, facShp)
+            End If
+        Else
+            arrPtsMain = 선번박스_경로_계산(ws, side1Type, side1Name, box1, side2Type, side2Name, box2, facShp)
+        End If
         Dim mainArrC As Shape: Set mainArrC = 선번박스_화살표생성(ws, arrPtsMain)
         If mainArrC Is Nothing Then
             Set mainArrC = ws.Shapes.AddLine(box1.Left + box1.Width / 2, box1.Top + box1.Height / 2, _
