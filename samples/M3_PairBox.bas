@@ -2695,6 +2695,7 @@ Public Sub 페어화살표_시설물페어_재정렬(ws As Worksheet)
     Dim ccGroupAnchors As Object: Set ccGroupAnchors = CreateObject("Scripting.Dictionary")
     Dim ccGroupMeta As Object: Set ccGroupMeta = CreateObject("Scripting.Dictionary")
     Dim ccAnchorKey As Object: Set ccAnchorKey = CreateObject("Scripting.Dictionary")    ' anchor name → group key
+    Dim hubCache As Object: Set hubCache = CreateObject("Scripting.Dictionary")          ' facId → 케이블 수 (owner 2026-06-11: 3방향+ 허브 V자 라우팅)
 
     Dim shPre As Shape, altPre As String
     For Each shPre In ws.Shapes
@@ -2935,8 +2936,14 @@ Public Sub 페어화살표_시설물페어_재정렬(ws As Worksheet)
             If ccFacShp Is Nothing Then GoTo NextCand            ' facility 못 찾으면 skip — anchor 그대로 두기
 
             ' 원본 path 계산 — 케이블 방향 따라 L-shape 또는 직선 자동 선택
+            ' owner 2026-06-11: 3방향+ 허브는 V자(박스→시설물 중심→박스) — 방사선끼리 교차 불가 (화살표 교차 최소화, owner 첨부)
             Dim ccPts As Variant
-            ccPts = 선번박스_경로_계산(ws, "cable", ccCblA, box1, "cable", ccCblB, box2, ccFacShp)
+            If Not hubCache.Exists(ccFacId) Then hubCache(ccFacId) = 선번박스_허브_케이블수(ws, ccFacId)
+            If CLng(hubCache(ccFacId)) >= 3 Then
+                ccPts = 선번박스_경로_V(box1, box2, ccFacShp)
+            Else
+                ccPts = 선번박스_경로_계산(ws, "cable", ccCblA, box1, "cable", ccCblB, box2, ccFacShp)
+            End If
 
             On Error Resume Next: arrShp.Delete: On Error GoTo 0
 
@@ -3148,8 +3155,14 @@ NextCand:
 
                     If Not gTopA Is Nothing And Not gTopB Is Nothing Then
                         ' L-shape path 계산 — 케이블 방향에 평행한 L
+                        ' owner 2026-06-11: 3방향+ 허브는 V자 (single anchor 와 동일 규칙)
                         Dim gPts As Variant
-                        gPts = 선번박스_경로_계산(ws, "cable", gCA, gTopA, "cable", gCB, gTopB, gFacShp)
+                        If Not hubCache.Exists(gFac) Then hubCache(gFac) = 선번박스_허브_케이블수(ws, gFac)
+                        If CLng(hubCache(gFac)) >= 3 Then
+                            gPts = 선번박스_경로_V(gTopA, gTopB, gFacShp)
+                        Else
+                            gPts = 선번박스_경로_계산(ws, "cable", gCA, gTopA, "cable", gCB, gTopB, gFacShp)
+                        End If
 
                         ' 기존 keep candidate main 있으면 삭제 + 재생성 (path 갱신)
                         Dim gMainName As String: gMainName = ""
@@ -3941,6 +3954,46 @@ Public Function 선번박스_화살표생성(ws As Worksheet, arrPts As Variant)
     Next pi
     Set 선번박스_화살표생성 = ffb.ConvertToShape
     On Error GoTo 0
+End Function
+
+' owner 2026-06-11: 3방향+ 허브 V자 경로 — [box1 경계점 → 시설물 중심 → box2 경계점].
+'   모든 화살표가 시설물 중심에서 뻗는 방사선 2개로 구성 → 방사선끼리 교차 불가 (owner 첨부: 교차 최소화).
+'   시설물 도형이 최상단(z-order)이라 중심 통과 구간은 도형 뒤로 가려짐.
+Public Function 선번박스_경로_V(box1 As Shape, box2 As Shape, facShp As Shape) As Variant
+    Dim fcx As Double, fcy As Double
+    fcx = facShp.Left + facShp.Width / 2
+    fcy = facShp.Top + facShp.Height / 2
+    Dim e1x As Double, e1y As Double, e2x As Double, e2y As Double
+    선번박스_경계점 box1, fcx, fcy, e1x, e1y
+    선번박스_경계점 box2, fcx, fcy, e2x, e2y
+    Dim pts() As Double
+    ReDim pts(1 To 3, 1 To 2)
+    pts(1, 1) = e1x: pts(1, 2) = e1y
+    pts(2, 1) = fcx: pts(2, 2) = fcy
+    pts(3, 1) = e2x: pts(3, 2) = e2y
+    선번박스_경로_V = pts
+End Function
+
+' 시설물에 모이는 케이블 방향 수 — cable-cable 선번박스(fac=facId)의 서로 다른 cbl_* 개수.
+'   3 이상 = 허브 → 방사형 배치 + V자 화살표. (RN·facility 측 박스 제외)
+Public Function 선번박스_허브_케이블수(ws As Worksheet, facId As String) As Long
+    선번박스_허브_케이블수 = 0
+    If ws Is Nothing Then Exit Function
+    If Len(facId) = 0 Then Exit Function
+    Dim cnt As Object: Set cnt = CreateObject("Scripting.Dictionary")
+    Dim sh As Shape, altS As String, cblNm As String
+    For Each sh In ws.Shapes
+        If Left(sh.Name, Len(PREFIX_PAIRBOX)) = PREFIX_PAIRBOX Then
+            altS = "": On Error Resume Next: altS = sh.AlternativeText: On Error GoTo 0
+            If InStr(altS, "|rn=") = 0 And InStr(altS, "rn=") <> 1 Then
+                If AltParseField(altS, "fac=") = facId Then
+                    cblNm = AltParseField(altS, "cbl=")
+                    If Left(cblNm, Len(PREFIX_CBL)) = PREFIX_CBL Then cnt(cblNm) = True
+                End If
+            End If
+        End If
+    Next sh
+    선번박스_허브_케이블수 = cnt.Count
 End Function
 
 ' 박스가 속한 케이블의 단위벡터 (시설물 → 케이블 끝점). facility 모드면 (시설물 → 박스) 방향.
