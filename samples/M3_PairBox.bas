@@ -2238,25 +2238,20 @@ End Sub
 '
 '   반환: arrPts(1 To 2, 1 To 2) — 2-point 직선
 Public Function 선번박스_경로_시설물페어(cableShp As Shape, box1 As Shape, box2 As Shape) As Variant
-    ' 1. 케이블 방향 단위벡터
-    Dim ax As Double, ay As Double, bx As Double, by As Double
-    GetLineEndpoints cableShp, ax, ay, bx, by
-    Dim cdx As Double, cdy As Double
-    cdx = bx - ax: cdy = by - ay
-    Dim clen As Double: clen = Sqr(cdx * cdx + cdy * cdy)
-    Dim ux As Double, uy As Double
-    If clen < 0.001 Then
-        ux = 1: uy = 0                                    ' fallback (길이 0 케이블)
-    Else
-        ux = cdx / clen: uy = cdy / clen
-    End If
-
-    ' 2. 박스 중심
+    ' 2. 박스 중심 (방향 계산의 허브 근사점으로 먼저 필요)
     Dim b1x As Double, b1y As Double, b2x As Double, b2y As Double
     b1x = box1.Left + box1.Width / 2
     b1y = box1.Top + box1.Height / 2
     b2x = box2.Left + box2.Width / 2
     b2y = box2.Top + box2.Height / 2
+
+    ' 1. 케이블 방향 단위벡터 — owner 2026-06-11: ㄷ자/L자 다조 케이블은 chord(양끝 직선)가 아니라
+    '   박스들이 붙어 있는 「허브 쪽 segment」 방향이어야 화살표가 박스 배열과 평행 (틀어짐 원인).
+    '   두 박스 중점 = 허브 근사점. 직선 케이블은 기존 chord 와 동일 결과 (RN 무영향).
+    Dim ux As Double, uy As Double
+    If Not 케이블_허브방향(cableShp, (b1x + b2x) / 2, (b1y + b2y) / 2, ux, uy) Then
+        ux = 1: uy = 0                                    ' fallback (길이 0 케이블)
+    End If
 
     ' 3. box1 → box2 방향이 +u 인지 -u 인지 결정 (dot product 부호)
     '   주의: 변수명 sgn 은 VBA 내장함수 Sgn 과 충돌 (컴파일 오류) → dirSign 사용.
@@ -2271,9 +2266,20 @@ Public Function 선번박스_경로_시설물페어(cableShp As Shape, box1 As S
     ext1 = (box1.Width / 2) * Abs(ex) + (box1.Height / 2) * Abs(ey)
     ext2 = (box2.Width / 2) * Abs(ex) + (box2.Height / 2) * Abs(ey)
 
+    ' 4.5 owner 2026-06-11: 직선 보정 — 두 박스 중심이 케이블 평행선에서 살짝 어긋나도 (옛 배치·드래그 잔재)
+    '   화살표는 두 중심의 perp 평균을 지나는 케이블 평행 「직선」 으로. 정상 배치(동일선상)는 보정량 0 — 기존과 완전 동일.
+    Dim nxP As Double, nyP As Double               ' 케이블 법선
+    nxP = -ey: nyP = ex
+    Dim perp1P As Double, perp2P As Double, perpMidP As Double
+    perp1P = b1x * nxP + b1y * nyP
+    perp2P = b2x * nxP + b2y * nyP
+    perpMidP = (perp1P + perp2P) / 2
+
     Dim e1x As Double, e1y As Double, e2x As Double, e2y As Double
-    e1x = b1x + ext1 * ex: e1y = b1y + ext1 * ey
-    e2x = b2x - ext2 * ex: e2y = b2y - ext2 * ey
+    e1x = b1x + ext1 * ex + (perpMidP - perp1P) * nxP
+    e1y = b1y + ext1 * ey + (perpMidP - perp1P) * nyP
+    e2x = b2x - ext2 * ex + (perpMidP - perp2P) * nxP
+    e2y = b2y - ext2 * ey + (perpMidP - perp2P) * nyP
 
     Dim pts() As Double
     ReDim pts(1 To 2, 1 To 2)
