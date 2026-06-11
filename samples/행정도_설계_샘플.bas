@@ -9858,6 +9858,7 @@ End Sub
 '   격자 칸수(network_grid_cells)는 불변 — 한 칸 크기만 변함 → 전체 영역이 같은 비율로 줌.
 '   재정렬: 시설물 등은 좌표만 비례 이동(크기 유지), 케이블은 부속정렬이 새 끝점으로 다시 그림(위치+크기).
 '   confirm/완료 MsgBox 없음 — 반복 클릭 UX. 한계 도달 시에만 안내.
+' 전체 줌 = 격자 밀도(한 칸 cell 수) ±2. 시설물 크기 유지 + 간격만 변경 (Excel 네이티브 줌엔 없는 동작). owner 2026-06-10
 Public Sub 격자_줌_전체_축소()
     격자_줌_적용 True, True, -2
 End Sub
@@ -9898,6 +9899,15 @@ Public Sub 격자_줌_적용(axisX As Boolean, axisY As Boolean, delta As Long)
         Exit Sub
     End If
 
+    ' 줌 전 사용자 선택 셀 기억 — 격자 재생성(틀고정)이 커서를 A2 로 옮기므로 끝에 복원+중심이동. owner 2026-06-10
+    Dim selRow As Long: selRow = 0
+    Dim selCol As Long: selCol = 0
+    On Error Resume Next
+    If Not ActiveCell Is Nothing Then
+        If ActiveCell.Worksheet.Name = SHEET_NETWORK Then selRow = ActiveCell.Row: selCol = ActiveCell.Column
+    End If
+    On Error GoTo 0
+
     Dim sx As Double: sx = newX / oldX
     Dim sy As Double: sy = newY / oldY
 
@@ -9912,15 +9922,20 @@ Public Sub 격자_줌_적용(axisX As Boolean, axisY As Boolean, delta As Long)
     '   스케일하면 시설물에서 멀어지고 캐스케이드 stack(고정간격)도 깨짐 → 변환 후 「소속 시설물 이동량만큼 평행이동」으로 보존. owner 2026-06-10
     Dim facOldCx As Object: Set facOldCx = CreateObject("Scripting.Dictionary")
     Dim facOldCy As Object: Set facOldCy = CreateObject("Scripting.Dictionary")
+    Dim facOldW As Object: Set facOldW = CreateObject("Scripting.Dictionary")
+    Dim facOldH As Object: Set facOldH = CreateObject("Scripting.Dictionary")
     Dim boxFac As Object: Set boxFac = CreateObject("Scripting.Dictionary")
     Dim boxOldL As Object: Set boxOldL = CreateObject("Scripting.Dictionary")
     Dim boxOldT As Object: Set boxOldT = CreateObject("Scripting.Dictionary")
     Dim shRec As Shape
-    ' Pass A — 시설물 중심 먼저 (부속의 소속 판정에 필요)
+    ' Pass A — 시설물 중심·크기 기록 + Placement=3 강제 (셀 크기변경에 안 휘말려 찌그러짐 방지). owner 2026-06-10
     For Each shRec In ws.Shapes
         If Left(shRec.Name, Len(PREFIX_FAC)) = PREFIX_FAC Then
+            On Error Resume Next: shRec.Placement = 3: On Error GoTo 0
             facOldCx(shRec.Name) = shRec.Left + shRec.Width / 2
             facOldCy(shRec.Name) = shRec.Top + shRec.Height / 2
+            facOldW(shRec.Name) = shRec.Width
+            facOldH(shRec.Name) = shRec.Height
         End If
     Next shRec
     ' Pass B — 부속 도형 수집 (이름 suffix = facId 인 데코 + alt fac= 인 코어박스)
@@ -9979,6 +9994,9 @@ Public Sub 격자_줌_적용(axisX As Boolean, axisY As Boolean, delta As Long)
                 If ncy < minNyZ Then ncy = minNyZ
             End If
             On Error Resume Next
+            ' 크기 복원(찌그러짐 방지) 후 중심 기준 재배치
+            If facOldW.Exists(shFac.Name) Then shFac.Width = CDbl(facOldW(shFac.Name))
+            If facOldH.Exists(shFac.Name) Then shFac.Height = CDbl(facOldH(shFac.Name))
             shFac.Left = ncx - shFac.Width / 2
             shFac.Top = ncy - shFac.Height / 2
             On Error GoTo 0
@@ -9989,8 +10007,14 @@ Public Sub 격자_줌_적용(axisX As Boolean, axisY As Boolean, delta As Long)
         End If
     Next shFac
 
-    ' [시설물 부속 따라가기] 변환 후 — 설명박스·배지·주야·콤보·코어박스를 소속 시설물 이동량(Δ)만큼 평행이동 (스케일된 위치 덮어씀).
-    '   시설물은 크기 불변 → 부속-시설물 오프셋·캐스케이드 stack 간격 그대로 유지. 이후 부속정렬이 배지·콤보·리더 미세 보정. owner 2026-06-10
+    네트웍_격자_생성
+
+    ' 케이블·리더·배지·콤보·태그 일괄 재정렬 (케이블은 새 끝점으로 다시 그림). 부속 위치는 아래 authoritative 가 덮어씀.
+    On Error Resume Next: 네트웍_부속도형_정렬: On Error GoTo 0
+
+    ' [시설물 부속 — 최종(authoritative) 배치] 위 모든 정렬 이후 「맨 마지막에 한 번만」 덮어쓰기.
+    '   설명박스·배지·주야·콤보·코어박스 = 「시설물 재스냅 중심 + 옛 오프셋 × 줌비율(sx,sy)」.
+    '   레거시 정렬(_lpos·배지=라벨·고정간격)이 먼저 건드려도 마지막에 덮어 → 모든 줌 레벨·반복에서 드리프트 0. owner 2026-06-10
     Dim bKey As Variant
     For Each bKey In boxFac.Keys
         Dim bShp As Shape: Set bShp = Nothing
@@ -10001,23 +10025,29 @@ Public Sub 격자_줌_적용(axisX As Boolean, axisY As Boolean, delta As Long)
                 Dim fShp As Shape: Set fShp = Nothing
                 On Error Resume Next: Set fShp = ws.Shapes(fId): On Error GoTo 0
                 If Not fShp Is Nothing Then
-                    Dim dX As Double: dX = (fShp.Left + fShp.Width / 2) - CDbl(facOldCx(fId))
-                    Dim dY As Double: dY = (fShp.Top + fShp.Height / 2) - CDbl(facOldCy(fId))
+                    Dim offX As Double: offX = CDbl(boxOldL(bKey)) - CDbl(facOldCx(fId))
+                    Dim offY As Double: offY = CDbl(boxOldT(bKey)) - CDbl(facOldCy(fId))
                     On Error Resume Next
-                    bShp.Left = CDbl(boxOldL(bKey)) + dX
-                    bShp.Top = CDbl(boxOldT(bKey)) + dY
+                    bShp.Left = (fShp.Left + fShp.Width / 2) + offX * sx
+                    bShp.Top = (fShp.Top + fShp.Height / 2) + offY * sy
                     On Error GoTo 0
+                    ' 코어박스는 lastPos 도 새 위치로 갱신 → 다음 드래그 시 Cable_Chain_평행이동 이
+                    '   줌 이동량을 「드래그」로 오인해 체인 박스 튀는 것 차단. owner 2026-06-10
+                    If Left(CStr(bKey), Len(PREFIX_PAIRBOX)) = PREFIX_PAIRBOX Then
+                        On Error Resume Next: AltSetLastPos bShp, bShp.Left, bShp.Top: On Error GoTo 0
+                    End If
                 End If
             End If
         End If
     Next bKey
 
-    네트웍_격자_생성
+    ' 최종 박스/라벨 위치 기준으로 리더·코어 화살표 다시 그림 (박스 위치 보존 — 고정간격 페어화살표는 줌에서 제외).
+    On Error Resume Next: 시설물_leader_재라우팅 ws: On Error GoTo 0
+    On Error Resume Next: 선번화살표_재라우팅 ws: On Error GoTo 0
 
-    ' 케이블·리더·배지·콤보·태그 일괄 재정렬 (케이블은 새 끝점으로 다시 그림 = 위치+크기 변경)
-    On Error Resume Next: 네트웍_부속도형_정렬: On Error GoTo 0
-    ' 코어박스 화살표 — 특히 캐스케이드 visible main(box 메타 없어 위 재라우팅이 skip) 을 박스 위치 기준 재생성. owner 2026-06-10
-    On Error Resume Next: 페어화살표_시설물페어_재정렬 ws: On Error GoTo 0
+    ' 줌 후 화면을 선택 셀 중심으로 이동(커서도 그 셀로 복원) + 검색버튼 가로추종 재계산. owner 2026-06-10
+    격자_줌_화면중심이동 ws, selRow, selCol
+    On Error Resume Next: 네트웍_검색버튼_위치갱신 ws: On Error GoTo 0
 
     If wasProt Then ApplySheetProtection ws
     Application.EnableEvents = oEv
@@ -10034,8 +10064,10 @@ Private Function 격자_줌_clamp(v As Long) As Long
     If 격자_줌_clamp > 40 Then 격자_줌_clamp = 40
 End Function
 
-' 시설물 부속 도형(설명박스·배지·주야박스·콤보)의 소속 시설물 id 반환. 이름 = prefix & facId 규칙.
-'   facDict 에 존재하는 facId 만 인정 — 케이블 라벨(lbl_<cableId>)·기타는 "" 반환(제외). owner 2026-06-10
+' 시설물 부속 도형(설명박스·배지·주야박스·태그콤보·태그박스)의 소속 시설물 id 반환.
+'   이름 규칙: badge_<facId> / _fac_status_<facId> / _fac_tag_dd_<facId> / _fac_tag_<facId>_<옵션> / lbl_<facId>.
+'   facDict 에 존재하는 facId 만 인정 — 케이블 라벨(lbl_<cableId>)·기타는 "" 반환(제외).
+'   태그박스는 facId 뒤 "_옵션" suffix 가 붙어 정확일치 실패 → 「facId & "_"」 prefix 매칭 fallback. owner 2026-06-10
 Private Function 격자_줌_데코소속시설(nm As String, facDict As Object) As String
     격자_줌_데코소속시설 = ""
     Dim fid As String: fid = ""
@@ -10043,15 +10075,53 @@ Private Function 격자_줌_데코소속시설(nm As String, facDict As Object) 
         fid = Mid(nm, Len(PREFIX_BADGE) + 1)
     ElseIf Left(nm, Len(PREFIX_FAC_STATUS)) = PREFIX_FAC_STATUS Then
         fid = Mid(nm, Len(PREFIX_FAC_STATUS) + 1)
+    ElseIf Left(nm, Len(PREFIX_FAC_TAG_DD)) = PREFIX_FAC_TAG_DD Then
+        fid = Mid(nm, Len(PREFIX_FAC_TAG_DD) + 1)     ' dd 가 _fac_tag_ 로 시작하므로 먼저 검사
     ElseIf Left(nm, Len(PREFIX_FAC_TAG)) = PREFIX_FAC_TAG Then
-        fid = Mid(nm, Len(PREFIX_FAC_TAG) + 1)
+        fid = Mid(nm, Len(PREFIX_FAC_TAG) + 1)        ' = "<facId>_<옵션>" — 아래 fallback 이 facId 추출
     ElseIf Left(nm, Len(PREFIX_LABEL)) = PREFIX_LABEL Then
         fid = Mid(nm, Len(PREFIX_LABEL) + 1)     ' 설명박스 — 단 lbl_<cableId> 는 facDict 에 없어 제외됨
     End If
-    If Len(fid) > 0 Then
-        If facDict.Exists(fid) Then 격자_줌_데코소속시설 = fid
+    If Len(fid) = 0 Then Exit Function
+    If facDict.Exists(fid) Then
+        격자_줌_데코소속시설 = fid
+        Exit Function
     End If
+    ' fallback — fid 가 "facId_옵션" 형태면 facDict 키 중 「key & "_"」 로 시작하는 것 찾기 (태그박스)
+    Dim k As Variant
+    For Each k In facDict.Keys
+        If Left(fid, Len(CStr(k)) + 1) = CStr(k) & "_" Then
+            격자_줌_데코소속시설 = CStr(k)
+            Exit Function
+        End If
+    Next k
 End Function
+
+' 줌 후 화면을 줌 전 선택 셀(selRow,selCol) 중심으로 스크롤 + 커서 복원 (ScrollRow/Col — 틀고정 행 아래로 클램프). owner 2026-06-10
+Private Sub 격자_줌_화면중심이동(ws As Worksheet, selRow As Long, selCol As Long)
+    On Error Resume Next
+    If selRow < 1 Or selCol < 1 Then Exit Sub
+    Dim awin As Window: Set awin = ActiveWindow
+    If awin Is Nothing Then Exit Sub
+    ws.Cells(selRow, selCol).Select     ' 격자 재생성이 A2 로 옮긴 커서를 사용자 셀로 복원
+    Dim rhC As Double: rhC = ws.Cells(LEGEND_ROWS + 1, 1).Height
+    Dim cwC As Double: cwC = ws.Cells(1, 1).Width
+    If rhC <= 0 Then rhC = CELL_PT
+    If cwC <= 0 Then cwC = CELL_PT
+    ' 화면 배율 반영 — 줌 시 한 셀이 화면에서 차지하는 크기 = 셀크기 × 배율. owner 2026-06-10
+    Dim zf As Double: zf = 1
+    On Error Resume Next: zf = awin.Zoom / 100#: On Error GoTo 0
+    If zf <= 0 Then zf = 1
+    Dim visRows As Long: visRows = CLng(awin.UsableHeight / (rhC * zf))
+    Dim visCols As Long: visCols = CLng(awin.UsableWidth / (cwC * zf))
+    Dim srC As Long: srC = selRow - visRows \ 2
+    Dim scC As Long: scC = selCol - visCols \ 2
+    If srC < LEGEND_ROWS + 1 Then srC = LEGEND_ROWS + 1     ' 틀고정(1행) 아래로
+    If scC < 1 Then scC = 1
+    awin.ScrollRow = srC
+    awin.ScrollColumn = scC
+    On Error GoTo 0
+End Sub
 
 ' 시설물 alt 의 "_lpos=X,Y" 를 새 위치로 갱신(없으면 추가). 재스냅 후 호출 →
 '   시설물_태그_위치_동기화 의 _lpos 델타 추종이 「안 움직임(dx=0)」으로 보게 해 부속 이중이동 차단. owner 2026-06-10
