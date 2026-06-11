@@ -836,6 +836,7 @@ Public Function RibbonGroupDefs() As Variant
             Array("격자 한 칸 기본",  "격자_단위_기본",           "한 격자 칸 = 20×20 cell (기본값) 복원."), _
             Array("격자 한 칸 직접",  "격자_단위_직접입력",       "한 격자 칸 안 가로/세로 cell 수 InputBox."), _
             Array("격자 칸수 입력",   "네트웍_격자_확장",         "가로/세로 격자 칸 수 변경 (한 칸 cell 수와 별개). 최소 1."), _
+            Array("비례 재배치",      "네트웍_비례_전체재배치",   "전 시설물을 행정도(배경지도) 비례 위치로 재배치. 「확장 되돌리기」로 1회 복원."), _
             Array("가로 축소 −2",     "격자_줌_가로_축소",        "가로 격자 한 칸 −2 cell (좁게). 시설물 위치만, 케이블 다시 그림. 최소 4."), _
             Array("가로 확대 +2",     "격자_줌_가로_확대",        "가로 격자 한 칸 +2 cell (넓게). 최대 40."), _
             Array("세로 축소 −2",     "격자_줌_세로_축소",        "세로 격자 한 칸 −2 cell (좁게). 최소 4."), _
@@ -2350,11 +2351,11 @@ Public Sub FinalizeDrawnFacility(shp As Shape)
     ' 격자 중앙 좌표 산출 → 시설물 좌상단 = 중앙 - 크기/2
     Dim nwCenterX As Double, nwCenterY As Double
     SnapToNetworkGrid wsNw, cLeft + lw / 2, cTop + lh / 2, nwCenterX, nwCenterY
-    ' owner 2026-06-10: 행정도 배경지도 내 위치 비례로 보정 — 첫 시설물도 지도 상대 위치가 격자에 반영.
-    '   기존 시설물 있으면 아래 빈격자_찾기의 기준-방향 배치(B안)가 우선이라 이 좌표는 폴백 시작점일 뿐.
-    행정도_비례_네트웍좌표 ws, wsNw, cLeft + lw / 2, cTop + lh / 2, nwCenterX, nwCenterY
-    ' owner 2026-06-07 (8-75): 행정도 좌표 전달 → 행정도 거리순 8 cell 안에서만 배치
-    네트웍_빈격자_찾기 wsNw, nwCenterX, nwCenterY, lw, lh, facId, cLeft + lw / 2, cTop + lh / 2, ws
+    ' owner 2026-06-10 v3: 배경지도 있으면 「확대된 행정도」 비례 배치 — 이상위치 + 1링 방향 재배치 + 밀집 시 격자 자동확장·전체 재배치.
+    '   배경 없으면 레거시 B안(행정도 기준-방향 8-cell). [복원 지점 = 커밋 1928ee2 — 이 If 블록을 옛 2줄(비례좌표+빈격자_찾기)로]
+    If Not 네트웍_비례_배치(ws, wsNw, cLeft + lw / 2, cTop + lh / 2, lw, lh, facId, nwCenterX, nwCenterY) Then
+        네트웍_빈격자_찾기 wsNw, nwCenterX, nwCenterY, lw, lh, facId, cLeft + lw / 2, cTop + lh / 2, ws
+    End If
     Dim nwLeft As Double, nwTop As Double
     nwLeft = nwCenterX - lw / 2
     nwTop = nwCenterY - lh / 2

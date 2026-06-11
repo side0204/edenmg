@@ -2008,6 +2008,336 @@ Public Function 행정도_비례_네트웍좌표(wsAd As Worksheet, wsNw As Work
     행정도_비례_네트웍좌표 = True
 End Function
 
+' ===== owner 2026-06-10 v3: 「확대된 행정도」 비례 배치 + 밀집 시 격자 자동확장 =====
+'   [복원] 변경 전 = 커밋 1928ee2. 일괄 원복 = git revert. 도면 복원 = 「격자 확장 되돌리기」(재배치 직전 자동 백업).
+'   흐름: 이상위치(균일배율) → 빈자리면 배치 → 점유면 1링 방향 재배치 → 그래도 없으면(밀집) 격자 자동확장 + 전체 비례 재배치.
+'   방향키 hold 경로는 코드 존치하나 owner 가 사용 안 함 예정 (자동배치 완성 시).
+Public Function 네트웍_비례_배치(wsAd As Worksheet, wsNw As Worksheet, _
+                                  adminX As Double, adminY As Double, _
+                                  facW As Double, facH As Double, excludeFacId As String, _
+                                  ByRef nx As Double, ByRef ny As Double) As Boolean
+    네트웍_비례_배치 = False
+    If Not 행정도_비례_네트웍좌표(wsAd, wsNw, adminX, adminY, nx, ny) Then Exit Function   ' 배경지도 없음 → 레거시 흐름
+    네트웍_비례_배치 = True
+    If Not 격자셀_시설물겹침(wsNw, nx, ny, facW, facH, excludeFacId) Then Exit Function    ' 이상위치가 빈자리
+
+    ' 행정도 최근접 기존 시설물 — 방향(재배치 우선순위)·밀집도(확장 판단) 산출
+    Dim refAdm As Shape: Set refAdm = Nothing
+    Dim bestD As Double: bestD = 1E+30
+    Dim shA As Shape
+    For Each shA In wsAd.Shapes
+        If Left(shA.Name, Len(PREFIX_FAC)) = PREFIX_FAC Then
+            If shA.Name <> excludeFacId Then
+                Dim dcx As Double, dcy As Double
+                dcx = (shA.Left + shA.Width / 2) - adminX
+                dcy = (shA.Top + shA.Height / 2) - adminY
+                If dcx * dcx + dcy * dcy < bestD Then
+                    bestD = dcx * dcx + dcy * dcy
+                    Set refAdm = shA
+                End If
+            End If
+        End If
+    Next shA
+    Dim adminDistMin As Double: adminDistMin = Sqr(bestD)
+    Dim adx As Double, ady As Double
+    adx = 0: ady = 0
+    If Not refAdm Is Nothing Then
+        adx = adminX - (refAdm.Left + refAdm.Width / 2)
+        ady = adminY - (refAdm.Top + refAdm.Height / 2)
+    End If
+
+    ' 1링(8칸) — 행정도 방향 일치 순 재배치
+    If 네트웍_링_재배치(wsNw, nx, ny, facW, facH, excludeFacId, adx, ady, 1, 1) Then Exit Function
+
+    ' 1링 실패 = 밀집 → 격자 자동 확장 (단, 지도상 사실상 동일 지점이면 확장 무의미 — 가드)
+    Dim bgE As Shape: Set bgE = Nothing
+    On Error Resume Next: Set bgE = wsAd.Shapes(BG_NAME): On Error GoTo 0
+    Dim canExpand As Boolean: canExpand = False
+    If Not bgE Is Nothing Then
+        If adminDistMin < 1E+29 Then
+            If adminDistMin > bgE.Width * 0.005 Then canExpand = True
+        End If
+    End If
+    If canExpand Then
+        If 네트웍_격자_자동확장(wsAd, wsNw, adminDistMin) Then
+            네트웍_비례_전체재배치_silent True
+            행정도_비례_네트웍좌표 wsAd, wsNw, adminX, adminY, nx, ny       ' 새 배율로 이상위치 재계산
+            If Not 격자셀_시설물겹침(wsNw, nx, ny, facW, facH, excludeFacId) Then Exit Function
+            If 네트웍_링_재배치(wsNw, nx, ny, facW, facH, excludeFacId, adx, ady, 1, 2) Then Exit Function
+        End If
+    End If
+    ' 확장 불가/실패 — 링 2~4 폴백 (드묾)
+    네트웍_링_재배치 wsNw, nx, ny, facW, facH, excludeFacId, adx, ady, 2, 4
+End Function
+
+' (nx,ny) 주변 ring rMin..rMax 의 십자 후보를 「행정도 방향(adx,ady) 일치 순」 으로 시도 — 첫 빈 십자에 nx,ny 갱신.
+Private Function 네트웍_링_재배치(wsNw As Worksheet, ByRef nx As Double, ByRef ny As Double, _
+                                   facW As Double, facH As Double, excludeFacId As String, _
+                                   adx As Double, ady As Double, rMin As Long, rMax As Long) As Boolean
+    네트웍_링_재배치 = False
+    Dim cw As Double: cw = wsNw.Cells(1, 1).Width
+    Dim rh As Double: rh = wsNw.Cells(LEGEND_ROWS + 1, 1).Height
+    If cw <= 0 Then cw = CELL_PT
+    If rh <= 0 Then rh = CELL_PT
+    Dim gridW As Double: gridW = cw * 네트웍_격자_단위가로cells()
+    Dim gridH As Double: gridH = rh * 네트웍_격자_단위세로cells()
+    Dim adLen As Double: adLen = Sqr(adx * adx + ady * ady)
+    Dim ring As Long
+    For ring = rMin To rMax
+        Dim cnt As Long: cnt = 0
+        Dim cdx() As Long, cdy() As Long, csc() As Double
+        ReDim cdx(1 To 8 * ring + 4)
+        ReDim cdy(1 To 8 * ring + 4)
+        ReDim csc(1 To 8 * ring + 4)
+        Dim ddx As Long, ddy As Long
+        For ddy = -ring To ring
+            For ddx = -ring To ring
+                If Abs(ddx) = ring Or Abs(ddy) = ring Then
+                    cnt = cnt + 1
+                    cdx(cnt) = ddx: cdy(cnt) = ddy
+                    Dim clen As Double: clen = Sqr(CDbl(ddx * ddx + ddy * ddy))
+                    If adLen > 0.001 And clen > 0 Then
+                        csc(cnt) = (ddx * adx + ddy * ady) / clen
+                    Else
+                        csc(cnt) = 0
+                    End If
+                End If
+            Next ddx
+        Next ddy
+        ' 방향 일치도 내림차순 (insertion sort)
+        Dim a As Long, b As Long
+        For a = 2 To cnt
+            Dim tdx As Long: tdx = cdx(a)
+            Dim tdy As Long: tdy = cdy(a)
+            Dim tsc As Double: tsc = csc(a)
+            b = a - 1
+            Do While b >= 1
+                If csc(b) < tsc Then
+                    cdx(b + 1) = cdx(b): cdy(b + 1) = cdy(b): csc(b + 1) = csc(b)
+                    b = b - 1
+                Else
+                    Exit Do
+                End If
+            Loop
+            cdx(b + 1) = tdx: cdy(b + 1) = tdy: csc(b + 1) = tsc
+        Next a
+        For a = 1 To cnt
+            Dim tx As Double, ty As Double
+            tx = nx + cdx(a) * gridW
+            ty = ny + cdy(a) * gridH
+            격자_교차점_스냅 wsNw, tx, ty
+            Dim minNyR As Double: minNyR = NW_TOP_H + facH / 2 + 8
+            If tx >= gridW + cw / 2 - 1 And ty >= minNyR Then
+                If Not 격자셀_시설물겹침(wsNw, tx, ty, facW, facH, excludeFacId) Then
+                    nx = tx: ny = ty
+                    네트웍_링_재배치 = True
+                    Exit Function
+                End If
+            End If
+        Next a
+    Next ring
+End Function
+
+' 밀집 해소 — 최근접 쌍이 1칸 이상 벌어지는 배율이 되도록 격자 칸수 자동 확장 (양축 비율 유지, 상한 80).
+Public Function 네트웍_격자_자동확장(wsAd As Worksheet, wsNw As Worksheet, adminDistMin As Double) As Boolean
+    네트웍_격자_자동확장 = False
+    Dim bg As Shape: Set bg = Nothing
+    On Error Resume Next: Set bg = wsAd.Shapes(BG_NAME): On Error GoTo 0
+    If bg Is Nothing Then Exit Function
+    If adminDistMin <= 0 Then Exit Function
+    Dim cw As Double: cw = wsNw.Cells(1, 1).Width
+    Dim rh As Double: rh = wsNw.Cells(LEGEND_ROWS + 1, 1).Height
+    If cw <= 0 Then cw = CELL_PT
+    If rh <= 0 Then rh = CELL_PT
+    Dim gridW As Double: gridW = cw * 네트웍_격자_단위가로cells()
+    Dim gridH As Double: gridH = rh * 네트웍_격자_단위세로cells()
+    Dim needScale As Double: needScale = gridW / adminDistMin
+    Const MAX_CELLS As Long = 80
+    Dim curX As Long: curX = 네트웍_격자_가로칸수()
+    Dim curY As Long: curY = 네트웍_격자_세로칸수()
+    Dim newX As Long, newY As Long
+    newX = CLng(Application.WorksheetFunction.Ceiling_Math(needScale * bg.Width / gridW, 1)) + 1
+    newY = CLng(Application.WorksheetFunction.Ceiling_Math(needScale * bg.Height / gridH, 1))
+    If newX < curX Then newX = curX
+    If newY < curY Then newY = curY
+    If newX > MAX_CELLS Then newX = MAX_CELLS
+    If newY > MAX_CELLS Then newY = MAX_CELLS
+    If newX = curX And newY = curY Then Exit Function          ' 더 못 늘림 (상한 도달)
+    Dim wasProt As Boolean: wasProt = wsNw.ProtectContents Or wsNw.ProtectDrawingObjects
+    On Error Resume Next: wsNw.Unprotect: On Error GoTo 0
+    네트웍_격자_칸수_저장 newX, newY
+    Dim totC As Long: totC = newX * 네트웍_격자_단위가로cells() + 1
+    Dim totR As Long: totR = newY * 네트웍_격자_단위세로cells() + 1
+    On Error Resume Next: UniformCellSize wsNw, totC, totR: On Error GoTo 0
+    네트웍_격자_생성
+    If wasProt Then ApplySheetProtection wsNw
+    On Error Resume Next
+    Application.StatusBar = "밀집 감지 — 격자 " & curX & "×" & curY & " → " & newX & "×" & newY & " 자동 확장 + 전체 비례 재배치 (「확장 되돌리기」로 복원 가능)"
+    On Error GoTo 0
+    네트웍_격자_자동확장 = True
+End Function
+
+' 전 시설물을 현재 배율의 비례 이상위치로 재배치 (행정도 좌상→우하 순, 충돌은 가까운 링) + 부속 Δ-이동 + 케이블·화살표 재생성.
+'   시작 시 격자_확장_Undo_백업 → 「격자 확장 되돌리기」 로 1회 복원 가능. 리본 「비례 재배치」 수동 실행도 동일 진입.
+Public Sub 네트웍_비례_전체재배치()
+    네트웍_비례_전체재배치_silent False
+End Sub
+
+Public Sub 네트웍_비례_전체재배치_silent(silent As Boolean)
+    Dim wsAd As Worksheet, wsNw As Worksheet
+    On Error Resume Next
+    Set wsAd = ThisWorkbook.Worksheets(SHEET_ADMIN)
+    Set wsNw = ThisWorkbook.Worksheets(SHEET_NETWORK)
+    On Error GoTo 0
+    If wsAd Is Nothing Then Exit Sub
+    If wsNw Is Nothing Then Exit Sub
+    Dim bgChk As Shape: Set bgChk = Nothing
+    On Error Resume Next: Set bgChk = wsAd.Shapes(BG_NAME): On Error GoTo 0
+    If bgChk Is Nothing Then
+        If Not silent Then MsgBox "행정도에 배경 지도가 없어 비례 재배치를 할 수 없습니다.", vbExclamation, "비례 재배치"
+        Exit Sub
+    End If
+
+    Dim wasProt As Boolean: wasProt = wsNw.ProtectContents Or wsNw.ProtectDrawingObjects
+    On Error Resume Next: wsNw.Unprotect: On Error GoTo 0
+    Dim oUpd As Boolean: oUpd = Application.ScreenUpdating
+    Dim oEv As Boolean: oEv = Application.EnableEvents
+    Application.ScreenUpdating = False
+    Application.EnableEvents = False
+
+    ' 복원용 백업 (좌표 + 격자 칸수) — 「격자 확장 되돌리기」 가 이 백업을 복원
+    On Error Resume Next: 격자_확장_Undo_백업 wsNw: On Error GoTo 0
+
+    ' 기록 — 시설물 중심(+Placement=3 강제) + 부속(설명·배지·주야·콤보·선번박스)
+    Dim facOldCx As Object: Set facOldCx = CreateObject("Scripting.Dictionary")
+    Dim facOldCy As Object: Set facOldCy = CreateObject("Scripting.Dictionary")
+    Dim boxFac As Object: Set boxFac = CreateObject("Scripting.Dictionary")
+    Dim boxOldL As Object: Set boxOldL = CreateObject("Scripting.Dictionary")
+    Dim boxOldT As Object: Set boxOldT = CreateObject("Scripting.Dictionary")
+    Dim moved As Long: moved = 0
+    Dim shR As Shape
+    For Each shR In wsNw.Shapes
+        On Error Resume Next: shR.Placement = 3: On Error GoTo 0
+        If Left(shR.Name, Len(PREFIX_FAC)) = PREFIX_FAC Then
+            facOldCx(shR.Name) = shR.Left + shR.Width / 2
+            facOldCy(shR.Name) = shR.Top + shR.Height / 2
+        End If
+    Next shR
+    For Each shR In wsNw.Shapes
+        Dim fAt As String: fAt = 격자_줌_데코소속시설(shR.Name, facOldCx)
+        If Len(fAt) = 0 Then
+            If Left(shR.Name, Len(PREFIX_PAIRBOX)) = PREFIX_PAIRBOX Then
+                Dim altR As String: altR = ""
+                On Error Resume Next: altR = shR.AlternativeText: On Error GoTo 0
+                fAt = 선번박스_alt추출(altR, "fac=")
+                If Not facOldCx.Exists(fAt) Then fAt = ""
+            End If
+        End If
+        If Len(fAt) > 0 Then
+            boxFac(shR.Name) = fAt
+            boxOldL(shR.Name) = shR.Left
+            boxOldT(shR.Name) = shR.Top
+        End If
+    Next shR
+
+    ' 행정도 좌상→우하 순서 (행정도 쌍둥이 있는 시설물만)
+    Dim n As Long: n = facOldCx.Count
+    If n = 0 Then GoTo Finish
+    Dim fn() As String, fxA() As Double, fyA() As Double
+    ReDim fn(1 To n): ReDim fxA(1 To n): ReDim fyA(1 To n)
+    Dim i As Long: i = 0
+    Dim k As Variant
+    For Each k In facOldCx.Keys
+        Dim aShp As Shape: Set aShp = Nothing
+        On Error Resume Next: Set aShp = wsAd.Shapes(CStr(k)): On Error GoTo 0
+        If Not aShp Is Nothing Then
+            i = i + 1
+            fn(i) = CStr(k)
+            fxA(i) = aShp.Left + aShp.Width / 2
+            fyA(i) = aShp.Top + aShp.Height / 2
+        End If
+    Next k
+    n = i
+    If n = 0 Then GoTo Finish
+    Dim a As Long, b As Long
+    For a = 2 To n
+        Dim tn As String: tn = fn(a)
+        Dim txx As Double: txx = fxA(a)
+        Dim tyy As Double: tyy = fyA(a)
+        b = a - 1
+        Do While b >= 1
+            If fyA(b) > tyy Or (fyA(b) = tyy And fxA(b) > txx) Then
+                fn(b + 1) = fn(b): fxA(b + 1) = fxA(b): fyA(b + 1) = fyA(b)
+                b = b - 1
+            Else
+                Exit Do
+            End If
+        Loop
+        fn(b + 1) = tn: fxA(b + 1) = txx: fyA(b + 1) = tyy
+    Next a
+
+    ' 순서대로 이상위치 재배치 — 먼저 옮긴 시설물이 실시간 점유로 반영됨 (재배치 기준 갱신)
+    For a = 1 To n
+        Dim nwShp As Shape: Set nwShp = Nothing
+        On Error Resume Next: Set nwShp = wsNw.Shapes(fn(a)): On Error GoTo 0
+        If Not nwShp Is Nothing Then
+            Dim px As Double, py As Double
+            If 행정도_비례_네트웍좌표(wsAd, wsNw, fxA(a), fyA(a), px, py) Then
+                If 격자셀_시설물겹침(wsNw, px, py, nwShp.Width, nwShp.Height, fn(a)) Then
+                    네트웍_링_재배치 wsNw, px, py, nwShp.Width, nwShp.Height, fn(a), 0, 0, 1, 4
+                End If
+                On Error Resume Next
+                nwShp.Left = px - nwShp.Width / 2
+                nwShp.Top = py - nwShp.Height / 2
+                On Error GoTo 0
+                Dim fAl As String: fAl = ""
+                On Error Resume Next: fAl = nwShp.AlternativeText: On Error GoTo 0
+                On Error Resume Next: nwShp.AlternativeText = 격자_줌_lpos갱신(fAl, nwShp.Left, nwShp.Top): On Error GoTo 0
+                moved = moved + 1
+            End If
+        End If
+    Next a
+
+    ' 부속 Δ-이동 (칸수 확장은 셀 크기 불변 → 오프셋 그대로) + 선번박스 lastPos 갱신
+    Dim bKey As Variant
+    For Each bKey In boxFac.Keys
+        Dim bShp As Shape: Set bShp = Nothing
+        On Error Resume Next: Set bShp = wsNw.Shapes(CStr(bKey)): On Error GoTo 0
+        If Not bShp Is Nothing Then
+            Dim fId As String: fId = CStr(boxFac(bKey))
+            If facOldCx.Exists(fId) Then
+                Dim fShp As Shape: Set fShp = Nothing
+                On Error Resume Next: Set fShp = wsNw.Shapes(fId): On Error GoTo 0
+                If Not fShp Is Nothing Then
+                    Dim dXX As Double: dXX = (fShp.Left + fShp.Width / 2) - CDbl(facOldCx(fId))
+                    Dim dYY As Double: dYY = (fShp.Top + fShp.Height / 2) - CDbl(facOldCy(fId))
+                    On Error Resume Next
+                    bShp.Left = CDbl(boxOldL(bKey)) + dXX
+                    bShp.Top = CDbl(boxOldT(bKey)) + dYY
+                    On Error GoTo 0
+                    If Left(CStr(bKey), Len(PREFIX_PAIRBOX)) = PREFIX_PAIRBOX Then
+                        On Error Resume Next: AltSetLastPos bShp, bShp.Left, bShp.Top: On Error GoTo 0
+                    End If
+                End If
+            End If
+        End If
+    Next bKey
+
+    ' 케이블·리더·배지·콤보 재생성 + 코어 화살표 재라우팅
+    On Error Resume Next: 네트웍_부속도형_정렬: On Error GoTo 0
+    On Error Resume Next: 선번화살표_재라우팅 wsNw: On Error GoTo 0
+
+Finish:
+    If wasProt Then ApplySheetProtection wsNw
+    Application.EnableEvents = oEv
+    Application.ScreenUpdating = oUpd
+    If Not silent Then
+        On Error Resume Next
+        Application.StatusBar = "비례 재배치 완료 — 시설물 " & moved & "개 (「격자 확장 되돌리기」로 복원 가능)"
+        On Error GoTo 0
+    End If
+End Sub
+
 ' 격자 한 칸이 임계(NW_BOX_HIDE_UNITS) 미만으로 축소되면 선번박스·코어화살표 자동 숨김, 이상으로 확대되면 자동 복원.
 '   숨긴 도형만 alt 에 "zoomhid=1" 표식 — 설계상 invisible 인 cascade anchor(8-25)는 안 건드림 (보이는 것만 숨기고, 표식 있는 것만 복원).
 '   반환 = 현재 숨김 모드 여부. owner 2026-06-10 (축소 시 박스 겹침 → 숨기는 게 낫다)
