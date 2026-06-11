@@ -5514,15 +5514,15 @@ Private Sub 네트웍_다조_경로점(fcx As Double, fcy As Double, tcx As Doub
     Dim eff As Long: eff = slot
     If Not isAxis Then eff = slot - 2
     Dim m As Long: m = (eff + 1) \ 2
-    Dim sgn As Double
-    If eff Mod 2 = 1 Then sgn = 1 Else sgn = -1
+    Dim dirSgn As Double                       ' Sgn 은 VBA 내장함수 — 변수명 금지 (체크리스트 3)
+    If eff Mod 2 = 1 Then dirSgn = 1 Else dirSgn = -1
     Dim ulen As Double: ulen = Sqr(dx * dx + dy * dy)
     If ulen < 0.001 Then ulen = 1
     Dim px As Double, py As Double
     px = -dy / ulen: py = dx / ulen
     Dim cellSpan As Double: cellSpan = Abs(px) * gridW + Abs(py) * gridH   ' 노랑격자 1칸 (perp 축 기준)
     Dim ox As Double, oy As Double
-    ox = px * sgn * m * cellSpan: oy = py * sgn * m * cellSpan
+    ox = px * dirSgn * m * cellSpan: oy = py * dirSgn * m * cellSpan
     nPts = 4
     ReDim pts(1 To 4, 1 To 2)
     pts(1, 1) = fcx: pts(1, 2) = fcy
