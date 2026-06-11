@@ -2102,6 +2102,14 @@ Public Function 선번박스_단일생성(ws As Worksheet, cbl As Shape, fcx As 
     Dim dx As Double, dy As Double
     dx = farX - fcx: dy = farY - fcy
 
+    ' owner 2026-06-11 다조 후속: ㄷ자/L자 폴리라인은 허브 쪽 첫 segment 방향으로 회전 (크기는 chord 유지 — len_ 의 거리 예산 의미 보존)
+    Dim hubUx As Double, hubUy As Double
+    If 케이블_허브방향(cbl, fcx, fcy, hubUx, hubUy) Then
+        Dim chordL As Double: chordL = Sqr(dx * dx + dy * dy)
+        If chordL < 0.001 Then chordL = 1
+        dx = hubUx * chordL: dy = hubUy * chordL
+    End If
+
     Const NEAR_FAC_DIST As Double = 55      ' 시설물 중심 → 박스 중심 거리 (시설물 바로 옆 = 시설물 외곽에서 ~15pt)
     Const PERP_OFFSET As Double = 15        ' 케이블 ↔ 박스 수직 기본 간격. 같은 perp side stack 시 PERP_STACK_GAP 만큼 추가.
     Const PERP_STACK_GAP As Double = 26     ' 같은 perp side 추가 박스마다 케이블에서 추가로 멀어지는 거리 (owner: 박스 겹침 차단).
@@ -2148,6 +2156,13 @@ Public Function 선번박스_단일생성(ws As Worksheet, cbl As Shape, fcx As 
         If odA_ > odB_ Then ofx_ = oax_: ofy_ = oay_ Else ofx_ = obx_: ofy_ = oby_
         Dim odx_ As Double, ody_ As Double
         odx_ = ofx_ - fcx: ody_ = ofy_ - fcy
+        ' owner 2026-06-11 다조 후속: 상대 케이블도 허브 쪽 첫 segment 방향 (안쪽각 = 보이는 두 선분 사이 각)
+        Dim oHubUx As Double, oHubUy As Double
+        If 케이블_허브방향(otherCbl, fcx, fcy, oHubUx, oHubUy) Then
+            Dim oChordL As Double: oChordL = Sqr(odx_ * odx_ + ody_ * ody_)
+            If oChordL < 0.001 Then oChordL = 1
+            odx_ = oHubUx * oChordL: ody_ = oHubUy * oChordL
+        End If
         Dim olen_ As Double: olen_ = Sqr(odx_ * odx_ + ody_ * ody_)
         If olen_ > 0.001 Then
             Dim cosAng As Double

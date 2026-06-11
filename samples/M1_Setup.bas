@@ -3047,6 +3047,65 @@ Public Sub GetLineEndpoints(sh As Shape, ByRef ax As Double, ByRef ay As Double,
     End If
 End Sub
 
+' owner 2026-06-11 다조 후속: 케이블의 「허브(시설물) 쪽 첫 segment」 방향 단위벡터.
+'   직선 케이블 = 기존 (far end - 허브) 방향과 동일 결과. ㄷ자/L자 폴리라인 = 허브 쪽 끝 노드 → 인접 노드 방향.
+'   선번박스·화살표가 눈에 보이는 segment 에 밀착·평행하도록 (chord 방향 사용 금지).
+Public Function 케이블_허브방향(sh As Shape, fcx As Double, fcy As Double, _
+                                 ByRef oux As Double, ByRef ouy As Double) As Boolean
+    케이블_허브방향 = False
+    If sh Is Nothing Then Exit Function
+    Dim dirX As Double, dirY As Double
+    Dim ncHD As Long: ncHD = 0
+    On Error Resume Next
+    ncHD = sh.Nodes.Count
+    On Error GoTo 0
+    If ncHD >= 3 Then
+        ' 폴리라인 — 허브에 가까운 끝 노드와 그 인접 노드로 첫 segment 방향
+        Dim okHD As Boolean: okHD = False
+        Dim pH1 As Variant, pH2 As Variant, qH1 As Variant, qH2 As Variant
+        On Error Resume Next
+        Err.Clear
+        pH1 = sh.Nodes.Item(1).Points
+        pH2 = sh.Nodes.Item(2).Points
+        qH1 = sh.Nodes.Item(ncHD).Points
+        qH2 = sh.Nodes.Item(ncHD - 1).Points
+        If Err.Number = 0 Then okHD = True
+        Err.Clear
+        On Error GoTo 0
+        If okHD Then
+            Dim dH1 As Double, dH2 As Double
+            dH1 = (pH1(1, 1) - fcx) * (pH1(1, 1) - fcx) + (pH1(1, 2) - fcy) * (pH1(1, 2) - fcy)
+            dH2 = (qH1(1, 1) - fcx) * (qH1(1, 1) - fcx) + (qH1(1, 2) - fcy) * (qH1(1, 2) - fcy)
+            If dH1 <= dH2 Then
+                dirX = pH2(1, 1) - pH1(1, 1): dirY = pH2(1, 2) - pH1(1, 2)
+            Else
+                dirX = qH2(1, 1) - qH1(1, 1): dirY = qH2(1, 2) - qH1(1, 2)
+            End If
+            Dim lenHD As Double: lenHD = Sqr(dirX * dirX + dirY * dirY)
+            If lenHD > 0.001 Then
+                oux = dirX / lenHD: ouy = dirY / lenHD
+                케이블_허브방향 = True
+                Exit Function
+            End If
+        End If
+    End If
+    ' 직선 (또는 Nodes 실패) — 기존 far-end 방식
+    Dim axHD As Double, ayHD As Double, bxHD As Double, byHD As Double
+    GetLineEndpoints sh, axHD, ayHD, bxHD, byHD
+    Dim dA_HD As Double, dB_HD As Double
+    dA_HD = (axHD - fcx) * (axHD - fcx) + (ayHD - fcy) * (ayHD - fcy)
+    dB_HD = (bxHD - fcx) * (bxHD - fcx) + (byHD - fcy) * (byHD - fcy)
+    If dA_HD > dB_HD Then
+        dirX = axHD - fcx: dirY = ayHD - fcy
+    Else
+        dirX = bxHD - fcx: dirY = byHD - fcy
+    End If
+    Dim lenF_HD As Double: lenF_HD = Sqr(dirX * dirX + dirY * dirY)
+    If lenF_HD < 0.001 Then Exit Function
+    oux = dirX / lenF_HD: ouy = dirY / lenF_HD
+    케이블_허브방향 = True
+End Function
+
 ' (x,y) 에 중심이 가장 가까운 시설물 id. 150pt 보다 멀면 매칭 안 함("")
 Public Function NearestFacilityId(ws As Worksheet, x As Double, y As Double) As String
     Dim sh As Shape, best As String, bestD As Double

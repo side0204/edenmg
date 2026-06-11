@@ -8,6 +8,7 @@ Private Const FANP_GAP As Double = 12         ' 케이블 ↔ 박스 가장자�
 Private Const FANP_PERP As Double = 18        ' 같은 side 다음 박스마다 추가 perp (화살표 통로)
 Private Const FANP_BUMP As Double = 20        ' 충돌 시 케이블 따라 양보 폭
 Private Const FANP_MIN_LEG As Double = 57     ' 화살표 한쪽 선 최소 길이 ≈ 2cm (owner 조건)
+Private Const FANP_CHAIN_GAP As Double = 5.7  ' 체인(박스추가 cascade) 박스 간격 ≈ 0.2cm (owner 2026-06-11: 같이 붙어 있어야)
 
 ' ===== owner 2026-06-08 (8-118): 방향키 hold 검사 — GetAsyncKeyState (user32) =====
 '   하위 8 비트 = 키 토글 상태, 최상위 비트 = 누름 상태. & H8000 마스크.
@@ -3103,6 +3104,65 @@ Public Sub GetLineEndpoints(sh As Shape, ByRef ax As Double, ByRef ay As Double,
         bx = sh.Left: by = sh.Top + sh.Height
     End If
 End Sub
+
+' owner 2026-06-11 다조 후속: 케이블의 「허브(시설물) 쪽 첫 segment」 방향 단위벡터.
+'   직선 케이블 = 기존 (far end - 허브) 방향과 동일 결과. ㄷ자/L자 폴리라인 = 허브 쪽 끝 노드 → 인접 노드 방향.
+'   선번박스·화살표가 눈에 보이는 segment 에 밀착·평행하도록 (chord 방향 사용 금지).
+Public Function 케이블_허브방향(sh As Shape, fcx As Double, fcy As Double, _
+                                 ByRef oux As Double, ByRef ouy As Double) As Boolean
+    케이블_허브방향 = False
+    If sh Is Nothing Then Exit Function
+    Dim dirX As Double, dirY As Double
+    Dim ncHD As Long: ncHD = 0
+    On Error Resume Next
+    ncHD = sh.Nodes.Count
+    On Error GoTo 0
+    If ncHD >= 3 Then
+        ' 폴리라인 — 허브에 가까운 끝 노드와 그 인접 노드로 첫 segment 방향
+        Dim okHD As Boolean: okHD = False
+        Dim pH1 As Variant, pH2 As Variant, qH1 As Variant, qH2 As Variant
+        On Error Resume Next
+        Err.Clear
+        pH1 = sh.Nodes.Item(1).Points
+        pH2 = sh.Nodes.Item(2).Points
+        qH1 = sh.Nodes.Item(ncHD).Points
+        qH2 = sh.Nodes.Item(ncHD - 1).Points
+        If Err.Number = 0 Then okHD = True
+        Err.Clear
+        On Error GoTo 0
+        If okHD Then
+            Dim dH1 As Double, dH2 As Double
+            dH1 = (pH1(1, 1) - fcx) * (pH1(1, 1) - fcx) + (pH1(1, 2) - fcy) * (pH1(1, 2) - fcy)
+            dH2 = (qH1(1, 1) - fcx) * (qH1(1, 1) - fcx) + (qH1(1, 2) - fcy) * (qH1(1, 2) - fcy)
+            If dH1 <= dH2 Then
+                dirX = pH2(1, 1) - pH1(1, 1): dirY = pH2(1, 2) - pH1(1, 2)
+            Else
+                dirX = qH2(1, 1) - qH1(1, 1): dirY = qH2(1, 2) - qH1(1, 2)
+            End If
+            Dim lenHD As Double: lenHD = Sqr(dirX * dirX + dirY * dirY)
+            If lenHD > 0.001 Then
+                oux = dirX / lenHD: ouy = dirY / lenHD
+                케이블_허브방향 = True
+                Exit Function
+            End If
+        End If
+    End If
+    ' 직선 (또는 Nodes 실패) — 기존 far-end 방식
+    Dim axHD As Double, ayHD As Double, bxHD As Double, byHD As Double
+    GetLineEndpoints sh, axHD, ayHD, bxHD, byHD
+    Dim dA_HD As Double, dB_HD As Double
+    dA_HD = (axHD - fcx) * (axHD - fcx) + (ayHD - fcy) * (ayHD - fcy)
+    dB_HD = (bxHD - fcx) * (bxHD - fcx) + (byHD - fcy) * (byHD - fcy)
+    If dA_HD > dB_HD Then
+        dirX = axHD - fcx: dirY = ayHD - fcy
+    Else
+        dirX = bxHD - fcx: dirY = byHD - fcy
+    End If
+    Dim lenF_HD As Double: lenF_HD = Sqr(dirX * dirX + dirY * dirY)
+    If lenF_HD < 0.001 Then Exit Function
+    oux = dirX / lenF_HD: ouy = dirY / lenF_HD
+    케이블_허브방향 = True
+End Function
 
 ' (x,y) 에 중심이 가장 가까운 시설물 id. 150pt 보다 멀면 매칭 안 함("")
 Public Function NearestFacilityId(ws As Worksheet, x As Double, y As Double) As String
@@ -14333,8 +14393,29 @@ Public Sub 선번박스_방사형_정렬(ws As Worksheet, facId As String)
         If Left(sh.Name, Len(PREFIX_FAC)) = PREFIX_FAC Then
             obs.Add Array(sh.Left - 2, sh.Top - 2, sh.Left + sh.Width + 2, sh.Top + sh.Height + 2)
         ElseIf Left(sh.Name, Len(PREFIX_CBL)) = PREFIX_CBL Then
-            GetLineEndpoints sh, cax, cay, cbx, cby
-            segs.Add Array(cax, cay, cbx, cby)
+            ' owner 2026-06-11 다조 후속: ㄷ자/L자 폴리라인은 node 별 실제 선분 수집 (chord 는 보이지 않는 가상선)
+            Dim ncSeg As Long: ncSeg = 0
+            On Error Resume Next: ncSeg = sh.Nodes.Count: On Error GoTo 0
+            If ncSeg >= 3 Then
+                Dim niSeg As Long, segOK As Boolean: segOK = True
+                Dim pvSegA As Variant, pvSegB As Variant
+                On Error Resume Next
+                Err.Clear
+                For niSeg = 1 To ncSeg - 1
+                    pvSegA = sh.Nodes.Item(niSeg).Points
+                    pvSegB = sh.Nodes.Item(niSeg + 1).Points
+                    If Err.Number <> 0 Then segOK = False: Err.Clear: Exit For
+                    segs.Add Array(CDbl(pvSegA(1, 1)), CDbl(pvSegA(1, 2)), CDbl(pvSegB(1, 1)), CDbl(pvSegB(1, 2)))
+                Next niSeg
+                On Error GoTo 0
+                If Not segOK Then
+                    GetLineEndpoints sh, cax, cay, cbx, cby
+                    segs.Add Array(cax, cay, cbx, cby)
+                End If
+            Else
+                GetLineEndpoints sh, cax, cay, cbx, cby
+                segs.Add Array(cax, cay, cbx, cby)
+            End If
         ElseIf Left(sh.Name, Len(PREFIX_PAIRBOX)) = PREFIX_PAIRBOX Then
             If Not fanSet.Exists(sh.Name) Then
                 obs.Add Array(sh.Left - 1, sh.Top - 1, sh.Left + sh.Width + 1, sh.Top + sh.Height + 1)
@@ -14375,7 +14456,16 @@ Public Sub 선번박스_방사형_정렬(ws As Worksheet, facId As String)
     ' --- 3. 배치 (v7) — 짝 단위, 내각 큰 순으로 안쪽 슬롯부터. 박스는 자기 케이블 밀착 (owner 조건) ---
     '   alongMin: L-shape corner 위치를 미리 계산해 화살표 양쪽 선이 최소 2cm 되도록 박스를 바깥으로.
     '   corner(케이블1 기준) = (perp2 + perp1·cosθ)/sinθ. 일직선(sinθ<0.26)은 직선 경로라 제한 불필요.
+    '   owner 2026-06-11 체인: 같은 케이블 짝(박스추가 cascade)은 첫 짝(head)만 v7 슬롯 배치,
+    '     나머지는 head 와 같은 side·perp 슬롯에서 케이블 따라 0.2cm 간격 밀착 stack (체인으로 묶여 보이게).
     Dim sideCnt As Object: Set sideCnt = CreateObject("Scripting.Dictionary")   ' "cblName|side" → 사용 슬롯 수
+    Dim chainSeen As Object: Set chainSeen = CreateObject("Scripting.Dictionary")   ' 케이블짝 키 → True (head 배치됨)
+    Dim chainSide As Object: Set chainSide = CreateObject("Scripting.Dictionary")   ' 짝키|cbl → side
+    Dim chainIdx As Object: Set chainIdx = CreateObject("Scripting.Dictionary")     ' 짝키|cbl → sideIdx (perp 슬롯)
+    Dim chainAlong As Object: Set chainAlong = CreateObject("Scripting.Dictionary") ' 짝키|cbl → 마지막 박스 중심 along
+    Dim chainHalf As Object: Set chainHalf = CreateObject("Scripting.Dictionary")   ' 짝키|cbl → 마지막 박스 half-extent (along 축)
+    Dim chKey As String, chK1 As String, chK2 As String
+    Dim half1 As Double, half2 As Double
     Dim pi2 As Long
     Dim s1 As Double, s2 As Double
     Dim idx1 As Long, idx2 As Long
@@ -14386,32 +14476,58 @@ Public Sub 선번박스_방사형_정렬(ws As Worksheet, facId As String)
     Dim corner1 As Double, corner2 As Double
     Dim aMin1 As Double, aMin2 As Double
     For pi2 = 1 To pairN
-        s1 = 방사형_side결정(pairU1x(pi2), pairU1y(pi2), pairU2x(pi2), pairU2y(pi2))
-        s2 = 방사형_side결정(pairU2x(pi2), pairU2y(pi2), pairU1x(pi2), pairU1y(pi2))
-        key1 = pairC1(pi2) & "|" & CStr(s1)
-        idx1 = 0: If sideCnt.Exists(key1) Then idx1 = CLng(sideCnt(key1))
-        sideCnt(key1) = idx1 + 1
-        key2 = pairC2(pi2) & "|" & CStr(s2)
-        idx2 = 0: If sideCnt.Exists(key2) Then idx2 = CLng(sideCnt(key2))
-        sideCnt(key2) = idx2 + 1
-        hw1 = pairB1(pi2).Width / 2: hh1 = pairB1(pi2).Height / 2
-        hw2 = pairB2(pi2).Width / 2: hh2 = pairB2(pi2).Height / 2
-        ' perp = 방사형_박스놓기 와 동일식 (corner 선행 계산용. |px|=|uy|, |py|=|ux|)
-        perp1 = FANP_GAP + Abs(pairU1y(pi2)) * hw1 + Abs(pairU1x(pi2)) * hh1 + idx1 * FANP_PERP
-        perp2 = FANP_GAP + Abs(pairU2y(pi2)) * hw2 + Abs(pairU2x(pi2)) * hh2 + idx2 * FANP_PERP
-        cosT = pairDot(pi2)
-        sinT = Abs(pairU1x(pi2) * pairU2y(pi2) - pairU1y(pi2) * pairU2x(pi2))
-        aMin1 = 0: aMin2 = 0
-        If sinT >= 0.26 Then
-            corner1 = (perp2 + perp1 * cosT) / sinT
-            If corner1 < 0 Then corner1 = 0
-            corner2 = (perp1 + perp2 * cosT) / sinT
-            If corner2 < 0 Then corner2 = 0
-            aMin1 = corner1 + FANP_MIN_LEG + Abs(pairU1x(pi2)) * hw1 + Abs(pairU1y(pi2)) * hh1
-            aMin2 = corner2 + FANP_MIN_LEG + Abs(pairU2x(pi2)) * hw2 + Abs(pairU2y(pi2)) * hh2
+        If pairC1(pi2) < pairC2(pi2) Then chKey = pairC1(pi2) & "|" & pairC2(pi2) Else chKey = pairC2(pi2) & "|" & pairC1(pi2)
+        chK1 = chKey & "|" & pairC1(pi2)
+        chK2 = chKey & "|" & pairC2(pi2)
+        half1 = Abs(pairU1x(pi2)) * (pairB1(pi2).Width / 2) + Abs(pairU1y(pi2)) * (pairB1(pi2).Height / 2)
+        half2 = Abs(pairU2x(pi2)) * (pairB2(pi2).Width / 2) + Abs(pairU2y(pi2)) * (pairB2(pi2).Height / 2)
+        If chainSeen.Exists(chKey) Then
+            ' --- 체인 멤버 (박스추가 cascade) — head 와 같은 슬롯, 케이블 따라 직전 박스에 밀착 ---
+            s1 = CDbl(chainSide(chK1)): idx1 = CLng(chainIdx(chK1))
+            s2 = CDbl(chainSide(chK2)): idx2 = CLng(chainIdx(chK2))
+            aMin1 = CDbl(chainAlong(chK1)) + CDbl(chainHalf(chK1)) + FANP_CHAIN_GAP + half1
+            aMin2 = CDbl(chainAlong(chK2)) + CDbl(chainHalf(chK2)) + FANP_CHAIN_GAP + half2
+            방사형_박스놓기 pairB1(pi2), fcx, fcy, pairU1x(pi2), pairU1y(pi2), s1, idx1, aMin1, obs, segs
+            방사형_박스놓기 pairB2(pi2), fcx, fcy, pairU2x(pi2), pairU2y(pi2), s2, idx2, aMin2, obs, segs
+        Else
+            ' --- 체인 head — v7 슬롯 배치 (기존 로직 그대로) ---
+            s1 = 방사형_side결정(pairU1x(pi2), pairU1y(pi2), pairU2x(pi2), pairU2y(pi2))
+            s2 = 방사형_side결정(pairU2x(pi2), pairU2y(pi2), pairU1x(pi2), pairU1y(pi2))
+            key1 = pairC1(pi2) & "|" & CStr(s1)
+            idx1 = 0: If sideCnt.Exists(key1) Then idx1 = CLng(sideCnt(key1))
+            sideCnt(key1) = idx1 + 1
+            key2 = pairC2(pi2) & "|" & CStr(s2)
+            idx2 = 0: If sideCnt.Exists(key2) Then idx2 = CLng(sideCnt(key2))
+            sideCnt(key2) = idx2 + 1
+            hw1 = pairB1(pi2).Width / 2: hh1 = pairB1(pi2).Height / 2
+            hw2 = pairB2(pi2).Width / 2: hh2 = pairB2(pi2).Height / 2
+            ' perp = 방사형_박스놓기 와 동일식 (corner 선행 계산용. |px|=|uy|, |py|=|ux|)
+            perp1 = FANP_GAP + Abs(pairU1y(pi2)) * hw1 + Abs(pairU1x(pi2)) * hh1 + idx1 * FANP_PERP
+            perp2 = FANP_GAP + Abs(pairU2y(pi2)) * hw2 + Abs(pairU2x(pi2)) * hh2 + idx2 * FANP_PERP
+            cosT = pairDot(pi2)
+            sinT = Abs(pairU1x(pi2) * pairU2y(pi2) - pairU1y(pi2) * pairU2x(pi2))
+            aMin1 = 0: aMin2 = 0
+            If sinT >= 0.26 Then
+                corner1 = (perp2 + perp1 * cosT) / sinT
+                If corner1 < 0 Then corner1 = 0
+                corner2 = (perp1 + perp2 * cosT) / sinT
+                If corner2 < 0 Then corner2 = 0
+                aMin1 = corner1 + FANP_MIN_LEG + Abs(pairU1x(pi2)) * hw1 + Abs(pairU1y(pi2)) * hh1
+                aMin2 = corner2 + FANP_MIN_LEG + Abs(pairU2x(pi2)) * hw2 + Abs(pairU2y(pi2)) * hh2
+            End If
+            방사형_박스놓기 pairB1(pi2), fcx, fcy, pairU1x(pi2), pairU1y(pi2), s1, idx1, aMin1, obs, segs
+            방사형_박스놓기 pairB2(pi2), fcx, fcy, pairU2x(pi2), pairU2y(pi2), s2, idx2, aMin2, obs, segs
+            chainSeen(chKey) = True
+            chainSide(chK1) = s1: chainIdx(chK1) = idx1
+            chainSide(chK2) = s2: chainIdx(chK2) = idx2
         End If
-        방사형_박스놓기 pairB1(pi2), fcx, fcy, pairU1x(pi2), pairU1y(pi2), s1, idx1, aMin1, obs, segs
-        방사형_박스놓기 pairB2(pi2), fcx, fcy, pairU2x(pi2), pairU2y(pi2), s2, idx2, aMin2, obs, segs
+        ' 마지막 박스의 실제 along(중심 투영) 기록 — 충돌 bump 반영된 최종 위치 기준 (다음 체인 멤버의 stack 기준점)
+        chainAlong(chK1) = ((pairB1(pi2).Left + pairB1(pi2).Width / 2) - fcx) * pairU1x(pi2) + _
+                           ((pairB1(pi2).Top + pairB1(pi2).Height / 2) - fcy) * pairU1y(pi2)
+        chainHalf(chK1) = half1
+        chainAlong(chK2) = ((pairB2(pi2).Left + pairB2(pi2).Width / 2) - fcx) * pairU2x(pi2) + _
+                           ((pairB2(pi2).Top + pairB2(pi2).Height / 2) - fcy) * pairU2y(pi2)
+        chainHalf(chK2) = half2
     Next pi2
 
     ' --- 3.5 짝 없는 박스 (anchor 유실 등 폴백) — 케이블별 좌우 교대, sideCnt 이어서 ---
@@ -14469,21 +14585,8 @@ Private Function 방사형_케이블방향(ws As Worksheet, cblName As String, f
     Dim cShp As Shape: Set cShp = Nothing
     On Error Resume Next: Set cShp = ws.Shapes(cblName): On Error GoTo 0
     If cShp Is Nothing Then Exit Function
-    Dim cax As Double, cay As Double, cbx As Double, cby As Double
-    GetLineEndpoints cShp, cax, cay, cbx, cby
-    Dim dA As Double, dB As Double
-    dA = (cax - fcx) * (cax - fcx) + (cay - fcy) * (cay - fcy)
-    dB = (cbx - fcx) * (cbx - fcx) + (cby - fcy) * (cby - fcy)
-    Dim vx As Double, vy As Double
-    If dA > dB Then
-        vx = cax - fcx: vy = cay - fcy
-    Else
-        vx = cbx - fcx: vy = cby - fcy
-    End If
-    Dim vlen As Double: vlen = Sqr(vx * vx + vy * vy)
-    If vlen < 0.001 Then Exit Function
-    oux = vx / vlen: ouy = vy / vlen
-    방사형_케이블방향 = True
+    ' owner 2026-06-11 다조 후속: ㄷ자/L자 폴리라인은 허브 쪽 첫 segment 방향 (chord 아님) — 케이블_허브방향 이 직선도 동일 처리
+    방사형_케이블방향 = 케이블_허브방향(cShp, fcx, fcy, oux, ouy)
 End Function
 
 ' 박스 side 결정 — 짝 케이블 쪽 (v2) · 내각 165°+ 는 가로→아래/수직·대각→오른쪽 고정 (eb537a3).
@@ -17420,23 +17523,13 @@ Private Sub 선번박스_방향계산(ws As Worksheet, sideType As String, sideN
         Set cbl = ws.Shapes(sideName)
         On Error GoTo 0
         If Not cbl Is Nothing Then
-            Dim ax As Double, ay As Double, bx2 As Double, by2 As Double
-            GetLineEndpoints cbl, ax, ay, bx2, by2
-            Dim dA As Double, dB As Double
-            dA = (ax - fcx) * (ax - fcx) + (ay - fcy) * (ay - fcy)
-            dB = (bx2 - fcx) * (bx2 - fcx) + (by2 - fcy) * (by2 - fcy)
-            Dim farX As Double, farY As Double
-            If dA > dB Then farX = ax: farY = ay Else farX = bx2: farY = by2
-
-            Dim dirX As Double, dirY As Double, len_ As Double
-            dirX = farX - fcx: dirY = farY - fcy
-            len_ = Sqr(dirX * dirX + dirY * dirY)
-            If len_ > 0.001 Then
-                ux = dirX / len_: uy = dirY / len_
+            ' owner 2026-06-11 다조 후속: ㄷ자/L자 폴리라인은 허브 쪽 첫 segment 방향 — 화살표가 보이는 선분과 평행 유지
+            If 케이블_허브방향(cbl, fcx, fcy, ux, uy) Then
+                Exit Sub
             Else
                 ux = 1: uy = 0
+                Exit Sub
             End If
-            Exit Sub
         End If
     End If
 
@@ -24877,6 +24970,14 @@ Private Function 선번박스_단일생성(ws As Worksheet, cbl As Shape, fcx As
     Dim dx As Double, dy As Double
     dx = farX - fcx: dy = farY - fcy
 
+    ' owner 2026-06-11 다조 후속: ㄷ자/L자 폴리라인은 허브 쪽 첫 segment 방향으로 회전 (크기는 chord 유지 — len_ 의 거리 예산 의미 보존)
+    Dim hubUx As Double, hubUy As Double
+    If 케이블_허브방향(cbl, fcx, fcy, hubUx, hubUy) Then
+        Dim chordL As Double: chordL = Sqr(dx * dx + dy * dy)
+        If chordL < 0.001 Then chordL = 1
+        dx = hubUx * chordL: dy = hubUy * chordL
+    End If
+
     Const NEAR_FAC_DIST As Double = 55      ' 시설물 중심 → 박스 중심 거리 (시설물 바로 옆 = 시설물 외곽에서 ~15pt)
     Const PERP_OFFSET As Double = 15        ' 케이블 ↔ 박스 수직 기본 간격. 같은 perp side stack 시 PERP_STACK_GAP 만큼 추가.
     Const PERP_STACK_GAP As Double = 26     ' 같은 perp side 추가 박스마다 케이블에서 추가로 멀어지는 거리 (owner: 박스 겹침 차단).
@@ -24923,6 +25024,13 @@ Private Function 선번박스_단일생성(ws As Worksheet, cbl As Shape, fcx As
         If odA_ > odB_ Then ofx_ = oax_: ofy_ = oay_ Else ofx_ = obx_: ofy_ = oby_
         Dim odx_ As Double, ody_ As Double
         odx_ = ofx_ - fcx: ody_ = ofy_ - fcy
+        ' owner 2026-06-11 다조 후속: 상대 케이블도 허브 쪽 첫 segment 방향 (안쪽각 = 보이는 두 선분 사이 각)
+        Dim oHubUx As Double, oHubUy As Double
+        If 케이블_허브방향(otherCbl, fcx, fcy, oHubUx, oHubUy) Then
+            Dim oChordL As Double: oChordL = Sqr(odx_ * odx_ + ody_ * ody_)
+            If oChordL < 0.001 Then oChordL = 1
+            odx_ = oHubUx * oChordL: ody_ = oHubUy * oChordL
+        End If
         Dim olen_ As Double: olen_ = Sqr(odx_ * odx_ + ody_ * ody_)
         If olen_ > 0.001 Then
             Dim cosAng As Double
