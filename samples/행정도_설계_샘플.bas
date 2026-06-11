@@ -14022,6 +14022,7 @@ End Sub
 '    충돌(시설물·케이블 선분·다른 박스) 시 반지름 +20pt 씩 밖으로 양보 (최대 8회).
 '    배치 후 페어화살표_시설물페어_재정렬 이 화살표 재생성 — L-shape (꺾임 1회·양끝 케이블 평행, owner 조건).
 '    계단식 perp offset 덕에 짝마다 corner 가 분리(nested) → 화살표끼리 교차 0. side = 짝 케이블 쪽 (v2).
+'    v7: 내각 큰 짝(일직선에 가까움)이 안쪽 슬롯 + 화살표 양쪽 선 최소 2cm(≈57pt) 보장 (owner 조건).
 '    2방향 이하(공선 체인·캐스케이드 stack)는 손대지 않음 — 기존 동작 보호. 복원 = 이 Sub + 헬퍼 + 호출 5곳 삭제.
 ' ============================================================================
 Public Sub 선번박스_방사형_정렬(ws As Worksheet, facId As String)
@@ -14055,28 +14056,70 @@ Public Sub 선번박스_방사형_정렬(ws As Worksheet, facId As String)
     Next sh
     If byCbl.Count < 3 Then Exit Sub      ' 2방향 이하 = 기존 공선 체인·캐스케이드 동작 유지
 
-    ' --- 1.5 짝 케이블 매핑 — anchor(box1=/box2=)로 각 박스의 상대 박스 → 상대 케이블 (side 결정용) ---
-    Dim partnerCbl As Object: Set partnerCbl = CreateObject("Scripting.Dictionary")   ' boxName → 짝 cblName
+    ' --- 1.5 짝 수집 (v7) — anchor(box1=/box2=) 로 (box1,box2) 짝 + 양쪽 케이블 방향 + 내각 dot ---
+    Dim pairB1() As Shape, pairB2() As Shape
+    Dim pairC1() As String, pairC2() As String
+    Dim pairU1x() As Double, pairU1y() As Double, pairU2x() As Double, pairU2y() As Double
+    Dim pairDot() As Double
+    Dim pairCap As Long: pairCap = 32
+    ReDim pairB1(1 To pairCap): ReDim pairB2(1 To pairCap)
+    ReDim pairC1(1 To pairCap): ReDim pairC2(1 To pairCap)
+    ReDim pairU1x(1 To pairCap): ReDim pairU1y(1 To pairCap)
+    ReDim pairU2x(1 To pairCap): ReDim pairU2y(1 To pairCap)
+    ReDim pairDot(1 To pairCap)
+    Dim pairN As Long: pairN = 0
+    Dim pairedSet As Object: Set pairedSet = CreateObject("Scripting.Dictionary")    ' boxName → True (짝으로 배치됨)
     Dim pb1 As String, pb2 As String
     Dim pbS1 As Shape, pbS2 As Shape
     Dim pAlt1 As String, pAlt2 As String
+    Dim cbl1Nm As String, cbl2Nm As String
+    Dim w1x As Double, w1y As Double, w2x As Double, w2y As Double
     For Each sh In ws.Shapes
         If Left(sh.Name, Len(PREFIX_PAIRARROW)) = PREFIX_PAIRARROW Then
             altS = "": On Error Resume Next: altS = sh.AlternativeText: On Error GoTo 0
             pb1 = AltParseField(altS, "box1="): pb2 = AltParseField(altS, "box2=")
             If Len(pb1) > 0 Then
                 If Len(pb2) > 0 Then
-                    Set pbS1 = Nothing: Set pbS2 = Nothing
-                    On Error Resume Next
-                    Set pbS1 = ws.Shapes(pb1)
-                    Set pbS2 = ws.Shapes(pb2)
-                    On Error GoTo 0
-                    If Not pbS1 Is Nothing Then
-                        If Not pbS2 Is Nothing Then
-                            pAlt1 = "": pAlt2 = ""
-                            On Error Resume Next: pAlt1 = pbS1.AlternativeText: pAlt2 = pbS2.AlternativeText: On Error GoTo 0
-                            partnerCbl(pb1) = AltParseField(pAlt2, "cbl=")
-                            partnerCbl(pb2) = AltParseField(pAlt1, "cbl=")
+                    If fanSet.Exists(pb1) Then
+                        If fanSet.Exists(pb2) Then
+                            If Not pairedSet.Exists(pb1) Then
+                                If Not pairedSet.Exists(pb2) Then
+                                    Set pbS1 = Nothing: Set pbS2 = Nothing
+                                    On Error Resume Next
+                                    Set pbS1 = ws.Shapes(pb1)
+                                    Set pbS2 = ws.Shapes(pb2)
+                                    On Error GoTo 0
+                                    If Not pbS1 Is Nothing Then
+                                        If Not pbS2 Is Nothing Then
+                                            pAlt1 = "": pAlt2 = ""
+                                            On Error Resume Next: pAlt1 = pbS1.AlternativeText: pAlt2 = pbS2.AlternativeText: On Error GoTo 0
+                                            cbl1Nm = AltParseField(pAlt1, "cbl=")
+                                            cbl2Nm = AltParseField(pAlt2, "cbl=")
+                                            If cbl1Nm <> cbl2Nm Then
+                                                If 방사형_케이블방향(ws, cbl1Nm, fcx, fcy, w1x, w1y) Then
+                                                    If 방사형_케이블방향(ws, cbl2Nm, fcx, fcy, w2x, w2y) Then
+                                                        pairN = pairN + 1
+                                                        If pairN > pairCap Then
+                                                            pairCap = pairCap * 2
+                                                            ReDim Preserve pairB1(1 To pairCap): ReDim Preserve pairB2(1 To pairCap)
+                                                            ReDim Preserve pairC1(1 To pairCap): ReDim Preserve pairC2(1 To pairCap)
+                                                            ReDim Preserve pairU1x(1 To pairCap): ReDim Preserve pairU1y(1 To pairCap)
+                                                            ReDim Preserve pairU2x(1 To pairCap): ReDim Preserve pairU2y(1 To pairCap)
+                                                            ReDim Preserve pairDot(1 To pairCap)
+                                                        End If
+                                                        Set pairB1(pairN) = pbS1: Set pairB2(pairN) = pbS2
+                                                        pairC1(pairN) = cbl1Nm: pairC2(pairN) = cbl2Nm
+                                                        pairU1x(pairN) = w1x: pairU1y(pairN) = w1y
+                                                        pairU2x(pairN) = w2x: pairU2y(pairN) = w2y
+                                                        pairDot(pairN) = w1x * w2x + w1y * w2y
+                                                        pairedSet(pb1) = True: pairedSet(pb2) = True
+                                                    End If
+                                                End If
+                                            End If
+                                        End If
+                                    End If
+                                End If
+                            End If
                         End If
                     End If
                 End If
@@ -14101,71 +14144,96 @@ Public Sub 선번박스_방사형_정렬(ws As Worksheet, facId As String)
         End If
     Next sh
 
-    ' --- 3. 케이블별 슬롯 배치 — 박스가 자기 케이블에 밀착 (owner 조건: 선번박스는 해당 케이블 쪽) ---
-    '   v4 (owner 2026-06-11): 회전각 슬롯 → 「케이블 따라(along) + 케이블 밀착 perp」.
-    '   perp = 12pt + 박스 반폭의 케이블수직 성분(support) + sideIdx×18 — 바깥 박스가 케이블에서 조금씩
-    '   더 떨어지는 계단식이라 바깥 박스의 평행 화살표가 안쪽 박스를 통과하지 않음.
-    '   side = 짝 케이블 쪽 (v2) · 내각 165°+ 는 가로→아래/수직·대각→오른쪽 고정 (eb537a3).
-    Const FAN_R As Double = 115           ' 시설물 중심 → 첫 박스 (케이블 따라)
-    Const FAN_RING_STEP As Double = 30    ' 같은 side 다음 박스마다 케이블 따라 밖으로
-    Const FAN_GAP As Double = 12          ' 케이블 ↔ 박스 가장자리 수직 간격
-    Const FAN_PERP_STEP As Double = 18    ' 같은 side 다음 박스마다 케이블에서 추가로 (화살표 통로 확보)
-    Const FAN_BUMP As Double = 20         ' 충돌 시 케이블 따라 양보 폭
+    ' --- 2.5 내각 큰 짝이 안쪽 (owner 조건) — 내각 큼 = 일직선에 가까움 = dot(u1,u2) 작음. dot 오름차순 안정 정렬 ---
+    Dim si As Long, sj As Long
+    Dim tB1 As Shape, tB2 As Shape
+    Dim tC1 As String, tC2 As String
+    Dim tU1x As Double, tU1y As Double, tU2x As Double, tU2y As Double, tDot As Double
+    For si = 2 To pairN
+        Set tB1 = pairB1(si): Set tB2 = pairB2(si)
+        tC1 = pairC1(si): tC2 = pairC2(si)
+        tU1x = pairU1x(si): tU1y = pairU1y(si): tU2x = pairU2x(si): tU2y = pairU2y(si)
+        tDot = pairDot(si)
+        sj = si - 1
+        Do While sj >= 1
+            If pairDot(sj) > tDot Then
+                Set pairB1(sj + 1) = pairB1(sj): Set pairB2(sj + 1) = pairB2(sj)
+                pairC1(sj + 1) = pairC1(sj): pairC2(sj + 1) = pairC2(sj)
+                pairU1x(sj + 1) = pairU1x(sj): pairU1y(sj + 1) = pairU1y(sj)
+                pairU2x(sj + 1) = pairU2x(sj): pairU2y(sj + 1) = pairU2y(sj)
+                pairDot(sj + 1) = pairDot(sj)
+                sj = sj - 1
+            Else
+                Exit Do
+            End If
+        Loop
+        Set pairB1(sj + 1) = tB1: Set pairB2(sj + 1) = tB2
+        pairC1(sj + 1) = tC1: pairC2(sj + 1) = tC2
+        pairU1x(sj + 1) = tU1x: pairU1y(sj + 1) = tU1y
+        pairU2x(sj + 1) = tU2x: pairU2y(sj + 1) = tU2y
+        pairDot(sj + 1) = tDot
+    Next si
+
+    ' --- 3. 배치 (v7) — 짝 단위, 내각 큰 순으로 안쪽 슬롯부터. 박스는 자기 케이블 밀착 (owner 조건) ---
+    '   alongMin: L-shape corner 위치를 미리 계산해 화살표 양쪽 선이 최소 2cm 되도록 박스를 바깥으로.
+    '   corner(케이블1 기준) = (perp2 + perp1·cosθ)/sinθ. 일직선(sinθ<0.26)은 직선 경로라 제한 불필요.
+    Dim sideCnt As Object: Set sideCnt = CreateObject("Scripting.Dictionary")   ' "cblName|side" → 사용 슬롯 수
+    Dim pi2 As Long
+    Dim s1 As Double, s2 As Double
+    Dim idx1 As Long, idx2 As Long
+    Dim key1 As String, key2 As String
+    Dim hw1 As Double, hh1 As Double, hw2 As Double, hh2 As Double
+    Dim perp1 As Double, perp2 As Double
+    Dim sinT As Double, cosT As Double
+    Dim corner1 As Double, corner2 As Double
+    Dim aMin1 As Double, aMin2 As Double
+    For pi2 = 1 To pairN
+        s1 = 방사형_side결정(pairU1x(pi2), pairU1y(pi2), pairU2x(pi2), pairU2y(pi2))
+        s2 = 방사형_side결정(pairU2x(pi2), pairU2y(pi2), pairU1x(pi2), pairU1y(pi2))
+        key1 = pairC1(pi2) & "|" & CStr(s1)
+        idx1 = 0: If sideCnt.Exists(key1) Then idx1 = CLng(sideCnt(key1))
+        sideCnt(key1) = idx1 + 1
+        key2 = pairC2(pi2) & "|" & CStr(s2)
+        idx2 = 0: If sideCnt.Exists(key2) Then idx2 = CLng(sideCnt(key2))
+        sideCnt(key2) = idx2 + 1
+        hw1 = pairB1(pi2).Width / 2: hh1 = pairB1(pi2).Height / 2
+        hw2 = pairB2(pi2).Width / 2: hh2 = pairB2(pi2).Height / 2
+        ' perp = 방사형_박스놓기 와 동일식 (corner 선행 계산용. |px|=|uy|, |py|=|ux|)
+        perp1 = FANP_GAP + Abs(pairU1y(pi2)) * hw1 + Abs(pairU1x(pi2)) * hh1 + idx1 * FANP_PERP
+        perp2 = FANP_GAP + Abs(pairU2y(pi2)) * hw2 + Abs(pairU2x(pi2)) * hh2 + idx2 * FANP_PERP
+        cosT = pairDot(pi2)
+        sinT = Abs(pairU1x(pi2) * pairU2y(pi2) - pairU1y(pi2) * pairU2x(pi2))
+        aMin1 = 0: aMin2 = 0
+        If sinT >= 0.26 Then
+            corner1 = (perp2 + perp1 * cosT) / sinT
+            If corner1 < 0 Then corner1 = 0
+            corner2 = (perp1 + perp2 * cosT) / sinT
+            If corner2 < 0 Then corner2 = 0
+            aMin1 = corner1 + FANP_MIN_LEG + Abs(pairU1x(pi2)) * hw1 + Abs(pairU1y(pi2)) * hh1
+            aMin2 = corner2 + FANP_MIN_LEG + Abs(pairU2x(pi2)) * hw2 + Abs(pairU2y(pi2)) * hh2
+        End If
+        방사형_박스놓기 pairB1(pi2), fcx, fcy, pairU1x(pi2), pairU1y(pi2), s1, idx1, aMin1, obs, segs
+        방사형_박스놓기 pairB2(pi2), fcx, fcy, pairU2x(pi2), pairU2y(pi2), s2, idx2, aMin2, obs, segs
+    Next pi2
+
+    ' --- 3.5 짝 없는 박스 (anchor 유실 등 폴백) — 케이블별 좌우 교대, sideCnt 이어서 ---
     Dim ck As Variant
     Dim ux As Double, uy As Double
-    Dim pux As Double, puy As Double
-    Dim hasPartner As Boolean
     Dim fanBx As Shape
-    Dim cntP As Long, cntM As Long, sideIdx As Long, bump As Long
-    Dim useSide As Double
-    Dim px As Double, py As Double, rr As Double, perpD As Double
-    Dim hw As Double, hh As Double, ccx As Double, ccy As Double
+    Dim sAlt As Double
+    Dim keyL As String, idxL As Long
+    Dim flip As Long: flip = 0
     For Each ck In byCbl.Keys
         If 방사형_케이블방향(ws, CStr(ck), fcx, fcy, ux, uy) Then
-            cntP = 0: cntM = 0
             For Each fanBx In byCbl(ck)
-                ' side 결정 — 짝 박스가 속한 케이블 쪽 (perp(+side)=(-uy,ux) 과 짝 방향의 dot 부호)
-                hasPartner = False
-                If partnerCbl.Exists(fanBx.Name) Then
-                    If 방사형_케이블방향(ws, CStr(partnerCbl(fanBx.Name)), fcx, fcy, pux, puy) Then hasPartner = True
+                If Not pairedSet.Exists(fanBx.Name) Then
+                    If flip Mod 2 = 0 Then sAlt = 1 Else sAlt = -1
+                    flip = flip + 1
+                    keyL = CStr(ck) & "|" & CStr(sAlt)
+                    idxL = 0: If sideCnt.Exists(keyL) Then idxL = CLng(sideCnt(keyL))
+                    sideCnt(keyL) = idxL + 1
+                    방사형_박스놓기 fanBx, fcx, fcy, ux, uy, sAlt, idxL, 0, obs, segs
                 End If
-                If hasPartner Then
-                    If ux * pux + uy * puy < -0.966 Then
-                        ' 내각 165° 이상 (거의 일직선 통과) — 짝 방향 수직성분이 미미해 side 가 임의로 갈려
-                        '   방향을 읽을 수 없음 (owner 2026-06-11 검정·빨강 표시).
-                        '   고정 규칙: 수평(가로) 케이블 → 아래쪽, 수직·대각 케이블 → 오른쪽.
-                        '   (+side 의 perp 오프셋 = (-uy, ux) 방향 — 단일생성의 공선 fallback 과 같은 규칙)
-                        If Abs(ux) > Abs(uy) Then
-                            If ux > 0 Then useSide = 1 Else useSide = -1      ' +side perp Y = ux → 아래쪽 선택
-                        Else
-                            If uy < 0 Then useSide = 1 Else useSide = -1      ' +side perp X = -uy → 오른쪽 선택
-                        End If
-                    Else
-                        If (ux * puy - uy * pux) >= 0 Then useSide = 1 Else useSide = -1   ' perp(+side)·짝방향 dot
-                    End If
-                Else
-                    If (cntP + cntM) Mod 2 = 0 Then useSide = 1 Else useSide = -1   ' 짝 정보 없으면 좌우 교대
-                End If
-                If useSide > 0 Then
-                    sideIdx = cntP: cntP = cntP + 1
-                Else
-                    sideIdx = cntM: cntM = cntM + 1
-                End If
-                px = -uy * useSide: py = ux * useSide     ' 케이블 수직 단위벡터 (선택 side)
-                hw = fanBx.Width / 2: hh = fanBx.Height / 2
-                ' 케이블 가장자리 기준 간격 — 박스 크기·케이블 기울기 무관 12pt 유지 (support = |px|·hw + |py|·hh)
-                perpD = FAN_GAP + Abs(px) * hw + Abs(py) * hh + sideIdx * FAN_PERP_STEP
-                For bump = 0 To 8
-                    rr = FAN_R + sideIdx * FAN_RING_STEP + bump * FAN_BUMP
-                    ccx = fcx + ux * rr + px * perpD
-                    ccy = fcy + uy * rr + py * perpD
-                    If Not 방사형_슬롯충돌(ccx - hw, ccy - hh, ccx + hw, ccy + hh, obs, segs) Then Exit For
-                Next bump
-                ' 전부 충돌이면 마지막 후보 그대로 (드묾)
-                fanBx.Left = ccx - hw
-                fanBx.Top = ccy - hh
-                On Error Resume Next: AltSetLastPos fanBx, fanBx.Left, fanBx.Top: On Error GoTo 0
-                obs.Add Array(fanBx.Left - 1, fanBx.Top - 1, fanBx.Left + fanBx.Width + 1, fanBx.Top + fanBx.Height + 1)
             Next fanBx
         End If
     Next ck
@@ -14219,6 +14287,56 @@ Private Function 방사형_케이블방향(ws As Worksheet, cblName As String, f
     oux = vx / vlen: ouy = vy / vlen
     방사형_케이블방향 = True
 End Function
+
+' ===== 케이블 밀착 배치 상수 — v7 (owner 2026-06-11) =====
+Private Const FANP_R As Double = 115          ' 시설물 중심 → 첫 박스 (케이블 따라)
+Private Const FANP_RING As Double = 30        ' 같은 side 다음 박스마다 케이블 따라 밖으로
+Private Const FANP_GAP As Double = 12         ' 케이블 ↔ 박스 가장자리 수직 간격
+Private Const FANP_PERP As Double = 18        ' 같은 side 다음 박스마다 추가 perp (화살표 통로)
+Private Const FANP_BUMP As Double = 20        ' 충돌 시 케이블 따라 양보 폭
+Private Const FANP_MIN_LEG As Double = 57     ' 화살표 한쪽 선 최소 길이 ≈ 2cm (owner 조건)
+
+' 박스 side 결정 — 짝 케이블 쪽 (v2) · 내각 165°+ 는 가로→아래/수직·대각→오른쪽 고정 (eb537a3).
+'   +side 의 perp 오프셋 방향 = (-uy, ux).
+Private Function 방사형_side결정(ux As Double, uy As Double, pux As Double, puy As Double) As Double
+    If ux * pux + uy * puy < -0.966 Then
+        ' 내각 165° 이상 (거의 일직선 통과) — 고정 규칙: 수평 케이블 → 아래쪽, 수직·대각 → 오른쪽
+        If Abs(ux) > Abs(uy) Then
+            If ux > 0 Then 방사형_side결정 = 1 Else 방사형_side결정 = -1
+        Else
+            If uy < 0 Then 방사형_side결정 = 1 Else 방사형_side결정 = -1
+        End If
+    Else
+        If (ux * puy - uy * pux) >= 0 Then 방사형_side결정 = 1 Else 방사형_side결정 = -1
+    End If
+End Function
+
+' 박스 1개 배치 — 케이블 밀착 (perp = 12pt + support + sideIdx×18) + along(115+30×sideIdx, alongMin 보장)
+'   + 충돌 시 케이블 따라 20pt 씩 양보. lastPos 갱신 + 장애물 목록 등록까지.
+Private Sub 방사형_박스놓기(fanBx As Shape, fcx As Double, fcy As Double, _
+                             ux As Double, uy As Double, useSide As Double, sideIdx As Long, _
+                             alongMin As Double, obs As Collection, segs As Collection)
+    Dim px As Double, py As Double
+    px = -uy * useSide: py = ux * useSide
+    Dim hw As Double, hh As Double
+    hw = fanBx.Width / 2: hh = fanBx.Height / 2
+    Dim perpD As Double
+    perpD = FANP_GAP + Abs(px) * hw + Abs(py) * hh + sideIdx * FANP_PERP
+    Dim along0 As Double: along0 = FANP_R + sideIdx * FANP_RING
+    If along0 < alongMin Then along0 = alongMin
+    Dim bump As Long, rr As Double, ccx As Double, ccy As Double
+    For bump = 0 To 8
+        rr = along0 + bump * FANP_BUMP
+        ccx = fcx + ux * rr + px * perpD
+        ccy = fcy + uy * rr + py * perpD
+        If Not 방사형_슬롯충돌(ccx - hw, ccy - hh, ccx + hw, ccy + hh, obs, segs) Then Exit For
+    Next bump
+    ' 전부 충돌이면 마지막 후보 그대로 (드묾)
+    fanBx.Left = ccx - hw
+    fanBx.Top = ccy - hh
+    On Error Resume Next: AltSetLastPos fanBx, fanBx.Left, fanBx.Top: On Error GoTo 0
+    obs.Add Array(fanBx.Left - 1, fanBx.Top - 1, fanBx.Left + fanBx.Width + 1, fanBx.Top + fanBx.Height + 1)
+End Sub
 
 ' RN 모드 박스+화살표 생성 — owner 사양 (i_1차/m_2차/s_3차 그림 참조).
 '   RN 시설물 양쪽에 IN 그룹 (라벨 "IN" + 코어 박스 N개) / P 그룹 (라벨 "P" + 코어 박스 N개) 배치.
