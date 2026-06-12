@@ -12449,7 +12449,9 @@ Public Sub 네트웍_케이블박스_동기화(Optional wsArg As Worksheet)
     On Error GoTo 0
 
     Const LBLAV_GAP As Double = 6      ' 라벨끼리 최소 여백 (owner: 바짝 붙지 않게 살짝 띄움)
-    Const LBLAV_MAX As Long = 12       ' 슬라이드 후보 최대 횟수 (0=중앙, 홀수=+, 짝수=-)
+    ' owner 2026-06-12 후속3: 이동 단위가 라벨 폭 전체라 중앙 부근 빈틈을 건너뛰고 멀리 치우치던 문제 —
+    '   단위를 1/4 로 잘게 (quantum) + 후보 수 4배. 가장 가까운 빈 자리에서 멈춤 (탐색 범위는 이전과 동일).
+    Const LBLAV_MAX As Long = 48       ' 슬라이드 후보 최대 횟수 (0=중앙, 홀수=+, 짝수=-)
 
     ' owner 2026-06-12 후속: 회피 대상 확장 — 라벨끼리뿐 아니라 시설물 명칭(lbl_fac_*)·배지·선번박스·
     '   상태박스·시설물 도형(사각 장애물) + 선번 화살표(선분 장애물) 와도 겹치지 않게 (owner 보고).
@@ -12529,9 +12531,11 @@ Public Sub 네트웍_케이블박스_동기화(Optional wsArg As Worksheet)
                 ' 슬라이드 축 = 케이블 중앙 부근 진행 방향 (step·margin 계산용)
                 Dim dux As Double, duy As Double
                 If Not 케이블중앙_방향(sh, dux, duy) Then dux = 1: duy = 0
-                ' step = 라벨의 방향 투영 폭 + 여백 — 한 칸 밀면 직전 라벨과 정확히 LBLAV_GAP 만큼 떨어짐
+                ' step = 라벨의 방향 투영 폭 + 여백. quantum = step/4 — 잘게 밀며 가장 가까운 빈 자리 탐색
                 Dim stepL As Double
                 stepL = Abs(dux) * box.Width + Abs(duy) * box.Height + LBLAV_GAP
+                Dim quantum As Double: quantum = stepL / 4
+                If quantum < 6 Then quantum = 6
                 ' owner 2026-06-12 후속2: 슬라이드를 「케이블 경로 위」 로 제한 (arc-length 걷기) —
                 '   방향 직선 슬라이드는 ㄷ자/L자에서 케이블을 벗어나고, 끝을 지나 밖까지 밀려남 (owner 보고).
                 '   후보 = 경로 중간 ± offD 지점. 양 끝은 라벨 절반(extHalf) margin 으로 클램프 — 케이블 밖 금지.
@@ -12547,9 +12551,9 @@ Public Sub 네트웍_케이블박스_동기화(Optional wsArg As Worksheet)
                     If k = 0 Then
                         offD = 0
                     ElseIf k Mod 2 = 1 Then
-                        offD = ((k + 1) \ 2) * stepL
+                        offD = ((k + 1) \ 2) * quantum
                     Else
-                        offD = -(k \ 2) * stepL
+                        offD = -(k \ 2) * quantum
                     End If
                     If pathOK Then
                         Dim arcS As Double: arcS = pathLen / 2 + offD
