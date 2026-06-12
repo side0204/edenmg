@@ -11819,6 +11819,66 @@ Public Sub 네트웍_케이블_재라우팅(Optional wsArg As Worksheet)
             toRebuild.Add sh.Name
         End If
     Next sh
+
+    ' owner 2026-06-12: 우회 경로 충돌 회피용 장애물 선분 사전 수집 —
+    '   ① slot0(직선) 케이블의 기대 직선 (시설물 중심 간) ② 메타 없는 케이블의 현재 선분.
+    '   slot≥1 케이블은 아래 본 루프에서 채택 경로를 순서대로 등록 (다조_경로_등록).
+    Dim obsSegs As New Collection
+    Dim j0 As Long
+    For j0 = 1 To toRebuild.Count
+        Dim nm0 As String: nm0 = toRebuild(j0)
+        Dim s0 As Long: s0 = -1
+        If cblSlot.Exists(nm0) Then s0 = CLng(cblSlot(nm0))
+        If s0 = 0 Then
+            Dim f0 As String, t0 As String
+            f0 = "": t0 = ""
+            If metaFrom.Exists(nm0) Then f0 = CStr(metaFrom(nm0))
+            If metaTo.Exists(nm0) Then t0 = CStr(metaTo(nm0))
+            Dim fS0 As Shape, tS0 As Shape
+            Set fS0 = Nothing: Set tS0 = Nothing
+            On Error Resume Next
+            Set fS0 = ws.Shapes(f0)
+            Set tS0 = ws.Shapes(t0)
+            On Error GoTo 0
+            If Not fS0 Is Nothing Then
+                If Not tS0 Is Nothing Then
+                    obsSegs.Add Array(fS0.Left + fS0.Width / 2, fS0.Top + fS0.Height / 2, _
+                                      tS0.Left + tS0.Width / 2, tS0.Top + tS0.Height / 2)
+                End If
+            End If
+        ElseIf s0 < 0 Then
+            ' 메타 없는 케이블 — 현재 도형 선분 그대로 장애물
+            Dim shp0 As Shape: Set shp0 = Nothing
+            On Error Resume Next: Set shp0 = ws.Shapes(nm0): On Error GoTo 0
+            If Not shp0 Is Nothing Then
+                Dim nc0 As Long: nc0 = 0
+                On Error Resume Next: nc0 = shp0.Nodes.Count: On Error GoTo 0
+                If nc0 >= 2 Then
+                    Dim i0 As Long, q1 As Variant, q2 As Variant
+                    For i0 = 1 To nc0 - 1
+                        q1 = Empty: q2 = Empty
+                        On Error Resume Next
+                        q1 = shp0.Nodes(i0).Points
+                        q2 = shp0.Nodes(i0 + 1).Points
+                        On Error GoTo 0
+                        If Not IsEmpty(q1) Then
+                            If Not IsEmpty(q2) Then
+                                obsSegs.Add Array(CDbl(q1(1, 1)), CDbl(q1(1, 2)), CDbl(q2(1, 1)), CDbl(q2(1, 2)))
+                            End If
+                        End If
+                    Next i0
+                Else
+                    Dim e1x0 As Double, e1y0 As Double, e2x0 As Double, e2y0 As Double
+                    e1x0 = 0: e1y0 = 0: e2x0 = 0: e2y0 = 0
+                    On Error Resume Next
+                    GetLineEndpoints shp0, e1x0, e1y0, e2x0, e2y0
+                    On Error GoTo 0
+                    obsSegs.Add Array(e1x0, e1y0, e2x0, e2y0)
+                End If
+            End If
+        End If
+    Next j0
+
     Dim i As Long
     For i = 1 To toRebuild.Count
         Dim nm As String: nm = toRebuild(i)
@@ -11863,6 +11923,41 @@ Public Sub 네트웍_케이블_재라우팅(Optional wsArg As Worksheet)
         ' 기대 경로 — slot 0 = 직선 (현행 그대로) / 가로·세로 다조 = ㄷ자 1칸 우회 / 대각 다조 = L자 (owner 2026-06-11)
         Dim ptsE() As Double, nE As Long
         네트웍_다조_경로점 fcx, fcy, tcx, tcy, slot, gridWR, gridHR, ptsE, nE
+        ' owner 2026-06-12: 우회(slot≥1) 경로가 다른 케이블과 평행 겹침이면 다른 후보로 재시도.
+        '   후보 순서 = 기본 slot 경로 → (대각이면 반대 L자) → 가상 slot+1.. (ㄷ 반대편·한 칸 더 밖).
+        '   십자 교차는 정상이라 허용 — 같은 선 위 포개짐만 회피. 충돌 없으면 기본 경로 무변경.
+        '   모든 후보 충돌 시 기본 경로 유지 (기존 동작).
+        If slot >= 1 Then
+            If 다조_경로_충돌(ptsE, nE, obsSegs) Then
+                Dim csList(1 To 9) As Long
+                Dim csN As Long: csN = 0
+                Dim dxC As Double, dyC As Double
+                dxC = tcx - fcx: dyC = tcy - fcy
+                Dim isAxisC As Boolean: isAxisC = (Abs(dxC) < 2 Or Abs(dyC) < 2)
+                Dim startS As Long: startS = slot + 1
+                If Not isAxisC Then
+                    If slot = 1 Then csN = csN + 1: csList(csN) = 2
+                    If slot = 2 Then csN = csN + 1: csList(csN) = 1
+                    If slot <= 2 Then startS = 3                  ' L 짝 다음은 ㄷ(eff1)부터 — 중복 회피
+                End If
+                Dim addS As Long
+                For addS = startS To startS + 5
+                    If csN >= 9 Then Exit For
+                    csN = csN + 1: csList(csN) = addS
+                Next addS
+                Dim ci As Long
+                For ci = 1 To csN
+                    Dim ptsC() As Double, nC As Long
+                    네트웍_다조_경로점 fcx, fcy, tcx, tcy, csList(ci), gridWR, gridHR, ptsC, nC
+                    If Not 다조_경로_충돌(ptsC, nC, obsSegs) Then
+                        ptsE = ptsC: nE = nC
+                        Exit For
+                    End If
+                Next ci
+            End If
+            ' 채택 경로 등록 — 이후 케이블의 충돌 검사 대상 (rebuild 여부와 무관)
+            다조_경로_등록 ptsE, nE, obsSegs
+        End If
         ' 이미 기대 경로에 있으면 skip
         If 케이블_경로_일치(oldLine, ptsE, nE) Then GoTo NextCbl
         ' 재생성 — line 끝점 직접 set 불가 (AutoShape 와 달리) → 삭제 후 새로 그림
@@ -11901,6 +11996,7 @@ End Sub
 '    slot 1+ : 가로·세로 구간 = ㄷ자 우회 (노랑격자 1칸씩 — slot1 +1칸, slot2 -1칸, slot3 +2칸 ...)
 '              대각 구간 = L자 (slot1 = 가로→세로, slot2 = 세로→가로, slot3+ = ㄷ자 평행 우회)
 '    slot 은 메타(_케이블) 행 순서 = 생성 순서. 재라우팅이 매번 기대 경로로 재구축 → 영구 유지.
+'    owner 2026-06-12: 우회 경로가 다른 케이블과 「평행 겹침」 이면 후보 순서로 다른 경로 시도 (십자 교차 허용).
 ' ============================================================================
 Private Sub 네트웍_다조_경로점(fcx As Double, fcy As Double, tcx As Double, tcy As Double, _
                                slot As Long, gridW As Double, gridH As Double, _
@@ -11953,6 +12049,61 @@ Private Sub 네트웍_다조_경로점(fcx As Double, fcy As Double, tcx As Doub
     pts(2, 1) = fcx + ox: pts(2, 2) = fcy + oy
     pts(3, 1) = tcx + ox: pts(3, 2) = tcy + oy
     pts(4, 1) = tcx: pts(4, 2) = tcy
+End Sub
+
+' owner 2026-06-12: 두 선분의 「평행 겹침」 판정 — ㄷ자/L자 우회가 다른 케이블 위에 포개지는 경우.
+'   십자 교차는 격자 특성상 정상 → 제외. 근사 평행(sin<0.05) + 수직 거리<3pt + 투영 겹침>6pt 만 True.
+Private Function 다조_세그_평행겹침(ax As Double, ay As Double, bx As Double, by As Double, _
+                                     cx As Double, cy As Double, dxx As Double, dyy As Double) As Boolean
+    다조_세그_평행겹침 = False
+    Dim ux As Double, uy As Double, ul As Double
+    ux = bx - ax: uy = by - ay
+    ul = Sqr(ux * ux + uy * uy)
+    If ul < 0.001 Then Exit Function
+    ux = ux / ul: uy = uy / ul
+    Dim vx As Double, vy As Double, vl As Double
+    vx = dxx - cx: vy = dyy - cy
+    vl = Sqr(vx * vx + vy * vy)
+    If vl < 0.001 Then Exit Function
+    vx = vx / vl: vy = vy / vl
+    If Abs(ux * vy - uy * vx) > 0.05 Then Exit Function          ' 평행 아님 → 교차는 허용
+    ' 수직 거리 — 상대 선분 양 끝점의 직선(a→b) 잔차. 둘 다 멀면 다른 평행선
+    Dim pd1 As Double, pd2 As Double
+    pd1 = Abs((cx - ax) * (-uy) + (cy - ay) * ux)
+    pd2 = Abs((dxx - ax) * (-uy) + (dyy - ay) * ux)
+    If pd1 > 3 And pd2 > 3 Then Exit Function
+    ' 투영 구간 겹침 길이
+    Dim t1 As Double, t2 As Double, tmp As Double
+    t1 = (cx - ax) * ux + (cy - ay) * uy
+    t2 = (dxx - ax) * ux + (dyy - ay) * uy
+    If t1 > t2 Then tmp = t1: t1 = t2: t2 = tmp
+    Dim lo As Double, hi As Double
+    If t1 > 0 Then lo = t1 Else lo = 0
+    If t2 < ul Then hi = t2 Else hi = ul
+    If hi - lo > 6 Then 다조_세그_평행겹침 = True
+End Function
+
+' 후보 경로(pts)의 어느 선분이라도 장애물 선분과 평행 겹침이면 True.
+Private Function 다조_경로_충돌(pts() As Double, nPts As Long, obsSegs As Collection) As Boolean
+    다조_경로_충돌 = False
+    Dim i As Long, o As Variant
+    For i = 1 To nPts - 1
+        For Each o In obsSegs
+            If 다조_세그_평행겹침(pts(i, 1), pts(i, 2), pts(i + 1, 1), pts(i + 1, 2), _
+                                  CDbl(o(0)), CDbl(o(1)), CDbl(o(2)), CDbl(o(3))) Then
+                다조_경로_충돌 = True
+                Exit Function
+            End If
+        Next o
+    Next i
+End Function
+
+' 채택 경로의 선분들을 장애물 목록에 등록 — 이후 케이블의 충돌 검사 대상.
+Private Sub 다조_경로_등록(pts() As Double, nPts As Long, obsSegs As Collection)
+    Dim i As Long
+    For i = 1 To nPts - 1
+        obsSegs.Add Array(pts(i, 1), pts(i, 2), pts(i + 1, 1), pts(i + 1, 2))
+    Next i
 End Sub
 
 ' 케이블 도형이 기대 경로(pts)와 일치하는지 — 노드(freeform) 또는 끝점(직선), 정/역방향 모두 허용.
