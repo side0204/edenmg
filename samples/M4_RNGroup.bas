@@ -752,45 +752,16 @@ End Sub
 '   RN 시설물은 입력 케이블·출력 케이블 두 개를 동시에 통과하므로 방사형 슬롯 한도 3 (케이블 2 + 시설물 1) 허용.
 '   owner 환경에서 메타 kind 값이 "rn" 이 아닌 경우 (저장 누락·법인 카테고리 명) 의 fallback —
 '     라벨(row(3)) 또는 시설물 콜아웃 텍스트에 "RN" 포함되면 RN 으로 인식.
+' owner 2026-06-12: 판별 로직을 시설물_isRN (M2, 파라미터 버전) 으로 위임 — 단일 소스.
+'   Step C 콤보 이후 「RN 이 양식 명칭에만 있는」 데이터 보정 (구분 substring + 범례 명칭 역조회) 포함.
 Public Function 선번연결_도구_isRN() As Boolean
     선번연결_도구_isRN = False
     If Len(g_pt_facId) = 0 Then Exit Function
-    Dim row As Variant
-    On Error Resume Next
-    row = MetaFindRow(SHEET_META_FAC, 1, g_pt_facId)
-    On Error GoTo 0
-    If Not IsEmpty(row) Then
-        If UBound(row) >= 2 Then
-            If LCase(CStr(row(2))) = "rn" Then
-                선번연결_도구_isRN = True
-                Exit Function
-            End If
-        End If
-        ' label (row(3)) 에 "RN" 포함 fallback
-        If UBound(row) >= 3 Then
-            If InStr(UCase(CStr(row(3))), "RN") > 0 Then
-                선번연결_도구_isRN = True
-                Exit Function
-            End If
-        End If
-    End If
-    ' 시설물 콜아웃 박스 (lbl_<facId>) 텍스트 fallback — "RN" 포함이면 RN 으로 인식
     Dim wsNw As Worksheet
     On Error Resume Next
     Set wsNw = ThisWorkbook.Worksheets(SHEET_NETWORK)
     On Error GoTo 0
-    If wsNw Is Nothing Then Exit Function
-    Dim lblShp As Shape: Set lblShp = Nothing
-    On Error Resume Next
-    Set lblShp = wsNw.Shapes(PREFIX_LABEL & g_pt_facId)
-    On Error GoTo 0
-    If Not lblShp Is Nothing Then
-        Dim lblTxt As String: lblTxt = ""
-        On Error Resume Next
-        lblTxt = lblShp.TextFrame2.TextRange.Text
-        On Error GoTo 0
-        If InStr(UCase(lblTxt), "RN") > 0 Then 선번연결_도구_isRN = True
-    End If
+    선번연결_도구_isRN = 시설물_isRN(wsNw, g_pt_facId)
 End Function
 
 ' RN 시설물 규격 조회 — SHEET_META_FAC 의 6번째 컬럼 (spec).
@@ -1195,7 +1166,17 @@ Public Function 선번연결_도구_label_to_kind(label As String) As String
         Dim r As Long
         For r = 2 To lastR
             If CStr(wsLeg.Cells(r, 3).Value) = label Then
-                선번연결_도구_label_to_kind = CStr(wsLeg.Cells(r, 2).Value)
+                Dim kindV As String: kindV = CStr(wsLeg.Cells(r, 2).Value)
+                ' owner 2026-06-12: 양식 명칭(9컬럼)에 "RN" 포함이면 rn 보정 —
+                '   Step C 콤보 등록 시 kind 매핑이 명칭 정확일치만 처리해 "facility" 로 저장된 기존 데이터 대응.
+                If LCase(kindV) <> "rn" And LCase(kindV) <> "cable" Then
+                    Dim nmV As String: nmV = ""
+                    On Error Resume Next
+                    nmV = CStr(wsLeg.Cells(r, 9).Value)
+                    On Error GoTo 0
+                    If InStr(UCase(nmV), "RN") > 0 Then kindV = "rn"
+                End If
+                선번연결_도구_label_to_kind = kindV
                 Exit Function
             End If
         Next r

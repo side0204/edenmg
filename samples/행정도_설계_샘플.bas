@@ -9599,6 +9599,9 @@ End Sub
 
 ' owner 2026-06-07 (8-66): 임의 facId 가 RN 종류인지 — 메타시트 kind 컬럼 + 라벨/콜아웃 텍스트 fallback.
 '   선번연결_도구_isRN (g_pt_facId 전용) 의 파라미터 버전. 상태박스 라벨 분기·기타 시설물 분류용.
+' owner 2026-06-12: Step C 콤보 이후 META_FAC row(2) 에는 kind 가 아닌 구분(label) 이 저장되고
+'   「RN」 이 양식 명칭(META_LEG 9컬럼) 에만 있는 경우가 생김 (owner 보고: RN 연결인데 일반 코어연결로 빠짐).
+'   → row(2) substring + 범례 명칭 역조회 (범례_명칭_isRN) fallback 추가.
 Public Function 시설물_isRN(ws As Worksheet, facId As String) As Boolean
     시설물_isRN = False
     If Len(facId) = 0 Then Exit Function
@@ -9611,6 +9614,10 @@ Public Function 시설물_isRN(ws As Worksheet, facId As String) As Boolean
     If Not IsEmpty(row) Then
         If UBound(row) >= 2 Then
             If LCase(CStr(row(2))) = "rn" Then 시설물_isRN = True: Exit Function
+            ' 구분(label) 자체에 "RN" 포함 (예: "RN(2:8)")
+            If InStr(UCase(CStr(row(2))), "RN") > 0 Then 시설물_isRN = True: Exit Function
+            ' 범례 메타 역조회 — 구분 매치 행의 kind="rn" 또는 명칭(9컬럼)에 "RN" 포함
+            If 범례_명칭_isRN(CStr(row(2))) Then 시설물_isRN = True: Exit Function
         End If
         ' label (row(3)) 에 "RN" 포함 fallback
         If UBound(row) >= 3 Then
@@ -9631,6 +9638,34 @@ Public Function 시설물_isRN(ws As Worksheet, facId As String) As Boolean
         On Error GoTo 0
         If InStr(UCase(lblTxt), "RN") > 0 Then 시설물_isRN = True
     End If
+End Function
+
+' owner 2026-06-12: 구분(label) → 범례 메타(SHEET_META_LEG) 역조회로 RN 판별.
+'   Step C 콤보 등록 양식 row: 1=도형명/2=kind/3=구분/9=명칭. kind 매핑이 명칭 정확일치만 처리해
+'   「RN(2:8)」 같은 명칭은 kind="facility" 로 저장됨 → 명칭(9컬럼) substring 으로 보정.
+Public Function 범례_명칭_isRN(label As String) As Boolean
+    범례_명칭_isRN = False
+    If Len(Trim(label)) = 0 Then Exit Function
+    Dim wsLeg As Worksheet
+    On Error Resume Next
+    Set wsLeg = ThisWorkbook.Worksheets(SHEET_META_LEG)
+    On Error GoTo 0
+    If wsLeg Is Nothing Then Exit Function
+    Dim lastR As Long: lastR = wsLeg.Cells(wsLeg.Rows.Count, 1).End(xlUp).Row
+    Dim r As Long
+    For r = 2 To lastR
+        If CStr(wsLeg.Cells(r, 3).Value) = label Then
+            Dim kindL As String: kindL = LCase(CStr(wsLeg.Cells(r, 2).Value))
+            If kindL <> "cable" Then
+                If kindL = "rn" Then 범례_명칭_isRN = True: Exit Function
+                Dim nmL As String: nmL = ""
+                On Error Resume Next
+                nmL = CStr(wsLeg.Cells(r, 9).Value)
+                On Error GoTo 0
+                If InStr(UCase(nmL), "RN") > 0 Then 범례_명칭_isRN = True: Exit Function
+            End If
+        End If
+    Next r
 End Function
 
 ' 상태 박스 값 저장 + 텍스트 + 줄별 폰트·색상 갱신
@@ -19807,45 +19842,16 @@ End Sub
 '   RN 시설물은 입력 케이블·출력 케이블 두 개를 동시에 통과하므로 방사형 슬롯 한도 3 (케이블 2 + 시설물 1) 허용.
 '   owner 환경에서 메타 kind 값이 "rn" 이 아닌 경우 (저장 누락·법인 카테고리 명) 의 fallback —
 '     라벨(row(3)) 또는 시설물 콜아웃 텍스트에 "RN" 포함되면 RN 으로 인식.
+' owner 2026-06-12: 판별 로직을 시설물_isRN (파라미터 버전) 으로 위임 — 단일 소스.
+'   Step C 콤보 이후 「RN 이 양식 명칭에만 있는」 데이터 보정 (구분 substring + 범례 명칭 역조회) 포함.
 Private Function 선번연결_도구_isRN() As Boolean
     선번연결_도구_isRN = False
     If Len(g_pt_facId) = 0 Then Exit Function
-    Dim row As Variant
-    On Error Resume Next
-    row = MetaFindRow(SHEET_META_FAC, 1, g_pt_facId)
-    On Error GoTo 0
-    If Not IsEmpty(row) Then
-        If UBound(row) >= 2 Then
-            If LCase(CStr(row(2))) = "rn" Then
-                선번연결_도구_isRN = True
-                Exit Function
-            End If
-        End If
-        ' label (row(3)) 에 "RN" 포함 fallback
-        If UBound(row) >= 3 Then
-            If InStr(UCase(CStr(row(3))), "RN") > 0 Then
-                선번연결_도구_isRN = True
-                Exit Function
-            End If
-        End If
-    End If
-    ' 시설물 콜아웃 박스 (lbl_<facId>) 텍스트 fallback — "RN" 포함이면 RN 으로 인식
     Dim wsNw As Worksheet
     On Error Resume Next
     Set wsNw = ThisWorkbook.Worksheets(SHEET_NETWORK)
     On Error GoTo 0
-    If wsNw Is Nothing Then Exit Function
-    Dim lblShp As Shape: Set lblShp = Nothing
-    On Error Resume Next
-    Set lblShp = wsNw.Shapes(PREFIX_LABEL & g_pt_facId)
-    On Error GoTo 0
-    If Not lblShp Is Nothing Then
-        Dim lblTxt As String: lblTxt = ""
-        On Error Resume Next
-        lblTxt = lblShp.TextFrame2.TextRange.Text
-        On Error GoTo 0
-        If InStr(UCase(lblTxt), "RN") > 0 Then 선번연결_도구_isRN = True
-    End If
+    선번연결_도구_isRN = 시설물_isRN(wsNw, g_pt_facId)
 End Function
 
 ' RN 시설물 규격 조회 — SHEET_META_FAC 의 6번째 컬럼 (spec).
@@ -20250,7 +20256,17 @@ Private Function 선번연결_도구_label_to_kind(label As String) As String
         Dim r As Long
         For r = 2 To lastR
             If CStr(wsLeg.Cells(r, 3).Value) = label Then
-                선번연결_도구_label_to_kind = CStr(wsLeg.Cells(r, 2).Value)
+                Dim kindV As String: kindV = CStr(wsLeg.Cells(r, 2).Value)
+                ' owner 2026-06-12: 양식 명칭(9컬럼)에 "RN" 포함이면 rn 보정 —
+                '   Step C 콤보 등록 시 kind 매핑이 명칭 정확일치만 처리해 "facility" 로 저장된 기존 데이터 대응.
+                If LCase(kindV) <> "rn" And LCase(kindV) <> "cable" Then
+                    Dim nmV As String: nmV = ""
+                    On Error Resume Next
+                    nmV = CStr(wsLeg.Cells(r, 9).Value)
+                    On Error GoTo 0
+                    If InStr(UCase(nmV), "RN") > 0 Then kindV = "rn"
+                End If
+                선번연결_도구_label_to_kind = kindV
                 Exit Function
             End If
         Next r
@@ -29645,6 +29661,7 @@ Public Function 양식_도형_찾기(ws As Worksheet, r As Long, c As Long) As S
     Set 양식_도형_찾기 = bestShp
 End Function
 
+' owner 2026-06-12: RN 계열은 정확일치 → substring 으로 완화 ("RN(2:8)"·"RN장비" 등 자유 명칭도 rn).
 Public Function 양식_명칭_kind_매핑(nameVal As String, isCable As Boolean) As String
     If isCable Then 양식_명칭_kind_매핑 = "cable": Exit Function
     Select Case nameVal
@@ -29652,7 +29669,13 @@ Public Function 양식_명칭_kind_매핑(nameVal As String, isCable As Boolean)
         Case "시설물":              양식_명칭_kind_매핑 = "facility"
         Case "접속함체":           양식_명칭_kind_매핑 = "closure"
         Case "RN", "광MUX", "IJP": 양식_명칭_kind_매핑 = "rn"
-        Case Else:                  양식_명칭_kind_매핑 = "facility"
+        Case Else
+            Dim uName As String: uName = UCase(Trim(nameVal))
+            If InStr(uName, "RN") > 0 Or InStr(uName, "IJP") > 0 Or InStr(uName, "MUX") > 0 Then
+                양식_명칭_kind_매핑 = "rn"
+            Else
+                양식_명칭_kind_매핑 = "facility"
+            End If
     End Select
 End Function
 
