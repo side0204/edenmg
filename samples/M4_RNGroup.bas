@@ -1666,6 +1666,11 @@ Public Sub 선번연결_도구_시트빌드()
         If Left(nm, Len(PREFIX_PT_RADIAL)) = PREFIX_PT_RADIAL Then GoTo NextShape
         If Left(nm, Len(PREFIX_PT_RADIALLBL)) = PREFIX_PT_RADIALLBL Then GoTo NextShape
         If Left(nm, Len(PREFIX_PT_BTN)) = PREFIX_PT_BTN Then
+            ' owner 2026-06-12: 케이블별 「전체 매핑 X」 버튼 (cblDelAll_*) 은 Step 2 에서도 보존 —
+            '   owner: Step 2 에서도 케이블 단위 매핑 일괄삭제 필요. 핸들러가 step 분기 재빌드 처리.
+            '   (케이블 1개 시설물은 Step 1 을 건너뛰어 버튼이 생성 직후 여기서 삭제되던 것이
+            '    「Step 1 빨간 버튼 안 보임」 보고의 원인이기도 했음)
+            If InStr(nm, PREFIX_PT_BTN & "cblDelAll_") = 1 Then GoTo NextShape
             ' Step 1 의 list 흔적 (s1_listHdr / s1_ex*) 은 모두 제거 — Step 2 본문과 겹침
             ' owner 2026-06-06: s1_exSel 은 L/B/R 글자가 underscore 없이 붙어 매치 실패 (이전 s1_exSel_) →
             '   s1_ex 로 변경해 exDel/exRow/exSel{L/B/R}/exPart/exMerge 모두 매치.
