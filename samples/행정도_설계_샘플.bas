@@ -17018,9 +17018,13 @@ End Sub
 '   Cable_Chain_평행이동_처리 보다 먼저 실행 — invalid 드래그를 「유효 이동」 으로 인식하지 않게.
 '   RN 박스 / cable-facility 제외 (cbl=fac_ prefix).
 '   비활성화: VALIDATION_ENABLED = False 로 1줄 변경 (예상대로 안 되면 즉시 복귀).
+' owner 2026-06-12: VALIDATION_ENABLED = False — 「박스를 임의로 옮기면 옮긴 자리 존중」 결정에 따라 비활성화.
+'   허브 주변에선 드래그 경로가 다른 케이블 선과 교차하기 마련 + ㄷ자/L자 폴리라인은 chord(보이지 않는
+'   가상 직선) 기준 t 범위라 정상 위치도 범위 밖 판정 → 일부 박스만 「옮겨도 제자리로 돌아가던」 원인.
+'   재활성화 시 chord → 케이블_허브방향/세그먼트별 검사로 바꿔야 함.
 Public Sub Cable_Range_Validation(ws As Worksheet)
     If ws Is Nothing Then Exit Sub
-    Const VALIDATION_ENABLED As Boolean = True
+    Const VALIDATION_ENABLED As Boolean = False
     If Not VALIDATION_ENABLED Then Exit Sub
 
     Dim sh As Shape, alt As String
