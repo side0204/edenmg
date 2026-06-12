@@ -161,11 +161,47 @@ Public Sub 선번연결_도구_방사형빌드(facName As String)
         End With
         On Error GoTo 0
     Else
-        Set facC = 선번연결_도구_시설물도형(ws, PREFIX_PT_RADIAL & "center", cx, cy, FAC_R * 2, _
-            RGB(255, 255, 255), RGB(29, 78, 192), 2#)
+        ' owner 2026-06-12: 기준(중앙) 시설물도 네트웍구성도와 동일 모양 — 끝 시설물과 같은 복제 경로.
+        '   범례 도형 우선 → 네트웍 도형 fallback → 둘 다 없으면 기존 ⊗ (legacy 시각 유지).
+        Dim ctrLegendShp As Shape: Set ctrLegendShp = Nothing
+        Dim ctrLabelStr As String: ctrLabelStr = ""
+        Dim metaRowCtr As Variant
+        metaRowCtr = MetaFindRow(SHEET_META_FAC, 1, facName)
+        If Not IsEmpty(metaRowCtr) Then
+            On Error Resume Next
+            ctrLabelStr = CStr(metaRowCtr(2))
+            On Error GoTo 0
+        End If
+        If Len(ctrLabelStr) > 0 Then Set ctrLegendShp = 선번연결_도구_범례도형_조회(ctrLabelStr)
+        Dim ctrNwShp As Shape: Set ctrNwShp = Nothing
+        If ctrLegendShp Is Nothing Then
+            On Error Resume Next
+            Set ctrNwShp = wsNw.Shapes(facName)
+            On Error GoTo 0
+        End If
+        If Not ctrLegendShp Is Nothing Then
+            Set facC = 선번연결_도구_시설물도형_복제(ws, PREFIX_PT_RADIAL & "center", cx, cy, FAC_R * 2, ctrLegendShp)
+        ElseIf Not ctrNwShp Is Nothing Then
+            Set facC = 선번연결_도구_시설물도형_복제(ws, PREFIX_PT_RADIAL & "center", cx, cy, FAC_R * 2, ctrNwShp)
+        Else
+            Set facC = 선번연결_도구_시설물도형(ws, PREFIX_PT_RADIAL & "center", cx, cy, FAC_R * 2, _
+                RGB(255, 255, 255), RGB(29, 78, 192), 2#)
+        End If
     End If
     facC.OnAction = "선번연결_도구_방사형클릭"
     facC.AlternativeText = "facCenter=1"
+
+    ' owner 2026-06-12: 선택 강조 링 — 복제 도형의 원래 색을 덮어쓰지 않기 위해 별도 링 토글 방식.
+    '   (이전엔 facC.Line 색을 주황/파랑으로 직접 변경 — 복제 도형·RN 빨간 원의 색이 망가지는 원인)
+    Dim selRing As Shape
+    Set selRing = ws.Shapes.AddShape(msoShapeOval, cx - FAC_R - 5, cy - FAC_R - 5, (FAC_R + 5) * 2, (FAC_R + 5) * 2)
+    selRing.Name = PREFIX_PT_RADIAL & "center_sel"
+    selRing.Placement = 3
+    On Error Resume Next
+    selRing.Fill.Visible = msoFalse
+    With selRing.Line: .ForeColor.RGB = RGB(234, 88, 12): .Weight = 3: .Visible = msoTrue: End With
+    selRing.Visible = msoFalse
+    On Error GoTo 0
 
     ' 투명 hit area — owner 요구: 시설물 클릭 영역 확장 (작은 ⊗ 도형 클릭 어려움 해결).
     '   직경 약 50pt (FAC_R*2=28 → 1.8 배). Fill·Line 둘 다 투명이지만 클릭은 받음.
@@ -1480,26 +1516,15 @@ Public Sub 선번연결_도구_방사형색상갱신()
     Next k
 
     ' 중앙 시설물 강조 — g_pt_facId 가 picked 에 있으면
+    ' owner 2026-06-12: facC.Line 색 직접 변경 → 선택 링 (center_sel) visible 토글로 교체.
+    '   중앙 도형이 네트웍 복제본이라 원래 색을 덮어쓰면 안 됨 (RN 빨간 원도 동일).
     Dim facSel As Boolean: facSel = g_pt_pickedCables.Exists(g_pt_facId)
-    Dim facC As Shape: Set facC = Nothing
-    Dim facX1 As Shape, facX2 As Shape: Set facX1 = Nothing: Set facX2 = Nothing
+    Dim facRing As Shape: Set facRing = Nothing
     On Error Resume Next
-    Set facC = ws.Shapes(PREFIX_PT_RADIAL & "center")
-    Set facX1 = ws.Shapes(PREFIX_PT_RADIAL & "center_x1")
-    Set facX2 = ws.Shapes(PREFIX_PT_RADIAL & "center_x2")
-    On Error GoTo 0
-    Dim facColor As Long, facWeight As Double
-    If facSel Then
-        facColor = RGB(234, 88, 12)              ' 주황 (시설물 내부 접속)
-        facWeight = 3
-    Else
-        facColor = RGB(29, 78, 192)
-        facWeight = 2
+    Set facRing = ws.Shapes(PREFIX_PT_RADIAL & "center_sel")
+    If Not facRing Is Nothing Then
+        If facSel Then facRing.Visible = msoTrue Else facRing.Visible = msoFalse
     End If
-    On Error Resume Next
-    If Not facC Is Nothing Then facC.Line.ForeColor.RGB = facColor: facC.Line.Weight = facWeight
-    If Not facX1 Is Nothing Then facX1.Line.ForeColor.RGB = facColor
-    If Not facX2 Is Nothing Then facX2.Line.ForeColor.RGB = facColor
     On Error GoTo 0
 
     ' 상태바 — 총 슬롯 + 모드 안내
