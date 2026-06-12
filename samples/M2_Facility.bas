@@ -5975,6 +5975,71 @@ Public Function 케이블중앙_방향(cbl As Shape, ByRef oux As Double, ByRef 
     케이블중앙_방향 = True
 End Function
 
+' owner 2026-06-12: 케이블 경로 위 arc-length s 지점 좌표 — 선로ID 라벨 슬라이드가 케이블을 벗어나지 않게.
+'   s 는 [0, totalLen] 클램프. polyline 은 node 따라 걷기, 직선·connector 는 양끝 보간.
+'   반환 False = 경로 정보 없음 (길이 0). totalLen 은 ByRef 로 함께 반환 (후보 클램프용).
+Public Function 케이블_경로점(cbl As Shape, s As Double, ByRef ox As Double, ByRef oy As Double, _
+                               ByRef totalLen As Double) As Boolean
+    케이블_경로점 = False
+    ox = 0: oy = 0: totalLen = 0
+    Dim n As Long: n = 0
+    On Error Resume Next
+    n = cbl.Nodes.Count
+    On Error GoTo 0
+    Dim xs() As Double, ys() As Double
+    Dim cnt As Long: cnt = 0
+    If n >= 2 Then
+        ReDim xs(1 To n): ReDim ys(1 To n)
+        Dim i As Long, p As Variant
+        For i = 1 To n
+            p = Empty
+            On Error Resume Next
+            p = cbl.Nodes(i).Points
+            On Error GoTo 0
+            If Not IsEmpty(p) Then
+                cnt = cnt + 1
+                xs(cnt) = CDbl(p(1, 1)): ys(cnt) = CDbl(p(1, 2))
+            End If
+        Next i
+    End If
+    If cnt < 2 Then
+        ReDim xs(1 To 2): ReDim ys(1 To 2)
+        xs(1) = 0: ys(1) = 0: xs(2) = 0: ys(2) = 0
+        On Error Resume Next
+        GetLineEndpoints cbl, xs(1), ys(1), xs(2), ys(2)
+        On Error GoTo 0
+        cnt = 2
+    End If
+    Dim segLen As Double, ddx As Double, ddy As Double
+    Dim j As Long
+    For j = 1 To cnt - 1
+        ddx = xs(j + 1) - xs(j): ddy = ys(j + 1) - ys(j)
+        totalLen = totalLen + Sqr(ddx * ddx + ddy * ddy)
+    Next j
+    If totalLen < 0.001 Then Exit Function
+    Dim sC As Double: sC = s
+    If sC < 0 Then sC = 0
+    If sC > totalLen Then sC = totalLen
+    Dim acc As Double: acc = 0
+    For j = 1 To cnt - 1
+        ddx = xs(j + 1) - xs(j): ddy = ys(j + 1) - ys(j)
+        segLen = Sqr(ddx * ddx + ddy * ddy)
+        If segLen > 0.0001 Then
+            If acc + segLen >= sC Then
+                Dim tSeg As Double: tSeg = (sC - acc) / segLen
+                ox = xs(j) + ddx * tSeg
+                oy = ys(j) + ddy * tSeg
+                케이블_경로점 = True
+                Exit Function
+            End If
+            acc = acc + segLen
+        End If
+    Next j
+    ' 수치 오차로 끝 도달 못 한 경우 — 마지막 점
+    ox = xs(cnt): oy = ys(cnt)
+    케이블_경로점 = True
+End Function
+
 '   - 시설물 이동 → connector 자동 reroute → 케이블 중심 이동했을 때 박스가 따라옴.
 '   - 시트_셀_클릭(SheetSelectionChange) 와 정보_적용 가 호출.
 ' owner 2026-06-12 (A안): 선로ID 라벨 겹침 자동 회피 — 케이블 교차 지점에서 라벨이 겹쳐 안 보이던 문제.
@@ -6076,12 +6141,20 @@ Public Sub 네트웍_케이블박스_동기화(Optional wsArg As Worksheet)
                 pt = CableCenterPoint(sh)
                 Dim cx0 As Double, cy0 As Double
                 cx0 = CDbl(pt(0)): cy0 = CDbl(pt(1))
-                ' 슬라이드 축 = 케이블 중앙 부근 진행 방향
+                ' 슬라이드 축 = 케이블 중앙 부근 진행 방향 (step·margin 계산용)
                 Dim dux As Double, duy As Double
                 If Not 케이블중앙_방향(sh, dux, duy) Then dux = 1: duy = 0
                 ' step = 라벨의 방향 투영 폭 + 여백 — 한 칸 밀면 직전 라벨과 정확히 LBLAV_GAP 만큼 떨어짐
                 Dim stepL As Double
                 stepL = Abs(dux) * box.Width + Abs(duy) * box.Height + LBLAV_GAP
+                ' owner 2026-06-12 후속2: 슬라이드를 「케이블 경로 위」 로 제한 (arc-length 걷기) —
+                '   방향 직선 슬라이드는 ㄷ자/L자에서 케이블을 벗어나고, 끝을 지나 밖까지 밀려남 (owner 보고).
+                '   후보 = 경로 중간 ± offD 지점. 양 끝은 라벨 절반(extHalf) margin 으로 클램프 — 케이블 밖 금지.
+                Dim pathLen As Double, candCx As Double, candCy As Double
+                Dim pathOK As Boolean
+                pathOK = 케이블_경로점(sh, 0, candCx, candCy, pathLen)
+                Dim extHalf As Double
+                extHalf = (Abs(dux) * box.Width + Abs(duy) * box.Height) / 2
                 Dim k As Long, offD As Double
                 Dim cL As Double, cT As Double, cR As Double, cB As Double
                 Dim hit As Boolean
@@ -6093,8 +6166,18 @@ Public Sub 네트웍_케이블박스_동기화(Optional wsArg As Worksheet)
                     Else
                         offD = -(k \ 2) * stepL
                     End If
-                    cL = (cx0 + dux * offD) - box.Width / 2
-                    cT = (cy0 + duy * offD) - box.Height / 2
+                    If pathOK Then
+                        Dim arcS As Double: arcS = pathLen / 2 + offD
+                        If arcS < extHalf Then arcS = extHalf
+                        If arcS > pathLen - extHalf Then arcS = pathLen - extHalf
+                        If arcS < 0 Then arcS = 0                ' pathLen < 2×extHalf (아주 짧은 케이블)
+                        케이블_경로점 sh, arcS, candCx, candCy, pathLen
+                    Else
+                        candCx = cx0 + dux * offD
+                        candCy = cy0 + duy * offD
+                    End If
+                    cL = candCx - box.Width / 2
+                    cT = candCy - box.Height / 2
                     cR = cL + box.Width
                     cB = cT + box.Height
                     hit = False
