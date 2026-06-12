@@ -5871,9 +5871,12 @@ Public Sub 시설물_leader_재라우팅(Optional wsArg As Worksheet)
             Set tb = ws.Shapes(PREFIX_LABEL & facId)
             On Error GoTo 0
             ' owner 재요청 — leader 투명 강제 (이전 가시화 코드 잔재 leader 도 매번 투명화)
+            ' owner 2026-06-12: OnAction(빈 매크로) 강제 — 투명 꼬리가 클릭에 잡히지 않게.
+            '   기존 파일의 OnAction 없는 leader 도 셀 클릭마다 자동 보정 (self-healing).
             On Error Resume Next
             sh.Line.Visible = msoFalse
             sh.Line.Transparency = 1
+            sh.OnAction = "리더_클릭_무시"
             On Error GoTo 0
             ' 시설물·박스 위치 비교 후 좌/우 site 동적 부착 (없으면 Excel 기본 reroute)
             If Not fac Is Nothing And Not tb Is Nothing Then
@@ -5886,6 +5889,13 @@ Public Sub 시설물_leader_재라우팅(Optional wsArg As Worksheet)
         End If
     Next sh
     If wasProt Then ApplySheetProtection ws
+End Sub
+
+' owner 2026-06-12: leader(설명박스 꼬리) 클릭 무시용 빈 매크로.
+'   투명 꼬리가 빈셀·다른 시설물 클릭 시 선택되던 문제 — OnAction 이 있으면 클릭해도
+'   도형이 선택되지 않고 이 매크로만 실행됨 (아무것도 안 함). 꼬리는 자동 재라우팅 전용.
+Public Sub 리더_클릭_무시()
+    ' 의도적으로 빈 매크로 — leader 선택 차단용
 End Sub
 
 ' leader 의 양 끝 부착점 설정 — 시설물 정중앙 ↔ 박스 가까운 모서리 (owner 요구).

@@ -6023,6 +6023,9 @@ Public Sub AddFacilityCallout(ws As Worksheet, fac As Shape, facId As String, Op
     cn.Name = PREFIX_LEADER & facId
     cn.Placement = 3
     cn.Locked = False
+    ' owner 2026-06-12: 투명 꼬리가 빈셀·다른 시설물 클릭 시 잡히는 문제 — OnAction(빈 매크로) 으로
+    '   클릭 시 선택 차단. leader 는 자동 재라우팅이라 사용자가 직접 선택할 일 없음.
+    cn.OnAction = "리더_클릭_무시"
     cn.Line.Weight = 0.5
     ' owner 재요청 — leader 투명 (보이지 않음, 도형은 살아있어 콜아웃 위치 동기화는 유지)
     On Error Resume Next
