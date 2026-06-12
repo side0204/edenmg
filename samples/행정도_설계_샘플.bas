@@ -12373,6 +12373,64 @@ Public Sub 네트웍_케이블박스_동기화(Optional wsArg As Worksheet)
     Const LBLAV_GAP As Double = 6      ' 라벨끼리 최소 여백 (owner: 바짝 붙지 않게 살짝 띄움)
     Const LBLAV_MAX As Long = 12       ' 슬라이드 후보 최대 횟수 (0=중앙, 홀수=+, 짝수=-)
 
+    ' owner 2026-06-12 후속: 회피 대상 확장 — 라벨끼리뿐 아니라 시설물 명칭(lbl_fac_*)·배지·선번박스·
+    '   상태박스·시설물 도형(사각 장애물) + 선번 화살표(선분 장애물) 와도 겹치지 않게 (owner 보고).
+    '   화살표는 bbox 가 아닌 선분 단위 — 대각선 화살표의 빈 bbox 영역까지 과차단하지 않게.
+    Dim obsR As New Collection      ' Array(L, T, R, B) — 사각 장애물
+    Dim obsS As New Collection      ' Array(x1, y1, x2, y2) — 선분 장애물 (화살표)
+    Dim lblFacPfx As String: lblFacPfx = PREFIX_LABEL & PREFIX_FAC
+    Dim shO As Shape, nmO As String
+    For Each shO In ws.Shapes
+        nmO = shO.Name
+        Dim isObsRect As Boolean: isObsRect = False
+        If Left(nmO, Len(lblFacPfx)) = lblFacPfx Then
+            isObsRect = True                                   ' 시설물 명칭 callout
+        ElseIf Left(nmO, Len(PREFIX_BADGE)) = PREFIX_BADGE Then
+            isObsRect = True                                   ' 배지
+        ElseIf Left(nmO, Len(PREFIX_PAIRBOX)) = PREFIX_PAIRBOX Then
+            isObsRect = True                                   ' 선번박스
+        ElseIf Left(nmO, Len(PREFIX_FAC_STATUS)) = PREFIX_FAC_STATUS Then
+            isObsRect = True                                   ' 상태박스
+        ElseIf Left(nmO, Len(PREFIX_FAC)) = PREFIX_FAC Then
+            isObsRect = True                                   ' 시설물 도형
+        End If
+        If isObsRect Then
+            Dim visO As Boolean: visO = False
+            On Error Resume Next: visO = (shO.Visible = msoTrue): On Error GoTo 0
+            If visO Then obsR.Add Array(shO.Left, shO.Top, shO.Left + shO.Width, shO.Top + shO.Height)
+        ElseIf Left(nmO, Len(PREFIX_PAIRARROW)) = PREFIX_PAIRARROW Then
+            Dim visA As Boolean: visA = False
+            On Error Resume Next: visA = (shO.Visible = msoTrue): On Error GoTo 0
+            If visA Then
+                Dim ncA As Long: ncA = 0
+                On Error Resume Next: ncA = shO.Nodes.Count: On Error GoTo 0
+                If ncA >= 2 Then
+                    ' freeform (L-shape 등) — node 별 선분
+                    Dim niA As Long, pA1 As Variant, pA2 As Variant
+                    For niA = 1 To ncA - 1
+                        pA1 = Empty: pA2 = Empty
+                        On Error Resume Next
+                        pA1 = shO.Nodes(niA).Points
+                        pA2 = shO.Nodes(niA + 1).Points
+                        On Error GoTo 0
+                        If Not IsEmpty(pA1) Then
+                            If Not IsEmpty(pA2) Then
+                                obsS.Add Array(CDbl(pA1(1, 1)), CDbl(pA1(1, 2)), CDbl(pA2(1, 1)), CDbl(pA2(1, 2)))
+                            End If
+                        End If
+                    Next niA
+                Else
+                    Dim ax1 As Double, ay1 As Double, ax2 As Double, ay2 As Double
+                    ax1 = 0: ay1 = 0: ax2 = 0: ay2 = 0
+                    On Error Resume Next
+                    GetLineEndpoints shO, ax1, ay1, ax2, ay2
+                    On Error GoTo 0
+                    obsS.Add Array(ax1, ay1, ax2, ay2)
+                End If
+            End If
+        End If
+    Next shO
+
     Dim placedL() As Double, placedT() As Double, placedR() As Double, placedB() As Double
     Dim placedN As Long: placedN = 0
     ReDim placedL(1 To 64): ReDim placedT(1 To 64)
@@ -12425,6 +12483,33 @@ Public Sub 네트웍_케이블박스_동기화(Optional wsArg As Worksheet)
                             End If
                         End If
                     Next pl
+                    ' 사각 장애물 (시설물 명칭·배지·선번박스·상태박스·시설물 도형)
+                    If Not hit Then
+                        Dim ov As Variant
+                        For Each ov In obsR
+                            If cL < CDbl(ov(2)) + LBLAV_GAP Then
+                                If cR > CDbl(ov(0)) - LBLAV_GAP Then
+                                    If cT < CDbl(ov(3)) + LBLAV_GAP Then
+                                        If cB > CDbl(ov(1)) - LBLAV_GAP Then
+                                            hit = True
+                                            Exit For
+                                        End If
+                                    End If
+                                End If
+                            End If
+                        Next ov
+                    End If
+                    ' 선분 장애물 (선번 화살표)
+                    If Not hit Then
+                        Dim sv As Variant
+                        For Each sv In obsS
+                            If 선분_사각형_교차(CDbl(sv(0)), CDbl(sv(1)), CDbl(sv(2)), CDbl(sv(3)), _
+                                                cL - LBLAV_GAP, cT - LBLAV_GAP, cR + LBLAV_GAP, cB + LBLAV_GAP) Then
+                                hit = True
+                                Exit For
+                            End If
+                        Next sv
+                    End If
                     If Not hit Then Exit For
                 Next k
                 On Error Resume Next
