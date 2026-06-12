@@ -5922,8 +5922,55 @@ Public Sub 시설물_leader_site설정(cn As Shape, fac As Shape, tb As Shape)
 End Sub
 
 
+' owner 2026-06-12: 케이블 중앙 부근 진행 방향 — 선로ID 라벨 겹침 회피 슬라이드 축.
+'   polyline 은 가운데 노드(CableCenterPoint 의 midIdx 규칙)와 다음 노드 방향, 직선은 양끝 방향.
+Public Function 케이블중앙_방향(cbl As Shape, ByRef oux As Double, ByRef ouy As Double) As Boolean
+    케이블중앙_방향 = False
+    oux = 1: ouy = 0
+    Dim n As Long: n = 0
+    On Error Resume Next
+    n = cbl.Nodes.Count
+    On Error GoTo 0
+    Dim x1 As Double, y1 As Double, x2 As Double, y2 As Double
+    Dim got As Boolean: got = False
+    If n >= 2 Then
+        Dim midIdx As Long: midIdx = (n + 1) \ 2
+        Dim nextIdx As Long: nextIdx = midIdx + 1
+        If nextIdx > n Then nextIdx = midIdx: midIdx = midIdx - 1
+        If midIdx >= 1 Then
+            Dim p1 As Variant, p2 As Variant
+            On Error Resume Next
+            p1 = cbl.Nodes(midIdx).Points
+            p2 = cbl.Nodes(nextIdx).Points
+            On Error GoTo 0
+            If Not IsEmpty(p1) Then
+                If Not IsEmpty(p2) Then
+                    x1 = CDbl(p1(1, 1)): y1 = CDbl(p1(1, 2))
+                    x2 = CDbl(p2(1, 1)): y2 = CDbl(p2(1, 2))
+                    got = True
+                End If
+            End If
+        End If
+    End If
+    If Not got Then
+        On Error Resume Next
+        GetLineEndpoints cbl, x1, y1, x2, y2
+        On Error GoTo 0
+    End If
+    Dim ddx As Double, ddy As Double
+    ddx = x2 - x1: ddy = y2 - y1
+    Dim dl As Double: dl = Sqr(ddx * ddx + ddy * ddy)
+    If dl < 0.001 Then Exit Function
+    oux = ddx / dl: ouy = ddy / dl
+    케이블중앙_방향 = True
+End Function
+
 '   - 시설물 이동 → connector 자동 reroute → 케이블 중심 이동했을 때 박스가 따라옴.
 '   - 시트_셀_클릭(SheetSelectionChange) 와 정보_적용 가 호출.
+' owner 2026-06-12 (A안): 선로ID 라벨 겹침 자동 회피 — 케이블 교차 지점에서 라벨이 겹쳐 안 보이던 문제.
+'   1) 기본 위치 = 케이블 중앙 (기존 동작 — 겹침 없으면 완전 동일)
+'   2) 먼저 배치된 라벨과 겹치면 (여백 LBLAV_GAP 포함) 자기 케이블 방향으로 ±step 슬라이드하며 빈 자리 탐색
+'   3) 후보 모두 겹치면 마지막 후보 그대로 (드묾)
 Public Sub 네트웍_케이블박스_동기화(Optional wsArg As Worksheet)
     Dim ws As Worksheet
     If wsArg Is Nothing Then
@@ -5941,6 +5988,14 @@ Public Sub 네트웍_케이블박스_동기화(Optional wsArg As Worksheet)
     ws.Unprotect
     On Error GoTo 0
 
+    Const LBLAV_GAP As Double = 6      ' 라벨끼리 최소 여백 (owner: 바짝 붙지 않게 살짝 띄움)
+    Const LBLAV_MAX As Long = 12       ' 슬라이드 후보 최대 횟수 (0=중앙, 홀수=+, 짝수=-)
+
+    Dim placedL() As Double, placedT() As Double, placedR() As Double, placedB() As Double
+    Dim placedN As Long: placedN = 0
+    ReDim placedL(1 To 64): ReDim placedT(1 To 64)
+    ReDim placedR(1 To 64): ReDim placedB(1 To 64)
+
     Dim sh As Shape, cblId As String, box As Shape, pt As Variant
     For Each sh In ws.Shapes
         If Left(sh.Name, Len(PREFIX_CBL)) = PREFIX_CBL Then
@@ -5951,10 +6006,56 @@ Public Sub 네트웍_케이블박스_동기화(Optional wsArg As Worksheet)
             On Error GoTo 0
             If Not box Is Nothing Then
                 pt = CableCenterPoint(sh)
+                Dim cx0 As Double, cy0 As Double
+                cx0 = CDbl(pt(0)): cy0 = CDbl(pt(1))
+                ' 슬라이드 축 = 케이블 중앙 부근 진행 방향
+                Dim dux As Double, duy As Double
+                If Not 케이블중앙_방향(sh, dux, duy) Then dux = 1: duy = 0
+                ' step = 라벨의 방향 투영 폭 + 여백 — 한 칸 밀면 직전 라벨과 정확히 LBLAV_GAP 만큼 떨어짐
+                Dim stepL As Double
+                stepL = Abs(dux) * box.Width + Abs(duy) * box.Height + LBLAV_GAP
+                Dim k As Long, offD As Double
+                Dim cL As Double, cT As Double, cR As Double, cB As Double
+                Dim hit As Boolean
+                For k = 0 To LBLAV_MAX
+                    If k = 0 Then
+                        offD = 0
+                    ElseIf k Mod 2 = 1 Then
+                        offD = ((k + 1) \ 2) * stepL
+                    Else
+                        offD = -(k \ 2) * stepL
+                    End If
+                    cL = (cx0 + dux * offD) - box.Width / 2
+                    cT = (cy0 + duy * offD) - box.Height / 2
+                    cR = cL + box.Width
+                    cB = cT + box.Height
+                    hit = False
+                    Dim pl As Long
+                    For pl = 1 To placedN
+                        If cL < placedR(pl) + LBLAV_GAP Then
+                            If cR > placedL(pl) - LBLAV_GAP Then
+                                If cT < placedB(pl) + LBLAV_GAP Then
+                                    If cB > placedT(pl) - LBLAV_GAP Then
+                                        hit = True
+                                        Exit For
+                                    End If
+                                End If
+                            End If
+                        End If
+                    Next pl
+                    If Not hit Then Exit For
+                Next k
                 On Error Resume Next
-                box.Left = CDbl(pt(0)) - box.Width / 2
-                box.Top = CDbl(pt(1)) - box.Height / 2
+                box.Left = cL
+                box.Top = cT
                 On Error GoTo 0
+                placedN = placedN + 1
+                If placedN > UBound(placedL) Then
+                    ReDim Preserve placedL(1 To placedN * 2): ReDim Preserve placedT(1 To placedN * 2)
+                    ReDim Preserve placedR(1 To placedN * 2): ReDim Preserve placedB(1 To placedN * 2)
+                End If
+                placedL(placedN) = cL: placedT(placedN) = cT
+                placedR(placedN) = cR: placedB(placedN) = cB
             End If
         End If
     Next sh
