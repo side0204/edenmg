@@ -1887,22 +1887,14 @@ Public Sub 선번박스_RN1_페어생성(ws As Worksheet, cblShp As Shape, facSh
     DoEvents
     Const PAIR_GAP As Double = 28                          ' 박스 간격 (owner 요구: 14 → 28, 화살표 길이 2배)
 
-    ' 1. 케이블 단위벡터 — facility → far-end 방향 (cblBox 를 facility 에서 멀어지는 쪽에 배치)
-    Dim cax As Double, cay As Double, cbx As Double, cby As Double
-    GetLineEndpoints cblShp, cax, cay, cbx, cby
-    Dim dAA As Double, dBB As Double
-    dAA = (cax - fcx) * (cax - fcx) + (cay - fcy) * (cay - fcy)
-    dBB = (cbx - fcx) * (cbx - fcx) + (cby - fcy) * (cby - fcy)
-    Dim farX_ As Double, farY_ As Double                   ' facility 와 더 먼 끝
-    If dAA > dBB Then farX_ = cax: farY_ = cay Else farX_ = cbx: farY_ = cby
-    Dim uvx As Double, uvy As Double
-    uvx = farX_ - fcx: uvy = farY_ - fcy                    ' facility → far-end 벡터
-    Dim uvlen As Double: uvlen = Sqr(uvx * uvx + uvy * uvy)
-    If uvlen < 0.001 Then
-        uvx = 1: uvy = 0: uvlen = 1
-    End If
+    ' 1. 케이블 단위벡터 — facility 에서 멀어지는 방향 (cblBox 를 facility 에서 먼 쪽에 배치)
+    '   owner 2026-06-12: chord(양끝 직선) → 케이블_허브방향 (시설물 쪽 첫 segment 방향).
+    '   ㄷ자/L자 폴리라인에서 chord 는 대각선 → cblBox 가 비스듬히 배치돼 화살표가 케이블과
+    '   비평행 (owner 보고: 처음 생성은 평행이어야). 직선 케이블은 chord 와 결과 동일.
     Dim ucx As Double, ucy As Double
-    ucx = uvx / uvlen: ucy = uvy / uvlen                    ' facility 반대 방향 단위벡터
+    If Not 케이블_허브방향(cblShp, fcx, fcy, ucx, ucy) Then
+        ucx = 1: ucy = 0
+    End If
 
     ' 2. anchor = 단일생성 이 정한 cblBox 위치 (cable 근처 facility-side) — 이 위치는 rnBox 가 차지
     Dim anchorX As Double, anchorY As Double
@@ -2150,33 +2142,35 @@ Public Sub 선번박스_RN1_화살표_재라우팅(ws As Worksheet, cblBox As Sh
     On Error Resume Next
     Set cblShpRR = ws.Shapes(cblName)
     On Error GoTo 0
-    Const PAIR_GAP_RR As Double = 28               ' 페어생성 과 일치 (2배 길이)
     If Not cblShpRR Is Nothing Then
-        Dim caxRR As Double, cayRR As Double, cbxRR As Double, cbyRR As Double
-        GetLineEndpoints cblShpRR, caxRR, cayRR, cbxRR, cbyRR
-        Dim dAARR As Double, dBBRR As Double
-        dAARR = (caxRR - fcx) * (caxRR - fcx) + (cayRR - fcy) * (cayRR - fcy)
-        dBBRR = (cbxRR - fcx) * (cbxRR - fcx) + (cbyRR - fcy) * (cbyRR - fcy)
-        Dim farXRR As Double, farYRR As Double
-        If dAARR > dBBRR Then farXRR = caxRR: farYRR = cayRR Else farXRR = cbxRR: farYRR = cbyRR
-        Dim uvxRR As Double, uvyRR As Double
-        uvxRR = farXRR - fcx: uvyRR = farYRR - fcy
-        Dim uvlenRR As Double: uvlenRR = Sqr(uvxRR * uvxRR + uvyRR * uvyRR)
-        If uvlenRR < 0.001 Then uvxRR = 1: uvyRR = 0: uvlenRR = 1
+        ' owner 2026-06-12: chord → 케이블_허브방향 + 사용자가 옮긴 박스 존중.
+        '   기존: cblBox 를 anchor + u·고정거리(perp 0) 로 강제 재배치 — 사용자가 옮긴 위치를 되돌림.
+        '   변경: 겹침 방지 최소 간격(케이블 방향 투영)만 강제, 법선(perp) 오프셋은 보존.
+        '   (owner: 처음 생성은 평행, 임의로 옮기면 옮긴 방향으로 박스 중앙 연결 — 화살표는 v5 중심 연결이 담당)
         Dim ucxRR As Double, ucyRR As Double
-        ucxRR = uvxRR / uvlenRR: ucyRR = uvyRR / uvlenRR
-        ' anchor = rnBox 현재 위치 (재라우팅이라 rnBox 의 facility-side 위치 유지)
+        If Not 케이블_허브방향(cblShpRR, fcx, fcy, ucxRR, ucyRR) Then
+            ucxRR = 1: ucyRR = 0
+        End If
         Dim anchorXRR As Double, anchorYRR As Double
         anchorXRR = rnBox.Left + rnBox.Width / 2
         anchorYRR = rnBox.Top + rnBox.Height / 2
         Dim extARR As Double, extBRR As Double
         extARR = (rnBox.Width / 2) * Abs(ucxRR) + (rnBox.Height / 2) * Abs(ucyRR)
         extBRR = (cblBox.Width / 2) * Abs(ucxRR) + (cblBox.Height / 2) * Abs(ucyRR)
-        Dim centerDistRR As Double: centerDistRR = extARR + extBRR + PAIR_GAP_RR
-        On Error Resume Next
-        cblBox.Left = (anchorXRR + ucxRR * centerDistRR) - cblBox.Width / 2
-        cblBox.Top = (anchorYRR + ucyRR * centerDistRR) - cblBox.Height / 2
-        On Error GoTo 0
+        Dim minGapRR As Double: minGapRR = extARR + extBRR + 8
+        Dim cblCxRR As Double, cblCyRR As Double
+        cblCxRR = cblBox.Left + cblBox.Width / 2
+        cblCyRR = cblBox.Top + cblBox.Height / 2
+        Dim projRR As Double, perpRR As Double
+        projRR = (cblCxRR - anchorXRR) * ucxRR + (cblCyRR - anchorYRR) * ucyRR
+        perpRR = (cblCxRR - anchorXRR) * (-ucyRR) + (cblCyRR - anchorYRR) * ucxRR
+        If projRR < minGapRR Then
+            On Error Resume Next
+            cblBox.Left = (anchorXRR + ucxRR * minGapRR + (-ucyRR) * perpRR) - cblBox.Width / 2
+            cblBox.Top = (anchorYRR + ucyRR * minGapRR + ucxRR * perpRR) - cblBox.Height / 2
+            AltSetLastPos cblBox, cblBox.Left, cblBox.Top
+            On Error GoTo 0
+        End If
     End If
     DoEvents
     Dim arrPts As Variant
@@ -2231,55 +2225,47 @@ End Sub
 '     4. 화살표 = 단순 직선 1개 (양 부착점 직접 연결)
 '
 '   owner 2026-06-06 v4 spec (기존 v3 폐기): 화살표를 항상 케이블과 평행하게 유지.
-'     1. 케이블 단위벡터 u 계산 (방향 무관 — 부호는 box1→box2 dot u 로 결정)
-'     2. 화살표 = box1 가장자리 → box2 가장자리, 방향은 u 와 평행
-'     3. 박스 가장자리 부착점 = box 중심 + ext * u (ext = (W/2)*|ux| + (H/2)*|uy|, axis-aligned 사각형 투영)
-'     4. 두 박스 중심을 잇는 선이 u 와 어긋나도 화살표는 강제 평행 — 박스 위치 보정은 RN1_페어생성 가 담당
+'
+'   owner 2026-06-12 v5 spec (v4 의 케이블 평행 강제 + perp 평균 직선 보정 폐기):
+'     화살표 = 두 박스 「중심」 을 직접 연결 (owner 보고: perp 평균 방식은 박스가 어긋난 경우
+'     화살촉이 왼쪽 박스 하단·오른쪽 박스 상단에 붙음 — 중앙에 와야).
+'     1. 방향 = box1 중심 → box2 중심 단위벡터 (중심 일치 시 케이블 허브방향 fallback)
+'     2. 부착점 = 중심 ± ext (축평행 사각형의 방향 투영 extent)
+'     박스가 케이블 평행으로 정상 배치된 경우(중심 동일선상) v4 와 결과 동일.
+'     어긋난 배치는 중심을 지나는 기울어진 직선 — 화살촉이 항상 박스 중앙을 향함.
 '
 '   반환: arrPts(1 To 2, 1 To 2) — 2-point 직선
 Public Function 선번박스_경로_시설물페어(cableShp As Shape, box1 As Shape, box2 As Shape) As Variant
-    ' 2. 박스 중심 (방향 계산의 허브 근사점으로 먼저 필요)
+    ' 박스 중심
     Dim b1x As Double, b1y As Double, b2x As Double, b2y As Double
     b1x = box1.Left + box1.Width / 2
     b1y = box1.Top + box1.Height / 2
     b2x = box2.Left + box2.Width / 2
     b2y = box2.Top + box2.Height / 2
 
-    ' 1. 케이블 방향 단위벡터 — owner 2026-06-11: ㄷ자/L자 다조 케이블은 chord(양끝 직선)가 아니라
-    '   박스들이 붙어 있는 「허브 쪽 segment」 방향이어야 화살표가 박스 배열과 평행 (틀어짐 원인).
-    '   두 박스 중점 = 허브 근사점. 직선 케이블은 기존 chord 와 동일 결과 (RN 무영향).
-    Dim ux As Double, uy As Double
-    If Not 케이블_허브방향(cableShp, (b1x + b2x) / 2, (b1y + b2y) / 2, ux, uy) Then
-        ux = 1: uy = 0                                    ' fallback (길이 0 케이블)
+    ' 방향 = 중심 → 중심 (v5). 중심 일치 (이상 케이스) 만 케이블 허브방향 fallback.
+    Dim ex As Double, ey As Double
+    Dim ddx As Double, ddy As Double, dLen As Double
+    ddx = b2x - b1x: ddy = b2y - b1y
+    dLen = Sqr(ddx * ddx + ddy * ddy)
+    If dLen > 0.001 Then
+        ex = ddx / dLen: ey = ddy / dLen
+    Else
+        If Not 케이블_허브방향(cableShp, (b1x + b2x) / 2, (b1y + b2y) / 2, ex, ey) Then
+            ex = 1: ey = 0                                ' fallback (길이 0 케이블)
+        End If
     End If
 
-    ' 3. box1 → box2 방향이 +u 인지 -u 인지 결정 (dot product 부호)
-    '   주의: 변수명 sgn 은 VBA 내장함수 Sgn 과 충돌 (컴파일 오류) → dirSign 사용.
-    Dim dotU As Double: dotU = (b2x - b1x) * ux + (b2y - b1y) * uy
-    Dim dirSign As Double
-    If dotU >= 0 Then dirSign = 1# Else dirSign = -1#
-    Dim ex As Double, ey As Double
-    ex = ux * dirSign: ey = uy * dirSign                  ' box1 → box2 향한 단위벡터
-
-    ' 4. 박스 가장자리 부착점 — 축평행 사각형의 방향 투영 extent
+    ' 박스 가장자리 부착점 — 축평행 사각형의 방향 투영 extent
     Dim ext1 As Double, ext2 As Double
     ext1 = (box1.Width / 2) * Abs(ex) + (box1.Height / 2) * Abs(ey)
     ext2 = (box2.Width / 2) * Abs(ex) + (box2.Height / 2) * Abs(ey)
 
-    ' 4.5 owner 2026-06-11: 직선 보정 — 두 박스 중심이 케이블 평행선에서 살짝 어긋나도 (옛 배치·드래그 잔재)
-    '   화살표는 두 중심의 perp 평균을 지나는 케이블 평행 「직선」 으로. 정상 배치(동일선상)는 보정량 0 — 기존과 완전 동일.
-    Dim nxP As Double, nyP As Double               ' 케이블 법선
-    nxP = -ey: nyP = ex
-    Dim perp1P As Double, perp2P As Double, perpMidP As Double
-    perp1P = b1x * nxP + b1y * nyP
-    perp2P = b2x * nxP + b2y * nyP
-    perpMidP = (perp1P + perp2P) / 2
-
     Dim e1x As Double, e1y As Double, e2x As Double, e2y As Double
-    e1x = b1x + ext1 * ex + (perpMidP - perp1P) * nxP
-    e1y = b1y + ext1 * ey + (perpMidP - perp1P) * nyP
-    e2x = b2x - ext2 * ex + (perpMidP - perp2P) * nxP
-    e2y = b2y - ext2 * ey + (perpMidP - perp2P) * nyP
+    e1x = b1x + ext1 * ex
+    e1y = b1y + ext1 * ey
+    e2x = b2x - ext2 * ex
+    e2y = b2y - ext2 * ey
 
     Dim pts() As Double
     ReDim pts(1 To 2, 1 To 2)
@@ -3371,10 +3357,11 @@ Public Sub 페어화살표_시설물페어_재정렬(ws As Worksheet)
             If Not 케이블_허브방향(cableShp, fcxRA, fcyRA, ucxRA, ucyRA) Then
                 ucxRA = 1: ucyRA = 0
             End If
-            ' owner 2026-06-10 「간격 기억」 — 28pt 고정 대신 현재 간격(케이블 방향 투영)을 유지하고 방향만 재정렬.
-            '   드래그로 늘린 간격·줌이 스케일한 간격이 셀클릭 후에도 유지. 겹침 방지 최소 간격만 강제.
-            '   ※ 복원 방법: cdRA 계산을 「cdRA = extARA + extBRA + PAIR_GAP_RA」 로 바꾸면 옛(28pt 고정) 동작. (변경 전 = 커밋 98a88d0)
-            Const PAIR_GAP_RA As Double = 28          ' (복원용 보존 — 간격 기억 방식에선 미사용)
+            ' owner 2026-06-10 「간격 기억」 — 드래그로 늘린 간격(케이블 방향 투영) 유지.
+            ' owner 2026-06-12: 법선(perp) 오프셋도 보존 — 사용자가 임의로 옮긴 박스를 되돌리지 않음.
+            '   (이전: perp 0 스냅 = 케이블 평행 강제 → 옮긴 박스가 셀클릭마다 제자리로. owner:
+            '    처음 생성은 평행, 옮기면 옮긴 방향으로 박스 중앙 연결 — 화살표는 경로_시설물페어 v5 가 중심 연결.)
+            '   겹침 방지 최소 간격만 강제 (그때도 perp 보존).
             ' anchor = rnBox 현재 위치 (facility 쪽)
             Dim anchorXRA As Double, anchorYRA As Double
             anchorXRA = rnBoxRA.Left + rnBoxRA.Width / 2
@@ -3383,20 +3370,23 @@ Public Sub 페어화살표_시설물페어_재정렬(ws As Worksheet)
             extARA = (rnBoxRA.Width / 2) * Abs(ucxRA) + (rnBoxRA.Height / 2) * Abs(ucyRA)
             extBRA = (cblBoxRA.Width / 2) * Abs(ucxRA) + (cblBoxRA.Height / 2) * Abs(ucyRA)
             Dim minGapRA As Double: minGapRA = extARA + extBRA + 8
-            Dim curProjRA As Double
-            curProjRA = ((cblBoxRA.Left + cblBoxRA.Width / 2) - anchorXRA) * ucxRA + _
-                        ((cblBoxRA.Top + cblBoxRA.Height / 2) - anchorYRA) * ucyRA
-            Dim cdRA As Double: cdRA = curProjRA
-            If cdRA < minGapRA Then cdRA = minGapRA
-            Dim newLRA As Double, newTRA As Double
-            newLRA = (anchorXRA + ucxRA * cdRA) - cblBoxRA.Width / 2
-            newTRA = (anchorYRA + ucyRA * cdRA) - cblBoxRA.Height / 2
-            If Abs(newLRA - cblBoxRA.Left) > 0.5 Or Abs(newTRA - cblBoxRA.Top) > 0.5 Then
-                On Error Resume Next
-                cblBoxRA.Left = newLRA
-                cblBoxRA.Top = newTRA
-                AltSetLastPos cblBoxRA, cblBoxRA.Left, cblBoxRA.Top   ' 재정렬 이동을 다음 클릭 chain 평행이동이 「드래그」로 오인 방지
-                On Error GoTo 0
+            Dim cblCxRA As Double, cblCyRA As Double
+            cblCxRA = cblBoxRA.Left + cblBoxRA.Width / 2
+            cblCyRA = cblBoxRA.Top + cblBoxRA.Height / 2
+            Dim curProjRA As Double, perpOffRA As Double
+            curProjRA = (cblCxRA - anchorXRA) * ucxRA + (cblCyRA - anchorYRA) * ucyRA
+            perpOffRA = (cblCxRA - anchorXRA) * (-ucyRA) + (cblCyRA - anchorYRA) * ucxRA
+            If curProjRA < minGapRA Then
+                Dim newLRA As Double, newTRA As Double
+                newLRA = (anchorXRA + ucxRA * minGapRA + (-ucyRA) * perpOffRA) - cblBoxRA.Width / 2
+                newTRA = (anchorYRA + ucyRA * minGapRA + ucxRA * perpOffRA) - cblBoxRA.Height / 2
+                If Abs(newLRA - cblBoxRA.Left) > 0.5 Or Abs(newTRA - cblBoxRA.Top) > 0.5 Then
+                    On Error Resume Next
+                    cblBoxRA.Left = newLRA
+                    cblBoxRA.Top = newTRA
+                    AltSetLastPos cblBoxRA, cblBoxRA.Left, cblBoxRA.Top   ' 재정렬 이동을 다음 클릭 chain 평행이동이 「드래그」로 오인 방지
+                    On Error GoTo 0
+                End If
             End If
         End If
 
