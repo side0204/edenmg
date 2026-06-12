@@ -5655,6 +5655,14 @@ Public Sub 검색_수행()
         Dim mex As Boolean: mex = mEntry(2)
         If (Not anyExact) Or mex Then
             검색_강조_적용 mws, msh
+            ' owner 2026-06-12: 포인트검색 — 배지 매치 시 그 시설물 도형에도 강조 링.
+            '   배지 = badge_<facId>, 시설물 도형 이름 = facId.
+            If Left(msh.Name, Len(PREFIX_BADGE)) = PREFIX_BADGE Then
+                Dim facIdHL As String: facIdHL = Mid(msh.Name, Len(PREFIX_BADGE) + 1)
+                Dim facShpHL As Shape: Set facShpHL = Nothing
+                On Error Resume Next: Set facShpHL = mws.Shapes(facIdHL): On Error GoTo 0
+                If Not facShpHL Is Nothing Then 검색_강조_시설물 mws, facShpHL
+            End If
             totalHits = totalHits + 1
             If mws Is wsAd Then
                 If firstShapeAd Is Nothing Then Set firstShapeAd = msh
@@ -5988,6 +5996,43 @@ Public Sub 검색_강조_적용(ws As Worksheet, shp As Shape)
     shp.Line.ForeColor.RGB = HL_LINE_COLOR
     shp.Line.Weight = HL_LINE_WEIGHT
     On Error GoTo 0
+End Sub
+
+' owner 2026-06-12: 시설물 도형 강조 — line 직접 변경 대신 overlay 링.
+'   포인트검색이 배지만 강조하던 것을 시설물에도 확장. 양식 복제(그룹) 시설물은 line 색을
+'   덮어쓰면 자식 도형들이 한 색으로 오염되고 복원도 단일값이라 불가 → 별도 링이 안전.
+'   링은 g_search_highlighted 에 "overlay|" 키로 등록 — 검색_강조_해제 가 자동 삭제 (기존 인프라).
+Public Sub 검색_강조_시설물(ws As Worksheet, facShp As Shape)
+    If ws Is Nothing Then Exit Sub
+    If facShp Is Nothing Then Exit Sub
+    If g_search_highlighted Is Nothing Then Set g_search_highlighted = CreateObject("Scripting.Dictionary")
+
+    Dim wasProtH As Boolean: wasProtH = ws.ProtectContents Or ws.ProtectDrawingObjects
+    On Error Resume Next: ws.Unprotect: On Error GoTo 0
+
+    Const HL_PAD As Double = 4
+    Dim ov As Shape: Set ov = Nothing
+    On Error Resume Next
+    Set ov = ws.Shapes.AddShape(msoShapeOval, facShp.Left - HL_PAD, facShp.Top - HL_PAD, _
+                                facShp.Width + HL_PAD * 2, facShp.Height + HL_PAD * 2)
+    On Error GoTo 0
+    If Not ov Is Nothing Then
+        On Error Resume Next
+        ov.Name = "_srch_hl_" & NewId8()
+        ov.Placement = 3
+        ov.Fill.Visible = msoFalse
+        With ov.Line
+            .Visible = msoTrue
+            .ForeColor.RGB = RGB(180, 100, 240)        ' 검색_강조_적용 과 동일 연보라
+            .Weight = 4#
+        End With
+        ov.OnAction = "리더_클릭_무시"                  ' 링이 클릭에 잡히지 않게 (leader 와 동일 패턴)
+        ov.ZOrder msoBringToFront
+        On Error GoTo 0
+        g_search_highlighted("overlay|" & ws.Name & "|" & ov.Name) = "1"
+    End If
+
+    If wasProtH Then ApplySheetProtection ws
 End Sub
 
 ' 강조 해제 — 모든 overlay 도형 삭제 + 백업된 line 색·굵기 복원.
