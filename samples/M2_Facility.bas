@@ -5560,15 +5560,30 @@ Public Sub 네트웍_케이블_재라우팅(Optional wsArg As Worksheet)
                     If csN >= 9 Then Exit For
                     csN = csN + 1: csList(csN) = addS
                 Next addS
-                Dim ci As Long
+                Dim ci As Long, foundC As Boolean: foundC = False
                 For ci = 1 To csN
                     Dim ptsC() As Double, nC As Long
                     네트웍_다조_경로점 fcx, fcy, tcx, tcy, csList(ci), gridWR, gridHR, ptsC, nC
                     If Not 다조_경로_충돌(ptsC, nC, obsSegs) Then
                         ptsE = ptsC: nE = nC
+                        foundC = True
                         Exit For
                     End If
                 Next ci
+                ' owner 2026-06-12 후속: ㄷ자/L자 후보 모두 겹침 (밀집 구간) → 대각선(V자) 우회.
+                '   다리가 대각선이라 축 평행 케이블과 평행 겹침 불가. ±1칸·±2칸 순.
+                If Not foundC Then
+                    Dim vm As Long, vSgn As Double
+                    For vm = 1 To 4
+                        If vm Mod 2 = 1 Then vSgn = (vm + 1) \ 2 Else vSgn = -(vm \ 2)
+                        Dim ptsV() As Double, nV As Long
+                        네트웍_다조_V경로 fcx, fcy, tcx, tcy, vSgn, gridWR, gridHR, ptsV, nV
+                        If Not 다조_경로_충돌(ptsV, nV, obsSegs) Then
+                            ptsE = ptsV: nE = nV
+                            Exit For
+                        End If
+                    Next vm
+                End If
             End If
             ' 채택 경로 등록 — 이후 케이블의 충돌 검사 대상 (rebuild 여부와 무관)
             다조_경로_등록 ptsE, nE, obsSegs
@@ -5719,6 +5734,27 @@ Private Sub 다조_경로_등록(pts() As Double, nPts As Long, obsSegs As Colle
     For i = 1 To nPts - 1
         obsSegs.Add Array(pts(i, 1), pts(i, 2), pts(i + 1, 1), pts(i + 1, 2))
     Next i
+End Sub
+
+' owner 2026-06-12: 대각선(V자) 우회 — ㄷ자/L자 후보가 모두 다른 케이블과 겹칠 때의 최후 우회.
+'   경로 = 출발 → 구간 중점 + perp m칸 → 도착 (꺾임 1회). 두 다리가 대각선이라
+'   축 평행 케이블과 「평행 겹침」 이 원천 불가 (교차만 발생 — 교차는 허용).
+Private Sub 네트웍_다조_V경로(fcx As Double, fcy As Double, tcx As Double, tcy As Double, _
+                              m As Double, gridW As Double, gridH As Double, _
+                              ByRef pts() As Double, ByRef nPts As Long)
+    Dim dx As Double, dy As Double
+    dx = tcx - fcx: dy = tcy - fcy
+    Dim ulen As Double: ulen = Sqr(dx * dx + dy * dy)
+    If ulen < 0.001 Then ulen = 1
+    Dim px As Double, py As Double
+    px = -dy / ulen: py = dx / ulen
+    Dim cellSpan As Double: cellSpan = Abs(px) * gridW + Abs(py) * gridH
+    nPts = 3
+    ReDim pts(1 To 3, 1 To 2)
+    pts(1, 1) = fcx: pts(1, 2) = fcy
+    pts(2, 1) = (fcx + tcx) / 2 + px * m * cellSpan
+    pts(2, 2) = (fcy + tcy) / 2 + py * m * cellSpan
+    pts(3, 1) = tcx: pts(3, 2) = tcy
 End Sub
 
 ' 케이블 도형이 기대 경로(pts)와 일치하는지 — 노드(freeform) 또는 끝점(직선), 정/역방향 모두 허용.
