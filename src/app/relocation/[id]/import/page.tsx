@@ -3,6 +3,7 @@ import { redirect, notFound } from 'next/navigation'
 import { ChevronLeft } from 'lucide-react'
 import { createClient } from '@/lib/supabase/server'
 import RelocationImportClient from '../RelocationImportClient'
+import ScreenCaptureImport from '../ScreenCaptureImport'
 
 // 지장이설 데이터 가져오기 — 표준 템플릿(시설·케이블·회선) CSV 일괄 등록.
 
@@ -46,6 +47,8 @@ export default async function RelocationImportPage({
             등록합니다. 각 템플릿을 내려받아 채운 뒤 업로드하세요.
           </p>
         </header>
+
+        <ScreenCaptureImport projectId={project.id} />
 
         <RelocationImportClient projectId={project.id} />
       </div>

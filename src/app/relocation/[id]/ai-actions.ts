@@ -19,7 +19,11 @@ export type ChatMessage =
   | { role: 'user'; content: string }
   | { role: 'assistant'; content: string }
 
-const MAX_ITERATIONS = 10
+const MAX_ITERATIONS = 16
+
+// 첨부 이미지 (캡처 화면 자동 도면화)
+const ALLOWED_IMAGE_TYPES = ['image/png', 'image/jpeg', 'image/webp', 'image/gif']
+const MAX_IMAGE_B64 = 7_000_000 // base64 길이 기준 ~5MB 원본
 
 // owner 게이트 — PoC 단계에서 단 한 명만
 async function requireOwner() {
@@ -174,6 +178,7 @@ export async function runAIChat(
   projectId: string,
   history: ChatMessage[],
   userMessage: string,
+  image?: { data: string; mediaType: string } | null,
 ): Promise<
   | {
       ok: true
@@ -186,8 +191,20 @@ export async function runAIChat(
   const gate = await requireOwner()
   if (!gate.ok) return { ok: false, error: gate.error }
   if (!projectId) return { ok: false, error: '프로젝트 id 가 없습니다.' }
-  const userText = (userMessage ?? '').trim()
-  if (!userText) return { ok: false, error: '메시지를 입력하세요.' }
+
+  const hasImage = !!(image && typeof image.data === 'string' && image.data.length > 0)
+  if (hasImage) {
+    if (!ALLOWED_IMAGE_TYPES.includes(image!.mediaType)) {
+      return { ok: false, error: '지원하지 않는 이미지 형식입니다 (PNG·JPG·WEBP·GIF).' }
+    }
+    if (image!.data.length > MAX_IMAGE_B64) {
+      return { ok: false, error: '이미지가 너무 큽니다. 더 작은 영역으로 캡처해 다시 시도하세요.' }
+    }
+  }
+
+  let userText = (userMessage ?? '').trim()
+  if (!userText && !hasImage) return { ok: false, error: '메시지를 입력하세요.' }
+  if (!userText) userText = '이 캡처 화면에 보이는 시설과 케이블을 모두 캔버스에 그려줘.'
 
   let client
   try {
@@ -201,7 +218,26 @@ export async function runAIChat(
   for (const m of history) {
     messages.push({ role: m.role, content: m.content })
   }
-  messages.push({ role: 'user', content: userText })
+  if (hasImage) {
+    messages.push({
+      role: 'user',
+      content: [
+        { type: 'text', text: userText },
+        {
+          type: 'image',
+          source: {
+            type: 'base64',
+            media_type: image!.mediaType as 'image/png' | 'image/jpeg' | 'image/webp' | 'image/gif',
+            data: image!.data,
+          },
+          // tool-use 루프 동안 큰 이미지를 매 라운드 재전송 — 캐싱으로 단가 절감
+          cache_control: { type: 'ephemeral' },
+        },
+      ],
+    })
+  } else {
+    messages.push({ role: 'user', content: userText })
+  }
 
   const toolCalls: { name: string; input: unknown; result: unknown }[] = []
   let finalText = ''

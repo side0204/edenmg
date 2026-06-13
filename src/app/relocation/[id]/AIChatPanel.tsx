@@ -2,7 +2,7 @@
 
 import { useState, useRef, useEffect } from 'react'
 import { useRouter } from 'next/navigation'
-import { Sparkles, Send, X, Loader2 } from 'lucide-react'
+import { Sparkles, Send, X, Loader2, ImagePlus } from 'lucide-react'
 import { runAIChat, type ChatMessage } from './ai-actions'
 
 type ToolCall = { name: string; input: unknown; result: unknown }
@@ -11,6 +11,38 @@ type Bubble = {
   role: 'user' | 'assistant'
   text: string
   toolCalls?: ToolCall[]
+  image?: string // 첨부 캡처 썸네일 (data URL)
+}
+
+type PendingImage = { dataUrl: string; base64: string; mediaType: string }
+
+// 캡처 화면을 캔버스로 축소(긴 변 1568px) — Claude 비전 권장 해상도 + 단가 절감.
+// PNG 유지로 선·글자 선명도 보존.
+async function fileToDownscaledImage(file: File): Promise<PendingImage> {
+  const MAX_EDGE = 1568
+  const srcUrl = await new Promise<string>((resolve, reject) => {
+    const r = new FileReader()
+    r.onload = () => resolve(r.result as string)
+    r.onerror = () => reject(new Error('read failed'))
+    r.readAsDataURL(file)
+  })
+  const img = await new Promise<HTMLImageElement>((resolve, reject) => {
+    const im = new Image()
+    im.onload = () => resolve(im)
+    im.onerror = () => reject(new Error('decode failed'))
+    im.src = srcUrl
+  })
+  const scale = Math.min(1, MAX_EDGE / Math.max(img.width, img.height))
+  const w = Math.max(1, Math.round(img.width * scale))
+  const h = Math.max(1, Math.round(img.height * scale))
+  const canvas = document.createElement('canvas')
+  canvas.width = w
+  canvas.height = h
+  const ctx = canvas.getContext('2d')
+  if (!ctx) throw new Error('canvas unavailable')
+  ctx.drawImage(img, 0, 0, w, h)
+  const out = canvas.toDataURL('image/png')
+  return { dataUrl: out, base64: out.split(',')[1] ?? '', mediaType: 'image/png' }
 }
 
 const SAMPLE_PROMPTS = [
@@ -26,11 +58,30 @@ export default function AIChatPanel({ projectId }: { projectId: string }) {
   // Claude 에게 보내는 history — assistant 는 최종 text 만
   const [history, setHistory] = useState<ChatMessage[]>([])
   const [input, setInput] = useState('')
+  const [pendingImage, setPendingImage] = useState<PendingImage | null>(null)
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const inputRef = useRef<HTMLTextAreaElement>(null)
+  const fileRef = useRef<HTMLInputElement>(null)
   const scrollRef = useRef<HTMLDivElement>(null)
   const router = useRouter()
+
+  async function onPickImage(e: React.ChangeEvent<HTMLInputElement>) {
+    const file = e.target.files?.[0]
+    e.target.value = '' // 같은 파일 다시 선택 가능하게
+    if (!file) return
+    if (!file.type.startsWith('image/')) {
+      setError('이미지 파일만 첨부할 수 있습니다.')
+      return
+    }
+    try {
+      const img = await fileToDownscaledImage(file)
+      setPendingImage(img)
+      setError(null)
+    } catch {
+      setError('이미지를 읽지 못했습니다.')
+    }
+  }
 
   useEffect(() => {
     const el = scrollRef.current
@@ -43,17 +94,27 @@ export default function AIChatPanel({ projectId }: { projectId: string }) {
 
   async function send(message?: string) {
     const text = (message ?? input).trim()
-    if (!text || loading) return
+    const img = pendingImage
+    if ((!text && !img) || loading) return
     setInput('')
     setError(null)
     setLoading(true)
 
-    const nextBubbles: Bubble[] = [...bubbles, { role: 'user', text }]
+    const nextBubbles: Bubble[] = [
+      ...bubbles,
+      { role: 'user', text: text || '(캡처 화면 분석)', image: img?.dataUrl },
+    ]
     setBubbles(nextBubbles)
+    setPendingImage(null)
     const historyForCall = history
 
     try {
-      const result = await runAIChat(projectId, historyForCall, text)
+      const result = await runAIChat(
+        projectId,
+        historyForCall,
+        text,
+        img ? { data: img.base64, mediaType: img.mediaType } : null,
+      )
       if (!result.ok) {
         setError(result.error)
       } else {
@@ -63,7 +124,7 @@ export default function AIChatPanel({ projectId }: { projectId: string }) {
         ])
         setHistory([
           ...historyForCall,
-          { role: 'user', content: text },
+          { role: 'user', content: text || '(캡처 화면을 첨부해 시설·케이블 자동 분석 요청)' },
           { role: 'assistant', content: result.reply },
         ])
         if (result.mutated) router.refresh()
@@ -87,6 +148,7 @@ export default function AIChatPanel({ projectId }: { projectId: string }) {
     setBubbles([])
     setHistory([])
     setError(null)
+    setPendingImage(null)
   }
 
   if (!open) {
@@ -138,6 +200,9 @@ export default function AIChatPanel({ projectId }: { projectId: string }) {
             <p className="text-xs text-slate-500">
               자연어로 요청하면 캔버스에 시설·케이블을 자동으로 그려드립니다.
             </p>
+            <p className="rounded border border-indigo-200 bg-indigo-50 px-2 py-1.5 text-[11px] text-indigo-700">
+              📷 <strong>캡처 화면을 첨부</strong>하면 시설·케이블을 자동으로 읽어 그립니다. (아래 사진 버튼)
+            </p>
             <div className="space-y-1.5">
               <p className="text-[11px] font-medium text-slate-600">예시:</p>
               {SAMPLE_PROMPTS.map((p) => (
@@ -166,6 +231,14 @@ export default function AIChatPanel({ projectId }: { projectId: string }) {
                   : 'bg-white border border-slate-200 text-slate-800')
               }
             >
+              {b.image && (
+                // eslint-disable-next-line @next/next/no-img-element
+                <img
+                  src={b.image}
+                  alt="첨부 캡처"
+                  className="mb-1.5 max-h-40 w-full rounded border border-white/30 object-contain bg-white"
+                />
+              )}
               {b.text}
               {b.toolCalls && b.toolCalls.length > 0 && (
                 <details className="mt-2 text-[11px]">
@@ -208,7 +281,43 @@ export default function AIChatPanel({ projectId }: { projectId: string }) {
       </div>
 
       <div className="border-t border-slate-200 p-2 shrink-0 bg-white">
+        {pendingImage && (
+          <div className="mb-2 flex items-center gap-2 rounded-lg border border-indigo-200 bg-indigo-50 p-1.5">
+            {/* eslint-disable-next-line @next/next/no-img-element */}
+            <img
+              src={pendingImage.dataUrl}
+              alt="첨부 예정 캡처"
+              className="h-12 w-16 rounded border border-indigo-200 object-cover"
+            />
+            <span className="flex-1 text-[11px] text-indigo-700">
+              캡처 화면 첨부됨 — 전송하면 분석합니다.
+            </span>
+            <button
+              onClick={() => setPendingImage(null)}
+              className="rounded p-1 text-indigo-500 hover:bg-indigo-100"
+              aria-label="첨부 제거"
+            >
+              <X className="h-4 w-4" />
+            </button>
+          </div>
+        )}
         <div className="flex items-end gap-2">
+          <input
+            ref={fileRef}
+            type="file"
+            accept="image/*"
+            onChange={onPickImage}
+            className="hidden"
+          />
+          <button
+            onClick={() => fileRef.current?.click()}
+            disabled={loading}
+            className="rounded-lg border border-slate-300 hover:bg-slate-50 disabled:opacity-40 p-2 text-slate-600 shrink-0"
+            aria-label="캡처 화면 첨부"
+            title="캡처 화면 첨부"
+          >
+            <ImagePlus className="h-4 w-4" />
+          </button>
           <textarea
             ref={inputRef}
             value={input}
@@ -216,12 +325,12 @@ export default function AIChatPanel({ projectId }: { projectId: string }) {
             onKeyDown={onKeyDown}
             disabled={loading}
             rows={2}
-            placeholder="자연어로 입력 (Enter 전송, Shift+Enter 줄바꿈)"
+            placeholder="자연어로 입력 · 사진 버튼으로 캡처 첨부 (Enter 전송)"
             className="flex-1 resize-none rounded-lg border border-slate-300 px-2 py-1.5 text-sm focus:border-indigo-500 focus:outline-none disabled:opacity-50"
           />
           <button
             onClick={() => send()}
-            disabled={loading || !input.trim()}
+            disabled={loading || (!input.trim() && !pendingImage)}
             className="rounded-lg bg-indigo-600 hover:bg-indigo-700 disabled:opacity-40 px-3 py-2 text-white shrink-0"
             aria-label="전송"
           >
