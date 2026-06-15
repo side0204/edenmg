@@ -1471,22 +1471,25 @@ Public Sub 선번연결_도구_박스정렬_silent(silent As Boolean)
             Next jj
         Next ii
 
-        ' 정렬된 순서대로 캐논 아래에 stack
-        Dim prevB1Y As Double, prevB2Y As Double
-        prevB1Y = canonB1.Top + canonB1.Height
-        prevB2Y = canonB2.Top + canonB2.Height
+        ' owner 2026-06-15: 1:1 정렬 — 각 cascade 짝(cB1,cB2)을 「같은 행 Y」 에 두고, 행 높이는
+        '   두 박스 중 큰 쪽으로 진행 → 좌·우 열이 어긋나지 않고 나란히. (기존: 열마다 자기 높이로 따로
+        '   진행 → 박스 줄수(높이) 다르면 좌우가 점점 어긋났음 = owner 보고 "1:1 정렬 안 됨")
         Dim prevB1X As Double, prevB2X As Double
         prevB1X = canonB1.Left: prevB2X = canonB2.Left
+        Dim rowY As Double: rowY = canonB1.Top + canonB1.Height
+        Dim canon2Bot As Double: canon2Bot = canonB2.Top + canonB2.Height
+        If canon2Bot > rowY Then rowY = canon2Bot          ' 캐논 좌우가 어긋나면 더 아래쪽 기준으로 시작
         For ii = 1 To cnt
             Dim cB1 As Shape, cB2 As Shape
             Set cB1 = cascB1List(idxArr(ii))
             Set cB2 = cascB2List(idxArr(ii))
             cB1.Left = prevB1X
-            cB1.Top = prevB1Y
+            cB1.Top = rowY
             cB2.Left = prevB2X
-            cB2.Top = prevB2Y
-            prevB1Y = cB1.Top + cB1.Height
-            prevB2Y = cB2.Top + cB2.Height
+            cB2.Top = rowY
+            Dim rowH As Double: rowH = cB1.Height
+            If cB2.Height > rowH Then rowH = cB2.Height
+            rowY = rowY + rowH
             ' owner 2026-06-06 (8-23): 시스템 이동 후 lastPos 동기화 — chain 평행 이동 처리에서 사용자 이동으로 오인 방지.
             On Error Resume Next
             AltSetLastPos cB1, cB1.Left, cB1.Top
@@ -1500,15 +1503,16 @@ Public Sub 선번연결_도구_박스정렬_silent(silent As Boolean)
         On Error GoTo 0
     End If
 
-    ' 3) main 화살표 재라우팅 — 가장 아래 박스 (canon 또는 마지막 cascade) 사이 L-shape
+    ' 3) main 화살표 재라우팅 — owner 2026-06-15: 「시설물(케이블)에 가장 가까운 박스」 사이로 통일.
+    '    기존엔 "맨 아래 cascade 박스" 였는데, 권위 함수 페어화살표_시설물페어_재정렬 은 facility-nearest
+    '    (M3 gTopA/gTopB) 로 그림 → 둘이 달라 박스추가 시 화살표가 엉킴(제각각). 같은 규칙으로 맞춤.
+    '    radial·비-cascade 는 canon 1개뿐이라 결과 동일(무영향) — 방사형 규칙 안 건드림.
+    Dim fcxN As Double, fcyN As Double
+    fcxN = facShp.Left + facShp.Width / 2
+    fcyN = facShp.Top + facShp.Height / 2
     Dim bottomB1 As Shape, bottomB2 As Shape
-    If cascB1List.Count > 0 Then
-        Set bottomB1 = cascB1List(cascB1List.Count)
-        Set bottomB2 = cascB2List(cascB2List.Count)
-    Else
-        Set bottomB1 = canonB1
-        Set bottomB2 = canonB2
-    End If
+    Set bottomB1 = 박스정렬_시설물최근접(canonB1, cascB1List, fcxN, fcyN)
+    Set bottomB2 = 박스정렬_시설물최근접(canonB2, cascB2List, fcxN, fcyN)
 
     Dim mainTagFwd As String, mainTagRev As String
     mainTagFwd = "main=1|fac=" & g_pt_facId & "|cblA=" & aNameL & "|cblB=" & bNameL
@@ -1561,6 +1565,135 @@ Public Sub 선번연결_도구_박스정렬_silent(silent As Boolean)
     If wasProt Then ApplySheetProtection ws
     Application.StatusBar = "박스 정렬 완료 — cascade 박스 stack 재정렬 + main 화살표 재라우팅."
 End Sub
+
+' owner 2026-06-15: 캐논 + cascade 박스 중 시설물 중심에 가장 가까운 박스 반환.
+'   페어화살표_시설물페어_재정렬 의 gTopA/gTopB(facility-nearest) 규칙과 동일 — main 화살표 끝점 통일용.
+Private Function 박스정렬_시설물최근접(canon As Shape, cascList As Collection, fcx As Double, fcy As Double) As Shape
+    Set 박스정렬_시설물최근접 = canon
+    Dim best As Double: best = 1E+30
+    If Not canon Is Nothing Then
+        Dim cx As Double, cy As Double
+        cx = canon.Left + canon.Width / 2: cy = canon.Top + canon.Height / 2
+        best = (cx - fcx) * (cx - fcx) + (cy - fcy) * (cy - fcy)
+    End If
+    Dim i As Long
+    For i = 1 To cascList.Count
+        Dim b As Shape: Set b = Nothing
+        On Error Resume Next: Set b = cascList(i): On Error GoTo 0
+        If Not b Is Nothing Then
+            Dim bx As Double, byy As Double
+            bx = b.Left + b.Width / 2: byy = b.Top + b.Height / 2
+            Dim d As Double: d = (bx - fcx) * (bx - fcx) + (byy - fcy) * (byy - fcy)
+            If d < best Then
+                best = d
+                Set 박스정렬_시설물최근접 = b
+            End If
+        End If
+    Next i
+End Function
+
+' ============================================================================
+'  owner 2026-06-15: 코어연결 진단 (읽기 전용) — 박스추가 정렬/화살표 문제 분석용.
+'    네트웍구성도의 모든 선번박스(위치·cbl·텍스트) + 모든 선번화살표(타입·가시성·화살촉·잇는 박스) 덤프.
+'    Alt+F8 → 「코어연결_진단」 실행. (분석 끝나면 제거 예정)
+' ============================================================================
+Public Sub 코어연결_진단()
+    Dim ws As Worksheet: Set ws = Nothing
+    On Error Resume Next: Set ws = ThisWorkbook.Worksheets(SHEET_NETWORK): On Error GoTo 0
+    If ws Is Nothing Then MsgBox "네트웍구성도 시트를 찾지 못했습니다.", vbExclamation, "코어연결 진단": Exit Sub
+
+    Dim msg As String
+    msg = "■ 코어연결 진단 (네트웍구성도)" & vbCrLf
+    msg = msg & "활성: fac=" & Right(g_pt_facId, 6) & " · cblA=" & Right(g_pt_cbl1Name, 6) & " · cblB=" & Right(g_pt_cbl2Name, 6) & vbCrLf & vbCrLf
+
+    Dim sh As Shape
+    msg = msg & "── 박스 (id5 · cbl5 · 텍스트 · 중심) ──" & vbCrLf
+    For Each sh In ws.Shapes
+        If Left(sh.Name, Len(PREFIX_PAIRBOX)) = PREFIX_PAIRBOX Then
+            Dim balt As String: balt = "": On Error Resume Next: balt = sh.AlternativeText: On Error GoTo 0
+            msg = msg & "  " & Right(sh.Name, 5) & " cbl=" & Right(AltParseField(balt, "cbl="), 5) & _
+                  " '" & 진단_첫줄(sh) & "' (" & CLng(sh.Left + sh.Width / 2) & "," & CLng(sh.Top + sh.Height / 2) & ")" & vbCrLf
+        End If
+    Next sh
+
+    msg = msg & vbCrLf & "── 화살표 (id5 · 타입 · 가시 · 촉 · 잇는박스) ──" & vbCrLf
+    For Each sh In ws.Shapes
+        If Left(sh.Name, Len(PREFIX_PAIRARROW)) = PREFIX_PAIRARROW Then
+            Dim aalt As String: aalt = "": On Error Resume Next: aalt = sh.AlternativeText: On Error GoTo 0
+            Dim vis As Boolean: vis = True
+            On Error Resume Next: vis = (sh.Visible <> msoFalse): If vis Then vis = (sh.Line.Visible <> msoFalse)
+            On Error GoTo 0
+            Dim typ As String
+            If InStr(aalt, "main=1") > 0 Then
+                typ = "main"
+            ElseIf InStr(aalt, "cascade=1") > 0 Then
+                typ = "casc"
+            Else
+                typ = "anch"
+            End If
+            Dim head As String: head = "X"
+            On Error Resume Next
+            If sh.Line.BeginArrowheadStyle <> msoArrowheadNone Or sh.Line.EndArrowheadStyle <> msoArrowheadNone Then head = "O"
+            On Error GoTo 0
+            msg = msg & "  " & Right(sh.Name, 5) & " " & typ & " " & IIf(vis, "보임", "숨김") & " 촉" & head & _
+                  " : " & 진단_화살표연결(ws, sh, aalt) & vbCrLf
+        End If
+    Next sh
+
+    MsgBox msg, vbInformation, "코어연결 진단"
+End Sub
+
+' 박스 텍스트 첫 줄 (코어 범위).
+Private Function 진단_첫줄(sh As Shape) As String
+    진단_첫줄 = ""
+    Dim t As String: t = "": On Error Resume Next: t = sh.TextFrame2.TextRange.Text: On Error GoTo 0
+    t = Replace(Replace(t, vbCrLf, vbCr), vbLf, vbCr)
+    Dim parts() As String: parts = Split(t, vbCr)
+    If UBound(parts) >= 0 Then 진단_첫줄 = Trim(parts(0))
+End Function
+
+' 화살표가 잇는 두 박스 — box1=/box2= 있으면 그걸로, main(좌표)이면 양 끝점 최근접 박스.
+Private Function 진단_화살표연결(ws As Worksheet, sh As Shape, alt As String) As String
+    Dim b1 As String: b1 = AltParseField(alt, "box1=")
+    Dim b2 As String: b2 = AltParseField(alt, "box2=")
+    If Len(b1) > 0 And Len(b2) > 0 Then
+        진단_화살표연결 = 진단_박스라벨(ws, b1) & " <-> " & 진단_박스라벨(ws, b2)
+        Exit Function
+    End If
+    Dim ex1 As Double, ey1 As Double, ex2 As Double, ey2 As Double
+    Dim hf As Boolean, vf As Boolean
+    hf = False: vf = False
+    On Error Resume Next: hf = (sh.HorizontalFlip = msoTrue): vf = (sh.VerticalFlip = msoTrue): On Error GoTo 0
+    If hf Xor vf Then
+        ex1 = sh.Left + sh.Width: ey1 = sh.Top
+        ex2 = sh.Left: ey2 = sh.Top + sh.Height
+    Else
+        ex1 = sh.Left: ey1 = sh.Top
+        ex2 = sh.Left + sh.Width: ey2 = sh.Top + sh.Height
+    End If
+    진단_화살표연결 = 진단_최근접박스(ws, ex1, ey1) & " <-> " & 진단_최근접박스(ws, ex2, ey2) & " (main좌표추정)"
+End Function
+
+Private Function 진단_박스라벨(ws As Worksheet, boxName As String) As String
+    Dim b As Shape: Set b = Nothing
+    On Error Resume Next: Set b = ws.Shapes(boxName): On Error GoTo 0
+    If b Is Nothing Then 진단_박스라벨 = "(없음:" & Right(boxName, 5) & ")": Exit Function
+    진단_박스라벨 = "'" & 진단_첫줄(b) & "'"
+End Function
+
+Private Function 진단_최근접박스(ws As Worksheet, x As Double, y As Double) As String
+    진단_최근접박스 = "(?)"
+    Dim best As Double: best = 1E+30
+    Dim sh As Shape
+    For Each sh In ws.Shapes
+        If Left(sh.Name, Len(PREFIX_PAIRBOX)) = PREFIX_PAIRBOX Then
+            Dim cx As Double, cy As Double
+            cx = sh.Left + sh.Width / 2: cy = sh.Top + sh.Height / 2
+            Dim dd As Double: dd = (cx - x) * (cx - x) + (cy - y) * (cy - y)
+            If dd < best Then best = dd: 진단_최근접박스 = "'" & 진단_첫줄(sh) & "'"
+        End If
+    Next sh
+End Function
 
 ' 박스추가 토글 — owner 2026-06-05. ON 시 다음 「연결완료」 가 기존 같은짝 박스에 merge 하지 않고
 '   같은 방향에 새 박스 페어 + cascading 화살표 (이전 박스 → 새 박스) 를 생성. 1회 사용 후 자동 OFF.

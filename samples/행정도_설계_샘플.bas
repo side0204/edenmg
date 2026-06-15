@@ -15282,6 +15282,10 @@ CascadeArrowOnly:
     On Error GoTo 0
     ' owner 2026-06-11: 케이블 3방향+ 허브 — 선번박스 방사형 정렬 + 화살표 재생성 (2방향 이하는 내부에서 즉시 복귀)
     선번박스_방사형_정렬 ws, facId
+    ' owner 2026-06-15: 2방향 cascade(박스추가)는 방사형_정렬이 손대지 않아 realign 누락 → 권위 함수 명시 호출.
+    '   페어화살표_시설물페어_재정렬 = facility-nearest 박스 사이 visible 화살표 1개 + 나머지 invisible anchor.
+    '   3방향+ 는 방사형_정렬이 이미 호출했어도 idempotent (같은 위치 → 같은 결과). 방사형 규칙 안 건드림.
+    On Error Resume Next: 페어화살표_시설물페어_재정렬 ws: On Error GoTo 0
 
     If wasProt Then ApplySheetProtection ws
     If Not IsArray(cascadePrev) Then Application.StatusBar = "코어 박스 생성 — 박스 클릭해 코어 번호 편집."
@@ -17702,46 +17706,84 @@ NextCand:
                         End If
                     Next aI
 
-                    ' cblA / cblB 측 박스 중 facility 가장 가까운 박스 찾기 (anchor 박스 set 내에서만)
-                    Dim gTopA As Shape: Set gTopA = Nothing
-                    Dim gTopB As Shape: Set gTopB = Nothing
-                    Dim gMinA As Double: gMinA = 1E+30
-                    Dim gMinB As Double: gMinB = 1E+30
-                    Dim gBxKey As Variant
-                    For Each gBxKey In gBoxSet.Keys
-                        Dim gShpB As Shape: Set gShpB = Nothing
-                        On Error Resume Next: Set gShpB = ws.Shapes(CStr(gBxKey)): On Error GoTo 0
-                        If Not gShpB Is Nothing Then
-                            Dim gAltB As String: gAltB = ""
-                            On Error Resume Next: gAltB = gShpB.AlternativeText: On Error GoTo 0
-                            Dim gCbl As String: gCbl = AltParseField(gAltB, "cbl=")
-                            If gCbl = gCA Or gCbl = gCB Then
-                                Dim gBcx As Double, gBcy As Double
-                                gBcx = gShpB.Left + gShpB.Width / 2
-                                gBcy = gShpB.Top + gShpB.Height / 2
-                                Dim gDist As Double
-                                gDist = (gBcx - gFcx) * (gBcx - gFcx) + (gBcy - gFcy) * (gBcy - gFcy)
-                                If gCbl = gCA Then
-                                    If gDist < gMinA Then
-                                        gMinA = gDist
-                                        Set gTopA = gShpB
+                    ' owner 2026-06-15: 그룹의 모든 짝(anchor box1↔box2) 수집 → facility 거리순 정렬 →
+                    '   좌·우 박스를 같은 행 Y 로 1:1 정렬 + 케이블-가장가까운 짝을 화살표 끝점으로.
+                    '   (박스정렬_silent 는 「활성 케이블쌍」만 정렬해 다른 시설물은 안 됐음 → 전 그룹 도는 여기서 정렬.)
+                    Dim gPairA(0 To 64) As Shape, gPairB(0 To 64) As Shape, gPairD(0 To 64) As Double
+                    Dim gPairN As Long: gPairN = 0
+                    Dim gAnc() As String: gAnc = Split(CStr(ccGroupAnchors(CStr(gKey))), "`")
+                    Dim gJ As Long
+                    For gJ = 0 To UBound(gAnc)
+                        If Len(gAnc(gJ)) > 0 And gPairN <= 64 Then
+                            Dim gaShp As Shape: Set gaShp = Nothing
+                            On Error Resume Next: Set gaShp = ws.Shapes(gAnc(gJ)): On Error GoTo 0
+                            If Not gaShp Is Nothing Then
+                                Dim gaAlt As String: gaAlt = ""
+                                On Error Resume Next: gaAlt = gaShp.AlternativeText: On Error GoTo 0
+                                Dim gb1 As Shape, gb2 As Shape: Set gb1 = Nothing: Set gb2 = Nothing
+                                On Error Resume Next
+                                Set gb1 = ws.Shapes(AltParseField(gaAlt, "box1="))
+                                Set gb2 = ws.Shapes(AltParseField(gaAlt, "box2="))
+                                On Error GoTo 0
+                                If Not gb1 Is Nothing And Not gb2 Is Nothing Then
+                                    Dim gc1 As String, gc2 As String
+                                    gc1 = AltParseField(gb1.AlternativeText, "cbl=")
+                                    gc2 = AltParseField(gb2.AlternativeText, "cbl=")
+                                    Dim gpA As Shape, gpB As Shape: Set gpA = Nothing: Set gpB = Nothing
+                                    If gc1 = gCA And gc2 = gCB Then
+                                        Set gpA = gb1: Set gpB = gb2
+                                    ElseIf gc1 = gCB And gc2 = gCA Then
+                                        Set gpA = gb2: Set gpB = gb1
                                     End If
-                                Else
-                                    If gDist < gMinB Then
-                                        gMinB = gDist
-                                        Set gTopB = gShpB
+                                    If Not gpA Is Nothing Then
+                                        Dim gpay As Double, gpby As Double
+                                        gpay = gpA.Top + gpA.Height / 2: gpby = gpB.Top + gpB.Height / 2
+                                        Dim gdA As Double, gdB As Double
+                                        gdA = (gpA.Left + gpA.Width / 2 - gFcx) * (gpA.Left + gpA.Width / 2 - gFcx) + (gpay - gFcy) * (gpay - gFcy)
+                                        gdB = (gpB.Left + gpB.Width / 2 - gFcx) * (gpB.Left + gpB.Width / 2 - gFcx) + (gpby - gFcy) * (gpby - gFcy)
+                                        Set gPairA(gPairN) = gpA: Set gPairB(gPairN) = gpB
+                                        gPairD(gPairN) = IIf(gdA < gdB, gdA, gdB)
+                                        gPairN = gPairN + 1
                                     End If
                                 End If
                             End If
                         End If
-                    Next gBxKey
+                    Next gJ
+
+                    ' facility 거리순 버블 정렬 (가까운 짝 = 위 행)
+                    Dim gsI As Long, gsJ As Long
+                    For gsI = 0 To gPairN - 2
+                        For gsJ = 0 To gPairN - 2 - gsI
+                            If gPairD(gsJ) > gPairD(gsJ + 1) Then
+                                Dim tDd As Double: tDd = gPairD(gsJ): gPairD(gsJ) = gPairD(gsJ + 1): gPairD(gsJ + 1) = tDd
+                                Dim tSa As Shape: Set tSa = gPairA(gsJ): Set gPairA(gsJ) = gPairA(gsJ + 1): Set gPairA(gsJ + 1) = tSa
+                                Dim tSb As Shape: Set tSb = gPairB(gsJ): Set gPairB(gsJ) = gPairB(gsJ + 1): Set gPairB(gsJ + 1) = tSb
+                            End If
+                        Next gsJ
+                    Next gsI
+
+                    ' 1:1 정렬 — 각 짝의 좌·우 박스만 같은 Y(둘 중 위쪽)로 맞춤. 행 위치·순서·간격은 그대로 →
+                    '   re-stack 안 하므로 셀 클릭마다 드리프트 없음(idempotent). gTopA/gTopB = 시설물 최근접 짝(화살표 끝점).
+                    Dim gTopA As Shape: Set gTopA = Nothing
+                    Dim gTopB As Shape: Set gTopB = Nothing
+                    If gPairN > 0 Then
+                        Set gTopA = gPairA(0): Set gTopB = gPairB(0)
+                        Dim gk As Long
+                        For gk = 0 To gPairN - 1
+                            Dim gTy As Double: gTy = gPairA(gk).Top
+                            If gPairB(gk).Top < gTy Then gTy = gPairB(gk).Top
+                            On Error Resume Next
+                            gPairA(gk).Top = gTy
+                            gPairB(gk).Top = gTy
+                            On Error GoTo 0
+                        Next gk
+                    End If
 
                     If Not gTopA Is Nothing And Not gTopB Is Nothing Then
-                        ' L-shape path 계산 — 케이블 방향에 평행한 L (owner 2026-06-11 v6: 허브도 동일 — 꺾임 1회)
-                        Dim gPts As Variant
-                        gPts = 선번박스_경로_계산(ws, "cable", gCA, gTopA, "cable", gCB, gTopB, gFacShp)
-
-                        ' 기존 keep candidate main 있으면 삭제 + 재생성 (path 갱신)
+                        ' owner 2026-06-15: cascade 그룹은 케이블-가장가까운 박스 「중앙끼리 직선」 (owner 요구
+                        '   — 1:1 정렬된 박스 중앙 연결). 기존 L-shape(선번박스_경로_계산)은 정렬된 cascade 와 안 맞음.
+                        '   radial 단일그룹은 위 분기(3301)에서 L-shape 그대로 유지 — 방사형 규칙 안 건드림.
+                        ' 기존 keep candidate main 있으면 삭제 + 재생성
                         Dim gMainName As String: gMainName = ""
                         Dim gMainAlt As String: gMainAlt = ""
                         If ccGroupKeptMain.Exists(CStr(gKey)) Then
@@ -17758,19 +17800,22 @@ NextCand:
                             gMainAlt = "main=1|fac=" & gFac & "|cblA=" & gCA & "|cblB=" & gCB
                         End If
 
+                        ' 두 박스의 「마주보는 모서리」 를 박스 중앙 높이에서 직선 연결.
+                        '   중앙-중앙으로 그으면 양 끝(화살촉)이 박스 안에 가려져 안 보임 → 마주보는 모서리로.
+                        Dim gAx As Double, gAy As Double, gBx As Double, gBy As Double
+                        gAy = gTopA.Top + gTopA.Height / 2
+                        gBy = gTopB.Top + gTopB.Height / 2
+                        If gTopA.Left <= gTopB.Left Then
+                            gAx = gTopA.Left + gTopA.Width       ' A 오른쪽 모서리
+                            gBx = gTopB.Left                      ' B 왼쪽 모서리
+                        Else
+                            gAx = gTopA.Left                      ' A 왼쪽 모서리
+                            gBx = gTopB.Left + gTopB.Width        ' B 오른쪽 모서리
+                        End If
                         Dim gNewMain As Shape: Set gNewMain = Nothing
                         On Error Resume Next
-                        Set gNewMain = 선번박스_화살표생성(ws, gPts)
+                        Set gNewMain = ws.Shapes.AddLine(gAx, gAy, gBx, gBy)
                         On Error GoTo 0
-                        If gNewMain Is Nothing Then
-                            ' fallback — AddLine
-                            Dim gAx As Double, gAy As Double, gBx As Double, gBy As Double
-                            gAx = gTopA.Left + gTopA.Width / 2: gAy = gTopA.Top + gTopA.Height / 2
-                            gBx = gTopB.Left + gTopB.Width / 2: gBy = gTopB.Top + gTopB.Height / 2
-                            On Error Resume Next
-                            Set gNewMain = ws.Shapes.AddLine(gAx, gAy, gBx, gBy)
-                            On Error GoTo 0
-                        End If
                         If Not gNewMain Is Nothing Then
                             gNewMain.Name = gMainName
                             gNewMain.OnAction = ""
@@ -25572,22 +25617,25 @@ Public Sub 선번연결_도구_박스정렬_silent(silent As Boolean)
             Next jj
         Next ii
 
-        ' 정렬된 순서대로 캐논 아래에 stack
-        Dim prevB1Y As Double, prevB2Y As Double
-        prevB1Y = canonB1.Top + canonB1.Height
-        prevB2Y = canonB2.Top + canonB2.Height
+        ' owner 2026-06-15: 1:1 정렬 — 각 cascade 짝(cB1,cB2)을 「같은 행 Y」 에 두고, 행 높이는
+        '   두 박스 중 큰 쪽으로 진행 → 좌·우 열이 어긋나지 않고 나란히. (기존: 열마다 자기 높이로 따로
+        '   진행 → 박스 줄수(높이) 다르면 좌우가 점점 어긋났음 = owner 보고 "1:1 정렬 안 됨")
         Dim prevB1X As Double, prevB2X As Double
         prevB1X = canonB1.Left: prevB2X = canonB2.Left
+        Dim rowY As Double: rowY = canonB1.Top + canonB1.Height
+        Dim canon2Bot As Double: canon2Bot = canonB2.Top + canonB2.Height
+        If canon2Bot > rowY Then rowY = canon2Bot          ' 캐논 좌우가 어긋나면 더 아래쪽 기준으로 시작
         For ii = 1 To cnt
             Dim cB1 As Shape, cB2 As Shape
             Set cB1 = cascB1List(idxArr(ii))
             Set cB2 = cascB2List(idxArr(ii))
             cB1.Left = prevB1X
-            cB1.Top = prevB1Y
+            cB1.Top = rowY
             cB2.Left = prevB2X
-            cB2.Top = prevB2Y
-            prevB1Y = cB1.Top + cB1.Height
-            prevB2Y = cB2.Top + cB2.Height
+            cB2.Top = rowY
+            Dim rowH As Double: rowH = cB1.Height
+            If cB2.Height > rowH Then rowH = cB2.Height
+            rowY = rowY + rowH
             ' owner 2026-06-06 (8-23): 시스템 이동 후 lastPos 동기화 — chain 평행 이동 처리에서 사용자 이동으로 오인 방지.
             On Error Resume Next
             AltSetLastPos cB1, cB1.Left, cB1.Top
@@ -25601,15 +25649,16 @@ Public Sub 선번연결_도구_박스정렬_silent(silent As Boolean)
         On Error GoTo 0
     End If
 
-    ' 3) main 화살표 재라우팅 — 가장 아래 박스 (canon 또는 마지막 cascade) 사이 L-shape
+    ' 3) main 화살표 재라우팅 — owner 2026-06-15: 「시설물(케이블)에 가장 가까운 박스」 사이로 통일.
+    '    기존엔 "맨 아래 cascade 박스" 였는데, 권위 함수 페어화살표_시설물페어_재정렬 은 facility-nearest
+    '    (M3 gTopA/gTopB) 로 그림 → 둘이 달라 박스추가 시 화살표가 엉킴(제각각). 같은 규칙으로 맞춤.
+    '    radial·비-cascade 는 canon 1개뿐이라 결과 동일(무영향) — 방사형 규칙 안 건드림.
+    Dim fcxN As Double, fcyN As Double
+    fcxN = facShp.Left + facShp.Width / 2
+    fcyN = facShp.Top + facShp.Height / 2
     Dim bottomB1 As Shape, bottomB2 As Shape
-    If cascB1List.Count > 0 Then
-        Set bottomB1 = cascB1List(cascB1List.Count)
-        Set bottomB2 = cascB2List(cascB2List.Count)
-    Else
-        Set bottomB1 = canonB1
-        Set bottomB2 = canonB2
-    End If
+    Set bottomB1 = 박스정렬_시설물최근접(canonB1, cascB1List, fcxN, fcyN)
+    Set bottomB2 = 박스정렬_시설물최근접(canonB2, cascB2List, fcxN, fcyN)
 
     Dim mainTagFwd As String, mainTagRev As String
     mainTagFwd = "main=1|fac=" & g_pt_facId & "|cblA=" & aNameL & "|cblB=" & bNameL
@@ -25662,6 +25711,32 @@ Public Sub 선번연결_도구_박스정렬_silent(silent As Boolean)
     If wasProt Then ApplySheetProtection ws
     Application.StatusBar = "박스 정렬 완료 — cascade 박스 stack 재정렬 + main 화살표 재라우팅."
 End Sub
+
+' owner 2026-06-15: 캐논 + cascade 박스 중 시설물 중심에 가장 가까운 박스 반환.
+'   페어화살표_시설물페어_재정렬 의 gTopA/gTopB(facility-nearest) 규칙과 동일 — main 화살표 끝점 통일용.
+Private Function 박스정렬_시설물최근접(canon As Shape, cascList As Collection, fcx As Double, fcy As Double) As Shape
+    Set 박스정렬_시설물최근접 = canon
+    Dim best As Double: best = 1E+30
+    If Not canon Is Nothing Then
+        Dim cx As Double, cy As Double
+        cx = canon.Left + canon.Width / 2: cy = canon.Top + canon.Height / 2
+        best = (cx - fcx) * (cx - fcx) + (cy - fcy) * (cy - fcy)
+    End If
+    Dim i As Long
+    For i = 1 To cascList.Count
+        Dim b As Shape: Set b = Nothing
+        On Error Resume Next: Set b = cascList(i): On Error GoTo 0
+        If Not b Is Nothing Then
+            Dim bx As Double, byy As Double
+            bx = b.Left + b.Width / 2: byy = b.Top + b.Height / 2
+            Dim d As Double: d = (bx - fcx) * (bx - fcx) + (byy - fcy) * (byy - fcy)
+            If d < best Then
+                best = d
+                Set 박스정렬_시설물최근접 = b
+            End If
+        End If
+    Next i
+End Function
 
 ' 박스추가 토글 — owner 2026-06-05. ON 시 다음 「연결완료」 가 기존 같은짝 박스에 merge 하지 않고
 '   같은 방향에 새 박스 페어 + cascading 화살표 (이전 박스 → 새 박스) 를 생성. 1회 사용 후 자동 OFF.
