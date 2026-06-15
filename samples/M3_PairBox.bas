@@ -4941,6 +4941,92 @@ End Sub
 
 ' RN 3-column 모드 진입 — Cable A | RN IN/OUT grid | Cable B.
 '   기존 Step2진입 을 그대로 호출해 좌·우 케이블 setup → 그 다음 RN 변수 셋업 + 재빌드.
+' ===== owner 2026-06-15: RN 명칭(예 "RN_1차")·규격이 시설물에 이미 있으면 차수·규격 자동 추출 → picker 생략 =====
+' RN 시설물의 표시 텍스트(콜아웃 명칭 + 메타 구분/이름) 수집 — 차수·규격 파싱용.
+Public Function 선번연결_도구_RN시설물라벨(facId As String) As String
+    선번연결_도구_RN시설물라벨 = ""
+    If Len(facId) = 0 Then Exit Function
+    Dim txt As String: txt = ""
+    Dim shtArr As Variant: shtArr = Array(SHEET_NETWORK, SHEET_ADMIN)
+    Dim si As Long
+    For si = LBound(shtArr) To UBound(shtArr)
+        Dim wsX As Worksheet: Set wsX = Nothing
+        On Error Resume Next: Set wsX = ThisWorkbook.Worksheets(CStr(shtArr(si))): On Error GoTo 0
+        If Not wsX Is Nothing Then
+            Dim lblShp As Shape: Set lblShp = Nothing
+            On Error Resume Next: Set lblShp = wsX.Shapes(PREFIX_LABEL & facId): On Error GoTo 0
+            If Not lblShp Is Nothing Then
+                Dim t As String: t = ""
+                On Error Resume Next: t = lblShp.TextFrame2.TextRange.Text: On Error GoTo 0
+                txt = txt & " " & t
+            End If
+            ' 시설물 도형 자체의 그려둔 글자 (그룹이면 자식 포함) — "RN_1차"·규격이 도형에 그려져 있을 수 있음
+            Dim facShp As Shape: Set facShp = Nothing
+            On Error Resume Next: Set facShp = wsX.Shapes(facId): On Error GoTo 0
+            If Not facShp Is Nothing Then txt = txt & " " & 도형_텍스트_수집(facShp)
+        End If
+    Next si
+    Dim row As Variant: row = MetaFindRow(SHEET_META_FAC, 1, facId)
+    If Not IsEmpty(row) Then
+        If UBound(row) >= 2 Then txt = txt & " " & CStr(row(2))
+        If UBound(row) >= 3 Then txt = txt & " " & CStr(row(3))
+    End If
+    선번연결_도구_RN시설물라벨 = txt
+End Function
+
+' 도형 텍스트 수집 (그룹이면 자식·손자까지 재귀). owner 2026-06-15
+Public Function 도형_텍스트_수집(sh As Shape) As String
+    도형_텍스트_수집 = ""
+    If sh Is Nothing Then Exit Function
+    Dim acc As String: acc = ""
+    On Error Resume Next
+    If sh.TextFrame2.HasText Then acc = acc & " " & sh.TextFrame2.TextRange.Text
+    On Error GoTo 0
+    If 도형_그룹여부(sh) Then
+        On Error Resume Next
+        Dim it As Shape
+        For Each it In sh.GroupItems
+            acc = acc & " " & 도형_텍스트_수집(it)
+        Next it
+        On Error GoTo 0
+    End If
+    도형_텍스트_수집 = acc
+End Function
+
+' 텍스트에서 RN 차수 (1/2/3, 못 찾으면 0).
+Public Function 선번연결_도구_RN차수_텍스트(txt As String) As Long
+    선번연결_도구_RN차수_텍스트 = 0
+    If InStr(txt, "1차") > 0 Then 선번연결_도구_RN차수_텍스트 = 1: Exit Function
+    If InStr(txt, "2차") > 0 Then 선번연결_도구_RN차수_텍스트 = 2: Exit Function
+    If InStr(txt, "3차") > 0 Then 선번연결_도구_RN차수_텍스트 = 3: Exit Function
+End Function
+
+' 텍스트에서 유효한 RN 규격 토큰(예 "2:8","1:2:8:4") 추출 (없으면 "").
+Public Function 선번연결_도구_RN규격_텍스트추출(txt As String) As String
+    선번연결_도구_RN규격_텍스트추출 = ""
+    If Len(txt) = 0 Then Exit Function
+    Dim s As String: s = txt
+    s = Replace(s, "(", " "): s = Replace(s, ")", " ")
+    s = Replace(s, ",", " "): s = Replace(s, "/", " ")
+    s = Replace(s, vbCr, " "): s = Replace(s, vbLf, " ")
+    Dim parts() As String: parts = Split(s, " ")
+    Dim i As Long
+    For i = LBound(parts) To UBound(parts)
+        Dim tok As String: tok = Trim(parts(i))
+        If Len(tok) > 0 Then
+            Dim cand As String: cand = tok
+            ' "2-8" 처럼 하이픈 2숫자 → 콜론 변환 (combo 규격 표기 대응). "1-2-8-4" 다중은 m:n 아님 → 제외
+            If InStr(cand, ":") = 0 And InStr(cand, "-") > 0 Then
+                Dim hp() As String: hp = Split(cand, "-")
+                If UBound(hp) = 1 Then cand = Trim(hp(0)) & ":" & Trim(hp(1))
+            End If
+            If InStr(cand, ":") > 0 Then
+                If 선번연결_도구_RN규격_유효(cand) Then 선번연결_도구_RN규격_텍스트추출 = cand: Exit Function
+            End If
+        End If
+    Next i
+End Function
+
 Public Sub 선번연결_도구_Step2진입_RN(cblA As String, cblB As String, rnSpec As String, rnLabel As String)
     ' 일반 Step2 setup (cable↔cable). g_pt_rnMode = False 로 들어감
     선번연결_도구_Step2진입 "cable", cblA, "cable", cblB
@@ -4953,6 +5039,16 @@ Public Sub 선번연결_도구_Step2진입_RN(cblA As String, cblB As String, rn
     If InStr(rnLabel, "2차") > 0 Then tierGuess = 2
     If InStr(rnLabel, "3차") > 0 Then tierGuess = 3
     Dim specOk As Boolean: specOk = 선번연결_도구_RN규격_유효(rnSpec)
+
+    ' owner 2026-06-15: 시설물 명칭(예 "RN_1차")·규격에 차수·규격이 이미 있으면 자동 추출 → 그만큼 picker 생략.
+    If tierGuess = 0 Or Not specOk Then
+        Dim facLbl As String: facLbl = 선번연결_도구_RN시설물라벨(g_pt_facId)
+        If tierGuess = 0 Then tierGuess = 선번연결_도구_RN차수_텍스트(facLbl)
+        If Not specOk Then
+            Dim facSpec As String: facSpec = 선번연결_도구_RN규격_텍스트추출(facLbl)
+            If 선번연결_도구_RN규격_유효(facSpec) Then rnSpec = facSpec: specOk = True
+        End If
+    End If
 
     ' owner 2026-06-06: 기존 RN 연결정보가 있으면 picker 건너뛰고 바로 매핑 UI 진입.
     '   tier 는 기존수집이 m/s/p prefix 에서 추출한 g_pt_existingTier 우선 → 0 이면 saved spec 라벨 → fallback 1차
@@ -5064,6 +5160,16 @@ Public Sub 선번연결_도구_Step2진입_RN1(cblA As String, rnSpec As String,
     If InStr(rnLabel, "2차") > 0 Then tierGuess1 = 2
     If InStr(rnLabel, "3차") > 0 Then tierGuess1 = 3
     Dim specOk1 As Boolean: specOk1 = 선번연결_도구_RN규격_유효(rnSpec)
+
+    ' owner 2026-06-15: 시설물 명칭(예 "RN_1차")·규격에 차수·규격이 이미 있으면 자동 추출 → 그만큼 picker 생략.
+    If tierGuess1 = 0 Or Not specOk1 Then
+        Dim facLbl1 As String: facLbl1 = 선번연결_도구_RN시설물라벨(g_pt_facId)
+        If tierGuess1 = 0 Then tierGuess1 = 선번연결_도구_RN차수_텍스트(facLbl1)
+        If Not specOk1 Then
+            Dim facSpec1 As String: facSpec1 = 선번연결_도구_RN규격_텍스트추출(facLbl1)
+            If 선번연결_도구_RN규격_유효(facSpec1) Then rnSpec = facSpec1: specOk1 = True
+        End If
+    End If
 
     ' owner 2026-06-06: 기존 RN 연결정보가 있으면 picker 건너뛰고 바로 매핑 UI 진입 (Step2진입_RN 와 동일 로직).
     Dim hasExisting1 As Boolean: hasExisting1 = (선번연결_도구_existing연결개수() > 0)

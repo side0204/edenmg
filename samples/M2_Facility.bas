@@ -6670,10 +6670,82 @@ End Sub
 ' ============================================================================
 '  7. 정보 표시 + 삭제 (1단계: MsgBox 기반. 추후 우측 패널 도형으로 보완)
 ' ============================================================================
+' 메타 없는 도형(그룹/이름 누락 시설물) 삭제 — 클릭한 그 도형(그룹이면 통째)만. owner 2026-06-15
+'   ★ 안전 원칙: 좌표 근접·facId 추정으로 다른 시트/다른 시설물에 cascade 하지 않음 (인접 시설물 오삭제 사고 방지).
+'   - 클릭 이름이 top-level 도형(이름은 시트당 유일) → 그 도형(그룹이면 통째) 삭제.
+'   - 클릭 이름이 그룹 자식이면, 그 이름을 가진 그룹이 정확히 1개일 때만 그 그룹을 통째 삭제 (2개 이상 = 모호 → 중단·Delete 키 안내).
+'   - 다른 시트(네트웍)의 짝은 자동으로 안 지움 (안전 링크 없음) → 그 시트에서 도형 선택 후 Delete 키로.
+Public Sub 고아도형_삭제(shapeName As String)
+    If Len(shapeName) = 0 Then Exit Sub
+    ' 클릭이 일어난 시트 우선(ActiveSheet) → 행정도 → 네트웍 순으로 대상 탐색
+    Dim wsNames As Variant: wsNames = Array(ActiveSheet.Name, SHEET_ADMIN, SHEET_NETWORK)
+    Dim target As Shape: Set target = Nothing
+    Dim ws As Worksheet: Set ws = Nothing
+    Dim k As Long
+    For k = LBound(wsNames) To UBound(wsNames)
+        Dim w As Worksheet: Set w = Nothing
+        On Error Resume Next: Set w = ThisWorkbook.Worksheets(CStr(wsNames(k))): On Error GoTo 0
+        If Not w Is Nothing Then
+            ' 이름으로 도형 찾기 → 그룹 자식이면 부모 그룹(선택 단위)까지 타고 올라감.
+            '   이래야 「하나만 삭제」 가 아니라 클릭한 그룹 전체가 한 단위로 처리됨. 부모는 유일 → 안전.
+            Dim direct As Shape: Set direct = Nothing
+            On Error Resume Next: Set direct = w.Shapes(shapeName): On Error GoTo 0
+            If Not direct Is Nothing Then
+                Set target = 최상위_도형(direct): Set ws = w: Exit For
+            End If
+            ' 위에서 못 찾았으면(이름 직접 접근 불가) — 그 이름 자식을 가진 그룹이 정확히 1개일 때만
+            Dim hit As Shape: Set hit = Nothing
+            Dim cnt As Long: cnt = 0
+            Dim sh As Shape
+            For Each sh In w.Shapes
+                If 도형_그룹여부(sh) Then
+                    If 그룹_자식있음(sh, shapeName) Then Set hit = sh: cnt = cnt + 1
+                End If
+            Next sh
+            If cnt = 1 Then
+                Set target = hit: Set ws = w: Exit For
+            ElseIf cnt > 1 Then
+                MsgBox "같은 이름의 도형이 여러 그룹에 있어 자동 삭제가 위험합니다." & vbLf & vbLf & _
+                       "그 도형(그룹)을 한 번 클릭해 선택한 뒤 키보드 Delete 키로 지워주세요.", _
+                       vbExclamation, "도형 삭제"
+                Exit Sub
+            End If
+        End If
+    Next k
+
+    If target Is Nothing Then
+        MsgBox "도형을 자동으로 찾지 못했습니다: " & shapeName & vbLf & vbLf & _
+               "그 도형을 한 번 클릭해 선택한 뒤 키보드 Delete 키로 지워주세요.", vbExclamation, "도형 삭제"
+        Exit Sub
+    End If
+
+    ' target 은 클릭한 바로 그 top-level 도형/그룹 (모호하면 위에서 이미 중단). 그룹명이 fac_ = 정상 시설물.
+    '   → 그 그룹 「자신의」 facId 로 검증된 cascade (양 시트·배지·케이블). 이웃 facId 추정 아님 = 안전.
+    If Left(target.Name, Len(PREFIX_FAC)) = PREFIX_FAC Then
+        Show시설물_정보 target.Name   ' 정상 시설물 정보+삭제 확인 → 양 시트 cascade (그전 삭제 기능)
+        Exit Sub
+    End If
+
+    ' fac_ 이름이 아님 → 클릭한 그 도형만 (active 시트) 안전 삭제. 네트웍 짝은 Delete 키로.
+    Dim isGrp As Boolean: isGrp = 도형_그룹여부(target)
+    If MsgBox("이 도형" & IIf(isGrp, " (그룹 전체)", "") & "을 삭제하시겠습니까?" & vbLf & vbLf & _
+              "※ 연결된 다른 시설물·배지는 건드리지 않습니다." & vbLf & _
+              "   네트웍 시트의 짝은 그 시트에서 따로 선택 후 Delete 키로 지워주세요.", _
+              vbYesNo + vbQuestion, "도형 삭제") <> vbYes Then Exit Sub
+
+    Dim wasP As Boolean: wasP = (ws.ProtectContents Or ws.ProtectDrawingObjects)
+    On Error Resume Next: ws.Unprotect: On Error GoTo 0
+    On Error Resume Next: target.Delete: On Error GoTo 0
+    If wasP Then ApplySheetProtection ws
+    Application.StatusBar = "도형 삭제 완료."
+End Sub
+
 Public Sub Show시설물_정보(facId As String)
     Dim row As Variant: row = MetaFindRow(SHEET_META_FAC, 1, facId)
     If IsEmpty(row) Then
-        MsgBox "메타 데이터를 찾지 못했습니다: " & facId, vbExclamation
+        ' 메타 없는 도형 — 그룹/자유형 복제 시 fac_ 이름 변경이 실패한 시설물 등. owner 2026-06-15
+        '   dead-end(에러) 대신 그 도형을 직접 삭제하도록 폴백 → 삭제모드에서 그룹 도형도 지워짐.
+        고아도형_삭제 facId
         Exit Sub
     End If
 
@@ -8054,9 +8126,29 @@ Public Function 양식_셀_텍스트(c As Range) As String
     On Error Resume Next
     Dim raw As Variant: raw = c.Value
     If IsEmpty(raw) Then Exit Function
-    ' "1-4" 가 Excel 에서 날짜로 변환된 케이스 (Date 타입이든 "2026-01-04" 텍스트든) → "월-일" 복원
-    If IsDate(raw) Then
-        양식_셀_텍스트 = Format(CDate(raw), "m-d")
+    ' Excel 자동 변환 복원 (owner 2026-06-15):
+    '   - 텍스트로 들어온 값은 그대로 (콜론 비율 "1:8:4"·"1:2:8:4" 등 보존 — IsDate 오판 방지)
+    '   - "1-4" → 날짜(직렬 >=1) → "월-일"  /  "1:4" → 시간(직렬 0~1) → "시:분(:초)" 콜론 복원 ("12-30" 버그)
+    If VarType(raw) = vbString Then
+        양식_셀_텍스트 = Trim(CStr(raw))
+        On Error GoTo 0
+        Exit Function
+    End If
+    ' 숫자/날짜 직렬 복원. IsDate 는 순수 Double 직렬(0.0444)엔 False 라 IsNumeric 도 함께 검사
+    '   (안 그러면 "1:4"→시간직렬 0.0444 가 CStr 로 "4.44E-02" 처럼 나옴. owner 2026-06-15)
+    If IsNumeric(raw) Or VarType(raw) = vbDate Then
+        Dim dv As Double: dv = CDbl(raw)
+        If dv > 0 And dv < 1 Then
+            If Second(CDate(raw)) > 0 Then
+                양식_셀_텍스트 = Format(CDate(raw), "h:m:s")
+            Else
+                양식_셀_텍스트 = Format(CDate(raw), "h:m")
+            End If
+        ElseIf VarType(raw) = vbDate Or IsDate(raw) Then
+            양식_셀_텍스트 = Format(CDate(raw), "m-d")
+        Else
+            양식_셀_텍스트 = Trim(CStr(raw))
+        End If
     Else
         양식_셀_텍스트 = Trim(CStr(raw))
     End If

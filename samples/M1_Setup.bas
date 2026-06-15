@@ -741,7 +741,7 @@ Public Function ButtonDefs() As Variant
         Array("코어 추적", "코어_추적_도구", RGB(236, 72, 153), ""), _
         Array("추적 지우기", "코어_추적_지우기", RGB(248, 113, 113), ""), _
         Array("코어 검증", "선번_검증", RGB(168, 85, 247), ""), _
-        Array("새 파일 내보내기", "새파일_내보내기", RGB(22, 163, 74), "") _
+        Array("내보내기", "새파일_내보내기", RGB(22, 163, 74), "") _
     )
 End Function
 
@@ -803,7 +803,7 @@ Public Function RibbonGroupDefs() As Variant
             Array("이벤트 복구", "이벤트_복구", "셀클릭 추종(배지·설명박스·콤보 동기화)이 멈췄을 때 — 이벤트·화면갱신 강제 복구")), False)
 
     g8 = Array("내보내기", Array( _
-            Array("새 파일 내보내기", "새파일_내보내기", "제출·공유용 매크로 없는 .xlsx 생성")), False)
+            Array("내보내기", "새파일_내보내기", "제출·공유용 매크로 없는 .xlsx 생성")), False)
 
     Dim g9 As Variant
     g9 = Array("라이센스", Array( _
@@ -3229,11 +3229,47 @@ Public Sub 삭제모드_토글()
 End Sub
 
 Public Sub 시설물_삭제클릭()
-    Show시설물_정보 CStr(Application.Caller)   ' 정보 + 삭제 확인 → 양 시트 cascade
+    Show시설물_정보 CStr(Application.Caller)   ' fac_ + 메타 있으면 cascade, 없으면 고아도형_삭제(안전 단일/그룹)
 End Sub
 Public Sub 케이블_삭제클릭()
     Show케이블_정보 CStr(Application.Caller)
 End Sub
+
+' sh.Type = msoGroup 안전 판정 (일부 도형은 Type 접근 시 오류 가능). owner 2026-06-15
+Public Function 도형_그룹여부(sh As Shape) As Boolean
+    도형_그룹여부 = False
+    On Error Resume Next
+    도형_그룹여부 = (sh.Type = msoGroup)
+    On Error GoTo 0
+End Function
+
+' 그룹 직속 자식 중 childName 이 있는지. owner 2026-06-15
+Public Function 그룹_자식있음(grp As Shape, childName As String) As Boolean
+    그룹_자식있음 = False
+    On Error Resume Next
+    Dim it As Shape
+    For Each it In grp.GroupItems
+        If it.Name = childName Then 그룹_자식있음 = True: Exit For
+    Next it
+    On Error GoTo 0
+End Function
+
+' 도형의 최상위(top-level) 조상 반환 — 그룹 자식이면 부모 그룹(엑셀에서 「선택」 단위)으로 타고 올라감.
+'   클릭한 자식 1개만 지우지 말고 그룹 전체를 한 단위로 다루기 위함. 부모는 유일 → 이웃 오삭제 0. owner 2026-06-15
+Public Function 최상위_도형(sh As Shape) As Shape
+    Set 최상위_도형 = sh
+    If sh Is Nothing Then Exit Function
+    Dim cur As Shape: Set cur = sh
+    Dim guard As Long: guard = 0
+    Do
+        Dim p As Shape: Set p = Nothing
+        On Error Resume Next: Set p = cur.ParentGroup: On Error GoTo 0
+        If p Is Nothing Then Exit Do
+        Set cur = p
+        guard = guard + 1
+    Loop While guard < 20
+    Set 최상위_도형 = cur
+End Function
 
 ' 범례 지우기 — 범례는 OnAction(클릭=그리기 모드)이라 직접 선택이 어려워 「번호 목록」 방식
 ' 범례 지우기 = 토글. ON 이면 「범례 목록(위쪽 패널)에서 범례를 클릭」 하면 그 범례가 삭제됨.
@@ -3587,9 +3623,12 @@ Public Sub 새파일_내보내기()
                Or Left(nm, Len(PANEL_LEGEND_OPT_PREFIX)) = PANEL_LEGEND_OPT_PREFIX _
                Or Left(nm, Len(PREFIX_FAC_TAG_DD)) = PREFIX_FAC_TAG_DD _
                Or Left(nm, Len(PREFIX_WP_TMP)) = PREFIX_WP_TMP _
+               Or Left(nm, Len(PREFIX_ADMIN_COMBO)) = PREFIX_ADMIN_COMBO _
+               Or Left(nm, Len(PREFIX_ADMIN_SEARCH_BTN)) = PREFIX_ADMIN_SEARCH_BTN _
+               Or Left(nm, Len(PREFIX_NW_SEARCH_BTN)) = PREFIX_NW_SEARCH_BTN _
                Or nm = "_mode_indicator" Then
                 On Error Resume Next
-                ws.Shapes(i).Delete                 ' 범례·버튼·모드표시 제거
+                ws.Shapes(i).Delete                 ' 범례·콤보·검색버튼·모드표시 제거 (owner 2026-06-15: 내보낸 파일에 버튼 안 남게)
                 On Error GoTo 0
             Else
                 On Error Resume Next
@@ -4105,7 +4144,7 @@ Public Sub 시설물_클릭()
             ResetMode
         End If
     Else
-        Show시설물_정보 facId
+        Show시설물_정보 facId   ' fac_ + 메타 있으면 cascade, 없으면 고아도형_삭제(안전 단일/그룹)
     End If
 End Sub
 
@@ -5195,9 +5234,9 @@ NextR:
         Dim hasChuga As Boolean: hasChuga = (Len(CStr(chugaMap(nmv))) > 0)
         Dim groupW As Double
         groupW = ADMIN_COMBO_LBL_W + 12 + (행정도_콤보_폭("size") + 2)   ' 라벨 + size 콤보(항상)
-        If hasGubun Then groupW = groupW + 행정도_콤보_폭("gubun") + 2
-        If hasGyuk Then groupW = groupW + 행정도_콤보_폭("gyuk") + 2
-        If hasChuga Then groupW = groupW + 행정도_콤보_폭("chuga") + 2
+        If hasGubun Then groupW = groupW + 행정도_콤보_폭L("gubun", CStr(gubunMap(nmv))) + 2
+        If hasGyuk Then groupW = groupW + 행정도_콤보_폭L("gyuk", CStr(gyukMap(nmv))) + 2
+        If hasChuga Then groupW = groupW + 행정도_콤보_폭L("chuga", CStr(chugaMap(nmv))) + 2
         If curX + groupW > maxX Then
             curX = startX
             curY = curY + rowH
@@ -5231,15 +5270,15 @@ NextR:
         ' 데이터 있는 콤보만 생성 (규격 없으면 규격 콤보 X — owner 2026-06-10)
         If hasGubun Then
             행정도_콤보_하나생성 ws, nmv, "gubun", CStr(gubunMap(nmv)), curX, curY, seq
-            curX = curX + 행정도_콤보_폭("gubun") + 2: seq = seq + 1
+            curX = curX + 행정도_콤보_폭L("gubun", CStr(gubunMap(nmv))) + 2: seq = seq + 1
         End If
         If hasGyuk Then
             행정도_콤보_하나생성 ws, nmv, "gyuk", CStr(gyukMap(nmv)), curX, curY, seq
-            curX = curX + 행정도_콤보_폭("gyuk") + 2: seq = seq + 1
+            curX = curX + 행정도_콤보_폭L("gyuk", CStr(gyukMap(nmv))) + 2: seq = seq + 1
         End If
         If hasChuga Then
             행정도_콤보_하나생성 ws, nmv, "chuga", CStr(chugaMap(nmv)), curX, curY, seq
-            curX = curX + 행정도_콤보_폭("chuga") + 2: seq = seq + 1
+            curX = curX + 행정도_콤보_폭L("chuga", CStr(chugaMap(nmv))) + 2: seq = seq + 1
         End If
         ' 크기/굵기 콤보 (항상) — 시설물 크기% / 케이블 굵기 가산. owner 2026-06-10 ⑤
         행정도_콤보_하나생성 ws, nmv, "size", "", curX, curY, seq
@@ -5263,7 +5302,8 @@ Public Sub 행정도_검색버튼_생성(ws As Worksheet, x As Double, y As Doub
     Dim defs As Variant
     defs = Array(Array("포인트검색", "검색_배지번호"), _
                  Array("명칭검색", "검색_시설물명"), _
-                 Array("ID검색", "검색_ID"))
+                 Array("ID검색", "검색_ID"), _
+                 Array("내보내기", "새파일_내보내기"))
     Dim bx As Double: bx = x
     Dim i As Long
     For i = LBound(defs) To UBound(defs)
@@ -5340,7 +5380,9 @@ Public Sub 네트웍_검색버튼_생성(wsNw As Worksheet)
                  Array("__gap__", ""), _
                  Array("전체축소", "격자_줌_전체_축소"), _
                  Array("전체확대", "격자_줌_전체_확대"), _
-                 Array("시설물만", "시설물만보기_토글"))
+                 Array("시설물만", "시설물만보기_토글"), _
+                 Array("__gap__", ""), _
+                 Array("내보내기", "새파일_내보내기"))
     Dim bx As Double: bx = wsNw.Cells(1, 1).Left + PANEL_OFFSET
     Dim by As Double: by = wsNw.Cells(1, 1).Top + 2
     Dim i As Long
@@ -5413,7 +5455,7 @@ End Sub
 Public Sub 행정도_콤보_하나생성(ws As Worksheet, 명칭 As String, tp As String, optList As String, x As Double, y As Double, seq As Long)
     Dim cb As Shape: Set cb = Nothing
     On Error Resume Next
-    Set cb = ws.Shapes.AddFormControl(xlDropDown, x, y, 행정도_콤보_폭(tp), ADMIN_COMBO_H)
+    Set cb = ws.Shapes.AddFormControl(xlDropDown, x, y, 행정도_콤보_폭L(tp, optList), ADMIN_COMBO_H)
     On Error GoTo 0
     If cb Is Nothing Then Exit Sub
     cb.Name = PREFIX_ADMIN_COMBO & seq
@@ -5488,6 +5530,41 @@ Public Function 행정도_콤보_폭(tp As String) As Double
     End Select
 End Function
 
+' 콤보 폭 — placeholder·옵션 중 가장 긴 글자에 맞춰 확장 (RN "1-2-8-4"·"(규격)" 잘림 방지). owner 2026-06-15
+'   최소폭은 기존 행정도_콤보_폭(tp) 유지. 크기/굵기(size)는 고정(컴팩트 유지 — owner).
+'   생성 loop 의 groupW·curX 전진과 행정도_콤보_하나생성 의 AddFormControl 이 같은 폭을 써야 겹침 없음.
+Public Function 행정도_콤보_폭L(tp As String, optList As String) As Double
+    Dim base As Double: base = 행정도_콤보_폭(tp)
+    If tp = "size" Then 행정도_콤보_폭L = base: Exit Function
+    Dim maxW As Double: maxW = 행정도_콤보_글자폭("(" & 행정도_콤보_타입라벨(tp) & ")")
+    If Len(optList) > 0 Then
+        Dim parts() As String: parts = Split(optList, "|")
+        Dim i As Long
+        For i = LBound(parts) To UBound(parts)
+            Dim w As Double: w = 행정도_콤보_글자폭(parts(i))
+            If w > maxW Then maxW = w
+        Next i
+    End If
+    Dim need As Double: need = maxW + 20    ' 드롭다운 화살표 + 좌우 여백
+    If need > base Then 행정도_콤보_폭L = need Else 행정도_콤보_폭L = base
+End Function
+
+' 문자열의 대략 픽셀폭 (콤보 폰트 기준) — 한글/전각은 넓게 계산. 잘림 방지 위해 약간 넉넉히. owner 2026-06-15
+Public Function 행정도_콤보_글자폭(s As String) As Double
+    Dim total As Double: total = 0
+    Dim i As Long
+    For i = 1 To Len(s)
+        Dim c As Long: c = AscW(Mid(s, i, 1))
+        If c < 0 Then c = c + 65536
+        If c > 255 Then
+            total = total + 9.5      ' 한글·전각
+        Else
+            total = total + 5.5      ' 숫자·영문·하이픈
+        End If
+    Next i
+    행정도_콤보_글자폭 = total
+End Function
+
 ' 행정도 1행 콤보·라벨·미리보기 일괄 제거 (PREFIX_ADMIN_COMBO 가 _LBL/_PV 포함 — 한 줄로 커버).
 Public Sub 행정도_콤보_제거(ws As Worksheet)
     If ws Is Nothing Then Exit Sub
@@ -5530,6 +5607,13 @@ Public Sub 행정도_콤보_변경()
     On Error Resume Next: alt = cb.AlternativeText: On Error GoTo 0
     Dim 명칭 As String: 명칭 = 행정도_콤보_alt파싱(alt, "nm")
     If Len(명칭) = 0 Then Exit Sub
+
+    ' 구분을 바꾸면 같은 명칭의 규격·추가 콤보를 그 구분 값만으로 재구성 (cascade). owner 2026-06-15
+    '   기존엔 "명칭에 있는 모든 규격" 이 나왔음 — 구분 선택 시 그 구분에 해당하는 규격만 남도록.
+    Dim callerTp As String: callerTp = 행정도_콤보_alt파싱(alt, "tp")
+    If callerTp = "gubun" Then
+        행정도_콤보_종속필터 ws, 명칭, 행정도_콤보_선택값(cb)
+    End If
 
     ' 같은 명칭 콤보 수집 + 전체/선택 개수 (owner: 마지막 콤보까지 다 골라야 그리기)
     Dim selGubun As String, selGyuk As String, selChuga As String
@@ -5603,6 +5687,67 @@ NextSh:
         행정도_콤보_미리보기 ws, "", cb, isCable   ' 미완료 — 미리보기 제거, 그리기 안 함
         Application.StatusBar = "[" & 명칭 & "] 나머지 콤보(규격 등)도 선택하면 그리기가 시작됩니다 (" & selCnt & "/" & totalCnt & ")."
     End If
+End Sub
+
+' 구분 선택 시 같은 명칭의 규격·추가 콤보를 그 구분 값만으로 재구성 (cascade). owner 2026-06-15
+'   selGubun="" (placeholder 복귀) 이면 그 명칭 전체 규격·추가 복원.
+'   _범례 셀은 양식_셀_텍스트 로 읽음 — 날짜화 트랩 회피 (행정도_콤보_생성·도형찾기 와 동일).
+Public Sub 행정도_콤보_종속필터(ws As Worksheet, 명칭 As String, selGubun As String)
+    If ws Is Nothing Then Exit Sub
+    Dim wsMeta As Worksheet: Set wsMeta = Nothing
+    On Error Resume Next: Set wsMeta = ThisWorkbook.Worksheets(SHEET_META_LEG): On Error GoTo 0
+    If wsMeta Is Nothing Then Exit Sub
+
+    Dim gyukList As String: gyukList = ""
+    Dim chugaList As String: chugaList = ""
+    Dim lastRow As Long: lastRow = wsMeta.Cells(wsMeta.Rows.Count, 1).End(xlUp).Row
+    Dim r As Long
+    For r = 2 To lastRow
+        If CStr(wsMeta.Cells(r, 8).Value) <> "form" Then GoTo NextR
+        If Trim(CStr(wsMeta.Cells(r, 9).Value)) <> 명칭 Then GoTo NextR
+        Dim gb As String: gb = 양식_셀_텍스트(wsMeta.Cells(r, 3))
+        If Len(selGubun) > 0 Then
+            If gb <> selGubun Then GoTo NextR
+        End If
+        gyukList = 행정도_콤보_옵션추가(gyukList, 양식_셀_텍스트(wsMeta.Cells(r, 5)))
+        chugaList = 행정도_콤보_옵션추가(chugaList, 양식_셀_텍스트(wsMeta.Cells(r, 6)))
+NextR:
+    Next r
+
+    행정도_콤보_재옵션 ws, 명칭, "gyuk", gyukList
+    행정도_콤보_재옵션 ws, 명칭, "chuga", chugaList
+End Sub
+
+' 명칭+tp 콤보를 찾아 옵션 재구성 (placeholder 유지, 선택은 placeholder 로 리셋). owner 2026-06-15
+Public Sub 행정도_콤보_재옵션(ws As Worksheet, 명칭 As String, tp As String, optList As String)
+    If ws Is Nothing Then Exit Sub
+    Dim sh As Shape
+    For Each sh In ws.Shapes
+        Dim n As String: n = sh.Name
+        If Left(n, Len(PREFIX_ADMIN_COMBO)) <> PREFIX_ADMIN_COMBO Then GoTo NextSh
+        If Left(n, Len(PREFIX_ADMIN_COMBO_LBL)) = PREFIX_ADMIN_COMBO_LBL Then GoTo NextSh
+        If Left(n, Len(PREFIX_ADMIN_COMBO_PV)) = PREFIX_ADMIN_COMBO_PV Then GoTo NextSh
+        Dim a2 As String: a2 = ""
+        On Error Resume Next: a2 = sh.AlternativeText: On Error GoTo 0
+        If 행정도_콤보_alt파싱(a2, "nm") <> 명칭 Then GoTo NextSh
+        If 행정도_콤보_alt파싱(a2, "tp") <> tp Then GoTo NextSh
+        ' 일치하는 콤보 — 옵션 재구성
+        On Error Resume Next
+        sh.ControlFormat.RemoveAllItems
+        sh.ControlFormat.AddItem "(" & 행정도_콤보_타입라벨(tp) & ")"
+        Dim parts() As String
+        If Len(optList) > 0 Then
+            parts = Split(optList, "|")
+            Dim i As Long
+            For i = LBound(parts) To UBound(parts)
+                If Len(parts(i)) > 0 Then sh.ControlFormat.AddItem parts(i)
+            Next i
+        End If
+        sh.ControlFormat.Value = 1
+        On Error GoTo 0
+        Exit Sub   ' 명칭+tp 콤보는 하나뿐 — 찾으면 종료
+NextSh:
+    Next sh
 End Sub
 
 ' AlternativeText "nm=..|tp=.." 파싱 (keyName: Key 예약어 회피)
