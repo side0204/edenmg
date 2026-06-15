@@ -205,7 +205,10 @@ Public Sub 배지_재정렬()
     For Each mk In metaDict.Keys
         ' 시설물 도형이 실제로 있는 경우만 「배지 결손」 판정 대상
         If adFacIds.Exists(CStr(mk)) Then
-            If Not presentFacIds.Exists(CStr(mk)) Then deletionOccurred = True: Exit For
+            ' owner 2026-06-15: 메타 배지번호(col5) 공란 = 의도적 배지없음 마커 → 결손 판정 제외 (압축 안 함)
+            If Len(Trim(CStr(metaDict(mk)))) > 0 Then
+                If Not presentFacIds.Exists(CStr(mk)) Then deletionOccurred = True: Exit For
+            End If
         End If
     Next mk
 
@@ -277,6 +280,77 @@ Public Sub 배지_재정렬()
                 seq = seq + 1
             Next ii
         End If
+    End If
+
+    ' owner 2026-06-15: 배지 번호 중복 해소 (압축 아닐 때 항상 — 변경 여부 무관).
+    '   같은 번호가 둘 이상이면 그 번호로 '변경한' 시설물(없으면 metaOrder 빠른 쪽)이 유지, 나머지는 최소 빈번호로.
+    '   ※ 한 번 swap 실패로 메타·표시가 같은 값으로 굳은 'baked-in 중복'(변경 미감지)도 정정.
+    If Not deletionOccurred Then
+        Dim finalText As Object: Set finalText = CreateObject("Scripting.Dictionary")
+        Dim pk As Variant
+        For Each pk In presentFacIds.Keys
+            Dim pfid As String: pfid = CStr(pk)
+            If assigned.Exists(pfid) Then
+                finalText(pfid) = CStr(assigned(pfid))
+            ElseIf adTextDict.Exists(pfid) Then
+                finalText(pfid) = CStr(adTextDict(pfid))
+            ElseIf nwTextDict.Exists(pfid) Then
+                finalText(pfid) = CStr(nwTextDict(pfid))
+            Else
+                finalText(pfid) = ""
+            End If
+        Next pk
+        ' 번호별 보유자 + 사용중 번호 집합
+        Dim holders As Object: Set holders = CreateObject("Scripting.Dictionary")
+        Dim usedNums As Object: Set usedNums = CreateObject("Scripting.Dictionary")
+        Dim fk2 As Variant
+        For Each fk2 In finalText.Keys
+            Dim numv As String: numv = CStr(finalText(fk2))
+            If Len(numv) > 0 And IsNumeric(numv) Then
+                usedNums(CLng(numv)) = True
+                If Not holders.Exists(numv) Then
+                    Dim cc2 As Collection: Set cc2 = New Collection
+                    Set holders(numv) = cc2
+                End If
+                holders(numv).Add CStr(fk2)
+            End If
+        Next fk2
+        ' 중복 번호 해소
+        Dim hnum As Variant
+        For Each hnum In holders.Keys
+            Dim hc As Collection: Set hc = holders(hnum)
+            If hc.Count > 1 Then
+                Dim keepFid As String: keepFid = ""
+                Dim qi As Long
+                For qi = 1 To hc.Count
+                    Dim cand As String: cand = CStr(hc(qi))
+                    If changedNewText.Exists(cand) Then
+                        If CStr(changedNewText(cand)) = CStr(hnum) Then keepFid = cand: Exit For
+                    End If
+                Next qi
+                If Len(keepFid) = 0 Then
+                    Dim bestOrd As Long: bestOrd = 2000000000
+                    For qi = 1 To hc.Count
+                        Dim c3 As String: c3 = CStr(hc(qi))
+                        Dim ordv As Long: ordv = 1000000000
+                        If metaOrder.Exists(c3) Then ordv = CLng(metaOrder(c3))
+                        If ordv < bestOrd Then bestOrd = ordv: keepFid = c3
+                    Next qi
+                End If
+                For qi = 1 To hc.Count
+                    Dim dupFid As String: dupFid = CStr(hc(qi))
+                    If dupFid <> keepFid Then
+                        Dim newNum As Long: newNum = 1
+                        Do While usedNums.Exists(newNum)
+                            newNum = newNum + 1
+                        Loop
+                        usedNums(newNum) = True
+                        assigned(dupFid) = CStr(newNum)
+                        finalText(dupFid) = CStr(newNum)
+                    End If
+                Next qi
+            End If
+        Next hnum
     End If
 
     ' 변경 사항 없으면 종료 (텍스트·메타 건드림 0건)
@@ -1114,13 +1188,16 @@ Public Function Action_facility_delete_복원(payload As String) As Boolean
 
     ' 양 시트 callout + 배지 + 네트웍 부속
     AddFacilityCallout wsAd, shAd, facId, cl_text, legLab
-    AddBadge wsAd, shAd, facId, badge
     AddFacilityCallout wsNw, shNw, facId, cl_text, legLab
-    AddBadge wsNw, shNw, facId, badge
-    AddFacilityStatusBox wsNw, facId
-    AddFacilityTagCombo wsNw, facId
-    상태박스_값_쓰기 wsNw, facId, dayV, nightV
-    시설물_태그_위치_동기화 wsNw, facId
+    ' owner 2026-06-15: 배지없는 마커(badge 공란)는 배지·상태·콤보도 복원 안 함
+    If Len(badge) > 0 Then
+        AddBadge wsAd, shAd, facId, badge
+        AddBadge wsNw, shNw, facId, badge
+        AddFacilityStatusBox wsNw, facId
+        AddFacilityTagCombo wsNw, facId
+        상태박스_값_쓰기 wsNw, facId, dayV, nightV
+        시설물_태그_위치_동기화 wsNw, facId
+    End If
 
     ' callout 위치 보정 — 사용자 드래그 위치 복원 (AddFacilityCallout 가 기본 위치로 생성하므로)
     Dim ad_cl_l As Double, ad_cl_t As Double
@@ -6026,6 +6103,18 @@ Public Sub 행정도_시설물_callout_추종(ws As Worksheet)
             End If
         End If
         On Error Resume Next: sh.AlternativeText = newAlt: On Error GoTo 0
+
+        ' owner 2026-06-15: 행정도 설명박스 꼬리(leader) 보이게 + 박스 테두리색과 동일 (기존 시설물도 매 셀 클릭 시 적용).
+        On Error Resume Next
+        Dim ldr As Shape: Set ldr = ws.Shapes(PREFIX_LEADER & sh.Name)
+        If Not ldr Is Nothing Then
+            ldr.Line.Visible = msoTrue
+            ldr.Line.Transparency = 0
+            ldr.Line.ForeColor.RGB = callout.Line.ForeColor.RGB
+            ldr.Line.Weight = 0.75
+            ldr.OnAction = "리더_클릭_무시"
+        End If
+        On Error GoTo 0
 NextFac:
     Next sh
 End Sub
@@ -6057,12 +6146,19 @@ Public Sub 시설물_leader_재라우팅(Optional wsArg As Worksheet)
             Set fac = ws.Shapes(facId)
             Set tb = ws.Shapes(PREFIX_LABEL & facId)
             On Error GoTo 0
-            ' owner 재요청 — leader 투명 강제 (이전 가시화 코드 잔재 leader 도 매번 투명화)
-            ' owner 2026-06-12: OnAction(빈 매크로) 강제 — 투명 꼬리가 클릭에 잡히지 않게.
-            '   기존 파일의 OnAction 없는 leader 도 셀 클릭마다 자동 보정 (self-healing).
+            ' owner 2026-06-15: 행정도는 꼬리 보이게(박스 테두리색과 동일), 네트웍은 투명 강제.
+            '   (이전엔 양 시트 모두 투명 강제 → 행정도 꼬리가 매 셀 클릭마다 다시 숨겨졌음)
+            ' owner 2026-06-12: OnAction(빈 매크로) 강제 — 꼬리가 클릭에 잡히지 않게 (self-healing).
             On Error Resume Next
-            sh.Line.Visible = msoFalse
-            sh.Line.Transparency = 1
+            If ws.Name = SHEET_ADMIN Then
+                sh.Line.Visible = msoTrue
+                sh.Line.Transparency = 0
+                sh.Line.Weight = 0.75
+                If Not tb Is Nothing Then sh.Line.ForeColor.RGB = tb.Line.ForeColor.RGB
+            Else
+                sh.Line.Visible = msoFalse
+                sh.Line.Transparency = 1
+            End If
             sh.OnAction = "리더_클릭_무시"
             On Error GoTo 0
             ' 시설물·박스 위치 비교 후 좌/우 site 동적 부착 (없으면 Excel 기본 reroute)
@@ -6094,15 +6190,23 @@ Public Sub 시설물_leader_site설정(cn As Shape, fac As Shape, tb As Shape)
     ' 1) connector attach 끊기 — 좌표 직접 set 위해
     cn.ConnectorFormat.BeginDisconnect
     cn.ConnectorFormat.EndDisconnect
-    ' 2) endpoint 좌표 직접 set — 시설물 정중앙 ↔ 박스 정중앙
+    ' 2) endpoint 좌표 — 시설물 정중앙 ↔ 설명박스 외곽에서 시설물에 가장 가까운 점
+    '    owner 2026-06-15: 고정 「왼쪽 상단」 → 박스가 마커의 위/왼쪽이면 꼬리가 박스를 가로질러 어긋남.
+    '    박스 사각형에서 시설물 중심을 clamp 한 점(=마커 향하는 변/모서리)에 부착 → 꼬리가 항상 마커 쪽으로.
     Dim facCx As Double, facCy As Double
     facCx = fac.Left + fac.Width / 2
     facCy = fac.Top + fac.Height / 2
+    Dim tbL As Double, tbT As Double, tbR As Double, tbB As Double
+    tbL = tb.Left: tbT = tb.Top
+    tbR = tb.Left + tb.Width: tbB = tb.Top + tb.Height
     Dim tbCx As Double, tbCy As Double
-    tbCx = tb.Left + tb.Width / 2
-    tbCy = tb.Top + tb.Height / 2
-    ' VBA 의 connector 는 BeginX/Y, EndX/Y 직접 set 불가 → 도형 크기·위치 변경으로 endpoint 이동
-    '   AddLine 의 BoundingBox 가 endpoint 좌표 그 자체 — Left/Top/Width/Height 로 양 끝점 결정
+    tbCx = facCx
+    If tbCx < tbL Then tbCx = tbL
+    If tbCx > tbR Then tbCx = tbR
+    tbCy = facCy
+    If tbCy < tbT Then tbCy = tbT
+    If tbCy > tbB Then tbCy = tbB
+    ' VBA connector 는 BeginX/Y 직접 set 불가 → bbox(Left/Top/Width/Height)로 양 끝점 결정
     Dim minX As Double, minY As Double, maxX As Double, maxY As Double
     If facCx < tbCx Then minX = facCx: maxX = tbCx Else minX = tbCx: maxX = facCx
     If facCy < tbCy Then minY = facCy: maxY = tbCy Else minY = tbCy: maxY = facCy
@@ -6110,11 +6214,16 @@ Public Sub 시설물_leader_site설정(cn As Shape, fac As Shape, tb As Shape)
     cn.Top = minY
     cn.Width = maxX - minX
     cn.Height = maxY - minY
-    ' Flip 으로 endpoint 방향 결정 — (Left,Top) → (Right,Bottom) 또는 (Right,Top) → (Left,Bottom)
-    If (facCx <= tbCx And facCy > tbCy) Or (facCx > tbCx And facCy <= tbCy) Then
-        cn.Rotation = 0
-        cn.Flip msoFlipVertical
-    End If
+    cn.Rotation = 0
+    ' 선이 (tbCx,tbCy)~(facCx,facCy) 두 점을 잇도록 flip 「절대값」 설정 (toggle 아님 — 매 클릭 깜박임 방지)
+    Dim wantFlip As Boolean
+    wantFlip = ((tbCx <= facCx And tbCy > facCy) Or (tbCx > facCx And tbCy <= facCy))
+    ' owner 2026-06-15: 직선 커넥터의 대각선 방향 = (HorizontalFlip Xor VerticalFlip).
+    '   기존엔 VerticalFlip 만 보정 → HorizontalFlip 이 켜진 방향(마커가 좌하단 등)에서
+    '   반대 대각선이 그려져 꼬리가 박스·마커 어디에도 안 닿음. 두 flip 의 XOR 로 절대 보정.
+    Dim curTRBL As Boolean
+    curTRBL = ((cn.HorizontalFlip = msoTrue) Xor (cn.VerticalFlip = msoTrue))
+    If curTRBL <> wantFlip Then cn.Flip msoFlipVertical
     On Error GoTo 0
 End Sub
 

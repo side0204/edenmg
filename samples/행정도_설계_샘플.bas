@@ -265,6 +265,11 @@ Public g_search_form_qFacId As String
 Public g_search_form_qCblId As String
 Public g_search_form_confirmed As Boolean
 
+' owner 2026-06-15: 케이블 거리 검색 — 시작·도착 시설물 2단계 선택 state.
+Public g_dist_step As Long                  ' 0=시작 대기, 1=도착 대기
+Public g_dist_startFac As String            ' 선택된 시작 시설물 id
+Public g_dist_polls As Long                 ' owner 2026-06-15: armed 후 도착 시설물 자동감지 폴링 잔여 횟수 (1초 간격)
+
 ' owner 2026-06-06 (8-37): 라이센스 시스템 상수 — 모든 Private Const 는 파일 상단 declarations 섹션에 와야 함 (VBA 규칙).
 Private Const LICENSE_SALT As String = "edenMG_2026_FiberDesign_v1_SecretSalt_DoNotShare_q9Z7$kP"
 Private Const LICENSE_BUILD As String = "v1"
@@ -2345,8 +2350,12 @@ Public Sub FinalizeDrawnFacility(shp As Shape)
     Dim name As String: name = ""
     Dim legLab As String: legLab = MetaLookupLabel(legendName)
     If Len(legLab) = 0 Then legLab = "구분"
+    ' owner 2026-06-15: 설명선 첫 줄 = 구분/규격 (예: 신설/가공/144C). 규격 없으면 구분만.
+    Dim facGyuk As String: facGyuk = MetaLookupGyuk(legendName)
+    Dim dispLab As String: dispLab = legLab
+    If Len(facGyuk) > 0 Then dispLab = legLab & "/" & facGyuk
     Dim calloutText As String
-    calloutText = legLab & vbCr & "함체명을 입력하세요" & vbCr & "ID"
+    calloutText = dispLab & vbCr & "함체명을 입력하세요" & vbCr & "ID"
 
     Dim facId As String: facId = PREFIX_FAC & NewId8()
 
@@ -2361,11 +2370,18 @@ Public Sub FinalizeDrawnFacility(shp As Shape)
     newShp.ZOrder msoBringToFront   ' 시설물은 케이블 위(맨 앞)
     On Error GoTo 0
 
-    Dim badgeNo As Long: badgeNo = NextBadgeNo()
-    AppendMetaRow SHEET_META_FAC, Array(facId, kind, name, Now, badgeNo)
+    ' owner 2026-06-15: 명칭="시설물" 범례는 배지·상태박스·태그콤보 없는 깔끔한 마커.
+    Dim noBadge As Boolean: noBadge = (MetaLookupCategory(legendName) = "시설물")
+    Dim badgeNo As Long, badgeNoMeta As Variant
+    If noBadge Then
+        badgeNo = 0: badgeNoMeta = ""        ' col5 공란 = 의도적 배지없음 (배지_재정렬 압축 제외)
+    Else
+        badgeNo = NextBadgeNo(): badgeNoMeta = badgeNo
+    End If
+    AppendMetaRow SHEET_META_FAC, Array(facId, kind, name, Now, badgeNoMeta)
 
-    ' 행정도 배지 부착 — 시설물 우상단 빨간 사각형 + 흰 번호
-    AddBadge ws, newShp, facId, CStr(badgeNo)
+    ' 행정도 배지 부착 — 시설물 우상단 빨간 사각형 + 흰 번호 (noBadge 면 생략)
+    If Not noBadge Then AddBadge ws, newShp, facId, CStr(badgeNo)
 
     ' 네트웍구성도 복제 — 행정도 좌표를 20x20 격자 셀 「중앙」 으로 자동 스냅 (시설물이 항상 격자 안에 들어가게)
     Dim wsNw As Worksheet: Set wsNw = ThisWorkbook.Worksheets(SHEET_NETWORK)
@@ -2405,10 +2421,12 @@ Public Sub FinalizeDrawnFacility(shp As Shape)
     '   legLab 은 calloutText 생성 시 이미 계산됨
     If Not shNw Is Nothing Then
         AddFacilityCallout wsNw, shNw, facId, calloutText, legLab
-        AddBadge wsNw, shNw, facId, CStr(badgeNo)
-        AddFacilityStatusBox wsNw, facId
-        AddFacilityTagCombo wsNw, facId
-        시설물_태그_위치_동기화 wsNw, facId
+        If Not noBadge Then
+            AddBadge wsNw, shNw, facId, CStr(badgeNo)
+            AddFacilityStatusBox wsNw, facId
+            AddFacilityTagCombo wsNw, facId
+            시설물_태그_위치_동기화 wsNw, facId
+        End If
     End If
     If wasProtNw Then ApplySheetProtection wsNw
 
@@ -2623,6 +2641,7 @@ Public Sub FinalizeDrawnCable(ln As Shape)
     ' 케이블 설명선(말풍선) — 행정도 중간점에. 규격은 범례 선택값(spec) 자동, ID·거리는 사용자가 채움.
     ' owner 2026-06-08 (8-84): 「케이블ID」 → 「선로ID」 (네트웍구성도와 라벨 통일)
     ' owner 2026-06-11: 규격 줄 = 「규격/구분」 (예: 36C/가공). 구분 콤보 미선택·규격과 동일하면 규격만.
+    '   (owner 2026-06-15 재확인: 케이블 설명박스는 규격/구분이 맞음 — 시설물 콜아웃만 구분/규격)
     Dim specDisp As String: specDisp = spec
     If Len(g_cableGubun) > 0 Then
         If g_cableGubun <> spec Then specDisp = spec & "/" & g_cableGubun
@@ -2634,10 +2653,14 @@ Public Sub FinalizeDrawnCable(ln As Shape)
 
     If wasProt Then ApplySheetProtection ws
 
+    ' owner 2026-06-15: 철거 케이블(구분에 "철거" 포함)은 네트웍구성도에 그리지 않음 (행정도엔 유지·X마크 그대로).
+    Dim cblGubun As String: cblGubun = MetaLookupLabel(legendName)
+    Dim isRemovalCable As Boolean: isRemovalCable = (InStr(cblGubun, "철거") > 0)
+
     ' 네트웍 — 양 끝 모두 시설물일 때 「직선」 커넥터로 연결 (꺽은선 X). 시설물 따라 이동.
     '   방향: 행정도의 |dx| vs |dy| 비교 — 가로 우세면 to 시설물 Y 를 from Y 에, 세로 우세면 X 를 from X 에 맞춰
     '         케이블이 가로/세로 직선으로 자연스럽게 보이도록 to 시설물 위치 보정. (이미 다른 케이블 있으면 보정 안 함)
-    If Len(fromId) > 0 And Len(toId) > 0 Then
+    If Len(fromId) > 0 And Len(toId) > 0 And Not isRemovalCable Then
         Dim wasProtNw As Boolean: wasProtNw = wsNw.ProtectContents Or wsNw.ProtectDrawingObjects
         On Error Resume Next
         wsNw.Unprotect
@@ -2684,8 +2707,8 @@ Public Sub FinalizeDrawnCable(ln As Shape)
     '   적용: 행정도(Freeform 경로) + 네트웍구성도(직선) 양 시트 모두
     '   owner 2026-06-09 (8-125-fix1): X 배치 중 에러 발생해도 케이블 등록 흐름 계속 — Resume Next 가드
     '   owner 2026-06-09 (8-125-fix4): fromId/toId 있으면 그 끝은 시설물 부착 → 첫/끝 X 생략
-    Dim cblGubun As String: cblGubun = MetaLookupLabel(legendName)
-    If InStr(cblGubun, "철거") > 0 Then
+    '   cblGubun·isRemovalCable 은 위 네트웍 블록에서 이미 계산 (owner 2026-06-15)
+    If isRemovalCable Then
         On Error Resume Next
         PlaceCableRemovalXMarks ws, ln, cblId, lc, lwt, Len(fromId) > 0, Len(toId) > 0
         If Len(fromId) > 0 And Len(toId) > 0 Then
@@ -3945,8 +3968,8 @@ End Function
 Private Sub 레이어_정리_시트(ws As Worksheet)
     ' owner 2026-06-05: 시설물 설명선(LABEL·LEADER)이 시설물 위에 있어 클릭이 막힘 →
     '   설명선을 가장 먼저 호출해 맨 아래(배경 바로 위)로. CBL·FAC 는 그 위.
-    BringGroupToFront ws, PREFIX_LABEL      ' 설명선 박스 (배경 바로 위 — 맨 아래)
-    BringGroupToFront ws, PREFIX_LEADER     ' 설명선 연결선 (LABEL 위)
+    BringGroupToFront ws, PREFIX_LEADER     ' 설명선 연결선 (배경 바로 위 — 박스보다 뒤). owner 2026-06-15: 꼬리는 설명박스와 배경 사이
+    BringGroupToFront ws, PREFIX_LABEL      ' 설명선 박스 (연결선 위)
     BringGroupToFront ws, PREFIX_CBL        ' 케이블 (설명선 위)
     BringGroupToFront ws, PREFIX_FAC        ' 시설물 (케이블 위 — 클릭 우선)
     BringGroupToFront ws, PREFIX_LEG_FAC    ' 범례(시설물)
@@ -4775,6 +4798,7 @@ Public Sub 시트_셀_클릭(Target As Range)
     Application.EnableEvents = False
     배지없는_시설물_부속정리      ' 배지 삭제 → 콤보·상태박스도 동시 제거
     배지_재정렬                    ' 남은 배지 번호 1부터 재정렬
+    On Error Resume Next: 케이블_거리_동기화 Target.Worksheet: On Error GoTo 0   ' owner 2026-06-15: 설명선 거리 직접수정 → 메타 반영
     Application.EnableEvents = oEvB
 
     ' 모드 없으면 여기서 종료 (배치/그리기 분기는 아래)
@@ -5042,16 +5066,28 @@ Public Sub PlaceFacility(ptLeft As Double, ptTop As Double, _
     shNw.OnAction = ""            ' OnAction 없음 → 네이티브 선택·이동
     shNw.Locked = False
 
-    Dim badgeNo2 As Long: badgeNo2 = NextBadgeNo()
-    AppendMetaRow SHEET_META_FAC, Array(facId, kind, label, Now, badgeNo2)
+    ' owner 2026-06-15: 명칭="시설물" 범례는 배지·상태박스·태그콤보 없는 깔끔한 마커.
+    Dim noBadge2 As Boolean: noBadge2 = (MetaLookupCategory(legendName) = "시설물")
+    Dim badgeNo2 As Long, badgeNo2Meta As Variant
+    If noBadge2 Then
+        badgeNo2 = 0: badgeNo2Meta = ""
+    Else
+        badgeNo2 = NextBadgeNo(): badgeNo2Meta = badgeNo2
+    End If
+    AppendMetaRow SHEET_META_FAC, Array(facId, kind, label, Now, badgeNo2Meta)
 
-    ' 시설물 좌상단 번호 배지 (양 시트)
-    AddBadge wsAd, shAd, facId, CStr(badgeNo2)
-    AddBadge wsNw, shNw, facId, CStr(badgeNo2)
+    ' 시설물 좌상단 번호 배지 (양 시트) — noBadge2 면 생략
+    If Not noBadge2 Then
+        AddBadge wsAd, shAd, facId, CStr(badgeNo2)
+        AddBadge wsNw, shNw, facId, CStr(badgeNo2)
+    End If
 
-    ' 설명선 자동 부착 — 양 시트. 「구분」 자리에 범례 명칭(label) 자동 입력
+    ' 설명선 자동 부착 — 양 시트. 첫 줄 = 구분/규격 (owner 2026-06-15). 색 판정용 label 은 구분 그대로.
+    Dim facGyuk2 As String: facGyuk2 = MetaLookupGyuk(legendName)
+    Dim dispLab2 As String: dispLab2 = label
+    If Len(facGyuk2) > 0 Then dispLab2 = label & "/" & facGyuk2
     Dim calloutTextP As String
-    calloutTextP = label & vbCr & "함체명을 입력하세요" & vbCr & "ID"
+    calloutTextP = dispLab2 & vbCr & "함체명을 입력하세요" & vbCr & "ID"
     AddFacilityCallout wsAd, shAd, facId, calloutTextP, label
     AddFacilityCallout wsNw, shNw, facId, calloutTextP, label
 
@@ -5059,10 +5095,12 @@ Public Sub PlaceFacility(ptLeft As Double, ptTop As Double, _
     배지_위치_동기화 wsAd
     배지_위치_동기화 wsNw
 
-    ' 네트웍구성도 시설물 callout 위 상태 박스 + 태그 콤보
-    AddFacilityStatusBox wsNw, facId
-    AddFacilityTagCombo wsNw, facId
-    시설물_태그_위치_동기화 wsNw, facId
+    ' 네트웍구성도 시설물 callout 위 상태 박스 + 태그 콤보 (noBadge2 면 생략 — owner 2026-06-15)
+    If Not noBadge2 Then
+        AddFacilityStatusBox wsNw, facId
+        AddFacilityTagCombo wsNw, facId
+        시설물_태그_위치_동기화 wsNw, facId
+    End If
 
     ' owner 2026-06-08 (8-115): 배치 모드 ON 중에 신규 시설물이면 새 데코도 즉시 숨김.
     '   토글 OFF 누르기 전까지 시설물·배지만 보이는 상태 유지.
@@ -5358,6 +5396,8 @@ Public Sub 행정도_검색버튼_생성(ws As Worksheet, x As Double, y As Doub
     defs = Array(Array("포인트검색", "검색_배지번호"), _
                  Array("명칭검색", "검색_시설물명"), _
                  Array("ID검색", "검색_ID"), _
+                 Array("거리입력", "케이블_거리입력"), _
+                 Array("거리검색", "거리검색"), _
                  Array("내보내기", "새파일_내보내기"))
     Dim bx As Double: bx = x
     Dim i As Long
@@ -5420,13 +5460,9 @@ Public Sub 네트웍_검색버튼_생성(wsNw As Worksheet)
             On Error Resume Next: oldSh.Delete: On Error GoTo 0
         End If
     Next j
-    ' 검색 3버튼 + 0.5칸 간격 + 코어 3버튼 + 포인트 2버튼 + 전체줌 2버튼 + 시설물만. owner 2026-06-10
+    ' 코어 3 + 포인트 2 + 전체줌 2 + 시설물만, 그리고 검색 3버튼·거리입력·거리검색·내보내기를 오른쪽에 묶음 (행정도와 일관). owner 2026-06-15
     Dim defs As Variant
-    defs = Array(Array("포인트검색", "검색_배지번호"), _
-                 Array("명칭검색", "검색_시설물명"), _
-                 Array("ID검색", "검색_ID"), _
-                 Array("__gap__", ""), _
-                 Array("코어연결", "선번연결_도구"), _
+    defs = Array(Array("코어연결", "선번연결_도구"), _
                  Array("코어추적", "코어_추적_도구"), _
                  Array("추적지우기", "코어_추적_지우기"), _
                  Array("__gap__", ""), _
@@ -5437,6 +5473,11 @@ Public Sub 네트웍_검색버튼_생성(wsNw As Worksheet)
                  Array("전체확대", "격자_줌_전체_확대"), _
                  Array("시설물만", "시설물만보기_토글"), _
                  Array("__gap__", ""), _
+                 Array("포인트검색", "검색_배지번호"), _
+                 Array("명칭검색", "검색_시설물명"), _
+                 Array("ID검색", "검색_ID"), _
+                 Array("거리입력", "케이블_거리입력"), _
+                 Array("거리검색", "거리검색"), _
                  Array("내보내기", "새파일_내보내기"))
     Dim bx As Double: bx = wsNw.Cells(1, 1).Left + PANEL_OFFSET
     Dim by As Double: by = wsNw.Cells(1, 1).Top + 2
@@ -6218,10 +6259,18 @@ Public Sub AddFacilityCallout(ws As Worksheet, fac As Shape, facId As String, Op
     '   클릭 시 선택 차단. leader 는 자동 재라우팅이라 사용자가 직접 선택할 일 없음.
     cn.OnAction = "리더_클릭_무시"
     cn.Line.Weight = 0.5
-    ' owner 재요청 — leader 투명 (보이지 않음, 도형은 살아있어 콜아웃 위치 동기화는 유지)
+    ' owner 2026-06-15: 행정도 설명박스 꼬리(leader) 보이게 + 박스 테두리색(lineColor)과 동일 + 클릭 무시(OnAction 유지).
+    '   네트웍구성도는 기존대로 투명 (격자 기반이라 꼬리 불필요).
     On Error Resume Next
-    cn.Line.Visible = msoFalse
-    cn.Line.Transparency = 1
+    If ws.Name = SHEET_ADMIN Then
+        cn.Line.Visible = msoTrue
+        cn.Line.Transparency = 0
+        cn.Line.ForeColor.RGB = lineColor
+        cn.Line.Weight = 0.75
+    Else
+        cn.Line.Visible = msoFalse
+        cn.Line.Transparency = 1
+    End If
     On Error GoTo 0
     시설물_leader_site설정 cn, fac, tb
 
@@ -6798,7 +6847,10 @@ Public Sub 배지_재정렬()
     For Each mk In metaDict.Keys
         ' 시설물 도형이 실제로 있는 경우만 「배지 결손」 판정 대상
         If adFacIds.Exists(CStr(mk)) Then
-            If Not presentFacIds.Exists(CStr(mk)) Then deletionOccurred = True: Exit For
+            ' owner 2026-06-15: 메타 배지번호(col5) 공란 = 의도적 배지없음 마커 → 결손 판정 제외 (압축 안 함)
+            If Len(Trim(CStr(metaDict(mk)))) > 0 Then
+                If Not presentFacIds.Exists(CStr(mk)) Then deletionOccurred = True: Exit For
+            End If
         End If
     Next mk
 
@@ -6870,6 +6922,77 @@ Public Sub 배지_재정렬()
                 seq = seq + 1
             Next ii
         End If
+    End If
+
+    ' owner 2026-06-15: 배지 번호 중복 해소 (압축 아닐 때 항상 — 변경 여부 무관).
+    '   같은 번호가 둘 이상이면 그 번호로 '변경한' 시설물(없으면 metaOrder 빠른 쪽)이 유지, 나머지는 최소 빈번호로.
+    '   ※ 한 번 swap 실패로 메타·표시가 같은 값으로 굳은 'baked-in 중복'(변경 미감지)도 정정.
+    If Not deletionOccurred Then
+        Dim finalText As Object: Set finalText = CreateObject("Scripting.Dictionary")
+        Dim pk As Variant
+        For Each pk In presentFacIds.Keys
+            Dim pfid As String: pfid = CStr(pk)
+            If assigned.Exists(pfid) Then
+                finalText(pfid) = CStr(assigned(pfid))
+            ElseIf adTextDict.Exists(pfid) Then
+                finalText(pfid) = CStr(adTextDict(pfid))
+            ElseIf nwTextDict.Exists(pfid) Then
+                finalText(pfid) = CStr(nwTextDict(pfid))
+            Else
+                finalText(pfid) = ""
+            End If
+        Next pk
+        ' 번호별 보유자 + 사용중 번호 집합
+        Dim holders As Object: Set holders = CreateObject("Scripting.Dictionary")
+        Dim usedNums As Object: Set usedNums = CreateObject("Scripting.Dictionary")
+        Dim fk2 As Variant
+        For Each fk2 In finalText.Keys
+            Dim numv As String: numv = CStr(finalText(fk2))
+            If Len(numv) > 0 And IsNumeric(numv) Then
+                usedNums(CLng(numv)) = True
+                If Not holders.Exists(numv) Then
+                    Dim cc2 As Collection: Set cc2 = New Collection
+                    Set holders(numv) = cc2
+                End If
+                holders(numv).Add CStr(fk2)
+            End If
+        Next fk2
+        ' 중복 번호 해소
+        Dim hnum As Variant
+        For Each hnum In holders.Keys
+            Dim hc As Collection: Set hc = holders(hnum)
+            If hc.Count > 1 Then
+                Dim keepFid As String: keepFid = ""
+                Dim qi As Long
+                For qi = 1 To hc.Count
+                    Dim cand As String: cand = CStr(hc(qi))
+                    If changedNewText.Exists(cand) Then
+                        If CStr(changedNewText(cand)) = CStr(hnum) Then keepFid = cand: Exit For
+                    End If
+                Next qi
+                If Len(keepFid) = 0 Then
+                    Dim bestOrd As Long: bestOrd = 2000000000
+                    For qi = 1 To hc.Count
+                        Dim c3 As String: c3 = CStr(hc(qi))
+                        Dim ordv As Long: ordv = 1000000000
+                        If metaOrder.Exists(c3) Then ordv = CLng(metaOrder(c3))
+                        If ordv < bestOrd Then bestOrd = ordv: keepFid = c3
+                    Next qi
+                End If
+                For qi = 1 To hc.Count
+                    Dim dupFid As String: dupFid = CStr(hc(qi))
+                    If dupFid <> keepFid Then
+                        Dim newNum As Long: newNum = 1
+                        Do While usedNums.Exists(newNum)
+                            newNum = newNum + 1
+                        Loop
+                        usedNums(newNum) = True
+                        assigned(dupFid) = CStr(newNum)
+                        finalText(dupFid) = CStr(newNum)
+                    End If
+                Next qi
+            End If
+        Next hnum
     End If
 
     ' 변경 사항 없으면 종료 (텍스트·메타 건드림 0건)
@@ -7707,13 +7830,16 @@ Private Function Action_facility_delete_복원(payload As String) As Boolean
 
     ' 양 시트 callout + 배지 + 네트웍 부속
     AddFacilityCallout wsAd, shAd, facId, cl_text, legLab
-    AddBadge wsAd, shAd, facId, badge
     AddFacilityCallout wsNw, shNw, facId, cl_text, legLab
-    AddBadge wsNw, shNw, facId, badge
-    AddFacilityStatusBox wsNw, facId
-    AddFacilityTagCombo wsNw, facId
-    상태박스_값_쓰기 wsNw, facId, dayV, nightV
-    시설물_태그_위치_동기화 wsNw, facId
+    ' owner 2026-06-15: 배지없는 마커(badge 공란)는 배지·상태·콤보도 복원 안 함
+    If Len(badge) > 0 Then
+        AddBadge wsAd, shAd, facId, badge
+        AddBadge wsNw, shNw, facId, badge
+        AddFacilityStatusBox wsNw, facId
+        AddFacilityTagCombo wsNw, facId
+        상태박스_값_쓰기 wsNw, facId, dayV, nightV
+        시설물_태그_위치_동기화 wsNw, facId
+    End If
 
     ' callout 위치 보정 — 사용자 드래그 위치 복원 (AddFacilityCallout 가 기본 위치로 생성하므로)
     Dim ad_cl_l As Double, ad_cl_t As Double
@@ -12556,6 +12682,18 @@ Public Sub 행정도_시설물_callout_추종(ws As Worksheet)
             End If
         End If
         On Error Resume Next: sh.AlternativeText = newAlt: On Error GoTo 0
+
+        ' owner 2026-06-15: 행정도 설명박스 꼬리(leader) 보이게 + 박스 테두리색과 동일 (기존 시설물도 매 셀 클릭 시 적용).
+        On Error Resume Next
+        Dim ldr As Shape: Set ldr = ws.Shapes(PREFIX_LEADER & sh.Name)
+        If Not ldr Is Nothing Then
+            ldr.Line.Visible = msoTrue
+            ldr.Line.Transparency = 0
+            ldr.Line.ForeColor.RGB = callout.Line.ForeColor.RGB
+            ldr.Line.Weight = 0.75
+            ldr.OnAction = "리더_클릭_무시"
+        End If
+        On Error GoTo 0
 NextFac:
     Next sh
 End Sub
@@ -12587,12 +12725,19 @@ Public Sub 시설물_leader_재라우팅(Optional wsArg As Worksheet)
             Set fac = ws.Shapes(facId)
             Set tb = ws.Shapes(PREFIX_LABEL & facId)
             On Error GoTo 0
-            ' owner 재요청 — leader 투명 강제 (이전 가시화 코드 잔재 leader 도 매번 투명화)
-            ' owner 2026-06-12: OnAction(빈 매크로) 강제 — 투명 꼬리가 클릭에 잡히지 않게.
-            '   기존 파일의 OnAction 없는 leader 도 셀 클릭마다 자동 보정 (self-healing).
+            ' owner 2026-06-15: 행정도는 꼬리 보이게(박스 테두리색과 동일), 네트웍은 투명 강제.
+            '   (이전엔 양 시트 모두 투명 강제 → 행정도 꼬리가 매 셀 클릭마다 다시 숨겨졌음)
+            ' owner 2026-06-12: OnAction(빈 매크로) 강제 — 꼬리가 클릭에 잡히지 않게 (self-healing).
             On Error Resume Next
-            sh.Line.Visible = msoFalse
-            sh.Line.Transparency = 1
+            If ws.Name = SHEET_ADMIN Then
+                sh.Line.Visible = msoTrue
+                sh.Line.Transparency = 0
+                sh.Line.Weight = 0.75
+                If Not tb Is Nothing Then sh.Line.ForeColor.RGB = tb.Line.ForeColor.RGB
+            Else
+                sh.Line.Visible = msoFalse
+                sh.Line.Transparency = 1
+            End If
             sh.OnAction = "리더_클릭_무시"
             On Error GoTo 0
             ' 시설물·박스 위치 비교 후 좌/우 site 동적 부착 (없으면 Excel 기본 reroute)
@@ -12624,15 +12769,23 @@ Private Sub 시설물_leader_site설정(cn As Shape, fac As Shape, tb As Shape)
     ' 1) connector attach 끊기 — 좌표 직접 set 위해
     cn.ConnectorFormat.BeginDisconnect
     cn.ConnectorFormat.EndDisconnect
-    ' 2) endpoint 좌표 직접 set — 시설물 정중앙 ↔ 박스 정중앙
+    ' 2) endpoint 좌표 — 시설물 정중앙 ↔ 설명박스 외곽에서 시설물에 가장 가까운 점
+    '    owner 2026-06-15: 고정 「왼쪽 상단」 → 박스가 마커의 위/왼쪽이면 꼬리가 박스를 가로질러 어긋남.
+    '    박스 사각형에서 시설물 중심을 clamp 한 점(=마커 향하는 변/모서리)에 부착 → 꼬리가 항상 마커 쪽으로.
     Dim facCx As Double, facCy As Double
     facCx = fac.Left + fac.Width / 2
     facCy = fac.Top + fac.Height / 2
+    Dim tbL As Double, tbT As Double, tbR As Double, tbB As Double
+    tbL = tb.Left: tbT = tb.Top
+    tbR = tb.Left + tb.Width: tbB = tb.Top + tb.Height
     Dim tbCx As Double, tbCy As Double
-    tbCx = tb.Left + tb.Width / 2
-    tbCy = tb.Top + tb.Height / 2
-    ' VBA 의 connector 는 BeginX/Y, EndX/Y 직접 set 불가 → 도형 크기·위치 변경으로 endpoint 이동
-    '   AddLine 의 BoundingBox 가 endpoint 좌표 그 자체 — Left/Top/Width/Height 로 양 끝점 결정
+    tbCx = facCx
+    If tbCx < tbL Then tbCx = tbL
+    If tbCx > tbR Then tbCx = tbR
+    tbCy = facCy
+    If tbCy < tbT Then tbCy = tbT
+    If tbCy > tbB Then tbCy = tbB
+    ' VBA connector 는 BeginX/Y 직접 set 불가 → bbox(Left/Top/Width/Height)로 양 끝점 결정
     Dim minX As Double, minY As Double, maxX As Double, maxY As Double
     If facCx < tbCx Then minX = facCx: maxX = tbCx Else minX = tbCx: maxX = facCx
     If facCy < tbCy Then minY = facCy: maxY = tbCy Else minY = tbCy: maxY = facCy
@@ -12640,11 +12793,16 @@ Private Sub 시설물_leader_site설정(cn As Shape, fac As Shape, tb As Shape)
     cn.Top = minY
     cn.Width = maxX - minX
     cn.Height = maxY - minY
-    ' Flip 으로 endpoint 방향 결정 — (Left,Top) → (Right,Bottom) 또는 (Right,Top) → (Left,Bottom)
-    If (facCx <= tbCx And facCy > tbCy) Or (facCx > tbCx And facCy <= tbCy) Then
-        cn.Rotation = 0
-        cn.Flip msoFlipVertical
-    End If
+    cn.Rotation = 0
+    ' 선이 (tbCx,tbCy)~(facCx,facCy) 두 점을 잇도록 flip 「절대값」 설정 (toggle 아님 — 매 클릭 깜박임 방지)
+    Dim wantFlip As Boolean
+    wantFlip = ((tbCx <= facCx And tbCy > facCy) Or (tbCx > facCx And tbCy <= facCy))
+    ' owner 2026-06-15: 직선 커넥터의 대각선 방향 = (HorizontalFlip Xor VerticalFlip).
+    '   기존엔 VerticalFlip 만 보정 → HorizontalFlip 이 켜진 방향(마커가 좌하단 등)에서
+    '   반대 대각선이 그려져 꼬리가 박스·마커 어디에도 안 닿음. 두 flip 의 XOR 로 절대 보정.
+    Dim curTRBL As Boolean
+    curTRBL = ((cn.HorizontalFlip = msoTrue) Xor (cn.VerticalFlip = msoTrue))
+    If curTRBL <> wantFlip Then cn.Flip msoFlipVertical
     On Error GoTo 0
 End Sub
 
@@ -26999,8 +27157,7 @@ Public Sub 정보_적용()
                     adShape.TextFrame2.TextRange.Text = winB
                     nwShape.TextFrame2.TextRange.Text = winB
                     On Error GoTo 0
-                    Dim facNm As String: facNm = Mid(adShape.Name, Len(PREFIX_BADGE) + 1)
-                    MetaUpdateBadgeNo facNm, Trim(winB)
+                    ' owner 2026-06-15: 메타 미리갱신 제거 — 아래 배지_재정렬 이 변경 감지→교환/메타갱신 일괄 처리
                     badgeSynced = badgeSynced + 1
                 End If
             End If
@@ -27009,6 +27166,8 @@ Public Sub 정보_적용()
     배지_위치_동기화 wsAd
     배지_위치_동기화 wsNw
     시설물_태그_위치_동기화 wsNw
+    ' owner 2026-06-15: 배지 변경 감지→교환(swap)+중복해소+메타갱신 일괄 (정보_적용_silent 와 동일 정책)
+    배지_재정렬
 
     Dim dupes As String: dupes = FindDuplicateBadges(wsAd)
     Dim dupesMsg As String: dupesMsg = ""
@@ -27111,8 +27270,9 @@ Public Sub 정보_적용_silent(Optional ByVal sourceSheetName As String = "")
                     sh.TextFrame2.TextRange.Text = winB
                     peer.TextFrame2.TextRange.Text = winB
                     On Error GoTo 0
-                    Dim facNm As String: facNm = Mid(sh.Name, Len(PREFIX_BADGE) + 1)
-                    MetaUpdateBadgeNo facNm, Trim(winB)
+                    ' owner 2026-06-15: 메타 갱신은 여기서 하지 않음 — 배지_재정렬(직후 실행)이 메타-도형 차이로
+                    '   '변경'을 감지해 교환(swap)/중복해소를 처리. 여기서 메타를 미리 갱신하면 변경이 가려져
+                    '   swap 이 실패하고 번호가 원복되던 버그. (도형 텍스트 양 시트 동기화만 수행)
                 End If
             End If
         End If
@@ -27533,6 +27693,39 @@ End Function
 Public Function MetaLookupKind(legendShapeName As String) As String
     Dim row As Variant: row = MetaFindRow(SHEET_META_LEG, 1, legendShapeName)
     If Not IsEmpty(row) Then MetaLookupKind = CStr(row(2))
+End Function
+
+' owner 2026-06-15: 범례 도형의 「명칭」(col9 — 시설물/광케이블/RN_1차 등) 메타 조회.
+'   (col3=구분 은 MetaLookupLabel 이 담당. 명칭은 col9.)
+'   ※ _범례 헤더는 4컬럼뿐 → MetaFindRow 는 col9 를 못 읽음. 콤보 코드처럼 col9 를 직접 읽는다.
+Public Function MetaLookupCategory(legendShapeName As String) As String
+    Dim ws As Worksheet
+    On Error Resume Next: Set ws = ThisWorkbook.Worksheets(SHEET_META_LEG): On Error GoTo 0
+    If ws Is Nothing Then Exit Function
+    Dim last As Long: last = ws.Cells(ws.Rows.Count, 1).End(xlUp).Row
+    Dim r As Long
+    For r = 2 To last
+        If CStr(ws.Cells(r, 1).Value) = legendShapeName Then
+            MetaLookupCategory = Trim(CStr(ws.Cells(r, 9).Value))
+            Exit Function
+        End If
+    Next r
+End Function
+
+' owner 2026-06-15: 범례 도형의 「규격」(col5) 메타 조회 — 시설물 설명선 구분/규격 표시용.
+'   _범례 헤더 4컬럼뿐 → MetaFindRow 못 읽음 → col5 직접 읽기.
+Public Function MetaLookupGyuk(legendShapeName As String) As String
+    Dim ws As Worksheet
+    On Error Resume Next: Set ws = ThisWorkbook.Worksheets(SHEET_META_LEG): On Error GoTo 0
+    If ws Is Nothing Then Exit Function
+    Dim last As Long: last = ws.Cells(ws.Rows.Count, 1).End(xlUp).Row
+    Dim r As Long
+    For r = 2 To last
+        If CStr(ws.Cells(r, 1).Value) = legendShapeName Then
+            MetaLookupGyuk = Trim(CStr(ws.Cells(r, 5).Value))
+            Exit Function
+        End If
+    Next r
 End Function
 
 Public Function MetaLookupName(metaSheet As String, facId As String) As String
@@ -29824,6 +30017,602 @@ Public Sub 검색_선로ID()
     g_search_form_qFacId = "": g_search_form_qCblId = Trim(s)
     g_search_form_confirmed = True
     검색_수행
+End Sub
+
+' ============================================================================
+'  owner 2026-06-15: 케이블 거리 — 입력(메타 8번 컬럼 저장) + 거리검색(시작·도착 시설물 경로 합산)
+'    - 거리 저장처: _케이블 메타 8번 컬럼 (col1=id·2=from·3=to·4=spec·7=gubun·8=distance)
+'    - 거리검색: 시작 시설물 선택 → 「거리검색」 → 도착 시설물 선택 → 「거리검색」 재클릭 → BFS 경로 거리 합산
+' ============================================================================
+
+' 케이블 1개 선택 → 거리(m) 입력 → 메타 8번 저장 + 설명선 거리줄 갱신.
+Public Sub 케이블_거리입력()
+    Dim selR As Object: Set selR = Nothing
+    On Error Resume Next: Set selR = Selection.ShapeRange: On Error GoTo 0
+    Dim cblShp As Shape: Set cblShp = Nothing
+    If Not selR Is Nothing Then
+        Dim i As Long
+        For i = 1 To selR.Count
+            If Left(selR(i).Name, Len(PREFIX_CBL)) = PREFIX_CBL Then Set cblShp = selR(i): Exit For
+        Next i
+    End If
+    If cblShp Is Nothing Then
+        MsgBox "거리를 입력할 케이블 1개를 먼저 선택한 뒤 「거리입력」 을 누르세요.", vbInformation, "케이블 거리 입력"
+        Exit Sub
+    End If
+    Dim cblId As String: cblId = cblShp.Name
+
+    Dim cur As String: cur = 케이블_거리_텍스트(cblId)
+    Dim s As String
+    s = InputBox("케이블 거리 (m) — 숫자만 입력 (공란=삭제):" & vbLf & vbLf & "구간: " & 케이블_구간라벨(cblId), _
+                 "케이블 거리 입력", cur)
+    If StrPtr(s) = 0 Then Exit Sub                 ' 취소
+    s = Trim(s)
+    Dim distVal As Double: distVal = 0
+    If Len(s) > 0 Then
+        distVal = 거리_숫자추출(s)
+        If distVal < 0 Then
+            MsgBox "올바른 숫자를 입력하세요 (예: 120).", vbExclamation, "케이블 거리 입력": Exit Sub
+        End If
+    End If
+
+    Dim wsCbl As Worksheet
+    On Error Resume Next: Set wsCbl = ThisWorkbook.Worksheets(SHEET_META_CBL): On Error GoTo 0
+    If wsCbl Is Nothing Then Exit Sub
+    If Len(CStr(wsCbl.Cells(1, 8).Value)) = 0 Then wsCbl.Cells(1, 8).Value = "distance"
+    Dim lastR As Long: lastR = wsCbl.Cells(wsCbl.Rows.Count, 1).End(xlUp).Row
+    Dim r As Long, done As Boolean: done = False
+    For r = 2 To lastR
+        If CStr(wsCbl.Cells(r, 1).Value) = cblId Then
+            If Len(s) = 0 Then wsCbl.Cells(r, 8).Value = "" Else wsCbl.Cells(r, 8).Value = distVal
+            done = True: Exit For
+        End If
+    Next r
+
+    ' 설명선 3번째 줄(거리) 표시 갱신 — 양 시트 (best-effort)
+    거리_설명선_갱신 cblId, IIf(Len(s) = 0, "거리", CStr(distVal) & "m")
+
+    If done Then
+        Application.StatusBar = "케이블 거리 저장: " & IIf(Len(s) = 0, "(삭제)", CStr(distVal) & " m") & " — " & 케이블_구간라벨(cblId)
+    Else
+        MsgBox "이 케이블의 메타 정보를 찾지 못했습니다.", vbExclamation, "케이블 거리 입력"
+    End If
+End Sub
+
+' owner 2026-06-15: 케이블 설명선 3번째 줄(거리)을 직접 수정하면 메타 8번에 반영 (셀 클릭 이벤트에서 호출).
+'   배지 텍스트 동기화와 동일 패턴. 숫자 파싱되는 줄만 반영, placeholder("거리")·공란은 skip.
+Public Sub 케이블_거리_동기화(ws As Worksheet)
+    If ws Is Nothing Then Exit Sub
+    If ws.Name <> SHEET_ADMIN And ws.Name <> SHEET_NETWORK Then Exit Sub
+    Dim wsCbl As Worksheet
+    On Error Resume Next: Set wsCbl = ThisWorkbook.Worksheets(SHEET_META_CBL): On Error GoTo 0
+    If wsCbl Is Nothing Then Exit Sub
+
+    Dim cblPrefix As String: cblPrefix = PREFIX_LABEL & PREFIX_CBL    ' "lbl_cbl_"
+    Dim headerEnsured As Boolean: headerEnsured = False
+    Dim sh As Shape
+    For Each sh In ws.Shapes
+        If Left(sh.Name, Len(cblPrefix)) = cblPrefix Then
+            Dim cblId As String: cblId = Mid(sh.Name, Len(PREFIX_LABEL) + 1)   ' cbl_*
+            Dim t As String: t = ""
+            On Error Resume Next: t = sh.TextFrame2.TextRange.Text: On Error GoTo 0
+            t = Replace(Replace(t, vbCrLf, vbCr), vbLf, vbCr)
+            Dim parts() As String: parts = Split(t, vbCr)
+            If UBound(parts) >= 2 Then
+                Dim distLine As String: distLine = Trim(parts(2))
+                If Len(distLine) > 0 And distLine <> "거리" Then
+                    Dim dv As Double: dv = 거리_숫자추출(distLine)
+                    If dv >= 0 Then
+                        Dim cur As String: cur = 케이블_거리_텍스트(cblId)
+                        If cur <> CStr(dv) Then
+                            If Not headerEnsured Then
+                                If Len(CStr(wsCbl.Cells(1, 8).Value)) = 0 Then wsCbl.Cells(1, 8).Value = "distance"
+                                headerEnsured = True
+                            End If
+                            케이블_거리_메타쓰기 wsCbl, cblId, dv
+                        End If
+                    End If
+                End If
+            End If
+        End If
+    Next sh
+End Sub
+
+' cblId 의 메타 8번 칸에 거리 기록.
+Private Sub 케이블_거리_메타쓰기(wsCbl As Worksheet, cblId As String, distVal As Double)
+    Dim last As Long: last = wsCbl.Cells(wsCbl.Rows.Count, 1).End(xlUp).Row
+    Dim r As Long
+    For r = 2 To last
+        If CStr(wsCbl.Cells(r, 1).Value) = cblId Then
+            wsCbl.Cells(r, 8).Value = distVal
+            Exit Sub
+        End If
+    Next r
+End Sub
+
+' 거리검색 — 시작 시설물 선택 → 「거리검색」 → (도착 시설물을 클릭하면 자동 검색).
+'   owner 2026-06-15: 도착 후 버튼 재클릭 불필요. armed 상태에서 1초 간격 폴링(거리검색_폴링)이
+'   시작과 다른 시설물 선택을 감지하면 자동으로 경로 거리 합산. 버튼 재클릭은 즉시 계산(수동 폴백) 또는 취소.
+'   행정도·네트웍구성도 양 시트 공용 (ActiveSheet 기준, 선택_시설물ID추출 은 시트 무관).
+Public Sub 거리검색()
+    Dim ws As Worksheet: Set ws = ActiveSheet
+    Dim facId As String: facId = 선택_시설물ID추출()
+
+    ' 이미 armed (시작 시설물 대기 중) 에서 버튼 재클릭
+    If g_dist_step = 1 And Len(g_dist_startFac) > 0 Then
+        If Len(facId) > 0 And facId <> g_dist_startFac Then
+            ' 수동 도착 — 옛 「두 번 클릭」 방식도 그대로 지원
+            Dim sFac0 As String: sFac0 = g_dist_startFac
+            거리검색_종료
+            거리검색_경로계산 ws, sFac0, facId
+        Else
+            ' 같은/빈 선택으로 재클릭 = 취소
+            거리검색_종료
+            Application.StatusBar = "거리 검색 취소."
+        End If
+        Exit Sub
+    End If
+
+    ' 시작 단계 — 시작 시설물이 선택돼 있어야 함
+    If Len(facId) = 0 Then
+        MsgBox "거리를 잴 「시작 시설물」 1개를 선택한 뒤 「거리검색」 을 누르세요." & vbLf & vbLf & _
+               "그 다음 「도착 시설물」 을 클릭하면 자동으로 거리가 검색됩니다.", vbInformation, "거리 검색"
+        Exit Sub
+    End If
+
+    ' armed — 도착 시설물 자동 감지 폴링 시작
+    g_dist_startFac = facId
+    g_dist_step = 1
+    g_dist_polls = 60                ' 약 60초 대기 후 자동 취소
+    Application.StatusBar = "시작 시설물: " & 시설물_표시명(facId) & " — 이제 「도착 시설물」 을 클릭하면 자동으로 거리가 검색됩니다. (취소: 「거리검색」 재클릭)"
+    On Error Resume Next
+    Application.OnTime Now + TimeSerial(0, 0, 1), "거리검색_폴링"
+    On Error GoTo 0
+End Sub
+
+' armed 후 1초 간격 폴링 — 시작과 다른 시설물 선택을 감지하면 자동 거리 계산. (OnTime 콜백 — Public 필수)
+Public Sub 거리검색_폴링()
+    On Error Resume Next
+    Static reentry As Boolean
+    If reentry Then Exit Sub          ' 재진입 가드 (다른 매크로 실행 중 중복 발화 차단)
+    reentry = True
+    거리검색_폴링_본문
+    reentry = False
+End Sub
+
+Private Sub 거리검색_폴링_본문()
+    On Error Resume Next
+    If g_dist_step <> 1 Or Len(g_dist_startFac) = 0 Then Exit Sub   ' 취소·완료됨 → 체인 종료
+    Dim facId As String: facId = 선택_시설물ID추출()
+    If Len(facId) > 0 And facId <> g_dist_startFac Then
+        ' 도착 시설물 감지 → 자동 계산
+        Dim sFac As String: sFac = g_dist_startFac
+        Dim ws As Worksheet: Set ws = ActiveSheet
+        거리검색_종료
+        거리검색_경로계산 ws, sFac, facId
+        Exit Sub
+    End If
+    ' 아직 도착 미선택 — 재예약 / 타임아웃
+    g_dist_polls = g_dist_polls - 1
+    If g_dist_polls > 0 Then
+        Application.OnTime Now + TimeSerial(0, 0, 1), "거리검색_폴링"
+    Else
+        거리검색_종료
+        Application.StatusBar = "거리 검색 대기 시간 초과 — 「거리검색」 으로 다시 시도하세요."
+    End If
+End Sub
+
+' armed 상태 해제 (공용).
+Private Sub 거리검색_종료()
+    g_dist_step = 0
+    g_dist_startFac = ""
+    g_dist_polls = 0
+End Sub
+
+Private Sub 거리검색_경로계산(ws As Worksheet, startFac As String, destFac As String)
+    Dim wsCbl As Worksheet
+    On Error Resume Next: Set wsCbl = ThisWorkbook.Worksheets(SHEET_META_CBL): On Error GoTo 0
+    If wsCbl Is Nothing Then Exit Sub
+
+    Dim adj As Object: Set adj = CreateObject("Scripting.Dictionary")     ' facId → Collection(Array(neighborFac, cblId))
+    Dim distOf As Object: Set distOf = CreateObject("Scripting.Dictionary") ' cblId → 거리(Double, 미입력=-1)
+    Dim lastR As Long: lastR = wsCbl.Cells(wsCbl.Rows.Count, 1).End(xlUp).Row
+    Dim r As Long
+    For r = 2 To lastR
+        Dim cId As String: cId = CStr(wsCbl.Cells(r, 1).Value)
+        Dim fF As String: fF = CStr(wsCbl.Cells(r, 2).Value)
+        Dim tF As String: tF = CStr(wsCbl.Cells(r, 3).Value)
+        If Len(cId) > 0 Then
+            If Len(fF) > 0 Then
+                If Len(tF) > 0 Then
+                    Dim dRaw As String: dRaw = Trim(CStr(wsCbl.Cells(r, 8).Value))
+                    Dim dv As Double: dv = -1
+                    If Len(dRaw) > 0 Then
+                        If IsNumeric(dRaw) Then dv = CDbl(dRaw)
+                    End If
+                    distOf(cId) = dv
+                    거리_인접추가 adj, fF, tF, cId
+                    거리_인접추가 adj, tF, fF, cId
+                End If
+            End If
+        End If
+    Next r
+
+    If Not adj.Exists(startFac) Or Not adj.Exists(destFac) Then
+        MsgBox "두 시설물을 잇는 케이블 경로를 찾지 못했습니다 (연결된 케이블 없음).", vbExclamation, "거리 검색"
+        Exit Sub
+    End If
+
+    ' owner 2026-06-15: 단순경로 후보를 여러 개 enumerate (DFS). 이원화·우회로 경로가 여럿이면
+    '   사용자가 목록에서 선택 (광케이블은 물리최단이 아니라 실제 포설경로를 따르므로 설계자 선택이 정확).
+    Dim paths As Collection: Set paths = New Collection
+    Dim budget As Long: budget = 200000              ' dense graph 폭발 방지용 총 탐색 예산 (긴 직렬 경로는 충분히 통과)
+    Dim visited As Object: Set visited = CreateObject("Scripting.Dictionary")
+    visited(startFac) = True
+    Dim curCbls As Collection: Set curCbls = New Collection
+    거리_경로DFS adj, startFac, destFac, visited, curCbls, paths, budget
+
+    If paths.Count = 0 Then
+        MsgBox "두 시설물을 잇는 케이블 경로가 없습니다.", vbExclamation, "거리 검색": Exit Sub
+    End If
+
+    Dim chosen As Collection
+    If paths.Count = 1 Then
+        Set chosen = paths(1)
+    Else
+        Set chosen = 거리검색_경로선택(paths, distOf, startFac, destFac)
+        If chosen Is Nothing Then Application.StatusBar = "거리 검색 취소.": Exit Sub
+    End If
+
+    거리검색_결과표시 ws, chosen, distOf, startFac, destFac, paths.Count
+End Sub
+
+' 단순경로 후보 DFS — start→dest 사이 시설물 미중복 경로를 cblId 순서 Collection 으로 수집.
+'   최대 MAXPATH 개 후보. MAXHOP 은 안전장치(visited 가 이미 경로길이를 시설물 수로 한계 — 지장이설 긴 직렬 경로 수용 위해 크게).
+'   진짜 폭발 방지는 budget(총 탐색 예산). 한계: 같은 두 시설물 사이 평행 케이블은 1개만 (시설물 단위 경로). v1.
+Private Sub 거리_경로DFS(adj As Object, cur As String, dest As String, visited As Object, curCbls As Collection, paths As Collection, ByRef budget As Long)
+    Const MAXPATH As Long = 8
+    Const MAXHOP As Long = 1000
+    If paths.Count >= MAXPATH Then Exit Sub
+    If budget <= 0 Then Exit Sub
+    budget = budget - 1
+    If cur = dest Then
+        Dim p As Collection: Set p = New Collection
+        Dim z As Long
+        For z = 1 To curCbls.Count: p.Add curCbls(z): Next z
+        paths.Add p
+        Exit Sub
+    End If
+    If curCbls.Count >= MAXHOP Then Exit Sub
+    Dim nbrs As Collection: Set nbrs = adj(cur)
+    Dim k As Long
+    For k = 1 To nbrs.Count
+        Dim e As Variant: e = nbrs(k)
+        Dim nb As String: nb = CStr(e(0))
+        Dim cb As String: cb = CStr(e(1))
+        If Not visited.Exists(nb) Then
+            visited(nb) = True
+            curCbls.Add cb
+            거리_경로DFS adj, nb, dest, visited, curCbls, paths, budget
+            curCbls.Remove curCbls.Count
+            visited.Remove nb
+        End If
+    Next k
+End Sub
+
+' 여러 경로 후보를 정렬(미입력 적은 순 → 거리 짧은 순 → 홉 적은 순) 후 InputBox 로 선택. 취소=Nothing.
+Private Function 거리검색_경로선택(paths As Collection, distOf As Object, startFac As String, destFac As String) As Collection
+    Set 거리검색_경로선택 = Nothing
+    Dim n As Long: n = paths.Count
+    Dim tot() As Double: ReDim tot(1 To n)
+    Dim miss() As Long: ReDim miss(1 To n)
+    Dim hops() As Long: ReDim hops(1 To n)
+    Dim order() As Long: ReDim order(1 To n)
+    Dim i As Long
+    For i = 1 To n
+        Dim pc As Collection: Set pc = paths(i)
+        Dim t As Double: t = 0
+        Dim m As Long: m = 0
+        Dim j As Long
+        For j = 1 To pc.Count
+            Dim cc As String: cc = CStr(pc(j))
+            Dim dd As Double: dd = -1
+            If distOf.Exists(cc) Then dd = CDbl(distOf(cc))
+            If dd < 0 Then m = m + 1 Else t = t + dd
+        Next j
+        tot(i) = t: miss(i) = m: hops(i) = pc.Count: order(i) = i
+    Next i
+
+    ' 버블 정렬 (N<=8) — order 인덱스만 재배열
+    Dim a As Long, b As Long
+    For a = 1 To n - 1
+        For b = 1 To n - a
+            If 거리_경로_앞선가(order(b + 1), order(b), tot, miss, hops) Then
+                Dim tmp As Long: tmp = order(b): order(b) = order(b + 1): order(b + 1) = tmp
+            End If
+        Next b
+    Next a
+
+    Dim prompt As String
+    prompt = 시설물_표시명(startFac) & " → " & 시설물_표시명(destFac) & vbLf & _
+             "경로가 " & n & " 개 있습니다. 번호를 입력하세요:" & vbLf & vbLf
+    For i = 1 To n
+        Dim idx As Long: idx = order(i)
+        prompt = prompt & i & ". " & hops(idx) & "홉 · " & CStr(tot(idx)) & " m"
+        If miss(idx) > 0 Then prompt = prompt & " (미입력 " & miss(idx) & ")"
+        prompt = prompt & vbLf
+    Next i
+
+    Dim ans As String: ans = InputBox(prompt, "경로 선택", "1")
+    If StrPtr(ans) = 0 Then Exit Function           ' 취소
+    ans = Trim(ans)
+    If Len(ans) = 0 Or Not IsNumeric(ans) Then Exit Function
+    Dim sel As Long: sel = CLng(Val(ans))
+    If sel < 1 Or sel > n Then Exit Function
+    Set 거리검색_경로선택 = paths(order(sel))
+End Function
+
+' 정렬 비교 — 경로 i 가 j 보다 앞서야 하면 True (미입력 asc → 거리 asc → 홉 asc).
+Private Function 거리_경로_앞선가(i As Long, j As Long, tot() As Double, miss() As Long, hops() As Long) As Boolean
+    If miss(i) <> miss(j) Then 거리_경로_앞선가 = (miss(i) < miss(j)): Exit Function
+    If tot(i) <> tot(j) Then 거리_경로_앞선가 = (tot(i) < tot(j)): Exit Function
+    거리_경로_앞선가 = (hops(i) < hops(j))
+End Function
+
+' 선택된 경로 1개 — 화면 강조 + 구간별 거리 합산 MsgBox.
+Private Sub 거리검색_결과표시(ws As Worksheet, pathCbls As Collection, distOf As Object, startFac As String, destFac As String, candCount As Long)
+    Dim total As Double: total = 0
+    Dim missingCnt As Long: missingCnt = 0
+    Dim lines As String: lines = ""
+    Dim j As Long
+    For j = 1 To pathCbls.Count
+        Dim cc As String: cc = CStr(pathCbls(j))
+        Dim dd As Double: dd = -1
+        If distOf.Exists(cc) Then dd = CDbl(distOf(cc))
+        Dim ddTxt As String
+        If dd < 0 Then
+            missingCnt = missingCnt + 1: ddTxt = "(미입력)"
+        Else
+            total = total + dd: ddTxt = CStr(dd) & " m"
+        End If
+        lines = lines & j & ". " & 케이블_구간라벨(cc) & " : " & ddTxt & vbLf
+    Next j
+
+    On Error Resume Next: 검색_강조_해제: On Error GoTo 0
+    거리검색_경로강조 ws, pathCbls, startFac, destFac
+
+    Dim msg As String
+    msg = "■ " & 시설물_표시명(startFac) & "  →  " & 시설물_표시명(destFac) & vbLf & vbLf
+    msg = msg & "경유 케이블 " & pathCbls.Count & " 구간 (아래 번호 = 캔버스 표시 번호)" & vbLf & vbLf
+    msg = msg & lines & vbLf
+    msg = msg & "─────────────" & vbLf
+    msg = msg & "총 거리: " & CStr(total) & " m"
+    msg = msg & vbLf & vbLf & "* 캔버스: 선택 경로가 굵은 연보라 선 + 구간 번호 + 출발(초록)·도착(빨강) 으로 표시됩니다."
+    If missingCnt > 0 Then msg = msg & vbLf & "* 거리 미입력 " & missingCnt & " 구간 (합계 제외) — 「거리입력」 으로 보강하세요."
+    If candCount > 1 Then msg = msg & vbLf & "* 경로 후보 " & candCount & " 개 중 선택됨 (다시 「거리검색」 으로 다른 경로 선택 가능)."
+    MsgBox msg, vbInformation, "거리 검색 결과"
+End Sub
+
+' 인접리스트에 (이웃, 케이블) 추가. (Dictionary 값이 객체라 Set 필요)
+Private Sub 거리_인접추가(adj As Object, fromFac As String, toFac As String, cblId As String)
+    Dim c As Collection
+    If adj.Exists(fromFac) Then
+        Set c = adj(fromFac)
+    Else
+        Set c = New Collection
+        Set adj(fromFac) = c
+    End If
+    c.Add Array(toFac, cblId)
+End Sub
+
+' owner 2026-06-15: 선택 경로 시각 강조 — 굵은 연보라 선(검색 강조 인프라 재사용) + 구간 순번 마커 ①②③
+'   (결과창 목록 번호와 일치) + 출발·도착 라벨·링. 모두 임시 overlay → 검색_강조_해제 가 자동 삭제.
+'   기존 단순 Select 는 선택 핸들뿐이라 경로·순서 구분 불가 → 교체.
+Private Sub 거리검색_경로강조(ws As Worksheet, pathCbls As Collection, startFac As String, destFac As String)
+    On Error Resume Next
+    ws.Activate
+    Dim wasProt As Boolean: wasProt = ws.ProtectContents Or ws.ProtectDrawingObjects
+    ws.Unprotect
+
+    ' 1) 경로 케이블 = 연보라 굵게 + 구간 중앙 순번 번호
+    Dim j As Long
+    For j = 1 To pathCbls.Count
+        Dim cc As String: cc = CStr(pathCbls(j))
+        Dim shCbl As Shape: Set shCbl = Nothing
+        Set shCbl = ws.Shapes(cc)
+        If Not shCbl Is Nothing Then
+            검색_강조_적용 ws, shCbl
+            거리_순번마커 ws, shCbl, j
+        End If
+    Next j
+
+    ' 2) 출발·도착 라벨 마커
+    Dim fStart As Shape: Set fStart = Nothing: Set fStart = ws.Shapes(startFac)
+    Dim fDest As Shape: Set fDest = Nothing: Set fDest = ws.Shapes(destFac)
+    If Not fStart Is Nothing Then 거리_끝마커 ws, fStart, "출발", RGB(22, 163, 74)
+    If Not fDest Is Nothing Then 거리_끝마커 ws, fDest, "도착", RGB(220, 38, 38)
+
+    If wasProt Then ApplySheetProtection ws
+
+    ' 3) 출발·도착 시설물 링 (검색_강조_시설물 — 자체 보호 관리)
+    If Not fStart Is Nothing Then 검색_강조_시설물 ws, fStart
+    If Not fDest Is Nothing Then 검색_강조_시설물 ws, fDest
+
+    ' 4) 시작 시설물로 스크롤
+    If Not fStart Is Nothing Then 검색_도형으로_스크롤 fStart
+    On Error GoTo 0
+End Sub
+
+' 경로 구간 순번 마커 — 케이블 중앙에 번호 원 (결과창 목록 번호와 일치). overlay 등록 → 검색_강조_해제 가 자동 삭제.
+'   (호출 측이 시트 unprotect 한 상태 가정)
+Private Sub 거리_순번마커(ws As Worksheet, cblShp As Shape, n As Long)
+    If g_search_highlighted Is Nothing Then Set g_search_highlighted = CreateObject("Scripting.Dictionary")
+    Dim pt As Variant: pt = CableCenterPoint(cblShp)
+    If Not IsArray(pt) Then Exit Sub
+    Dim cx As Double: cx = CDbl(pt(0))
+    Dim cy As Double: cy = CDbl(pt(1))
+    Const MD As Double = 18
+    Dim mk As Shape: Set mk = Nothing
+    On Error Resume Next
+    Set mk = ws.Shapes.AddShape(msoShapeOval, cx - MD / 2, cy - MD / 2, MD, MD)
+    On Error GoTo 0
+    If mk Is Nothing Then Exit Sub
+    On Error Resume Next
+    mk.Name = "_distseq_" & NewId8()
+    mk.Placement = 3
+    mk.Fill.Visible = msoTrue
+    mk.Fill.ForeColor.RGB = RGB(180, 100, 240)
+    mk.Line.Visible = msoTrue
+    mk.Line.ForeColor.RGB = RGB(255, 255, 255)
+    mk.Line.Weight = 1#
+    With mk.TextFrame2
+        .MarginLeft = 0: .MarginRight = 0: .MarginTop = 0: .MarginBottom = 0
+        .VerticalAnchor = msoAnchorMiddle
+        .WordWrap = msoFalse
+        .TextRange.Text = CStr(n)
+        .TextRange.Font.Size = 9
+        .TextRange.Font.Bold = True
+        .TextRange.Font.Fill.ForeColor.RGB = RGB(255, 255, 255)
+        .TextRange.ParagraphFormat.Alignment = 2
+    End With
+    mk.OnAction = "리더_클릭_무시"
+    mk.ZOrder msoBringToFront
+    On Error GoTo 0
+    g_search_highlighted("overlay|" & ws.Name & "|" & mk.Name) = "1"
+End Sub
+
+' 출발·도착 라벨 마커 — 시설물 위 둥근 사각형. overlay 등록 → 자동 삭제. (호출 측 unprotect 가정)
+Private Sub 거리_끝마커(ws As Worksheet, facShp As Shape, txt As String, clr As Long)
+    If g_search_highlighted Is Nothing Then Set g_search_highlighted = CreateObject("Scripting.Dictionary")
+    Const LW As Double = 34
+    Const LH As Double = 16
+    Dim lx As Double: lx = facShp.Left + facShp.Width / 2 - LW / 2
+    Dim ly As Double: ly = facShp.Top - LH - 3
+    Dim mk As Shape: Set mk = Nothing
+    On Error Resume Next
+    Set mk = ws.Shapes.AddShape(msoShapeRoundedRectangle, lx, ly, LW, LH)
+    On Error GoTo 0
+    If mk Is Nothing Then Exit Sub
+    On Error Resume Next
+    mk.Name = "_distend_" & NewId8()
+    mk.Placement = 3
+    mk.Fill.Visible = msoTrue
+    mk.Fill.ForeColor.RGB = clr
+    mk.Line.Visible = msoFalse
+    With mk.TextFrame2
+        .MarginLeft = 0: .MarginRight = 0: .MarginTop = 0: .MarginBottom = 0
+        .VerticalAnchor = msoAnchorMiddle
+        .WordWrap = msoFalse
+        .TextRange.Text = txt
+        .TextRange.Font.Size = 8
+        .TextRange.Font.Bold = True
+        .TextRange.Font.Fill.ForeColor.RGB = RGB(255, 255, 255)
+        .TextRange.ParagraphFormat.Alignment = 2
+    End With
+    mk.OnAction = "리더_클릭_무시"
+    mk.ZOrder msoBringToFront
+    On Error GoTo 0
+    g_search_highlighted("overlay|" & ws.Name & "|" & mk.Name) = "1"
+End Sub
+
+' 케이블 메타 8번(거리) — 텍스트 (없으면 ""). _케이블 헤더 7컬럼 → col8 직접 읽기.
+Private Function 케이블_거리_텍스트(cblId As String) As String
+    케이블_거리_텍스트 = ""
+    Dim ws As Worksheet
+    On Error Resume Next: Set ws = ThisWorkbook.Worksheets(SHEET_META_CBL): On Error GoTo 0
+    If ws Is Nothing Then Exit Function
+    Dim last As Long: last = ws.Cells(ws.Rows.Count, 1).End(xlUp).Row
+    Dim r As Long
+    For r = 2 To last
+        If CStr(ws.Cells(r, 1).Value) = cblId Then
+            케이블_거리_텍스트 = Trim(CStr(ws.Cells(r, 8).Value))
+            Exit Function
+        End If
+    Next r
+End Function
+
+' 케이블 구간 라벨 — "시작시설명 ~ 도착시설명".
+Private Function 케이블_구간라벨(cblId As String) As String
+    Dim row As Variant: row = MetaFindRow(SHEET_META_CBL, 1, cblId)
+    If IsEmpty(row) Then 케이블_구간라벨 = cblId: Exit Function
+    Dim fF As String, tF As String
+    fF = "": tF = ""
+    If UBound(row) >= 3 Then
+        fF = CStr(row(2)): tF = CStr(row(3))
+    End If
+    케이블_구간라벨 = 시설물_표시명(fF) & " ~ " & 시설물_표시명(tF)
+End Function
+
+' 시설물 표시명 — 설명선 함체명(2번째 줄) 우선, 없으면 구분(1번째 줄), 그래도 없으면 메타/ID.
+Private Function 시설물_표시명(facId As String) As String
+    Dim nm As String: nm = ""
+    If Len(facId) = 0 Then 시설물_표시명 = "(미상)": Exit Function
+    Dim shtNames(0 To 1) As String: shtNames(0) = SHEET_ADMIN: shtNames(1) = SHEET_NETWORK
+    Dim si As Long
+    For si = 0 To 1
+        Dim ws As Worksheet: Set ws = Nothing
+        Dim lbl As Shape: Set lbl = Nothing
+        On Error Resume Next
+        Set ws = ThisWorkbook.Worksheets(shtNames(si))
+        If Not ws Is Nothing Then Set lbl = ws.Shapes(PREFIX_LABEL & facId)
+        On Error GoTo 0
+        If Not lbl Is Nothing Then
+            Dim t As String: t = ""
+            On Error Resume Next: t = lbl.TextFrame2.TextRange.Text: On Error GoTo 0
+            t = Replace(Replace(t, vbCrLf, vbCr), vbLf, vbCr)
+            Dim parts() As String: parts = Split(t, vbCr)
+            If UBound(parts) >= 1 Then
+                Dim nm1 As String: nm1 = Trim(parts(1))
+                If Len(nm1) > 0 And nm1 <> "함체명을 입력하세요" Then nm = nm1
+            End If
+            If Len(nm) = 0 And UBound(parts) >= 0 Then nm = Trim(parts(0))
+            If Len(nm) > 0 Then Exit For
+        End If
+    Next si
+    If Len(nm) = 0 Then nm = MetaLookupName(SHEET_META_FAC, facId)
+    If Len(nm) = 0 Or nm = "(미지정)" Then nm = facId
+    시설물_표시명 = nm
+End Function
+
+' 문자열에서 첫 숫자 토큰 추출 ("120m" → 120). 없으면 -1.
+Private Function 거리_숫자추출(s As String) As Double
+    Dim i As Long, ch As String, numStr As String
+    numStr = ""
+    For i = 1 To Len(s)
+        ch = Mid(s, i, 1)
+        If (ch >= "0" And ch <= "9") Or ch = "." Then
+            numStr = numStr & ch
+        ElseIf Len(numStr) > 0 Then
+            Exit For
+        End If
+    Next i
+    If Len(numStr) = 0 Then 거리_숫자추출 = -1: Exit Function
+    If Not IsNumeric(numStr) Then 거리_숫자추출 = -1: Exit Function
+    거리_숫자추출 = CDbl(numStr)
+End Function
+
+' 케이블 설명선(lbl_<cblId>) 3번째 줄(거리)을 distText 로 갱신 — 양 시트 best-effort.
+Private Sub 거리_설명선_갱신(cblId As String, distText As String)
+    Dim shtNames(0 To 1) As String: shtNames(0) = SHEET_ADMIN: shtNames(1) = SHEET_NETWORK
+    Dim si As Long
+    For si = 0 To 1
+        On Error Resume Next
+        Dim ws As Worksheet: Set ws = ThisWorkbook.Worksheets(shtNames(si))
+        If ws Is Nothing Then GoTo NextSi
+        Dim lbl As Shape: Set lbl = Nothing
+        Set lbl = ws.Shapes(PREFIX_LABEL & cblId)
+        If lbl Is Nothing Then GoTo NextSi
+        Dim t As String: t = ""
+        t = lbl.TextFrame2.TextRange.Text
+        t = Replace(Replace(t, vbCrLf, vbCr), vbLf, vbCr)
+        Dim parts() As String: parts = Split(t, vbCr)
+        If UBound(parts) >= 2 Then
+            parts(2) = distText
+            lbl.TextFrame2.TextRange.Text = Join(parts, vbCr)
+        End If
+NextSi:
+        On Error GoTo 0
+    Next si
 End Sub
 
 ' 도형이 화면 정중앙에 오도록 스크롤. ActiveWindow.UsableWidth/Height (point 단위) 의

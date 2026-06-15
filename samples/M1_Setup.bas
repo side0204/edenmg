@@ -245,6 +245,11 @@ Public g_search_form_qFacId As String
 Public g_search_form_qCblId As String
 Public g_search_form_confirmed As Boolean
 
+' owner 2026-06-15: 케이블 거리 검색 — 시작·도착 시설물 2단계 선택 state.
+Public g_dist_step As Long                  ' 0=시작 대기, 1=도착 대기
+Public g_dist_startFac As String            ' 선택된 시작 시설물 id
+Public g_dist_polls As Long                 ' owner 2026-06-15: armed 후 도착 시설물 자동감지 폴링 잔여 횟수 (1초 간격)
+
 ' owner 2026-06-06 (8-37): 라이센스 시스템 상수 — 모든 Private Const 는 파일 상단 declarations 섹션에 와야 함 (VBA 규칙).
 Public Const LICENSE_SALT As String = "edenMG_2026_FiberDesign_v1_SecretSalt_DoNotShare_q9Z7$kP"
 Public Const LICENSE_BUILD As String = "v1"
@@ -2319,8 +2324,12 @@ Public Sub FinalizeDrawnFacility(shp As Shape)
     Dim name As String: name = ""
     Dim legLab As String: legLab = MetaLookupLabel(legendName)
     If Len(legLab) = 0 Then legLab = "구분"
+    ' owner 2026-06-15: 설명선 첫 줄 = 구분/규격 (예: 신설/가공/144C). 규격 없으면 구분만.
+    Dim facGyuk As String: facGyuk = MetaLookupGyuk(legendName)
+    Dim dispLab As String: dispLab = legLab
+    If Len(facGyuk) > 0 Then dispLab = legLab & "/" & facGyuk
     Dim calloutText As String
-    calloutText = legLab & vbCr & "함체명을 입력하세요" & vbCr & "ID"
+    calloutText = dispLab & vbCr & "함체명을 입력하세요" & vbCr & "ID"
 
     Dim facId As String: facId = PREFIX_FAC & NewId8()
 
@@ -2335,11 +2344,18 @@ Public Sub FinalizeDrawnFacility(shp As Shape)
     newShp.ZOrder msoBringToFront   ' 시설물은 케이블 위(맨 앞)
     On Error GoTo 0
 
-    Dim badgeNo As Long: badgeNo = NextBadgeNo()
-    AppendMetaRow SHEET_META_FAC, Array(facId, kind, name, Now, badgeNo)
+    ' owner 2026-06-15: 명칭="시설물" 범례는 배지·상태박스·태그콤보 없는 깔끔한 마커.
+    Dim noBadge As Boolean: noBadge = (MetaLookupCategory(legendName) = "시설물")
+    Dim badgeNo As Long, badgeNoMeta As Variant
+    If noBadge Then
+        badgeNo = 0: badgeNoMeta = ""        ' col5 공란 = 의도적 배지없음 (배지_재정렬 압축 제외)
+    Else
+        badgeNo = NextBadgeNo(): badgeNoMeta = badgeNo
+    End If
+    AppendMetaRow SHEET_META_FAC, Array(facId, kind, name, Now, badgeNoMeta)
 
-    ' 행정도 배지 부착 — 시설물 우상단 빨간 사각형 + 흰 번호
-    AddBadge ws, newShp, facId, CStr(badgeNo)
+    ' 행정도 배지 부착 — 시설물 우상단 빨간 사각형 + 흰 번호 (noBadge 면 생략)
+    If Not noBadge Then AddBadge ws, newShp, facId, CStr(badgeNo)
 
     ' 네트웍구성도 복제 — 행정도 좌표를 20x20 격자 셀 「중앙」 으로 자동 스냅 (시설물이 항상 격자 안에 들어가게)
     Dim wsNw As Worksheet: Set wsNw = ThisWorkbook.Worksheets(SHEET_NETWORK)
@@ -2379,10 +2395,12 @@ Public Sub FinalizeDrawnFacility(shp As Shape)
     '   legLab 은 calloutText 생성 시 이미 계산됨
     If Not shNw Is Nothing Then
         AddFacilityCallout wsNw, shNw, facId, calloutText, legLab
-        AddBadge wsNw, shNw, facId, CStr(badgeNo)
-        AddFacilityStatusBox wsNw, facId
-        AddFacilityTagCombo wsNw, facId
-        시설물_태그_위치_동기화 wsNw, facId
+        If Not noBadge Then
+            AddBadge wsNw, shNw, facId, CStr(badgeNo)
+            AddFacilityStatusBox wsNw, facId
+            AddFacilityTagCombo wsNw, facId
+            시설물_태그_위치_동기화 wsNw, facId
+        End If
     End If
     If wasProtNw Then ApplySheetProtection wsNw
 
@@ -2600,6 +2618,7 @@ Public Sub FinalizeDrawnCable(ln As Shape)
     ' 케이블 설명선(말풍선) — 행정도 중간점에. 규격은 범례 선택값(spec) 자동, ID·거리는 사용자가 채움.
     ' owner 2026-06-08 (8-84): 「케이블ID」 → 「선로ID」 (네트웍구성도와 라벨 통일)
     ' owner 2026-06-11: 규격 줄 = 「규격/구분」 (예: 36C/가공). 구분 콤보 미선택·규격과 동일하면 규격만.
+    '   (owner 2026-06-15 재확인: 케이블 설명박스는 규격/구분이 맞음 — 시설물 콜아웃만 구분/규격)
     Dim specDisp As String: specDisp = spec
     If Len(g_cableGubun) > 0 Then
         If g_cableGubun <> spec Then specDisp = spec & "/" & g_cableGubun
@@ -2611,10 +2630,14 @@ Public Sub FinalizeDrawnCable(ln As Shape)
 
     If wasProt Then ApplySheetProtection ws
 
+    ' owner 2026-06-15: 철거 케이블(구분에 "철거" 포함)은 네트웍구성도에 그리지 않음 (행정도엔 유지·X마크 그대로).
+    Dim cblGubun As String: cblGubun = MetaLookupLabel(legendName)
+    Dim isRemovalCable As Boolean: isRemovalCable = (InStr(cblGubun, "철거") > 0)
+
     ' 네트웍 — 양 끝 모두 시설물일 때 「직선」 커넥터로 연결 (꺽은선 X). 시설물 따라 이동.
     '   방향: 행정도의 |dx| vs |dy| 비교 — 가로 우세면 to 시설물 Y 를 from Y 에, 세로 우세면 X 를 from X 에 맞춰
     '         케이블이 가로/세로 직선으로 자연스럽게 보이도록 to 시설물 위치 보정. (이미 다른 케이블 있으면 보정 안 함)
-    If Len(fromId) > 0 And Len(toId) > 0 Then
+    If Len(fromId) > 0 And Len(toId) > 0 And Not isRemovalCable Then
         Dim wasProtNw As Boolean: wasProtNw = wsNw.ProtectContents Or wsNw.ProtectDrawingObjects
         On Error Resume Next
         wsNw.Unprotect
@@ -2661,8 +2684,8 @@ Public Sub FinalizeDrawnCable(ln As Shape)
     '   적용: 행정도(Freeform 경로) + 네트웍구성도(직선) 양 시트 모두
     '   owner 2026-06-09 (8-125-fix1): X 배치 중 에러 발생해도 케이블 등록 흐름 계속 — Resume Next 가드
     '   owner 2026-06-09 (8-125-fix4): fromId/toId 있으면 그 끝은 시설물 부착 → 첫/끝 X 생략
-    Dim cblGubun As String: cblGubun = MetaLookupLabel(legendName)
-    If InStr(cblGubun, "철거") > 0 Then
+    '   cblGubun·isRemovalCable 은 위 네트웍 블록에서 이미 계산 (owner 2026-06-15)
+    If isRemovalCable Then
         On Error Resume Next
         PlaceCableRemovalXMarks ws, ln, cblId, lc, lwt, Len(fromId) > 0, Len(toId) > 0
         If Len(fromId) > 0 And Len(toId) > 0 Then
@@ -3887,8 +3910,8 @@ End Function
 Public Sub 레이어_정리_시트(ws As Worksheet)
     ' owner 2026-06-05: 시설물 설명선(LABEL·LEADER)이 시설물 위에 있어 클릭이 막힘 →
     '   설명선을 가장 먼저 호출해 맨 아래(배경 바로 위)로. CBL·FAC 는 그 위.
-    BringGroupToFront ws, PREFIX_LABEL      ' 설명선 박스 (배경 바로 위 — 맨 아래)
-    BringGroupToFront ws, PREFIX_LEADER     ' 설명선 연결선 (LABEL 위)
+    BringGroupToFront ws, PREFIX_LEADER     ' 설명선 연결선 (배경 바로 위 — 박스보다 뒤). owner 2026-06-15: 꼬리는 설명박스와 배경 사이
+    BringGroupToFront ws, PREFIX_LABEL      ' 설명선 박스 (연결선 위)
     BringGroupToFront ws, PREFIX_CBL        ' 케이블 (설명선 위)
     BringGroupToFront ws, PREFIX_FAC        ' 시설물 (케이블 위 — 클릭 우선)
     BringGroupToFront ws, PREFIX_LEG_FAC    ' 범례(시설물)
@@ -4752,6 +4775,7 @@ Public Sub 시트_셀_클릭(Target As Range)
     Application.EnableEvents = False
     배지없는_시설물_부속정리      ' 배지 삭제 → 콤보·상태박스도 동시 제거
     배지_재정렬                    ' 남은 배지 번호 1부터 재정렬
+    On Error Resume Next: 케이블_거리_동기화 Target.Worksheet: On Error GoTo 0   ' owner 2026-06-15: 설명선 거리 직접수정 → 메타 반영
     Application.EnableEvents = oEvB
 
     ' 모드 없으면 여기서 종료 (배치/그리기 분기는 아래)
@@ -4972,16 +4996,28 @@ Public Sub PlaceFacility(ptLeft As Double, ptTop As Double, _
     shNw.OnAction = ""            ' OnAction 없음 → 네이티브 선택·이동
     shNw.Locked = False
 
-    Dim badgeNo2 As Long: badgeNo2 = NextBadgeNo()
-    AppendMetaRow SHEET_META_FAC, Array(facId, kind, label, Now, badgeNo2)
+    ' owner 2026-06-15: 명칭="시설물" 범례는 배지·상태박스·태그콤보 없는 깔끔한 마커.
+    Dim noBadge2 As Boolean: noBadge2 = (MetaLookupCategory(legendName) = "시설물")
+    Dim badgeNo2 As Long, badgeNo2Meta As Variant
+    If noBadge2 Then
+        badgeNo2 = 0: badgeNo2Meta = ""
+    Else
+        badgeNo2 = NextBadgeNo(): badgeNo2Meta = badgeNo2
+    End If
+    AppendMetaRow SHEET_META_FAC, Array(facId, kind, label, Now, badgeNo2Meta)
 
-    ' 시설물 좌상단 번호 배지 (양 시트)
-    AddBadge wsAd, shAd, facId, CStr(badgeNo2)
-    AddBadge wsNw, shNw, facId, CStr(badgeNo2)
+    ' 시설물 좌상단 번호 배지 (양 시트) — noBadge2 면 생략
+    If Not noBadge2 Then
+        AddBadge wsAd, shAd, facId, CStr(badgeNo2)
+        AddBadge wsNw, shNw, facId, CStr(badgeNo2)
+    End If
 
-    ' 설명선 자동 부착 — 양 시트. 「구분」 자리에 범례 명칭(label) 자동 입력
+    ' 설명선 자동 부착 — 양 시트. 첫 줄 = 구분/규격 (owner 2026-06-15). 색 판정용 label 은 구분 그대로.
+    Dim facGyuk2 As String: facGyuk2 = MetaLookupGyuk(legendName)
+    Dim dispLab2 As String: dispLab2 = label
+    If Len(facGyuk2) > 0 Then dispLab2 = label & "/" & facGyuk2
     Dim calloutTextP As String
-    calloutTextP = label & vbCr & "함체명을 입력하세요" & vbCr & "ID"
+    calloutTextP = dispLab2 & vbCr & "함체명을 입력하세요" & vbCr & "ID"
     AddFacilityCallout wsAd, shAd, facId, calloutTextP, label
     AddFacilityCallout wsNw, shNw, facId, calloutTextP, label
 
@@ -4989,10 +5025,12 @@ Public Sub PlaceFacility(ptLeft As Double, ptTop As Double, _
     배지_위치_동기화 wsAd
     배지_위치_동기화 wsNw
 
-    ' 네트웍구성도 시설물 callout 위 상태 박스 + 태그 콤보
-    AddFacilityStatusBox wsNw, facId
-    AddFacilityTagCombo wsNw, facId
-    시설물_태그_위치_동기화 wsNw, facId
+    ' 네트웍구성도 시설물 callout 위 상태 박스 + 태그 콤보 (noBadge2 면 생략 — owner 2026-06-15)
+    If Not noBadge2 Then
+        AddFacilityStatusBox wsNw, facId
+        AddFacilityTagCombo wsNw, facId
+        시설물_태그_위치_동기화 wsNw, facId
+    End If
 
     ' owner 2026-06-08 (8-115): 배치 모드 ON 중에 신규 시설물이면 새 데코도 즉시 숨김.
     '   토글 OFF 누르기 전까지 시설물·배지만 보이는 상태 유지.
@@ -5303,6 +5341,8 @@ Public Sub 행정도_검색버튼_생성(ws As Worksheet, x As Double, y As Doub
     defs = Array(Array("포인트검색", "검색_배지번호"), _
                  Array("명칭검색", "검색_시설물명"), _
                  Array("ID검색", "검색_ID"), _
+                 Array("거리입력", "케이블_거리입력"), _
+                 Array("거리검색", "거리검색"), _
                  Array("내보내기", "새파일_내보내기"))
     Dim bx As Double: bx = x
     Dim i As Long
@@ -5365,13 +5405,9 @@ Public Sub 네트웍_검색버튼_생성(wsNw As Worksheet)
             On Error Resume Next: oldSh.Delete: On Error GoTo 0
         End If
     Next j
-    ' 검색 3버튼 + 0.5칸 간격 + 코어 3버튼 + 포인트 2버튼 + 전체줌 2버튼 + 시설물만. owner 2026-06-10
+    ' 코어 3 + 포인트 2 + 전체줌 2 + 시설물만, 그리고 검색 3버튼·거리입력·거리검색·내보내기를 오른쪽에 묶음 (행정도와 일관). owner 2026-06-15
     Dim defs As Variant
-    defs = Array(Array("포인트검색", "검색_배지번호"), _
-                 Array("명칭검색", "검색_시설물명"), _
-                 Array("ID검색", "검색_ID"), _
-                 Array("__gap__", ""), _
-                 Array("코어연결", "선번연결_도구"), _
+    defs = Array(Array("코어연결", "선번연결_도구"), _
                  Array("코어추적", "코어_추적_도구"), _
                  Array("추적지우기", "코어_추적_지우기"), _
                  Array("__gap__", ""), _
@@ -5382,6 +5418,11 @@ Public Sub 네트웍_검색버튼_생성(wsNw As Worksheet)
                  Array("전체확대", "격자_줌_전체_확대"), _
                  Array("시설물만", "시설물만보기_토글"), _
                  Array("__gap__", ""), _
+                 Array("포인트검색", "검색_배지번호"), _
+                 Array("명칭검색", "검색_시설물명"), _
+                 Array("ID검색", "검색_ID"), _
+                 Array("거리입력", "케이블_거리입력"), _
+                 Array("거리검색", "거리검색"), _
                  Array("내보내기", "새파일_내보내기"))
     Dim bx As Double: bx = wsNw.Cells(1, 1).Left + PANEL_OFFSET
     Dim by As Double: by = wsNw.Cells(1, 1).Top + 2
@@ -6172,10 +6213,18 @@ Public Sub AddFacilityCallout(ws As Worksheet, fac As Shape, facId As String, Op
     '   클릭 시 선택 차단. leader 는 자동 재라우팅이라 사용자가 직접 선택할 일 없음.
     cn.OnAction = "리더_클릭_무시"
     cn.Line.Weight = 0.5
-    ' owner 재요청 — leader 투명 (보이지 않음, 도형은 살아있어 콜아웃 위치 동기화는 유지)
+    ' owner 2026-06-15: 행정도 설명박스 꼬리(leader) 보이게 + 박스 테두리색(lineColor)과 동일 + 클릭 무시(OnAction 유지).
+    '   네트웍구성도는 기존대로 투명 (격자 기반이라 꼬리 불필요).
     On Error Resume Next
-    cn.Line.Visible = msoFalse
-    cn.Line.Transparency = 1
+    If ws.Name = SHEET_ADMIN Then
+        cn.Line.Visible = msoTrue
+        cn.Line.Transparency = 0
+        cn.Line.ForeColor.RGB = lineColor
+        cn.Line.Weight = 0.75
+    Else
+        cn.Line.Visible = msoFalse
+        cn.Line.Transparency = 1
+    End If
     On Error GoTo 0
     시설물_leader_site설정 cn, fac, tb
 
