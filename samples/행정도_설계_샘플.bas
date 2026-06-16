@@ -20,6 +20,21 @@ Private Const FANP_CHAIN_GAP As Double = 5.7  ' 체인(박스추가 cascade) 박
     Public Declare Function GetAsyncKeyState Lib "user32" (ByVal vKey As Long) As Integer
 #End If
 
+' ── 기별 Phase 3a 체인 직렬화용 모듈 상태 ──
+Private mFacName As Object, mFacKind As Object, mFacBadge As Object
+Private mFacNo As Object, mFacCore As Object, mFacDay As Object, mFacNight As Object
+Private mCblFrom As Object, mCblTo As Object, mCblSpec As Object, mCblGubun As Object, mCblDist As Object
+Private mChildren As Object, mWeight As Object
+Private mSeq As Long, mOutR As Long, mSeg As Long
+Private mWsOut As Worksheet
+Private mCounted As Object                   ' 공종 집계 중복방지 (시설물 1회만)
+' ── 공종 누적 (Phase 3b 산출) — owner §7-3 ──
+Private mSumHW As Long, mSumHX As Long      ' 함체작업 주간/야간
+Private mSumIA As Long, mSumIB As Long      ' FTTH 광탭작업 주간/야간
+Private mSumIDc As Long, mSumIEc As Long    ' 코어접속 주간/야간
+Private mSumIFc As Long                      ' 코어접속 성단
+Private mSumGQ As Double                     ' 포설(주간) 신설 거리합
+
 ' ============================================================================
 '  AdminMapDesigner — 행정도 설계 매크로 모듈
 '
@@ -31864,3 +31879,505 @@ NextCbl:
            "케이블 " & cblCount & " (신설 " & nCNew & " / 철거 " & nCRem & " / 기설 " & nCOld & ")" & vbLf & _
            "반영거리 합 " & distSum & " m (기설 제외), 총 연결코어수 " & coreSum, vbInformation, "기별 추출 미리보기"
 End Sub
+
+' ============================================================================
+'  Phase 3a — 체인 직렬화 미리보기 (양식 채우기 전 행 순서 검증)
+'  폼은 함체→경간→함체 선형. 케이블 인접그래프를 주경로(코어접속 누적 최다) 우선
+'  DFS 로 직렬화 → _기별_미리보기 시트에 행 순서 덤프. 읽기전용(행정도/네트웍 미변경).
+'  실행: Alt+F8 → 기별_체인_직렬화_미리보기
+'  분기 처리(owner §3·§7-6): 분기점에서 가지를 코어접속 누적합 큰 쪽부터 재귀.
+'  ※ 이원화/우회로의 여분 간선은 spanning tree 로 1개만 채택(미리보기 단계).
+' ============================================================================
+Public Sub 기별_체인_직렬화_미리보기()
+    Dim wsFac As Worksheet, wsCbl As Worksheet, wsNw As Worksheet
+    On Error Resume Next
+    Set wsFac = ThisWorkbook.Worksheets(SHEET_META_FAC)
+    Set wsCbl = ThisWorkbook.Worksheets(SHEET_META_CBL)
+    Set wsNw = ThisWorkbook.Worksheets(SHEET_NETWORK)
+    On Error GoTo 0
+    If wsFac Is Nothing Then MsgBox "_시설물 메타 시트가 없습니다.", vbExclamation, "기별 직렬화": Exit Sub
+    If wsCbl Is Nothing Then MsgBox "_케이블 메타 시트가 없습니다.", vbExclamation, "기별 직렬화": Exit Sub
+
+    Application.ScreenUpdating = False
+
+    ' 1) 시설물 메타 적재
+    Set mFacName = CreateObject("Scripting.Dictionary")
+    Set mFacKind = CreateObject("Scripting.Dictionary")
+    Set mFacBadge = CreateObject("Scripting.Dictionary")
+    Set mFacNo = CreateObject("Scripting.Dictionary")
+    Set mFacCore = CreateObject("Scripting.Dictionary")
+    Set mFacDay = CreateObject("Scripting.Dictionary")
+    Set mFacNight = CreateObject("Scripting.Dictionary")
+    Dim lastF As Long: lastF = wsFac.Cells(wsFac.Rows.Count, 1).End(xlUp).Row
+    Dim r As Long
+    For r = 2 To lastF
+        Dim fId As String: fId = CStr(wsFac.Cells(r, 1).Value)
+        If Len(fId) > 0 Then
+            Dim lbl As String: lbl = CStr(wsFac.Cells(r, 2).Value)
+            mFacName(fId) = CStr(wsFac.Cells(r, 3).Value)
+            mFacBadge(fId) = CStr(wsFac.Cells(r, 5).Value)
+            mFacNo(fId) = 기별_신설기설(lbl)
+            mFacKind(fId) = 기별_시설종류(wsNw, fId, lbl)
+            Dim dV As String, nV As String: dV = "": nV = ""
+            On Error Resume Next: 상태박스_값_읽기 wsNw, fId, dV, nV: On Error GoTo 0
+            mFacDay(fId) = dV: mFacNight(fId) = nV
+            Dim cc As Long: cc = 0
+            On Error Resume Next: cc = 시설물_연결코어수_계산(wsNw, fId): On Error GoTo 0
+            mFacCore(fId) = cc
+        End If
+    Next r
+
+    ' 2) 케이블 인접그래프 + 메타
+    Set mCblFrom = CreateObject("Scripting.Dictionary")
+    Set mCblTo = CreateObject("Scripting.Dictionary")
+    Set mCblSpec = CreateObject("Scripting.Dictionary")
+    Set mCblGubun = CreateObject("Scripting.Dictionary")
+    Set mCblDist = CreateObject("Scripting.Dictionary")
+    Dim adj As Object: Set adj = CreateObject("Scripting.Dictionary")
+    Dim lastC As Long: lastC = wsCbl.Cells(wsCbl.Rows.Count, 1).End(xlUp).Row
+    For r = 2 To lastC
+        Dim cId As String: cId = CStr(wsCbl.Cells(r, 1).Value)
+        Dim ff As String: ff = CStr(wsCbl.Cells(r, 2).Value)
+        Dim tt As String: tt = CStr(wsCbl.Cells(r, 3).Value)
+        If Len(cId) > 0 And Len(ff) > 0 And Len(tt) > 0 Then
+            mCblFrom(cId) = ff: mCblTo(cId) = tt
+            mCblSpec(cId) = CStr(wsCbl.Cells(r, 4).Value)
+            mCblGubun(cId) = CStr(wsCbl.Cells(r, 7).Value)
+            mCblDist(cId) = CStr(wsCbl.Cells(r, 8).Value)
+            기별_adj_추가 adj, ff, tt, cId
+            기별_adj_추가 adj, tt, ff, cId
+        End If
+    Next r
+
+    ' 3) 출력 시트 헤더
+    Set mWsOut = 기별_미리보기_시트확보()
+    mWsOut.Cells.Clear
+    mOutR = 1
+    mWsOut.Cells(mOutR, 1).Value = "■ 기별 체인 직렬화 미리보기 (Phase 3a · 주경로 우선 · 읽기전용)": mOutR = mOutR + 2
+    Dim hh As Variant
+    hh = Array("구간", "순번", "타입", "함체명/구간", "역할", "종류", "배지", "신설/기설", "코어수", "주간", "야간", "규격", "거리(m)", "거리반영", "비고(JM)", "함체작업/광탭", "코어접속", "포설")
+    Dim c As Long
+    For c = 0 To UBound(hh): mWsOut.Cells(mOutR, c + 1).Value = hh(c): Next c
+    mOutR = mOutR + 1
+    mSeq = 0: mSeg = 0
+    mSumHW = 0: mSumHX = 0: mSumIA = 0: mSumIB = 0: mSumIDc = 0: mSumIEc = 0: mSumIFc = 0: mSumGQ = 0
+
+    ' 4) 연결요소별 직렬화
+    Set mChildren = CreateObject("Scripting.Dictionary")
+    Set mWeight = CreateObject("Scripting.Dictionary")
+    Set mCounted = CreateObject("Scripting.Dictionary")
+    Dim gv As Object: Set gv = CreateObject("Scripting.Dictionary")
+    Dim compCount As Long: compCount = 0
+    Dim startKey As Variant
+    For Each startKey In adj.Keys
+        Dim sNode As String: sNode = CStr(startKey)
+        If Not gv.Exists(sNode) Then
+            Dim comp As Object: Set comp = CreateObject("Scripting.Dictionary")
+            기별_연결요소_수집 adj, sNode, comp
+            Dim root As String: root = 기별_루트선택(adj, comp)
+            기별_트리_구성 adj, root, gv
+            compCount = compCount + 1
+            mWsOut.Cells(mOutR, 1).Value = "■ 체인 " & compCount
+            mWsOut.Cells(mOutR, 4).Value = "(루트: " & 기별_disp(root) & ")"
+            mOutR = mOutR + 1
+            기별_구간_방출 root, "", Empty, True
+        End If
+    Next startKey
+
+    ' 5) 미연결 시설물 (케이블 없음)
+    Dim orphanHeader As Boolean: orphanHeader = False
+    For r = 2 To lastF
+        Dim oId As String: oId = CStr(wsFac.Cells(r, 1).Value)
+        If Len(oId) > 0 Then
+            If Not adj.Exists(oId) Then
+                If Not orphanHeader Then
+                    mOutR = mOutR + 1
+                    mWsOut.Cells(mOutR, 1).Value = "── 미연결 시설물 (케이블 없음) ──": mOutR = mOutR + 1
+                    orphanHeader = True
+                End If
+                기별_방출_함체 oId, 0, "단독"
+            End If
+        End If
+    Next r
+
+    ' === 공종 집계 (양식에 들어갈 최종 수량 — owner §7-3) ===
+    mOutR = mOutR + 1
+    mWsOut.Cells(mOutR, 1).Value = "[공종 집계 — 양식 입력 수량]": mOutR = mOutR + 1
+    기별_집계행 "함체작업 주간 (HW)", mSumHW, "개소"
+    기별_집계행 "함체작업 야간 (HX)", mSumHX, "개소"
+    기별_집계행 "FTTH 광탭작업 주간 (IA)", mSumIA, "개소"
+    기별_집계행 "FTTH 광탭작업 야간 (IB)", mSumIB, "개소"
+    기별_집계행 "코어접속 주간 (ID)", mSumIDc, "코어"
+    기별_집계행 "코어접속 야간 (IE)", mSumIEc, "코어"
+    기별_집계행 "코어접속 성단 (IF)", mSumIFc, "코어"
+    기별_집계행 "광케이블 포설 주간 (GQ)", mSumGQ, "m"
+    mOutR = mOutR + 1
+    mWsOut.Cells(mOutR, 1).Value = "※ 주야 판정: 야간코어>0 이면 함체작업/광탭=야간, 아니면 주간 (owner 확인 필요)": mOutR = mOutR + 1
+    mWsOut.Cells(mOutR, 1).Value = "※ 포설: 신설 케이블 거리만 GQ(주간). 철거·기설은 별도/미반영. 야간포설(GS)·이설(GT)은 설계 입력 추가 시 분기": mOutR = mOutR + 1
+    mWsOut.Cells(mOutR, 1).Value = "※ 자재 열(케이블규격·함체규격·RN종류 → I~BR)은 매핑 확정 후 Phase 3c": mOutR = mOutR + 1
+
+    On Error Resume Next: mWsOut.Columns("A:R").AutoFit: On Error GoTo 0
+    Application.ScreenUpdating = True
+    On Error Resume Next: mWsOut.Activate: On Error GoTo 0
+    MsgBox "체인 직렬화 + 공종 산출 미리보기 완료 (시트: _기별_미리보기)" & vbLf & vbLf & _
+           "체인 " & compCount & " 개" & vbLf & _
+           "함체작업 주/야 " & mSumHW & " / " & mSumHX & " · 광탭 주/야 " & mSumIA & " / " & mSumIB & vbLf & _
+           "코어접속 주/야/성단 " & mSumIDc & " / " & mSumIEc & " / " & mSumIFc & vbLf & _
+           "포설(주간) " & mSumGQ & " m" & vbLf & vbLf & _
+           "행 순서·공종 수량을 확인하세요.", vbInformation, "기별 산출"
+End Sub
+
+' 공종 집계 한 행 출력 (이름·수량·단위).
+Private Sub 기별_집계행(ByVal nm As String, ByVal qty As Variant, ByVal unit As String)
+    mWsOut.Cells(mOutR, 1).Value = nm
+    mWsOut.Cells(mOutR, 2).Value = qty
+    mWsOut.Cells(mOutR, 3).Value = unit
+    mOutR = mOutR + 1
+End Sub
+
+' 인접리스트 추가 (M5 거리_인접추가 는 Private 라 M6 자체 보유).
+Private Sub 기별_adj_추가(adj As Object, fromFac As String, toFac As String, cblId As String)
+    Dim col As Collection
+    If adj.Exists(fromFac) Then
+        Set col = adj(fromFac)
+    Else
+        Set col = New Collection
+        Set adj(fromFac) = col
+    End If
+    col.Add Array(toFac, cblId)
+End Sub
+
+' 연결요소 노드 수집 (BFS).
+Private Sub 기별_연결요소_수집(adj As Object, startNode As String, comp As Object)
+    Dim q As Collection: Set q = New Collection
+    q.Add startNode
+    comp(startNode) = True
+    Do While q.Count > 0
+        Dim cur As String: cur = CStr(q(1)): q.Remove 1
+        If adj.Exists(cur) Then
+            Dim nbrs As Collection: Set nbrs = adj(cur)
+            Dim k As Long
+            For k = 1 To nbrs.Count
+                Dim e As Variant: e = nbrs(k)
+                Dim nb As String: nb = CStr(e(0))
+                If Not comp.Exists(nb) Then
+                    comp(nb) = True
+                    q.Add nb
+                End If
+            Next k
+        End If
+    Loop
+End Sub
+
+' 루트 선택 — 국사(명칭/종류) > 차수1(말단) > 첫 노드.
+Private Function 기별_루트선택(adj As Object, comp As Object) As String
+    Dim rootStation As String: rootStation = ""
+    Dim rootLeaf As String: rootLeaf = ""
+    Dim firstNode As String: firstNode = ""
+    Dim kk As Variant
+    For Each kk In comp.Keys
+        Dim node As String: node = CStr(kk)
+        If Len(firstNode) = 0 Then firstNode = node
+        Dim nm As String: nm = ""
+        If mFacName.Exists(node) Then nm = CStr(mFacName(node))
+        Dim kd As String: kd = ""
+        If mFacKind.Exists(node) Then kd = CStr(mFacKind(node))
+        If Len(rootStation) = 0 Then
+            If InStr(nm, "국사") > 0 Or InStr(kd, "국사") > 0 Then rootStation = node
+        End If
+        If Len(rootLeaf) = 0 Then
+            Dim deg As Long: deg = 0
+            If adj.Exists(node) Then deg = adj(node).Count
+            If deg = 1 Then rootLeaf = node
+        End If
+    Next kk
+    If Len(rootStation) > 0 Then
+        기별_루트선택 = rootStation
+    ElseIf Len(rootLeaf) > 0 Then
+        기별_루트선택 = rootLeaf
+    Else
+        기별_루트선택 = firstNode
+    End If
+End Function
+
+' 스패닝 트리 구성 (BFS) — mChildren 채움 + gv(전역 방문) 갱신.
+Private Sub 기별_트리_구성(adj As Object, root As String, gv As Object)
+    Dim q As Collection: Set q = New Collection
+    q.Add root
+    gv(root) = True
+    Set mChildren(root) = New Collection
+    Do While q.Count > 0
+        Dim cur As String: cur = CStr(q(1)): q.Remove 1
+        If adj.Exists(cur) Then
+            Dim nbrs As Collection: Set nbrs = adj(cur)
+            Dim k As Long
+            For k = 1 To nbrs.Count
+                Dim e As Variant: e = nbrs(k)
+                Dim nb As String: nb = CStr(e(0))
+                Dim cb As String: cb = CStr(e(1))
+                If Not gv.Exists(nb) Then
+                    gv(nb) = True
+                    mChildren(cur).Add Array(nb, cb)
+                    Set mChildren(nb) = New Collection
+                    q.Add nb
+                End If
+            Next k
+        End If
+    Loop
+End Sub
+
+' 서브트리 가중치(코어접속 누적합) — 메모이즈.
+Private Function 기별_가중치(node As String) As Long
+    If mWeight.Exists(node) Then 기별_가중치 = CLng(mWeight(node)): Exit Function
+    Dim w As Long: w = 0
+    If mFacCore.Exists(node) Then w = CLng(mFacCore(node))
+    If mChildren.Exists(node) Then
+        Dim ch As Collection: Set ch = mChildren(node)
+        Dim k As Long
+        For k = 1 To ch.Count
+            Dim e As Variant: e = ch(k)
+            w = w + 기별_가중치(CStr(e(0)))
+        Next k
+    End If
+    mWeight(node) = w
+    기별_가중치 = w
+End Function
+
+' 자식을 가중치 내림차순 정렬 (큰 가지부터). 삽입정렬(안정).
+Private Function 기별_자식정렬(node As String) As Collection
+    Dim out As Collection: Set out = New Collection
+    Set 기별_자식정렬 = out
+    If Not mChildren.Exists(node) Then Exit Function
+    Dim ch As Collection: Set ch = mChildren(node)
+    Dim n As Long: n = ch.Count
+    If n = 0 Then Exit Function
+    Dim items() As Variant: ReDim items(1 To n)
+    Dim wts() As Long: ReDim wts(1 To n)
+    Dim k As Long
+    For k = 1 To n
+        Dim e As Variant: e = ch(k)
+        items(k) = e
+        wts(k) = 기별_가중치(CStr(e(0)))
+    Next k
+    Dim i As Long, j As Long
+    For i = 2 To n
+        Dim keyItem As Variant: keyItem = items(i)
+        Dim keyW As Long: keyW = wts(i)
+        j = i - 1
+        Do While j >= 1
+            If wts(j) >= keyW Then Exit Do
+            items(j + 1) = items(j)
+            wts(j + 1) = wts(j)
+            j = j - 1
+        Loop
+        items(j + 1) = keyItem
+        wts(j + 1) = keyW
+    Next i
+    For k = 1 To n: out.Add items(k): Next k
+End Function
+
+' 구간 방출 (heavy-path 분해, 재귀) — owner 2026-06-16.
+'   폼은 구간 단위 (함체→경간→…→함체 선형). 분기가 갈라지면 분기점 함체를 다시 「시작」으로
+'   재기재한 새 구간을 만든다. 예) 함체2 는 구간1 에선 경유, 구간2(함체2~함체5) 에선 시작.
+'   headNode = 이 구간의 시작 함체. inCable = head 진입 케이블("" — 시작은 앞 경간 없음).
+'   firstEdge = head 에서 첫 내려갈 자식 간선(Array(child,cbl)). 분기 구간은 그 분기 자식으로 강제,
+'     루트 구간은 Empty → head 의 heaviest child 자동. 이후는 매 노드 heaviest child 로 연장.
+'   headOwns = head 의 「나머지 자식」도 이 구간이 분기로 소유하는가. 루트=True, 분기구간=False
+'     (분기구간의 head 자식들은 부모 구간 소유 → 중복 방지).
+Private Sub 기별_구간_방출(headNode As String, inCable As String, ByVal firstEdge As Variant, headOwns As Boolean)
+    ' 1) 구간 경로 노드 수집 (진입케이블, 노드)
+    Dim seqCbl As Collection: Set seqCbl = New Collection
+    Dim seqNode As Collection: Set seqNode = New Collection
+    seqCbl.Add inCable: seqNode.Add headNode
+    Dim cur As String: cur = headNode
+    Dim forced As Variant: forced = firstEdge
+    Do
+        Dim nextEdge As Variant
+        If Not IsEmpty(forced) Then
+            nextEdge = forced: forced = Empty
+        Else
+            Dim kk As Collection: Set kk = 기별_자식정렬(cur)
+            If kk.Count > 0 Then nextEdge = kk(1) Else nextEdge = Empty
+        End If
+        If IsEmpty(nextEdge) Then Exit Do
+        seqCbl.Add CStr(nextEdge(1)): seqNode.Add CStr(nextEdge(0))
+        cur = CStr(nextEdge(0))
+    Loop
+
+    ' 2) 간선 단위 방출 — owner 2026-06-16: 모든 구간을 시작~종료로. 케이블 1개 = 구간 1개.
+    Dim total As Long: total = seqNode.Count
+    Dim i As Long
+    If total = 1 Then
+        ' 간선 없는 단독 노드 (자식 없는 루트)
+        mSeg = mSeg + 1
+        기별_구간헤더 mSeg
+        기별_방출_함체 CStr(seqNode(1)), mSeg, "시작·종료"
+    Else
+        For i = 1 To total - 1
+            mSeg = mSeg + 1
+            기별_구간헤더 mSeg
+            기별_방출_함체 CStr(seqNode(i)), mSeg, "시작"
+            기별_방출_경간 CStr(seqCbl(i + 1)), mSeg
+            기별_방출_함체 CStr(seqNode(i + 1)), mSeg, "종료"
+        Next i
+    End If
+
+    ' 3) 분기 수집 — 노드 순서대로, 노드당 가중치 내림차순. 분기구간은 head(index1) 제외.
+    Dim startIdx As Long
+    If headOwns Then startIdx = 1 Else startIdx = 2
+    Dim branches As Collection: Set branches = New Collection
+    For i = startIdx To total
+        Dim bNode As String: bNode = CStr(seqNode(i))
+        Dim contChild As String: contChild = ""
+        If i < total Then contChild = CStr(seqNode(i + 1))
+        Dim kids2 As Collection: Set kids2 = 기별_자식정렬(bNode)
+        Dim j As Long
+        For j = 1 To kids2.Count
+            Dim ke As Variant: ke = kids2(j)
+            If CStr(ke(0)) <> contChild Then branches.Add Array(bNode, ke)
+        Next j
+    Next i
+
+    ' 4) 재귀 — 각 분기는 branchNode(시작)에서 그 자식 간선으로 내려감 (head 미소유).
+    Dim b As Long
+    For b = 1 To branches.Count
+        Dim br As Variant: br = branches(b)
+        기별_구간_방출 CStr(br(0)), "", br(1), False
+    Next b
+End Sub
+
+' 구간 헤더 한 줄.
+Private Sub 기별_구간헤더(ByVal segNo As Long)
+    mWsOut.Cells(mOutR, 1).Value = "구간 " & segNo
+    mWsOut.Cells(mOutR, 4).Value = "── 구간 " & segNo & " ──"
+    mOutR = mOutR + 1
+End Sub
+
+Private Sub 기별_방출_함체(node As String, segNo As Long, role As String)
+    mSeq = mSeq + 1
+    ' 중복 등장 판정 — 같은 시설물이 인접 구간의 종료·시작으로 두 번 이상 나옴. 공종은 첫 회만 집계.
+    Dim firstTime As Boolean: firstTime = True
+    If mCounted.Exists(node) Then
+        firstTime = False
+    Else
+        mCounted(node) = True
+    End If
+    Dim nm As String: nm = "": If mFacName.Exists(node) Then nm = CStr(mFacName(node))
+    Dim kd As String: kd = "": If mFacKind.Exists(node) Then kd = CStr(mFacKind(node))
+    Dim bg As String: bg = "": If mFacBadge.Exists(node) Then bg = CStr(mFacBadge(node))
+    Dim no As String: no = "": If mFacNo.Exists(node) Then no = CStr(mFacNo(node))
+    Dim dv As String: dv = "": If mFacDay.Exists(node) Then dv = CStr(mFacDay(node))
+    Dim nv As String: nv = "": If mFacNight.Exists(node) Then nv = CStr(mFacNight(node))
+    Dim ccS As String: ccS = "": If mFacCore.Exists(node) Then ccS = CStr(mFacCore(node))
+    ' 공종 산출 (owner §7-3) — 코어접속 발생 시 종류별. 주야 = 상태박스 day/night.
+    '   같은 시설물이 여러 구간에 시작/종료로 중복 등장 → 공종은 첫 등장(firstTime) 1회만 집계.
+    Dim workTxt As String: workTxt = ""
+    Dim coreTxt As String: coreTxt = ""
+    If Not firstTime Then
+        workTxt = "(중복-집계제외)"
+    Else
+        Dim total As Long: total = 0: If Len(ccS) > 0 And IsNumeric(ccS) Then total = CLng(ccS)
+        Dim nightN As Long: nightN = 기별_숫자(nv)
+        Dim dayN As Long
+        If Len(dv) > 0 And IsNumeric(dv) Then dayN = CLng(dv) Else dayN = total - nightN
+        If dayN < 0 Then dayN = 0
+        If total > 0 Then
+            If kd = "RN" Then
+                ' FTTH 광탭작업 = 1 (주간 IA / 야간 IB), 코어접속 주간 ID / 야간 IE
+                If nightN > 0 Then
+                    workTxt = "광탭 IB(야간)=1": mSumIB = mSumIB + 1
+                Else
+                    workTxt = "광탭 IA(주간)=1": mSumIA = mSumIA + 1
+                End If
+                coreTxt = "ID(주)=" & dayN & " / IE(야)=" & nightN
+                mSumIDc = mSumIDc + dayN: mSumIEc = mSumIEc + nightN
+            ElseIf kd = "접속함체" Then
+                ' 함체작업 = 1 (주간 HW / 야간 HX, 하나만), 코어접속 주간 ID / 야간 IE
+                If nightN > 0 Then
+                    workTxt = "함체작업 HX(야간)=1": mSumHX = mSumHX + 1
+                Else
+                    workTxt = "함체작업 HW(주간)=1": mSumHW = mSumHW + 1
+                End If
+                coreTxt = "ID(주)=" & dayN & " / IE(야)=" & nightN
+                mSumIDc = mSumIDc + dayN: mSumIEc = mSumIEc + nightN
+            Else
+                ' 그 외 시설물 — 성단 IF 에만
+                coreTxt = "IF(성단)=" & total
+                mSumIFc = mSumIFc + total
+            End If
+        End If
+    End If
+    If segNo > 0 Then mWsOut.Cells(mOutR, 1).Value = "구간 " & segNo
+    mWsOut.Cells(mOutR, 2).Value = mSeq
+    mWsOut.Cells(mOutR, 3).Value = "함체"
+    mWsOut.Cells(mOutR, 4).Value = nm
+    mWsOut.Cells(mOutR, 5).Value = role
+    mWsOut.Cells(mOutR, 6).Value = kd
+    mWsOut.Cells(mOutR, 7).Value = bg
+    mWsOut.Cells(mOutR, 8).Value = no
+    mWsOut.Cells(mOutR, 9).Value = ccS
+    mWsOut.Cells(mOutR, 10).Value = dv
+    mWsOut.Cells(mOutR, 11).Value = nv
+    mWsOut.Cells(mOutR, 15).Value = 기별_비고(no, kd)
+    mWsOut.Cells(mOutR, 16).Value = workTxt
+    mWsOut.Cells(mOutR, 17).Value = coreTxt
+    mOutR = mOutR + 1
+End Sub
+
+' 숫자 문자열 → Long (비숫자/공란 = 0).
+Private Function 기별_숫자(ByVal s As String) As Long
+    기별_숫자 = 0
+    s = Trim(s)
+    If Len(s) > 0 And IsNumeric(s) Then 기별_숫자 = CLng(s)
+End Function
+
+Private Sub 기별_방출_경간(cblId As String, segNo As Long)
+    mSeq = mSeq + 1
+    Dim sp As String: sp = "": If mCblSpec.Exists(cblId) Then sp = CStr(mCblSpec(cblId))
+    Dim gb As String: gb = "": If mCblGubun.Exists(cblId) Then gb = CStr(mCblGubun(cblId))
+    Dim ds As String: ds = "": If mCblDist.Exists(cblId) Then ds = CStr(mCblDist(cblId))
+    Dim ffN As String: ffN = "": If mCblFrom.Exists(cblId) Then ffN = 기별_disp(CStr(mCblFrom(cblId)))
+    Dim ttN As String: ttN = "": If mCblTo.Exists(cblId) Then ttN = 기별_disp(CStr(mCblTo(cblId)))
+    ' 포설 (owner §7-3·§7-9): 신설 케이블 거리 → 주간 GQ. 철거는 별도 시트, 기설은 미반영.
+    Dim layTxt As String: layTxt = ""
+    Dim distN As Double: distN = 0: If Len(ds) > 0 And IsNumeric(ds) Then distN = CDbl(ds)
+    If InStr(gb, "신설") > 0 Then
+        layTxt = "GQ(주간)=" & ds
+        mSumGQ = mSumGQ + distN
+    ElseIf InStr(gb, "철거") > 0 Then
+        layTxt = "철거(별도시트)"
+    ElseIf InStr(gb, "기설") > 0 Then
+        layTxt = "기설(미반영)"
+    End If
+    mWsOut.Cells(mOutR, 1).Value = "구간 " & segNo
+    mWsOut.Cells(mOutR, 2).Value = mSeq
+    mWsOut.Cells(mOutR, 3).Value = "경간"
+    mWsOut.Cells(mOutR, 4).Value = "    " & ffN & " ~ " & ttN
+    mWsOut.Cells(mOutR, 12).Value = sp
+    mWsOut.Cells(mOutR, 13).Value = ds
+    mWsOut.Cells(mOutR, 14).Value = 기별_거리반영(gb)
+    mWsOut.Cells(mOutR, 18).Value = layTxt
+    mOutR = mOutR + 1
+End Sub
+
+' 표시명 — 시설명 있으면 그대로, 없으면 ID 끝5자.
+Private Function 기별_disp(facId As String) As String
+    If mFacName.Exists(facId) Then
+        Dim nm As String: nm = CStr(mFacName(facId))
+        If Len(nm) > 0 Then 기별_disp = nm: Exit Function
+    End If
+    기별_disp = Right(facId, 5)
+End Function
+
+' 비고(JM) = 신설/기설 + 종류 → 신설함체·기설RN 등.
+Private Function 기별_비고(no As String, kind As String) As String
+    Dim t As String
+    If kind = "RN" Then
+        t = "RN"
+    ElseIf kind = "접속함체" Then
+        t = "함체"
+    Else
+        t = kind
+    End If
+    기별_비고 = no & t
+End Function
