@@ -1256,11 +1256,14 @@ Public Sub 기별_양식_채우기()
             GoTo NextSeg
         End If
         Dim r0 As Long: r0 = rw
-        ' 템플릿 블록 서식 복사 후 데이터 3행 내용만 비움 (서식 유지)
-        wsNew.Rows(TPL_BLOCK & ":" & (TPL_BLOCK + 3)).Copy Destination:=wsNew.Rows(r0)
-        wsNew.Range(wsNew.Cells(r0, 1), wsNew.Cells(r0 + 2, 275)).ClearContents
+        ' 행별 서식+행높이만 복사 (owner 2026-06-16: 소계/합계 글자·색·굵기·채움·행높이 반영).
+        '   ※ 서식만 복사 → 샘플 수동수식(아연도강연선 =G 등) 안 따라옴 → 장주 없이 조가선 계산되던 문제 동시 해결.
+        기별_행서식복사 wsNew, TPL_BLOCK, r0                ' 시작함체 ← 함체행
         기별_양식_시설쓰기 wsNew, r0, sFac, dedup
         If Len(cbl) > 0 Then
+            기별_행서식복사 wsNew, TPL_BLOCK + 1, r0 + 1    ' 경간 ← 경간행
+            기별_행서식복사 wsNew, TPL_BLOCK + 2, r0 + 2    ' 종료함체 ← 함체행
+            기별_행서식복사 wsNew, TPL_BLOCK + 3, r0 + 3    ' 소계 ← 소계행(높이 20.1·채움)
             기별_양식_경간쓰기 wsNew, r0 + 1, cbl
             기별_양식_시설쓰기 wsNew, r0 + 2, eFac, dedup
             wsNew.Range("A" & (r0 + 3)).Value = "소  계"
@@ -1268,6 +1271,7 @@ Public Sub 기별_양식_채우기()
             subRows.Add (r0 + 3)
             rw = r0 + 4
         Else
+            기별_행서식복사 wsNew, TPL_BLOCK + 3, r0 + 1    ' 소계 ← 소계행
             wsNew.Range("A" & (r0 + 1)).Value = "소  계"
             기별_양식_소계 wsNew, r0 + 1, r0, r0
             subRows.Add (r0 + 1)
@@ -1277,10 +1281,9 @@ Public Sub 기별_양식_채우기()
 NextSeg:
     Next si
 
-    ' 합계 — 템플릿 합계행 서식 복사 후 값/수식.
+    ' 합계 — 합계행 서식+행높이 복사 후 값/수식.
     '   A열 = "합 계" (공백 1개) — 종합기별명세서 G열 INDEX/MATCH("합 계") 가 이 행을 찾아 연동. (owner 2026-06-16)
-    wsNew.Rows(TPL_TOTAL & ":" & TPL_TOTAL).Copy Destination:=wsNew.Rows(rw)
-    wsNew.Range(wsNew.Cells(rw, 1), wsNew.Cells(rw, 275)).ClearContents
+    기별_행서식복사 wsNew, TPL_TOTAL, rw
     wsNew.Range("A" & rw).Value = "합 계"
     기별_양식_합계 wsNew, rw, subRows
 
@@ -1369,6 +1372,17 @@ End Sub
 Private Sub 기별_셀W(ws As Worksheet, ByVal col As String, ByVal rowNum As Long, ByVal val As Variant)
     ws.Range(col & rowNum).Value = val
     If Not mUsedCols Is Nothing Then mUsedCols(col) = True
+End Sub
+
+' 한 행의 서식(글자·색·굵기·채움·테두리)만 복사 + 행높이 복사 (내용·수식은 안 따라옴).
+'   owner 2026-06-16: 소계/합계 행높이까지 원본 그대로. 샘플 수동수식 전파 방지.
+Private Sub 기별_행서식복사(ws As Worksheet, ByVal srcRow As Long, ByVal dstRow As Long)
+    On Error Resume Next
+    ws.Rows(srcRow).Copy
+    ws.Rows(dstRow).PasteSpecial Paste:=xlPasteFormats
+    Application.CutCopyMode = False
+    ws.Rows(dstRow).RowHeight = ws.Rows(srcRow).RowHeight
+    On Error GoTo 0
 End Sub
 
 ' 경간거리 행 — A="경간거리", G=거리, 신설이면 포설 GQ + 케이블 자재열.
