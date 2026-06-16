@@ -340,10 +340,10 @@ NextCbl:
     outR = outR + 1
     wsOut.Cells(outR, 1).Value = "[집계]": outR = outR + 1
     wsOut.Cells(outR, 1).Value = "시설물": wsOut.Cells(outR, 2).Value = facCount: outR = outR + 1
-    wsOut.Cells(outR, 1).Value = "  신설 / 기설": wsOut.Cells(outR, 2).Value = nNew & " / " & nOld: outR = outR + 1
-    wsOut.Cells(outR, 1).Value = "  RN / 접속함체": wsOut.Cells(outR, 2).Value = nRN & " / " & nClo: outR = outR + 1
+    wsOut.Cells(outR, 1).Value = "  신설 / 기설": wsOut.Cells(outR, 2).Value = nNew & " · " & nOld: outR = outR + 1
+    wsOut.Cells(outR, 1).Value = "  RN / 접속함체": wsOut.Cells(outR, 2).Value = nRN & " · " & nClo: outR = outR + 1
     wsOut.Cells(outR, 1).Value = "케이블": wsOut.Cells(outR, 2).Value = cblCount: outR = outR + 1
-    wsOut.Cells(outR, 1).Value = "  신설 / 철거 / 기설": wsOut.Cells(outR, 2).Value = nCNew & " / " & nCRem & " / " & nCOld: outR = outR + 1
+    wsOut.Cells(outR, 1).Value = "  신설 / 철거 / 기설": wsOut.Cells(outR, 2).Value = nCNew & " · " & nCRem & " · " & nCOld: outR = outR + 1
     wsOut.Cells(outR, 1).Value = "  반영거리 합(m, 기설제외)": wsOut.Cells(outR, 2).Value = distSum: outR = outR + 1
     wsOut.Cells(outR, 1).Value = "총 연결코어수": wsOut.Cells(outR, 2).Value = coreSum: outR = outR + 1
 
@@ -538,8 +538,8 @@ NextC:
     o = o + 1
     wsOut.Cells(o, 1).Value = "[요약]": o = o + 1
     wsOut.Cells(o, 1).Value = "케이블 총": wsOut.Cells(o, 2).Value = (nNew + nOld + nRem): o = o + 1
-    wsOut.Cells(o, 1).Value = "  신설 / 기설 / 철거": wsOut.Cells(o, 2).Value = nNew & " / " & nOld & " / " & nRem: o = o + 1
-    wsOut.Cells(o, 1).Value = "반영 O / 누락 X": wsOut.Cells(o, 2).Value = nOK & " / " & nMiss: o = o + 1
+    wsOut.Cells(o, 1).Value = "  신설 / 기설 / 철거": wsOut.Cells(o, 2).Value = nNew & " · " & nOld & " · " & nRem: o = o + 1
+    wsOut.Cells(o, 1).Value = "반영 O / 누락 X": wsOut.Cells(o, 2).Value = nOK & " · " & nMiss: o = o + 1
     wsOut.Cells(o, 1).Value = "신설 거리합(m)": wsOut.Cells(o, 2).Value = distNewSum: o = o + 1
     wsOut.Cells(o, 1).Value = "철거 거리합(m)": wsOut.Cells(o, 2).Value = distRemSum: o = o + 1
     If nMiss > 0 Then
