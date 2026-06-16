@@ -31700,6 +31700,28 @@ Public Function 기별_시설종류(ws As Worksheet, ByVal facId As String, ByVa
     End If
 End Function
 
+' 시설 명칭/종류/규격 — 네트웍 우선, 없으면 행정도 폴백 (owner 2026-06-16).
+'   철거 시설물은 네트웍구성도에 안 그려지고 행정도에만 있음 → 네트웍에서 못 읽으면 행정도 콜아웃에서 읽음.
+'   신설 시설은 네트웍에서 그대로 해결되어 기존 동작 불변.
+Public Function 기별_시설명칭_양도면(wsN As Worksheet, wsA As Worksheet, ByVal facId As String, ByVal fallbackGubun As String) As String
+    Dim s As String: s = 기별_시설명칭(wsN, facId, fallbackGubun)
+    If Len(s) = 0 Then s = 기별_시설명칭(wsA, facId, fallbackGubun)
+    기별_시설명칭_양도면 = s
+End Function
+Public Function 기별_시설종류_양도면(wsN As Worksheet, wsA As Worksheet, ByVal facId As String, ByVal label As String) As String
+    Dim k As String: k = 기별_시설종류(wsN, facId, label)
+    If k = "그외" Then
+        Dim k2 As String: k2 = 기별_시설종류(wsA, facId, label)
+        If k2 <> "그외" Then k = k2
+    End If
+    기별_시설종류_양도면 = k
+End Function
+Public Function 기별_시설규격_양도면(wsN As Worksheet, wsA As Worksheet, ByVal facId As String) As String
+    Dim g As String: g = 기별_시설규격(wsN, facId)
+    If Len(g) = 0 Then g = 기별_시설규격(wsA, facId)
+    기별_시설규격_양도면 = g
+End Function
+
 ' 케이블 거리 반영 여부 (owner 2026-06-16): 기설 케이블은 거리(경간) 제외 — 공종만.
 '   신설→신설시트 거리 반영, 철거→철거시트 거리 반영, 기설→거리 X(공종만).
 Public Function 기별_거리반영(ByVal gubun As String) As String
@@ -31727,11 +31749,12 @@ Public Function 기별_미리보기_시트확보() As Worksheet
 End Function
 
 Public Sub 기별_추출_미리보기()
-    Dim wsFac As Worksheet, wsCbl As Worksheet, wsNw As Worksheet
+    Dim wsFac As Worksheet, wsCbl As Worksheet, wsNw As Worksheet, wsAdmin As Worksheet
     On Error Resume Next
     Set wsFac = ThisWorkbook.Worksheets(SHEET_META_FAC)
     Set wsCbl = ThisWorkbook.Worksheets(SHEET_META_CBL)
     Set wsNw = ThisWorkbook.Worksheets(SHEET_NETWORK)
+    Set wsAdmin = ThisWorkbook.Worksheets(SHEET_ADMIN)
     On Error GoTo 0
     If wsFac Is Nothing Then MsgBox "_시설물 메타 시트가 없습니다.", vbExclamation, "기별 추출": Exit Sub
 
@@ -31764,7 +31787,7 @@ Public Sub 기별_추출_미리보기()
         facName(facId) = nm
 
         Dim no As String: no = 기별_신설기설(label)
-        Dim kind As String: kind = 기별_시설종류(wsNw, facId, label)
+        Dim kind As String: kind = 기별_시설종류_양도면(wsNw, wsAdmin, facId, label)
         Dim dayV As String, nightV As String: dayV = "": nightV = ""
         On Error Resume Next: 상태박스_값_읽기 wsNw, facId, dayV, nightV: On Error GoTo 0
         Dim cores As Long: cores = 0
@@ -31779,7 +31802,7 @@ Public Sub 기별_추출_미리보기()
         wsOut.Cells(outR, 7).Value = dayV
         wsOut.Cells(outR, 8).Value = nightV
         wsOut.Cells(outR, 9).Value = cores
-        wsOut.Cells(outR, 10).Value = 기별_시설명칭(wsNw, facId, label)
+        wsOut.Cells(outR, 10).Value = 기별_시설명칭_양도면(wsNw, wsAdmin, facId, label)
         outR = outR + 1
 
         facCount = facCount + 1: coreSum = coreSum + cores
@@ -31927,9 +31950,9 @@ Public Sub 기별_체인_직렬화_미리보기()
             mFacName(fId) = 기별_시설명(wsAdmin, wsNw, fId, CStr(wsFac.Cells(r, 3).Value))
             mFacBadge(fId) = CStr(wsFac.Cells(r, 5).Value)
             mFacNo(fId) = 기별_신설기설(lbl)
-            mFacKind(fId) = 기별_시설종류(wsNw, fId, lbl)
-            mFacLegend(fId) = 기별_시설명칭(wsNw, fId, lbl)
-            mFacGyuk(fId) = 기별_시설규격(wsNw, fId)
+            mFacKind(fId) = 기별_시설종류_양도면(wsNw, wsAdmin, fId, lbl)
+            mFacLegend(fId) = 기별_시설명칭_양도면(wsNw, wsAdmin, fId, lbl)
+            mFacGyuk(fId) = 기별_시설규격_양도면(wsNw, wsAdmin, fId)
             Dim dV As String, nV As String: dV = "": nV = ""
             On Error Resume Next: 상태박스_값_읽기 wsNw, fId, dV, nV: On Error GoTo 0
             mFacDay(fId) = dV: mFacNight(fId) = nV
@@ -32726,9 +32749,9 @@ Public Sub 기별_양식_채우기()
             mFacName(fId) = 기별_시설명(wsAdmin, wsNw, fId, CStr(wsFac.Cells(r, 3).Value))
             mFacBadge(fId) = CStr(wsFac.Cells(r, 5).Value)
             mFacNo(fId) = 기별_신설기설(lbl)
-            mFacKind(fId) = 기별_시설종류(wsNw, fId, lbl)
-            mFacLegend(fId) = 기별_시설명칭(wsNw, fId, lbl)
-            mFacGyuk(fId) = 기별_시설규격(wsNw, fId)
+            mFacKind(fId) = 기별_시설종류_양도면(wsNw, wsAdmin, fId, lbl)
+            mFacLegend(fId) = 기별_시설명칭_양도면(wsNw, wsAdmin, fId, lbl)
+            mFacGyuk(fId) = 기별_시설규격_양도면(wsNw, wsAdmin, fId)
             Dim dV As String, nV As String: dV = "": nV = ""
             On Error Resume Next: 상태박스_값_읽기 wsNw, fId, dV, nV: On Error GoTo 0
             mFacDay(fId) = dV: mFacNight(fId) = nV
