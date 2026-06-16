@@ -13,6 +13,7 @@ Private mCounted As Object                   ' 공종 집계 중복방지 (시�
 Private mMatQty As Object                     ' 자재열(폼 열문자) → 수량 누적 (Phase 3c)
 Private mSegList As Object                    ' 구간 리스트 Array(start,cbl,end) — 양식 채우기 공유 (Phase 3d)
 Private mCollectOnly As Boolean               ' True 면 기별_구간_방출 이 emit 안 하고 mSegList 수집만
+Private mUsedCols As Object                    ' 양식에서 값 기입한 열 (끝에 숨김 해제) (Phase 3d)
 ' ── 공종 누적 (Phase 3b 산출) — owner §7-3 ──
 Private mSumHW As Long, mSumHX As Long      ' 함체작업 주간/야간
 Private mSumIA As Long, mSumIB As Long      ' FTTH 광탭작업 주간/야간
@@ -1236,6 +1237,7 @@ Public Sub 기별_양식_채우기()
     wsNew.Range(wsNew.Cells(10, 1), wsNew.Cells(880, 275)).ClearContents
 
     Dim dedup As Object: Set dedup = CreateObject("Scripting.Dictionary")
+    Set mUsedCols = CreateObject("Scripting.Dictionary")
     Dim subRows As Collection: Set subRows = New Collection
     Dim rw As Long: rw = 10
     Dim filled As Long, skippedRem As Long
@@ -1286,6 +1288,18 @@ NextSeg:
     Application.CutCopyMode = False
     wsNew.Rows(TPL_BLOCK & ":" & (TPL_TOTAL + 1)).Delete
 
+    ' 값 들어간 열 숨김 해제 (owner 2026-06-16: 값 셀이 숨겨지지 않게). 메타열(A~H·JL·JM) 항상 표시.
+    Dim alwaysVis As Variant
+    alwaysVis = Array("A", "B", "C", "D", "E", "F", "G", "H", "JL", "JM")
+    Dim av As Long
+    For av = LBound(alwaysVis) To UBound(alwaysVis)
+        On Error Resume Next: wsNew.Columns(CStr(alwaysVis(av))).Hidden = False: On Error GoTo 0
+    Next av
+    Dim uc As Variant
+    For Each uc In mUsedCols.Keys
+        On Error Resume Next: wsNew.Columns(CStr(uc)).Hidden = False: On Error GoTo 0
+    Next uc
+
     ' 5) 복사본 SaveAs (원본 불변)
     Dim outPath As String
     outPath = ThisWorkbook.Path & "\기별명세서_채움_" & Format(Now, "yyyymmdd_hhnn") & ".xlsx"
@@ -1324,7 +1338,7 @@ Private Sub 기별_양식_시설쓰기(ws As Worksheet, rowNum As Long, facId As
         Dim gk2 As String: gk2 = "": If mFacGyuk.Exists(facId) Then gk2 = CStr(mFacGyuk(facId))
         기별_RN열 gk2, no, mCol, mNote
     End If
-    If Len(mCol) > 0 Then ws.Range(mCol & rowNum).Value = 1
+    If Len(mCol) > 0 Then 기별_셀W ws, mCol, rowNum, 1
 
     ' 공종 — 종류별. RN은 광탭+레벨을 코어수 무관 1 (owner 2026-06-16: RN이면 포함).
     Dim total As Long: total = 0: If mFacCore.Exists(facId) Then total = CLng(mFacCore(facId))
@@ -1335,19 +1349,25 @@ Private Sub 기별_양식_시설쓰기(ws As Worksheet, rowNum As Long, facId As
     If dayN < 0 Then dayN = 0
     If kd = "RN" Then
         ' FTTH 광탭작업 + 레벨측정 = RN 1건당 (코어수 0 이어도 기입)
-        If nightN > 0 Then ws.Range("IB" & rowNum).Value = 1 Else ws.Range("IA" & rowNum).Value = 1
-        ws.Range("IJ" & rowNum).Value = 1
-        If dayN > 0 Then ws.Range("ID" & rowNum).Value = dayN
-        If nightN > 0 Then ws.Range("IE" & rowNum).Value = nightN
+        If nightN > 0 Then 기별_셀W ws, "IB", rowNum, 1 Else 기별_셀W ws, "IA", rowNum, 1
+        기별_셀W ws, "IJ", rowNum, 1
+        If dayN > 0 Then 기별_셀W ws, "ID", rowNum, dayN
+        If nightN > 0 Then 기별_셀W ws, "IE", rowNum, nightN
     ElseIf kd = "접속함체" Then
         If total > 0 Then
-            If nightN > 0 Then ws.Range("HX" & rowNum).Value = 1 Else ws.Range("HW" & rowNum).Value = 1
-            If dayN > 0 Then ws.Range("ID" & rowNum).Value = dayN
-            If nightN > 0 Then ws.Range("IE" & rowNum).Value = nightN
+            If nightN > 0 Then 기별_셀W ws, "HX", rowNum, 1 Else 기별_셀W ws, "HW", rowNum, 1
+            If dayN > 0 Then 기별_셀W ws, "ID", rowNum, dayN
+            If nightN > 0 Then 기별_셀W ws, "IE", rowNum, nightN
         End If
     Else
-        If total > 0 Then ws.Range("IF" & rowNum).Value = total
+        If total > 0 Then 기별_셀W ws, "IF", rowNum, total
     End If
+End Sub
+
+' 값 기입 + 사용열 기록 (끝에 숨김 해제용).
+Private Sub 기별_셀W(ws As Worksheet, ByVal col As String, ByVal rowNum As Long, ByVal val As Variant)
+    ws.Range(col & rowNum).Value = val
+    If Not mUsedCols Is Nothing Then mUsedCols(col) = True
 End Sub
 
 ' 경간거리 행 — A="경간거리", G=거리, 신설이면 포설 GQ + 케이블 자재열.
@@ -1358,13 +1378,13 @@ Private Sub 기별_양식_경간쓰기(ws As Worksheet, rowNum As Long, cblId As
     Dim ds As String: ds = "": If mCblDist.Exists(cblId) Then ds = CStr(mCblDist(cblId))
     Dim distN As Double: distN = 0: If Len(ds) > 0 And IsNumeric(ds) Then distN = CDbl(ds)
     Dim status As String: status = 기별_신설기설(gb)
-    If distN > 0 Then ws.Range("G" & rowNum).Value = distN
+    If distN > 0 Then 기별_셀W ws, "G", rowNum, distN
     ' 기설·철거 아닌 케이블(=신설/미상)은 포설(GQ) + 케이블 자재열. 기설은 거리만(§7-9), 철거는 철거시트.
     If InStr(status, "기설") = 0 And InStr(status, "철거") = 0 Then
-        If distN > 0 Then ws.Range("GQ" & rowNum).Value = distN
+        If distN > 0 Then 기별_셀W ws, "GQ", rowNum, distN
         Dim mCol As String, mNote As String: mCol = "": mNote = ""
         기별_케이블열 sp, gb, status, mCol, mNote
-        If Len(mCol) > 0 And distN > 0 Then ws.Range(mCol & rowNum).Value = distN
+        If Len(mCol) > 0 And distN > 0 Then 기별_셀W ws, mCol, rowNum, distN
     End If
 End Sub
 
