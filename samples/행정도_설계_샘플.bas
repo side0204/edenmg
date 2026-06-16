@@ -32983,10 +32983,11 @@ Private Sub 기별_양식_시설쓰기(ws As Worksheet, rowNum As Long, facId As
     If kd = "접속함체" And InStr(no, "기설") > 0 Then
         ' 코어접속 발생 → 컬러 열수축슬리브(FL) = 접속코어수
         If total > 0 Then 기별_셀W ws, "FL", rowNum, total
-        ' 신설 케이블 포설 발생 → 광접속함체 분기키트 1NT(CH) = 신설케이블 조수
+        ' 신설 케이블 포설 발생 → 광접속함체 분기키트 1NT = 신설케이블 조수.
+        '   중복자재 추가 우선(owner) → FW(추가31, 930004404). CH(지입58)는 동일품 구버전.
         Dim newCbl As Long: newCbl = 0
         If mFacNewCbl.Exists(facId) Then newCbl = CLng(mFacNewCbl(facId))
-        If newCbl > 0 Then 기별_셀W ws, "CH", rowNum, newCbl
+        If newCbl > 0 Then 기별_셀W ws, "FW", rowNum, newCbl
     End If
 End Sub
 
@@ -33072,5 +33073,5 @@ End Sub
 
 ' 소계·합계 대상 열 (메타 G·H + 케이블 I~AA + 함체 AB~AI + 공종).
 Private Function 기별_양식_합산열() As Variant
-    기별_양식_합산열 = Array("G", "H", "I", "J", "K", "L", "M", "N", "O", "P", "Q", "R", "S", "T", "U", "V", "W", "X", "Y", "Z", "AA", "AB", "AC", "AD", "AE", "AF", "AG", "AH", "AI", "CH", "FL", "JF", "IR", "IS", "IV", "IW", "ID", "IE", "IF", "IJ")
+    기별_양식_합산열 = Array("G", "H", "I", "J", "K", "L", "M", "N", "O", "P", "Q", "R", "S", "T", "U", "V", "W", "X", "Y", "Z", "AA", "AB", "AC", "AD", "AE", "AF", "AG", "AH", "AI", "FW", "FL", "JF", "IR", "IS", "IV", "IW", "ID", "IE", "IF", "IJ")
 End Function
