@@ -32788,6 +32788,14 @@ Public Sub 기별_양식_채우기()
         Application.ScreenUpdating = True
         MsgBox "양식에 「2.기별명세서(신설)」 시트가 없습니다.", vbExclamation, "양식 채우기": Exit Sub
     End If
+    ' 시트 보호 해제 (owner 2026-06-16: 값은 되는데 채움·행높이 등 서식 변경이 보호로 막힘).
+    On Error Resume Next
+    wsNew.Unprotect
+    Dim wsSumP As Worksheet: Set wsSumP = wb.Worksheets("1.종합기별명세서")
+    If Not wsSumP Is Nothing Then wsSumP.Unprotect
+    Dim wsRem As Worksheet: Set wsRem = wb.Worksheets("3.기별명세서(철거)")
+    If Not wsRem Is Nothing Then wsRem.Unprotect
+    On Error GoTo 0
 
     ' === 데이터 영역 채우기 (owner 2026-06-16: 원본 양식 서식·행높이 그대로) ===
     ' 비-철거 + 케이블 있는 구간만 4행 블록(시작/경간/종료/소계). 단독노드·철거 제외.
