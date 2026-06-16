@@ -32885,10 +32885,9 @@ Public Sub 기별_양식_채우기()
         wsNew.Columns(CStr(uc)).AutoFit          ' ### 방지 — 값이 열폭보다 커서 잘리는 것 자동맞춤
         On Error GoTo 0
     Next uc
-    ' 거리(G)·여장(H) 도 자동맞춤 (큰 숫자 ### 방지)
+    ' 거리(G) 만 자동맞춤 (큰 숫자 ### 방지). H(여장)은 헤더 병합영역이 넓어 AutoFit 시 과확장 → 제외.
     On Error Resume Next
     wsNew.Columns("G").AutoFit
-    wsNew.Columns("H").AutoFit
     On Error GoTo 0
 
     ' 종합 재계산 + 선택값(K=1) 필터 재적용 (owner 2026-06-16: 값 채워도 K=1 행 자동 표시)
