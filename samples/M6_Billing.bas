@@ -395,13 +395,23 @@ Public Sub 기별_검증_미리보기()
 
     Application.ScreenUpdating = False
 
-    ' 1) 시설명 (대조용)
-    Dim facNm As Object: Set facNm = CreateObject("Scripting.Dictionary")
+    ' 1) 시설 메타 — 직렬화(기별_루트선택·기별_가중치)가 mFacName/mFacKind/mFacCore 를 읽으므로 반드시 채움.
+    '   (안 채우면 mFacName 이 Nothing → 기별_루트선택 의 mFacName.Exists 에서 런타임 오류 91)
+    Set mFacName = CreateObject("Scripting.Dictionary")
+    Set mFacKind = CreateObject("Scripting.Dictionary")
+    Set mFacCore = CreateObject("Scripting.Dictionary")
     Dim lastF As Long: lastF = wsFac.Cells(wsFac.Rows.Count, 1).End(xlUp).Row
     Dim r As Long
     For r = 2 To lastF
         Dim fId0 As String: fId0 = CStr(wsFac.Cells(r, 1).Value)
-        If Len(fId0) > 0 Then facNm(fId0) = 기별_시설명(wsAdmin, wsNw, fId0, CStr(wsFac.Cells(r, 3).Value))
+        If Len(fId0) > 0 Then
+            Dim lbl0 As String: lbl0 = CStr(wsFac.Cells(r, 2).Value)
+            mFacName(fId0) = 기별_시설명(wsAdmin, wsNw, fId0, CStr(wsFac.Cells(r, 3).Value))
+            mFacKind(fId0) = 기별_시설종류_양도면(wsNw, wsAdmin, fId0, lbl0)
+            Dim cc0 As Long: cc0 = 0
+            On Error Resume Next: cc0 = 시설물_연결코어수_계산(wsNw, fId0): On Error GoTo 0
+            mFacCore(fId0) = cc0
+        End If
     Next r
 
     ' 2) 케이블 메타 + 인접그래프 (직렬화로 신설/기설 커버리지 판정)
@@ -427,7 +437,6 @@ Public Sub 기별_검증_미리보기()
     Next r
 
     ' 3) 직렬화 → mSegList. 신설/기설 커버리지 = mSegList 에 등장한 케이블 집합
-    Set mFacCore = CreateObject("Scripting.Dictionary")   ' 가중치용(없으면 0)
     Set mChildren = CreateObject("Scripting.Dictionary")
     Set mWeight = CreateObject("Scripting.Dictionary")
     Set mSegList = New Collection
@@ -502,8 +511,8 @@ Public Sub 기별_검증_미리보기()
             End If
         End If
 
-        Dim fNm As String: fNm = fId: If facNm.Exists(fId) Then fNm = CStr(facNm(fId))
-        Dim tNm As String: tNm = tId: If facNm.Exists(tId) Then tNm = CStr(facNm(tId))
+        Dim fNm As String: fNm = fId: If mFacName.Exists(fId) Then fNm = CStr(mFacName(fId))
+        Dim tNm As String: tNm = tId: If mFacName.Exists(tId) Then tNm = CStr(mFacName(tId))
         wsOut.Cells(o, 1).Value = Right(cbId, 5)
         wsOut.Cells(o, 2).Value = fNm
         wsOut.Cells(o, 3).Value = tNm
