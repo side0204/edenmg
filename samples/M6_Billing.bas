@@ -1290,8 +1290,8 @@ Public Sub 기별_양식_채우기()
 
     ' === 데이터 영역 채우기 (owner 2026-06-16: 원본 양식 서식·행높이 그대로) ===
     ' 비-철거 + 케이블 있는 구간만 4행 블록(시작/경간/종료/소계). 단독노드·철거 제외.
+    ' 신설/기설 구간 = 트리 직렬화(mSegList) — 철거는 여기서 제외(아래 직접 스캔).
     Dim segs As Collection: Set segs = New Collection
-    Dim segsRem As Collection: Set segsRem = New Collection
     Dim skippedSolo As Long
     Dim si As Long
     For si = 1 To mSegList.Count
@@ -1302,14 +1302,35 @@ Public Sub 기별_양식_채우기()
         Else
             Dim cgub As String: cgub = ""
             If mCblGubun.Exists(cblChk) Then cgub = CStr(mCblGubun(cblChk))
-            If InStr(cgub, "철거") > 0 Then
-                segsRem.Add rec        ' 철거 케이블 → 철거시트 (3.기별명세서(철거))
+            Dim cspc As String: cspc = "": If mCblSpec.Exists(cblChk) Then cspc = CStr(mCblSpec(cblChk))
+            If InStr(cgub, "철거") > 0 Or InStr(cspc, "철거") > 0 Then
+                ' 철거 — 직접 스캔이 담당 (트리 직렬화는 비-트리 간선 누락하므로 여기선 버림)
             Else
                 segs.Add rec
             End If
         End If
     Next si
     Dim nBlk As Long: nBlk = segs.Count
+
+    ' 철거 구간 = _케이블 메타 직접 스캔 (owner 2026-06-16: 철거는 네트웍에 없고 트리 직렬화에서도
+    '   비-트리 간선으로 누락됨 → mSegList 의존하지 않고 케이블 메타를 직접 훑어 각 철거 케이블 1구간).
+    '   철거 판정 = 구분(col7) 또는 규격(col4) 에 "철거" (owner: 철거는 구분에 들어가 있음).
+    Dim segsRem As Collection: Set segsRem = New Collection
+    Dim rc As Long
+    For rc = 2 To lastC
+        Dim cidR As String: cidR = CStr(wsCbl.Cells(rc, 1).Value)
+        If Len(cidR) > 0 Then
+            Dim gbR As String: gbR = CStr(wsCbl.Cells(rc, 7).Value)
+            Dim spR As String: spR = CStr(wsCbl.Cells(rc, 4).Value)
+            If InStr(gbR, "철거") > 0 Or InStr(spR, "철거") > 0 Then
+                ' 경간쓰기가 읽는 dict 보강 (from/to 비어 트리 그래프에 안 들어간 케이블도 포함)
+                If Not mCblSpec.Exists(cidR) Then mCblSpec(cidR) = spR
+                If Not mCblGubun.Exists(cidR) Then mCblGubun(cidR) = gbR
+                If Not mCblDist.Exists(cidR) Then mCblDist(cidR) = CStr(wsCbl.Cells(rc, 8).Value)
+                segsRem.Add Array(CStr(wsCbl.Cells(rc, 2).Value), cidR, CStr(wsCbl.Cells(rc, 3).Value))
+            End If
+        End If
+    Next rc
     Dim nBlkRem As Long: nBlkRem = segsRem.Count
 
     ' 원본 템플릿 행높이 캡처 (clear 전): 함체10·경간11·소계13·합계22
