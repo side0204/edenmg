@@ -377,6 +377,179 @@ NextCbl:
 End Sub
 
 ' ============================================================================
+'  검증 미리보기 (합계 대조 · 커버리지) — owner 2026-06-16
+'  _케이블 메타의 모든 케이블이 실제로 신설/철거 시트에 반영되는지 대조.
+'  신설/기설은 트리 직렬화(mSegList)에 들어가야 반영됨 → 비-트리 간선(병렬·순환)은 누락.
+'  철거는 직접 스캔이라 항상 반영. 규격이 폼 열에 매핑 안 되면 자재열 누락 경고.
+'  ※ 읽기전용. 실행: Alt+F8 → 기별_검증_미리보기
+' ============================================================================
+Public Sub 기별_검증_미리보기()
+    Dim wsFac As Worksheet, wsCbl As Worksheet, wsNw As Worksheet, wsAdmin As Worksheet
+    On Error Resume Next
+    Set wsFac = ThisWorkbook.Worksheets(SHEET_META_FAC)
+    Set wsCbl = ThisWorkbook.Worksheets(SHEET_META_CBL)
+    Set wsNw = ThisWorkbook.Worksheets(SHEET_NETWORK)
+    Set wsAdmin = ThisWorkbook.Worksheets(SHEET_ADMIN)
+    On Error GoTo 0
+    If wsFac Is Nothing Or wsCbl Is Nothing Then MsgBox "_시설물/_케이블 메타가 없습니다.", vbExclamation, "기별 검증": Exit Sub
+
+    Application.ScreenUpdating = False
+
+    ' 1) 시설명 (대조용)
+    Dim facNm As Object: Set facNm = CreateObject("Scripting.Dictionary")
+    Dim lastF As Long: lastF = wsFac.Cells(wsFac.Rows.Count, 1).End(xlUp).Row
+    Dim r As Long
+    For r = 2 To lastF
+        Dim fId0 As String: fId0 = CStr(wsFac.Cells(r, 1).Value)
+        If Len(fId0) > 0 Then facNm(fId0) = 기별_시설명(wsAdmin, wsNw, fId0, CStr(wsFac.Cells(r, 3).Value))
+    Next r
+
+    ' 2) 케이블 메타 + 인접그래프 (직렬화로 신설/기설 커버리지 판정)
+    Set mCblFrom = CreateObject("Scripting.Dictionary")
+    Set mCblTo = CreateObject("Scripting.Dictionary")
+    Set mCblSpec = CreateObject("Scripting.Dictionary")
+    Set mCblGubun = CreateObject("Scripting.Dictionary")
+    Set mCblDist = CreateObject("Scripting.Dictionary")
+    Dim adj As Object: Set adj = CreateObject("Scripting.Dictionary")
+    Dim lastC As Long: lastC = wsCbl.Cells(wsCbl.Rows.Count, 1).End(xlUp).Row
+    For r = 2 To lastC
+        Dim cId As String: cId = CStr(wsCbl.Cells(r, 1).Value)
+        Dim ff As String: ff = CStr(wsCbl.Cells(r, 2).Value)
+        Dim tt As String: tt = CStr(wsCbl.Cells(r, 3).Value)
+        If Len(cId) > 0 And Len(ff) > 0 And Len(tt) > 0 Then
+            mCblFrom(cId) = ff: mCblTo(cId) = tt
+            mCblSpec(cId) = CStr(wsCbl.Cells(r, 4).Value)
+            mCblGubun(cId) = CStr(wsCbl.Cells(r, 7).Value)
+            mCblDist(cId) = CStr(wsCbl.Cells(r, 8).Value)
+            기별_adj_추가 adj, ff, tt, cId
+            기별_adj_추가 adj, tt, ff, cId
+        End If
+    Next r
+
+    ' 3) 직렬화 → mSegList. 신설/기설 커버리지 = mSegList 에 등장한 케이블 집합
+    Set mFacCore = CreateObject("Scripting.Dictionary")   ' 가중치용(없으면 0)
+    Set mChildren = CreateObject("Scripting.Dictionary")
+    Set mWeight = CreateObject("Scripting.Dictionary")
+    Set mSegList = New Collection
+    Dim gv As Object: Set gv = CreateObject("Scripting.Dictionary")
+    mCollectOnly = True
+    Dim sk As Variant
+    For Each sk In adj.Keys
+        Dim sNode As String: sNode = CStr(sk)
+        If Not gv.Exists(sNode) Then
+            Dim comp As Object: Set comp = CreateObject("Scripting.Dictionary")
+            기별_연결요소_수집 adj, sNode, comp
+            Dim root As String: root = 기별_루트선택(adj, comp)
+            기별_트리_구성 adj, root, gv
+            기별_구간_방출 root, "", Empty, True
+        End If
+    Next sk
+    mCollectOnly = False
+    Dim inSeg As Object: Set inSeg = CreateObject("Scripting.Dictionary")
+    Dim si As Long
+    For si = 1 To mSegList.Count
+        Dim rc0 As Variant: rc0 = mSegList(si)
+        Dim cc As String: cc = CStr(rc0(1))
+        If Len(cc) > 0 Then inSeg(cc) = True
+    Next si
+
+    ' 4) 출력 시트
+    Dim wsOut As Worksheet: Set wsOut = 기별_미리보기_시트확보()
+    wsOut.Cells.Clear
+    Dim o As Long: o = 1
+    wsOut.Cells(o, 1).Value = "■ 기별 검증 미리보기 (합계 대조·커버리지 · 읽기전용)": o = o + 2
+    wsOut.Cells(o, 1).Value = "[케이블 반영 검증] — 메타의 모든 케이블이 신설/철거 시트에 반영되는지": o = o + 1
+    Dim hh As Variant: hh = Array("ID(끝5)", "시작", "끝", "규격", "구분", "거리", "상태", "대상시트", "규격열", "반영", "사유")
+    Dim c As Long: For c = 0 To UBound(hh): wsOut.Cells(o, c + 1).Value = hh(c): Next c
+    o = o + 1
+
+    Dim nOK As Long, nMiss As Long, nRem As Long, nNew As Long, nOld As Long
+    Dim distNewSum As Double, distRemSum As Double
+    For r = 2 To lastC
+        Dim cbId As String: cbId = CStr(wsCbl.Cells(r, 1).Value)
+        If Len(cbId) = 0 Then GoTo NextC
+        Dim fId As String: fId = CStr(wsCbl.Cells(r, 2).Value)
+        Dim tId As String: tId = CStr(wsCbl.Cells(r, 3).Value)
+        Dim sp As String: sp = CStr(wsCbl.Cells(r, 4).Value)
+        Dim gb As String: gb = CStr(wsCbl.Cells(r, 7).Value)
+        Dim ds As String: ds = CStr(wsCbl.Cells(r, 8).Value)
+        Dim isRem As Boolean: isRem = (InStr(gb, "철거") > 0 Or InStr(sp, "철거") > 0)
+        Dim status As String, target As String, colTxt As String, ok As String, why As String
+        status = "": target = "": colTxt = "": ok = "": why = ""
+        If isRem Then
+            status = "철거": target = "철거시트"
+            colTxt = 기별_철거케이블열(sp, gb)
+            ok = "O": why = "직접 스캔(항상 반영)"
+            If Len(colTxt) = 0 Then why = "거리·철거공종은 반영, 규격 자재열 미매핑(" & sp & ")"
+            nRem = nRem + 1
+            If IsNumeric(ds) Then distRemSum = distRemSum + CDbl(ds)
+        Else
+            status = 기별_신설기설(gb)
+            If status = "기설" Then
+                target = "신설시트(공종만)": nOld = nOld + 1
+            Else
+                target = "신설시트": status = "신설": nNew = nNew + 1
+                If IsNumeric(ds) Then distNewSum = distNewSum + CDbl(ds)
+            End If
+            Dim mc As String, mn As String: mc = "": mn = ""
+            기별_케이블열 sp, gb, status, mc, mn
+            colTxt = mc
+            If inSeg.Exists(cbId) Then
+                ok = "O": why = ""
+                If status <> "기설" And Len(mc) = 0 Then why = "거리·포설은 반영, 규격 자재열 미매핑(" & mn & ")"
+            Else
+                ok = "X": why = "직렬화 누락 — 비-트리 간선(병렬·순환). 시작/끝 시설 확인 필요"
+            End If
+        End If
+
+        Dim fNm As String: fNm = fId: If facNm.Exists(fId) Then fNm = CStr(facNm(fId))
+        Dim tNm As String: tNm = tId: If facNm.Exists(tId) Then tNm = CStr(facNm(tId))
+        wsOut.Cells(o, 1).Value = Right(cbId, 5)
+        wsOut.Cells(o, 2).Value = fNm
+        wsOut.Cells(o, 3).Value = tNm
+        wsOut.Cells(o, 4).Value = sp
+        wsOut.Cells(o, 5).Value = gb
+        wsOut.Cells(o, 6).Value = ds
+        wsOut.Cells(o, 7).Value = status
+        wsOut.Cells(o, 8).Value = target
+        wsOut.Cells(o, 9).Value = colTxt
+        wsOut.Cells(o, 10).Value = ok
+        wsOut.Cells(o, 11).Value = why
+        If ok = "X" Then
+            wsOut.Range(wsOut.Cells(o, 1), wsOut.Cells(o, 11)).Interior.Color = RGB(255, 220, 220)
+            nMiss = nMiss + 1
+        Else
+            nOK = nOK + 1
+        End If
+        o = o + 1
+NextC:
+    Next r
+
+    ' 5) 요약
+    o = o + 1
+    wsOut.Cells(o, 1).Value = "[요약]": o = o + 1
+    wsOut.Cells(o, 1).Value = "케이블 총": wsOut.Cells(o, 2).Value = (nNew + nOld + nRem): o = o + 1
+    wsOut.Cells(o, 1).Value = "  신설 / 기설 / 철거": wsOut.Cells(o, 2).Value = nNew & " / " & nOld & " / " & nRem: o = o + 1
+    wsOut.Cells(o, 1).Value = "반영 O / 누락 X": wsOut.Cells(o, 2).Value = nOK & " / " & nMiss: o = o + 1
+    wsOut.Cells(o, 1).Value = "신설 거리합(m)": wsOut.Cells(o, 2).Value = distNewSum: o = o + 1
+    wsOut.Cells(o, 1).Value = "철거 거리합(m)": wsOut.Cells(o, 2).Value = distRemSum: o = o + 1
+    If nMiss > 0 Then
+        o = o + 1
+        wsOut.Cells(o, 1).Value = "⚠ 누락(X) 케이블이 있습니다 — 빨강 행 확인. 보통 시작/끝 시설 미연결 또는 병렬/순환 간선.": o = o + 1
+    End If
+
+    On Error Resume Next: wsOut.Columns("A:K").AutoFit: On Error GoTo 0
+    Application.ScreenUpdating = True
+    On Error Resume Next: wsOut.Activate: On Error GoTo 0
+
+    MsgBox "기별 검증 미리보기 완료 (시트: _기별_미리보기)" & vbLf & vbLf & _
+           "케이블 " & (nNew + nOld + nRem) & " (신설 " & nNew & " / 기설 " & nOld & " / 철거 " & nRem & ")" & vbLf & _
+           "반영 " & nOK & " · 누락 " & nMiss & IIf(nMiss > 0, " ⚠ (빨강 행 확인)", "") & vbLf & _
+           "신설 거리합 " & distNewSum & " m · 철거 거리합 " & distRemSum & " m", _
+           IIf(nMiss > 0, vbExclamation, vbInformation), "기별 검증"
+End Sub
+
+' ============================================================================
 '  Phase 3a — 체인 직렬화 미리보기 (양식 채우기 전 행 순서 검증)
 '  폼은 함체→경간→함체 선형. 케이블 인접그래프를 주경로(코어접속 누적 최다) 우선
 '  DFS 로 직렬화 → _기별_미리보기 시트에 행 순서 덤프. 읽기전용(행정도/네트웍 미변경).
