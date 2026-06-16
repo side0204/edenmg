@@ -32924,6 +32924,10 @@ Private Sub 기별_양식_시설쓰기(ws As Worksheet, rowNum As Long, facId As
     ws.Range("A" & rowNum).Value = nm
     If Len(bg) > 0 Then ws.Range("JL" & rowNum).Value = bg
     ws.Range("JM" & rowNum).Value = 기별_비고(no, kd)
+    ' 비고: 신설이면 글자색 빨강 (owner 2026-06-16). 기설은 기본(검정).
+    If InStr(no, "신설") > 0 Then
+        On Error Resume Next: ws.Range("JM" & rowNum).Font.Color = RGB(255, 0, 0): On Error GoTo 0
+    End If
     If dedup.Exists(facId) Then Exit Sub
     dedup(facId) = True
 
