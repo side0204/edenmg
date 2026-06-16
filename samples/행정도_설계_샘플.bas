@@ -33,6 +33,7 @@ Private mMatQty As Object                     ' 자재열(폼 열문자) → 수
 Private mSegList As Object                    ' 구간 리스트 Array(start,cbl,end) — 양식 채우기 공유 (Phase 3d)
 Private mCollectOnly As Boolean               ' True 면 기별_구간_방출 이 emit 안 하고 mSegList 수집만
 Private mUsedCols As Object                    ' 양식에서 값 기입한 열 (끝에 숨김 해제) (Phase 3d)
+Private mFacNewCbl As Object                    ' 시설물별 인접 신설 케이블 수 (기설함체 분기키트 산출)
 ' ── 공종 누적 (Phase 3b 산출) — owner §7-3 ──
 Private mSumHW As Long, mSumHX As Long      ' 함체작업 주간/야간
 Private mSumIA As Long, mSumIB As Long      ' FTTH 광탭작업 주간/야간
@@ -32745,6 +32746,7 @@ Public Sub 기별_양식_채우기()
     Set mCblGubun = CreateObject("Scripting.Dictionary")
     Set mCblDist = CreateObject("Scripting.Dictionary")
     Dim adj As Object: Set adj = CreateObject("Scripting.Dictionary")
+    Set mFacNewCbl = CreateObject("Scripting.Dictionary")
     Dim lastC As Long: lastC = wsCbl.Cells(wsCbl.Rows.Count, 1).End(xlUp).Row
     For r = 2 To lastC
         Dim cId As String: cId = CStr(wsCbl.Cells(r, 1).Value)
@@ -32753,10 +32755,16 @@ Public Sub 기별_양식_채우기()
         If Len(cId) > 0 And Len(ff) > 0 And Len(tt) > 0 Then
             mCblFrom(cId) = ff: mCblTo(cId) = tt
             mCblSpec(cId) = CStr(wsCbl.Cells(r, 4).Value)
-            mCblGubun(cId) = CStr(wsCbl.Cells(r, 7).Value)
+            Dim cgb As String: cgb = CStr(wsCbl.Cells(r, 7).Value)
+            mCblGubun(cId) = cgb
             mCblDist(cId) = CStr(wsCbl.Cells(r, 8).Value)
             기별_adj_추가 adj, ff, tt, cId
             기별_adj_추가 adj, tt, ff, cId
+            ' 신설(기설·철거 아님) 케이블이면 양끝 시설물 신설케이블 카운트 +1 (기설함체 분기키트용)
+            If InStr(cgb, "기설") = 0 And InStr(cgb, "철거") = 0 Then
+                If mFacNewCbl.Exists(ff) Then mFacNewCbl(ff) = mFacNewCbl(ff) + 1 Else mFacNewCbl(ff) = 1
+                If mFacNewCbl.Exists(tt) Then mFacNewCbl(tt) = mFacNewCbl(tt) + 1 Else mFacNewCbl(tt) = 1
+            End If
         End If
     Next r
 
@@ -32971,6 +32979,15 @@ Private Sub 기별_양식_시설쓰기(ws As Worksheet, rowNum As Long, facId As
     Else
         If total > 0 Then 기별_셀W ws, "IF", rowNum, total
     End If
+    ' 기설 접속함체 추가 자재 (owner 2026-06-16)
+    If kd = "접속함체" And InStr(no, "기설") > 0 Then
+        ' 코어접속 발생 → 컬러 열수축슬리브(FL) = 접속코어수
+        If total > 0 Then 기별_셀W ws, "FL", rowNum, total
+        ' 신설 케이블 포설 발생 → 광접속함체 분기키트 1NT(CH) = 신설케이블 조수
+        Dim newCbl As Long: newCbl = 0
+        If mFacNewCbl.Exists(facId) Then newCbl = CLng(mFacNewCbl(facId))
+        If newCbl > 0 Then 기별_셀W ws, "CH", rowNum, newCbl
+    End If
 End Sub
 
 ' 값 기입 + 사용열 기록 (끝에 숨김 해제용).
@@ -33055,5 +33072,5 @@ End Sub
 
 ' 소계·합계 대상 열 (메타 G·H + 케이블 I~AA + 함체 AB~AI + 공종).
 Private Function 기별_양식_합산열() As Variant
-    기별_양식_합산열 = Array("G", "H", "I", "J", "K", "L", "M", "N", "O", "P", "Q", "R", "S", "T", "U", "V", "W", "X", "Y", "Z", "AA", "AB", "AC", "AD", "AE", "AF", "AG", "AH", "AI", "JF", "IR", "IS", "IV", "IW", "ID", "IE", "IF", "IJ")
+    기별_양식_합산열 = Array("G", "H", "I", "J", "K", "L", "M", "N", "O", "P", "Q", "R", "S", "T", "U", "V", "W", "X", "Y", "Z", "AA", "AB", "AC", "AD", "AE", "AF", "AG", "AH", "AI", "CH", "FL", "JF", "IR", "IS", "IV", "IW", "ID", "IE", "IF", "IJ")
 End Function
