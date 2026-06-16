@@ -25,14 +25,19 @@ Private mFacName As Object, mFacKind As Object, mFacBadge As Object
 Private mFacNo As Object, mFacCore As Object, mFacDay As Object, mFacNight As Object
 Private mCblFrom As Object, mCblTo As Object, mCblSpec As Object, mCblGubun As Object, mCblDist As Object
 Private mChildren As Object, mWeight As Object
+Private mFacLegend As Object, mFacGyuk As Object  ' 범례명칭(직선형 등)·규격(콜아웃)
 Private mSeq As Long, mOutR As Long, mSeg As Long
 Private mWsOut As Worksheet
 Private mCounted As Object                   ' 공종 집계 중복방지 (시설물 1회만)
+Private mMatQty As Object                     ' 자재열(폼 열문자) → 수량 누적 (Phase 3c)
+Private mSegList As Object                    ' 구간 리스트 Array(start,cbl,end) — 양식 채우기 공유 (Phase 3d)
+Private mCollectOnly As Boolean               ' True 면 기별_구간_방출 이 emit 안 하고 mSegList 수집만
 ' ── 공종 누적 (Phase 3b 산출) — owner §7-3 ──
 Private mSumHW As Long, mSumHX As Long      ' 함체작업 주간/야간
 Private mSumIA As Long, mSumIB As Long      ' FTTH 광탭작업 주간/야간
 Private mSumIDc As Long, mSumIEc As Long    ' 코어접속 주간/야간
 Private mSumIFc As Long                      ' 코어접속 성단
+Private mSumIJ As Long                       ' FTTH 레벨측정시험 (RN 코어연결 시, 개소)
 Private mSumGQ As Double                     ' 포설(주간) 신설 거리합
 
 ' ============================================================================
@@ -31908,6 +31913,9 @@ Public Sub 기별_체인_직렬화_미리보기()
     Set mFacCore = CreateObject("Scripting.Dictionary")
     Set mFacDay = CreateObject("Scripting.Dictionary")
     Set mFacNight = CreateObject("Scripting.Dictionary")
+    Set mFacLegend = CreateObject("Scripting.Dictionary")
+    Set mFacGyuk = CreateObject("Scripting.Dictionary")
+    Set mMatQty = CreateObject("Scripting.Dictionary")
     Dim lastF As Long: lastF = wsFac.Cells(wsFac.Rows.Count, 1).End(xlUp).Row
     Dim r As Long
     For r = 2 To lastF
@@ -31918,6 +31926,8 @@ Public Sub 기별_체인_직렬화_미리보기()
             mFacBadge(fId) = CStr(wsFac.Cells(r, 5).Value)
             mFacNo(fId) = 기별_신설기설(lbl)
             mFacKind(fId) = 기별_시설종류(wsNw, fId, lbl)
+            mFacLegend(fId) = 기별_시설명칭(wsNw, fId, lbl)
+            mFacGyuk(fId) = 기별_시설규격(wsNw, fId)
             Dim dV As String, nV As String: dV = "": nV = ""
             On Error Resume Next: 상태박스_값_읽기 wsNw, fId, dV, nV: On Error GoTo 0
             mFacDay(fId) = dV: mFacNight(fId) = nV
@@ -31955,12 +31965,12 @@ Public Sub 기별_체인_직렬화_미리보기()
     mOutR = 1
     mWsOut.Cells(mOutR, 1).Value = "■ 기별 체인 직렬화 미리보기 (Phase 3a · 주경로 우선 · 읽기전용)": mOutR = mOutR + 2
     Dim hh As Variant
-    hh = Array("구간", "순번", "타입", "함체명/구간", "역할", "종류", "배지", "신설/기설", "코어수", "주간", "야간", "규격", "거리(m)", "거리반영", "비고(JM)", "함체작업/광탭", "코어접속", "포설")
+    hh = Array("구간", "순번", "타입", "함체명/구간", "역할", "종류", "배지", "신설/기설", "코어수", "주간", "야간", "규격", "거리(m)", "거리반영", "비고(JM)", "함체작업/광탭", "코어접속", "포설", "자재열")
     Dim c As Long
     For c = 0 To UBound(hh): mWsOut.Cells(mOutR, c + 1).Value = hh(c): Next c
     mOutR = mOutR + 1
-    mSeq = 0: mSeg = 0
-    mSumHW = 0: mSumHX = 0: mSumIA = 0: mSumIB = 0: mSumIDc = 0: mSumIEc = 0: mSumIFc = 0: mSumGQ = 0
+    mSeq = 0: mSeg = 0: mCollectOnly = False
+    mSumHW = 0: mSumHX = 0: mSumIA = 0: mSumIB = 0: mSumIDc = 0: mSumIEc = 0: mSumIFc = 0: mSumIJ = 0: mSumGQ = 0
 
     ' 4) 연결요소별 직렬화
     Set mChildren = CreateObject("Scripting.Dictionary")
@@ -32007,6 +32017,7 @@ Public Sub 기별_체인_직렬화_미리보기()
     기별_집계행 "함체작업 야간 (HX)", mSumHX, "개소"
     기별_집계행 "FTTH 광탭작업 주간 (IA)", mSumIA, "개소"
     기별_집계행 "FTTH 광탭작업 야간 (IB)", mSumIB, "개소"
+    기별_집계행 "FTTH 레벨측정시험 (IJ)", mSumIJ, "개소"
     기별_집계행 "코어접속 주간 (ID)", mSumIDc, "코어"
     기별_집계행 "코어접속 야간 (IE)", mSumIEc, "코어"
     기별_집계행 "코어접속 성단 (IF)", mSumIFc, "코어"
@@ -32014,14 +32025,34 @@ Public Sub 기별_체인_직렬화_미리보기()
     mOutR = mOutR + 1
     mWsOut.Cells(mOutR, 1).Value = "※ 주야 판정: 야간코어>0 이면 함체작업/광탭=야간, 아니면 주간 (owner 확인 필요)": mOutR = mOutR + 1
     mWsOut.Cells(mOutR, 1).Value = "※ 포설: 신설 케이블 거리만 GQ(주간). 철거·기설은 별도/미반영. 야간포설(GS)·이설(GT)은 설계 입력 추가 시 분기": mOutR = mOutR + 1
-    mWsOut.Cells(mOutR, 1).Value = "※ 자재 열(케이블규격·함체규격·RN종류 → I~BR)은 매핑 확정 후 Phase 3c": mOutR = mOutR + 1
 
-    On Error Resume Next: mWsOut.Columns("A:R").AutoFit: On Error GoTo 0
+    ' === 자재 집계 (신설시트 자재열 → 수량 — Phase 3c) ===
+    mOutR = mOutR + 1
+    mWsOut.Cells(mOutR, 1).Value = "[자재 집계 — 신설시트 자재열 수량]": mOutR = mOutR + 1
+    Dim mh As Variant: mh = Array("폼 열", "수량", "비고")
+    For c = 0 To UBound(mh): mWsOut.Cells(mOutR, c + 1).Value = mh(c): Next c
+    mOutR = mOutR + 1
+    If mMatQty.Count = 0 Then
+        mWsOut.Cells(mOutR, 1).Value = "(매핑된 자재 없음)": mOutR = mOutR + 1
+    Else
+        Dim mk As Variant
+        For Each mk In mMatQty.Keys
+            mWsOut.Cells(mOutR, 1).Value = CStr(mk)
+            mWsOut.Cells(mOutR, 2).Value = mMatQty(mk)
+            mWsOut.Cells(mOutR, 3).Value = 기별_열라벨(CStr(mk))
+            mOutR = mOutR + 1
+        Next mk
+    End If
+    mOutR = mOutR + 1
+    mWsOut.Cells(mOutR, 1).Value = "※ 케이블열: 거리(M) 누적 · 함체/RN열: 개수(EA). 신설만 반영(기설·철거 제외)": mOutR = mOutR + 1
+    mWsOut.Cells(mOutR, 1).Value = "※ RN 세분열(구내/옥외·포트)은 우리 데이터(비율+RN)로 자동 불가 → 「확인필요」. 12C 세경/광, 576C 양식부재도 확인 필요": mOutR = mOutR + 1
+
+    On Error Resume Next: mWsOut.Columns("A:S").AutoFit: On Error GoTo 0
     Application.ScreenUpdating = True
     On Error Resume Next: mWsOut.Activate: On Error GoTo 0
     MsgBox "체인 직렬화 + 공종 산출 미리보기 완료 (시트: _기별_미리보기)" & vbLf & vbLf & _
            "체인 " & compCount & " 개" & vbLf & _
-           "함체작업 주/야 " & mSumHW & " / " & mSumHX & " · 광탭 주/야 " & mSumIA & " / " & mSumIB & vbLf & _
+           "함체작업 주/야 " & mSumHW & " / " & mSumHX & " · 광탭 주/야 " & mSumIA & " / " & mSumIB & " · 레벨측정 " & mSumIJ & vbLf & _
            "코어접속 주/야/성단 " & mSumIDc & " / " & mSumIEc & " / " & mSumIFc & vbLf & _
            "포설(주간) " & mSumGQ & " m" & vbLf & vbLf & _
            "행 순서·공종 수량을 확인하세요.", vbInformation, "기별 산출"
@@ -32204,21 +32235,30 @@ Private Sub 기별_구간_방출(headNode As String, inCable As String, ByVal fi
         cur = CStr(nextEdge(0))
     Loop
 
-    ' 2) 간선 단위 방출 — owner 2026-06-16: 모든 구간을 시작~종료로. 케이블 1개 = 구간 1개.
+    ' 2) 간선 단위 — owner 2026-06-16: 모든 구간을 시작~종료로. 케이블 1개 = 구간 1개.
+    '    mCollectOnly=True (양식 채우기) 면 mSegList 수집만, 아니면 미리보기 emit.
     Dim total As Long: total = seqNode.Count
     Dim i As Long
     If total = 1 Then
         ' 간선 없는 단독 노드 (자식 없는 루트)
-        mSeg = mSeg + 1
-        기별_구간헤더 mSeg
-        기별_방출_함체 CStr(seqNode(1)), mSeg, "시작·종료"
-    Else
-        For i = 1 To total - 1
+        If mCollectOnly Then
+            mSegList.Add Array(CStr(seqNode(1)), "", "")
+        Else
             mSeg = mSeg + 1
             기별_구간헤더 mSeg
-            기별_방출_함체 CStr(seqNode(i)), mSeg, "시작"
-            기별_방출_경간 CStr(seqCbl(i + 1)), mSeg
-            기별_방출_함체 CStr(seqNode(i + 1)), mSeg, "종료"
+            기별_방출_함체 CStr(seqNode(1)), mSeg, "시작·종료"
+        End If
+    Else
+        For i = 1 To total - 1
+            If mCollectOnly Then
+                mSegList.Add Array(CStr(seqNode(i)), CStr(seqCbl(i + 1)), CStr(seqNode(i + 1)))
+            Else
+                mSeg = mSeg + 1
+                기별_구간헤더 mSeg
+                기별_방출_함체 CStr(seqNode(i)), mSeg, "시작"
+                기별_방출_경간 CStr(seqCbl(i + 1)), mSeg
+                기별_방출_함체 CStr(seqNode(i + 1)), mSeg, "종료"
+            End If
         Next i
     End If
 
@@ -32281,17 +32321,20 @@ Private Sub 기별_방출_함체(node As String, segNo As Long, role As String)
         Dim dayN As Long
         If Len(dv) > 0 And IsNumeric(dv) Then dayN = CLng(dv) Else dayN = total - nightN
         If dayN < 0 Then dayN = 0
-        If total > 0 Then
-            If kd = "RN" Then
-                ' FTTH 광탭작업 = 1 (주간 IA / 야간 IB), 코어접속 주간 ID / 야간 IE
-                If nightN > 0 Then
-                    workTxt = "광탭 IB(야간)=1": mSumIB = mSumIB + 1
-                Else
-                    workTxt = "광탭 IA(주간)=1": mSumIA = mSumIA + 1
-                End If
+        If kd = "RN" Then
+            ' FTTH 광탭작업 + 레벨측정 = RN 1건당 (코어수 무관 — owner 2026-06-16). 코어접속은 코어 있을 때.
+            If nightN > 0 Then
+                workTxt = "광탭 IB(야간)=1": mSumIB = mSumIB + 1
+            Else
+                workTxt = "광탭 IA(주간)=1": mSumIA = mSumIA + 1
+            End If
+            workTxt = workTxt & " · 레벨측정 IJ=1": mSumIJ = mSumIJ + 1
+            If total > 0 Then
                 coreTxt = "ID(주)=" & dayN & " / IE(야)=" & nightN
                 mSumIDc = mSumIDc + dayN: mSumIEc = mSumIEc + nightN
-            ElseIf kd = "접속함체" Then
+            End If
+        ElseIf kd = "접속함체" Then
+            If total > 0 Then
                 ' 함체작업 = 1 (주간 HW / 야간 HX, 하나만), 코어접속 주간 ID / 야간 IE
                 If nightN > 0 Then
                     workTxt = "함체작업 HX(야간)=1": mSumHX = mSumHX + 1
@@ -32300,11 +32343,31 @@ Private Sub 기별_방출_함체(node As String, segNo As Long, role As String)
                 End If
                 coreTxt = "ID(주)=" & dayN & " / IE(야)=" & nightN
                 mSumIDc = mSumIDc + dayN: mSumIEc = mSumIEc + nightN
-            Else
-                ' 그 외 시설물 — 성단 IF 에만
+            End If
+        Else
+            ' 그 외 시설물 — 성단 IF 에만 (코어 있을 때)
+            If total > 0 Then
                 coreTxt = "IF(성단)=" & total
                 mSumIFc = mSumIFc + total
             End If
+        End If
+    End If
+    ' 자재열 (Phase 3c) — 신설 접속함체/RN 만. firstTime 1회.
+    Dim matTxt As String: matTxt = ""
+    If firstTime Then
+        Dim lg As String: lg = "": If mFacLegend.Exists(node) Then lg = CStr(mFacLegend(node))
+        Dim gk As String: gk = "": If mFacGyuk.Exists(node) Then gk = CStr(mFacGyuk(node))
+        Dim mCol As String, mNote As String: mCol = "": mNote = ""
+        If kd = "접속함체" Then
+            기별_함체열 lg, gk, no, mCol, mNote
+        ElseIf kd = "RN" Then
+            기별_RN열 gk, no, mCol, mNote
+        End If
+        If Len(mCol) > 0 Then
+            matTxt = mCol & " (" & mNote & ") +1"
+            기별_자재누적 mCol, 1
+        ElseIf Len(mNote) > 0 Then
+            matTxt = mNote
         End If
     End If
     If segNo > 0 Then mWsOut.Cells(mOutR, 1).Value = "구간 " & segNo
@@ -32321,6 +32384,7 @@ Private Sub 기별_방출_함체(node As String, segNo As Long, role As String)
     mWsOut.Cells(mOutR, 15).Value = 기별_비고(no, kd)
     mWsOut.Cells(mOutR, 16).Value = workTxt
     mWsOut.Cells(mOutR, 17).Value = coreTxt
+    mWsOut.Cells(mOutR, 19).Value = matTxt
     mOutR = mOutR + 1
 End Sub
 
@@ -32341,13 +32405,24 @@ Private Sub 기별_방출_경간(cblId As String, segNo As Long)
     ' 포설 (owner §7-3·§7-9): 신설 케이블 거리 → 주간 GQ. 철거는 별도 시트, 기설은 미반영.
     Dim layTxt As String: layTxt = ""
     Dim distN As Double: distN = 0: If Len(ds) > 0 And IsNumeric(ds) Then distN = CDbl(ds)
-    If InStr(gb, "신설") > 0 Then
-        layTxt = "GQ(주간)=" & ds
-        mSumGQ = mSumGQ + distN
-    ElseIf InStr(gb, "철거") > 0 Then
+    If InStr(gb, "철거") > 0 Then
         layTxt = "철거(별도시트)"
     ElseIf InStr(gb, "기설") > 0 Then
         layTxt = "기설(미반영)"
+    Else
+        ' 신설 또는 미상 → 포설(주간)
+        layTxt = "GQ(주간)=" & ds
+        mSumGQ = mSumGQ + distN
+    End If
+    ' 자재열 (Phase 3c) — 신설 케이블만 신설시트 규격열에 거리 누적.
+    Dim matTxt As String: matTxt = ""
+    Dim mCol As String, mNote As String: mCol = "": mNote = ""
+    기별_케이블열 sp, gb, 기별_신설기설(gb), mCol, mNote
+    If Len(mCol) > 0 Then
+        matTxt = mCol & " (" & mNote & ") +" & ds
+        기별_자재누적 mCol, distN
+    ElseIf Len(mNote) > 0 Then
+        matTxt = mNote
     End If
     mWsOut.Cells(mOutR, 1).Value = "구간 " & segNo
     mWsOut.Cells(mOutR, 2).Value = mSeq
@@ -32357,6 +32432,7 @@ Private Sub 기별_방출_경간(cblId As String, segNo As Long)
     mWsOut.Cells(mOutR, 13).Value = ds
     mWsOut.Cells(mOutR, 14).Value = 기별_거리반영(gb)
     mWsOut.Cells(mOutR, 18).Value = layTxt
+    mWsOut.Cells(mOutR, 19).Value = matTxt
     mOutR = mOutR + 1
 End Sub
 
@@ -32380,4 +32456,479 @@ Private Function 기별_비고(no As String, kind As String) As String
         t = kind
     End If
     기별_비고 = no & t
+End Function
+
+' ============================================================================
+'  Phase 3c — 자재 열 매핑 (설계 규격/종류 → 신설시트 폼 열). 양식: _양식_열맵.txt
+'  케이블: 규격+설치구분 → I~AA · 함체: 명칭(직선/다분기/중간분기)+규격 → AB~AI
+'  RN: 우리 데이터(비율+RN)로 양식 세분열(구내/옥외·포트) 자동 불가 → 확인필요 플래그
+' ============================================================================
+
+' 자재열 수량 누적 (열문자 → Double).
+Private Sub 기별_자재누적(ByVal col As String, ByVal qty As Double)
+    If mMatQty.Exists(col) Then
+        mMatQty(col) = CDbl(mMatQty(col)) + qty
+    Else
+        mMatQty(col) = qty
+    End If
+End Sub
+
+' 규격 문자열 → 표준 코드 ("광케이블,144C,가공" 또는 "144C" → "144C").
+Private Function 기별_규격코드(ByVal s As String) As String
+    Dim up As String: up = UCase(Trim(s))
+    Dim cand As Variant: cand = Array("576C", "288C", "144C", "72C", "48C", "36C", "24C", "12C", "4C", "2C", "1C")
+    Dim i As Long
+    For i = LBound(cand) To UBound(cand)
+        If InStr(up, CStr(cand(i))) > 0 Then 기별_규격코드 = CStr(cand(i)): Exit Function
+    Next i
+    기별_규격코드 = Trim(s)
+End Function
+
+' 케이블 구분("신설/가공") → 설치구분 (가공/관로/일반). 지중→관로·구내→일반 기본.
+Private Function 기별_설치(ByVal gubun As String) As String
+    If InStr(gubun, "관로") > 0 Then
+        기별_설치 = "관로"
+    ElseIf InStr(gubun, "일반") > 0 Then
+        기별_설치 = "일반"
+    ElseIf InStr(gubun, "가공") > 0 Then
+        기별_설치 = "가공"
+    ElseIf InStr(gubun, "지중") > 0 Then
+        기별_설치 = "관로"
+    ElseIf InStr(gubun, "구내") > 0 Then
+        기별_설치 = "일반"
+    Else
+        기별_설치 = "가공"
+    End If
+End Function
+
+' 시설물 콜아웃 규격 (line1 = "구분/규격" 의 마지막 토큰, 시간직렬 복원).
+Private Function 기별_시설규격(ws As Worksheet, ByVal facId As String) As String
+    기별_시설규격 = ""
+    If ws Is Nothing Or Len(facId) = 0 Then Exit Function
+    Dim lbl As Shape: Set lbl = Nothing
+    On Error Resume Next: Set lbl = ws.Shapes(PREFIX_LABEL & facId): On Error GoTo 0
+    If lbl Is Nothing Then Exit Function
+    Dim tx As String: tx = ""
+    On Error Resume Next: tx = lbl.TextFrame2.TextRange.Text: On Error GoTo 0
+    tx = Replace(Replace(tx, vbCrLf, vbCr), vbLf, vbCr)
+    Dim p As Long: p = InStr(tx, vbCr)
+    Dim line1 As String
+    If p > 0 Then line1 = Left(tx, p - 1) Else line1 = tx
+    line1 = Trim(line1)
+    Dim lp As Long: lp = InStrRev(line1, "/")
+    If lp > 0 Then 기별_시설규격 = 기별_규격복원(Mid(line1, lp + 1))
+End Function
+
+' 케이블 → 신설시트 자재열. 신설만. outCol="" 면 대상아님/미매핑(outNote 사유).
+Private Sub 기별_케이블열(ByVal spec As String, ByVal gubun As String, ByVal status As String, ByRef outCol As String, ByRef outNote As String)
+    outCol = "": outNote = ""
+    If InStr(status, "철거") > 0 Then outNote = "철거시트(별도)": Exit Sub
+    If InStr(status, "기설") > 0 Then outNote = "기설(미반영)": Exit Sub
+    ' 신설 또는 미상(status 토큰 없음) → 신설 자재열 매핑 진행
+    Dim sp As String: sp = 기별_규격코드(spec)
+    Dim inst As String: inst = 기별_설치(gubun)
+    Dim slim As Boolean: slim = (InStr(gubun, "세경") > 0)
+    Select Case sp
+        Case "2C": outCol = "I": outNote = "세경2C인입용"
+        Case "4C": outCol = "J": outNote = "세경4C가공"
+        Case "12C"
+            If slim Then
+                outCol = "K": outNote = "세경12C가공"
+            Else
+                outCol = "L": outNote = "광12C가공"
+            End If
+        Case "24C"
+            If inst = "관로" Then outCol = "N" Else outCol = "M"
+            outNote = "24C" & inst
+        Case "36C"
+            If inst = "일반" Then
+                outCol = "O"
+            ElseIf inst = "관로" Then
+                outCol = "Q"
+            Else
+                outCol = "P"
+            End If
+            outNote = "36C" & inst
+        Case "48C"
+            If inst = "관로" Then outCol = "S" Else outCol = "R"
+            outNote = "48C" & inst
+        Case "72C"
+            If inst = "일반" Then
+                outCol = "T"
+            ElseIf inst = "관로" Then
+                outCol = "V"
+            Else
+                outCol = "U"
+            End If
+            outNote = "72C" & inst
+        Case "144C"
+            If inst = "일반" Then
+                outCol = "W"
+            ElseIf inst = "관로" Then
+                outCol = "Y"
+            Else
+                outCol = "X"
+            End If
+            outNote = "144C" & inst
+        Case "288C"
+            If inst = "관로" Then outCol = "AA" Else outCol = "Z"
+            outNote = "288C" & inst
+        Case "576C"
+            outNote = "576C(양식 열부재-확인필요)"
+        Case Else
+            outNote = "미매핑(" & spec & ")"
+    End Select
+End Sub
+
+' 접속함체 → 신설시트 자재열 (명칭 직선/다분기/중간분기 + 규격). 신설만.
+Private Sub 기별_함체열(ByVal nm As String, ByVal gyuk As String, ByVal status As String, ByRef outCol As String, ByRef outNote As String)
+    outCol = "": outNote = ""
+    If InStr(status, "신설") = 0 Then outNote = "기설/철거(미반영)": Exit Sub
+    Dim sp As String: sp = 기별_규격코드(gyuk)
+    If InStr(nm, "중간분기") > 0 Then
+        outCol = "AI": outNote = "중간분기함체"
+    ElseIf InStr(nm, "다분기") > 0 Then
+        outCol = "AH": outNote = "다분기72C"
+    ElseIf InStr(nm, "직선") > 0 Then
+        If sp = "144C" Then
+            outCol = "AG": outNote = "직선형144C"
+        Else
+            outCol = "AF": outNote = "직선형72C"
+        End If
+    Else
+        Select Case sp
+            Case "36C": outCol = "AB"
+            Case "72C": outCol = "AC"
+            Case "144C": outCol = "AD"
+            Case "288C": outCol = "AE"
+            Case Else: outNote = "함체규격미매핑(" & gyuk & ")"
+        End Select
+        If Len(outCol) > 0 Then outNote = "접속함체" & sp
+    End If
+End Sub
+
+' RN → 신설시트 자재열. 우리 데이터(비율+RN)로 양식 세분열 자동불가 → 확인필요.
+Private Sub 기별_RN열(ByVal gyuk As String, ByVal status As String, ByRef outCol As String, ByRef outNote As String)
+    outCol = ""
+    If InStr(status, "신설") = 0 Then
+        outNote = "기설RN(미반영)"
+    Else
+        outNote = "RN자재열 확인필요(비율 " & gyuk & ")"
+    End If
+End Sub
+
+' 폼 열문자 → 라벨 (자재 집계 비고용).
+Private Function 기별_열라벨(ByVal col As String) As String
+    Select Case col
+        Case "I": 기별_열라벨 = "세경2C인입용"
+        Case "J": 기별_열라벨 = "세경4C가공"
+        Case "K": 기별_열라벨 = "세경12C가공"
+        Case "L": 기별_열라벨 = "광12C가공"
+        Case "M": 기별_열라벨 = "24C가공"
+        Case "N": 기별_열라벨 = "24C관로"
+        Case "O": 기별_열라벨 = "36C일반"
+        Case "P": 기별_열라벨 = "36C가공"
+        Case "Q": 기별_열라벨 = "36C관로"
+        Case "R": 기별_열라벨 = "48C가공"
+        Case "S": 기별_열라벨 = "48C관로"
+        Case "T": 기별_열라벨 = "72C일반"
+        Case "U": 기별_열라벨 = "72C가공"
+        Case "V": 기별_열라벨 = "72C관로"
+        Case "W": 기별_열라벨 = "144C일반"
+        Case "X": 기별_열라벨 = "144C가공"
+        Case "Y": 기별_열라벨 = "144C관로"
+        Case "Z": 기별_열라벨 = "288C가공"
+        Case "AA": 기별_열라벨 = "288C관로"
+        Case "AB": 기별_열라벨 = "접속함체36C"
+        Case "AC": 기별_열라벨 = "접속함체72C"
+        Case "AD": 기별_열라벨 = "접속함체144C"
+        Case "AE": 기별_열라벨 = "접속함체288C"
+        Case "AF": 기별_열라벨 = "직선형72C"
+        Case "AG": 기별_열라벨 = "직선형144C"
+        Case "AH": 기별_열라벨 = "다분기72C"
+        Case "AI": 기별_열라벨 = "중간분기함체"
+        Case Else: 기별_열라벨 = ""
+    End Select
+End Function
+
+' ============================================================================
+'  Phase 3d — 양식 채우기 (도식·네트웍 → 기별명세서양식.xlsx 신설시트)
+'  미리보기와 같은 직렬화(기별_구간_방출, mCollectOnly 수집모드)를 재사용 → mSegList.
+'  각 구간 = 4행 블록 (시작함체 / 경간거리 / 종료함체 / 소계). 끝에 합계.
+'  양식 원본 불변 — 복사본 「기별명세서_채움_<일시>.xlsx」 로 SaveAs.
+'  ※ 1차컷: 신설시트만. 철거 케이블은 건너뜀(철거시트 별도 — 후속). 종합시트 미반영.
+'  실행: Alt+F8 → 기별_양식_채우기
+' ============================================================================
+Public Sub 기별_양식_채우기()
+    Dim wsFac As Worksheet, wsCbl As Worksheet, wsNw As Worksheet
+    On Error Resume Next
+    Set wsFac = ThisWorkbook.Worksheets(SHEET_META_FAC)
+    Set wsCbl = ThisWorkbook.Worksheets(SHEET_META_CBL)
+    Set wsNw = ThisWorkbook.Worksheets(SHEET_NETWORK)
+    On Error GoTo 0
+    If wsFac Is Nothing Or wsCbl Is Nothing Then MsgBox "_시설물/_케이블 메타가 없습니다.", vbExclamation, "양식 채우기": Exit Sub
+
+    Dim formPath As String: formPath = ThisWorkbook.Path & "\기별명세서양식.xlsx"
+    If Len(Dir(formPath)) = 0 Then
+        MsgBox "양식 파일이 없습니다:" & vbLf & formPath & vbLf & vbLf & _
+               "「기별명세서양식.xlsx」 를 이 도구(.xlsm)와 같은 폴더에 두세요.", vbExclamation, "양식 채우기"
+        Exit Sub
+    End If
+
+    Application.ScreenUpdating = False
+
+    ' 1) 시설물 메타 적재 (미리보기와 동일)
+    Set mFacName = CreateObject("Scripting.Dictionary")
+    Set mFacKind = CreateObject("Scripting.Dictionary")
+    Set mFacBadge = CreateObject("Scripting.Dictionary")
+    Set mFacNo = CreateObject("Scripting.Dictionary")
+    Set mFacCore = CreateObject("Scripting.Dictionary")
+    Set mFacDay = CreateObject("Scripting.Dictionary")
+    Set mFacNight = CreateObject("Scripting.Dictionary")
+    Set mFacLegend = CreateObject("Scripting.Dictionary")
+    Set mFacGyuk = CreateObject("Scripting.Dictionary")
+    Dim lastF As Long: lastF = wsFac.Cells(wsFac.Rows.Count, 1).End(xlUp).Row
+    Dim r As Long
+    For r = 2 To lastF
+        Dim fId As String: fId = CStr(wsFac.Cells(r, 1).Value)
+        If Len(fId) > 0 Then
+            Dim lbl As String: lbl = CStr(wsFac.Cells(r, 2).Value)
+            mFacName(fId) = CStr(wsFac.Cells(r, 3).Value)
+            mFacBadge(fId) = CStr(wsFac.Cells(r, 5).Value)
+            mFacNo(fId) = 기별_신설기설(lbl)
+            mFacKind(fId) = 기별_시설종류(wsNw, fId, lbl)
+            mFacLegend(fId) = 기별_시설명칭(wsNw, fId, lbl)
+            mFacGyuk(fId) = 기별_시설규격(wsNw, fId)
+            Dim dV As String, nV As String: dV = "": nV = ""
+            On Error Resume Next: 상태박스_값_읽기 wsNw, fId, dV, nV: On Error GoTo 0
+            mFacDay(fId) = dV: mFacNight(fId) = nV
+            Dim cc As Long: cc = 0
+            On Error Resume Next: cc = 시설물_연결코어수_계산(wsNw, fId): On Error GoTo 0
+            mFacCore(fId) = cc
+        End If
+    Next r
+
+    ' 2) 케이블 메타 + 인접그래프
+    Set mCblFrom = CreateObject("Scripting.Dictionary")
+    Set mCblTo = CreateObject("Scripting.Dictionary")
+    Set mCblSpec = CreateObject("Scripting.Dictionary")
+    Set mCblGubun = CreateObject("Scripting.Dictionary")
+    Set mCblDist = CreateObject("Scripting.Dictionary")
+    Dim adj As Object: Set adj = CreateObject("Scripting.Dictionary")
+    Dim lastC As Long: lastC = wsCbl.Cells(wsCbl.Rows.Count, 1).End(xlUp).Row
+    For r = 2 To lastC
+        Dim cId As String: cId = CStr(wsCbl.Cells(r, 1).Value)
+        Dim ff As String: ff = CStr(wsCbl.Cells(r, 2).Value)
+        Dim tt As String: tt = CStr(wsCbl.Cells(r, 3).Value)
+        If Len(cId) > 0 And Len(ff) > 0 And Len(tt) > 0 Then
+            mCblFrom(cId) = ff: mCblTo(cId) = tt
+            mCblSpec(cId) = CStr(wsCbl.Cells(r, 4).Value)
+            mCblGubun(cId) = CStr(wsCbl.Cells(r, 7).Value)
+            mCblDist(cId) = CStr(wsCbl.Cells(r, 8).Value)
+            기별_adj_추가 adj, ff, tt, cId
+            기별_adj_추가 adj, tt, ff, cId
+        End If
+    Next r
+
+    ' 3) 직렬화 수집 (mCollectOnly=True → mSegList)
+    Set mChildren = CreateObject("Scripting.Dictionary")
+    Set mWeight = CreateObject("Scripting.Dictionary")
+    Set mSegList = New Collection
+    Dim gv As Object: Set gv = CreateObject("Scripting.Dictionary")
+    mCollectOnly = True
+    Dim startKey As Variant
+    For Each startKey In adj.Keys
+        Dim sNode As String: sNode = CStr(startKey)
+        If Not gv.Exists(sNode) Then
+            Dim comp As Object: Set comp = CreateObject("Scripting.Dictionary")
+            기별_연결요소_수집 adj, sNode, comp
+            Dim root As String: root = 기별_루트선택(adj, comp)
+            기별_트리_구성 adj, root, gv
+            기별_구간_방출 root, "", Empty, True
+        End If
+    Next startKey
+    mCollectOnly = False
+
+    ' 4) 양식 복사본 열기 + 신설시트 채우기
+    Dim wb As Workbook: Set wb = Workbooks.Open(formPath)
+    Dim wsNew As Worksheet: Set wsNew = Nothing
+    On Error Resume Next: Set wsNew = wb.Worksheets("2.기별명세서(신설)"): On Error GoTo 0
+    If wsNew Is Nothing Then
+        wb.Close SaveChanges:=False
+        Application.ScreenUpdating = True
+        MsgBox "양식에 「2.기별명세서(신설)」 시트가 없습니다.", vbExclamation, "양식 채우기": Exit Sub
+    End If
+
+    ' 원본 양식의 블록 서식 보존 (owner 2026-06-16): 데이터행을 원래 양식처럼.
+    '   샘플 블록(10~13: 시작/경간/종료/소계)·합계행(22)을 스크래치(行 밖)로 복사해 서식 템플릿 확보 →
+    '   각 구간마다 템플릿 블록을 복사(테두리·글꼴·행높이 따라옴) 후 값만 기록. 헤더(1~8) 불변.
+    Const TPL_BLOCK As Long = 900
+    Const TPL_TOTAL As Long = 905
+    wsNew.Rows("10:13").Copy Destination:=wsNew.Rows(TPL_BLOCK)
+    wsNew.Rows("22:22").Copy Destination:=wsNew.Rows(TPL_TOTAL)
+    wsNew.Range(wsNew.Cells(10, 1), wsNew.Cells(880, 275)).ClearContents
+
+    Dim dedup As Object: Set dedup = CreateObject("Scripting.Dictionary")
+    Dim subRows As Collection: Set subRows = New Collection
+    Dim rw As Long: rw = 10
+    Dim filled As Long, skippedRem As Long
+    Dim si As Long
+    For si = 1 To mSegList.Count
+        Dim rec As Variant: rec = mSegList(si)
+        Dim sFac As String: sFac = CStr(rec(0))
+        Dim cbl As String: cbl = CStr(rec(1))
+        Dim eFac As String: eFac = CStr(rec(2))
+        Dim cgub As String: cgub = ""
+        If Len(cbl) > 0 Then
+            If mCblGubun.Exists(cbl) Then cgub = CStr(mCblGubun(cbl))
+        End If
+        If InStr(cgub, "철거") > 0 Then
+            skippedRem = skippedRem + 1
+            GoTo NextSeg
+        End If
+        Dim r0 As Long: r0 = rw
+        ' 템플릿 블록 서식 복사 후 데이터 3행 내용만 비움 (서식 유지)
+        wsNew.Rows(TPL_BLOCK & ":" & (TPL_BLOCK + 3)).Copy Destination:=wsNew.Rows(r0)
+        wsNew.Range(wsNew.Cells(r0, 1), wsNew.Cells(r0 + 2, 275)).ClearContents
+        기별_양식_시설쓰기 wsNew, r0, sFac, dedup
+        If Len(cbl) > 0 Then
+            기별_양식_경간쓰기 wsNew, r0 + 1, cbl
+            기별_양식_시설쓰기 wsNew, r0 + 2, eFac, dedup
+            wsNew.Range("A" & (r0 + 3)).Value = "소  계"
+            기별_양식_소계 wsNew, r0 + 3, r0, r0 + 2
+            subRows.Add (r0 + 3)
+            rw = r0 + 4
+        Else
+            wsNew.Range("A" & (r0 + 1)).Value = "소  계"
+            기별_양식_소계 wsNew, r0 + 1, r0, r0
+            subRows.Add (r0 + 1)
+            rw = r0 + 2
+        End If
+        filled = filled + 1
+NextSeg:
+    Next si
+
+    ' 합계 — 템플릿 합계행 서식 복사 후 값/수식.
+    '   A열 = "합 계" (공백 1개) — 종합기별명세서 G열 INDEX/MATCH("합 계") 가 이 행을 찾아 연동. (owner 2026-06-16)
+    wsNew.Rows(TPL_TOTAL & ":" & TPL_TOTAL).Copy Destination:=wsNew.Rows(rw)
+    wsNew.Range(wsNew.Cells(rw, 1), wsNew.Cells(rw, 275)).ClearContents
+    wsNew.Range("A" & rw).Value = "합 계"
+    기별_양식_합계 wsNew, rw, subRows
+
+    ' 스크래치(서식 템플릿) 행 제거 — 데이터 영역(rw) 아래라 위 데이터 영향 없음
+    Application.CutCopyMode = False
+    wsNew.Rows(TPL_BLOCK & ":" & (TPL_TOTAL + 1)).Delete
+
+    ' 5) 복사본 SaveAs (원본 불변)
+    Dim outPath As String
+    outPath = ThisWorkbook.Path & "\기별명세서_채움_" & Format(Now, "yyyymmdd_hhnn") & ".xlsx"
+    Application.DisplayAlerts = False
+    On Error Resume Next
+    wb.SaveAs outPath, FileFormat:=51
+    wb.Close SaveChanges:=False
+    On Error GoTo 0
+    Application.DisplayAlerts = True
+    Application.ScreenUpdating = True
+
+    MsgBox "양식 채우기 완료 (신설시트)" & vbLf & vbLf & _
+           "채운 구간 " & filled & " 개" & IIf(skippedRem > 0, " · 철거 케이블 " & skippedRem & " 건 건너뜀(철거시트 후속)", "") & vbLf & _
+           "저장: " & outPath, vbInformation, "양식 채우기"
+End Sub
+
+' 시설물 행 — A·JL·JM 항상, 공종·자재는 첫 등장(dedup) 1회.
+Private Sub 기별_양식_시설쓰기(ws As Worksheet, rowNum As Long, facId As String, dedup As Object)
+    Dim nm As String: nm = "": If mFacName.Exists(facId) Then nm = CStr(mFacName(facId))
+    Dim bg As String: bg = "": If mFacBadge.Exists(facId) Then bg = CStr(mFacBadge(facId))
+    Dim no As String: no = "": If mFacNo.Exists(facId) Then no = CStr(mFacNo(facId))
+    Dim kd As String: kd = "": If mFacKind.Exists(facId) Then kd = CStr(mFacKind(facId))
+    ws.Range("A" & rowNum).Value = nm
+    If Len(bg) > 0 Then ws.Range("JL" & rowNum).Value = bg
+    ws.Range("JM" & rowNum).Value = 기별_비고(no, kd)
+    If dedup.Exists(facId) Then Exit Sub
+    dedup(facId) = True
+
+    ' 자재 (신설 접속함체/RN → +1)
+    Dim mCol As String, mNote As String: mCol = "": mNote = ""
+    If kd = "접속함체" Then
+        Dim lg As String: lg = "": If mFacLegend.Exists(facId) Then lg = CStr(mFacLegend(facId))
+        Dim gk As String: gk = "": If mFacGyuk.Exists(facId) Then gk = CStr(mFacGyuk(facId))
+        기별_함체열 lg, gk, no, mCol, mNote
+    ElseIf kd = "RN" Then
+        Dim gk2 As String: gk2 = "": If mFacGyuk.Exists(facId) Then gk2 = CStr(mFacGyuk(facId))
+        기별_RN열 gk2, no, mCol, mNote
+    End If
+    If Len(mCol) > 0 Then ws.Range(mCol & rowNum).Value = 1
+
+    ' 공종 — 종류별. RN은 광탭+레벨을 코어수 무관 1 (owner 2026-06-16: RN이면 포함).
+    Dim total As Long: total = 0: If mFacCore.Exists(facId) Then total = CLng(mFacCore(facId))
+    Dim nightN As Long: nightN = 0: If mFacNight.Exists(facId) Then nightN = 기별_숫자(CStr(mFacNight(facId)))
+    Dim dayN As Long
+    Dim dv As String: dv = "": If mFacDay.Exists(facId) Then dv = CStr(mFacDay(facId))
+    If Len(dv) > 0 And IsNumeric(dv) Then dayN = CLng(dv) Else dayN = total - nightN
+    If dayN < 0 Then dayN = 0
+    If kd = "RN" Then
+        ' FTTH 광탭작업 + 레벨측정 = RN 1건당 (코어수 0 이어도 기입)
+        If nightN > 0 Then ws.Range("IB" & rowNum).Value = 1 Else ws.Range("IA" & rowNum).Value = 1
+        ws.Range("IJ" & rowNum).Value = 1
+        If dayN > 0 Then ws.Range("ID" & rowNum).Value = dayN
+        If nightN > 0 Then ws.Range("IE" & rowNum).Value = nightN
+    ElseIf kd = "접속함체" Then
+        If total > 0 Then
+            If nightN > 0 Then ws.Range("HX" & rowNum).Value = 1 Else ws.Range("HW" & rowNum).Value = 1
+            If dayN > 0 Then ws.Range("ID" & rowNum).Value = dayN
+            If nightN > 0 Then ws.Range("IE" & rowNum).Value = nightN
+        End If
+    Else
+        If total > 0 Then ws.Range("IF" & rowNum).Value = total
+    End If
+End Sub
+
+' 경간거리 행 — A="경간거리", G=거리, 신설이면 포설 GQ + 케이블 자재열.
+Private Sub 기별_양식_경간쓰기(ws As Worksheet, rowNum As Long, cblId As String)
+    ws.Range("A" & rowNum).Value = "경간거리"
+    Dim sp As String: sp = "": If mCblSpec.Exists(cblId) Then sp = CStr(mCblSpec(cblId))
+    Dim gb As String: gb = "": If mCblGubun.Exists(cblId) Then gb = CStr(mCblGubun(cblId))
+    Dim ds As String: ds = "": If mCblDist.Exists(cblId) Then ds = CStr(mCblDist(cblId))
+    Dim distN As Double: distN = 0: If Len(ds) > 0 And IsNumeric(ds) Then distN = CDbl(ds)
+    Dim status As String: status = 기별_신설기설(gb)
+    If distN > 0 Then ws.Range("G" & rowNum).Value = distN
+    ' 기설·철거 아닌 케이블(=신설/미상)은 포설(GQ) + 케이블 자재열. 기설은 거리만(§7-9), 철거는 철거시트.
+    If InStr(status, "기설") = 0 And InStr(status, "철거") = 0 Then
+        If distN > 0 Then ws.Range("GQ" & rowNum).Value = distN
+        Dim mCol As String, mNote As String: mCol = "": mNote = ""
+        기별_케이블열 sp, gb, status, mCol, mNote
+        If Len(mCol) > 0 And distN > 0 Then ws.Range(mCol & rowNum).Value = distN
+    End If
+End Sub
+
+' 소계 행 — 합산열별 =SUM(블록 3행).
+Private Sub 기별_양식_소계(ws As Worksheet, subRow As Long, r1 As Long, r2 As Long)
+    Dim cols As Variant: cols = 기별_양식_합산열()
+    Dim k As Long
+    For k = LBound(cols) To UBound(cols)
+        Dim cl As String: cl = CStr(cols(k))
+        ws.Range(cl & subRow).Formula = "=SUM(" & cl & r1 & ":" & cl & r2 & ")"
+    Next k
+End Sub
+
+' 합계 행 — 합산열별 소계행들의 합.
+Private Sub 기별_양식_합계(ws As Worksheet, totRow As Long, subRows As Collection)
+    If subRows.Count = 0 Then Exit Sub
+    Dim cols As Variant: cols = 기별_양식_합산열()
+    Dim k As Long
+    For k = LBound(cols) To UBound(cols)
+        Dim cl As String: cl = CStr(cols(k))
+        Dim f As String: f = ""
+        Dim z As Long
+        For z = 1 To subRows.Count
+            If Len(f) > 0 Then f = f & "+"
+            f = f & cl & subRows(z)
+        Next z
+        ws.Range(cl & totRow).Formula = "=" & f
+    Next k
+End Sub
+
+' 소계·합계 대상 열 (메타 G·H + 케이블 I~AA + 함체 AB~AI + 공종).
+Private Function 기별_양식_합산열() As Variant
+    기별_양식_합산열 = Array("G", "H", "I", "J", "K", "L", "M", "N", "O", "P", "Q", "R", "S", "T", "U", "V", "W", "X", "Y", "Z", "AA", "AB", "AC", "AD", "AE", "AF", "AG", "AH", "AI", "GQ", "HW", "HX", "IA", "IB", "ID", "IE", "IF", "IJ")
 End Function
