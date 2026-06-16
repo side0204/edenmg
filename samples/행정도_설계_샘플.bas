@@ -32760,69 +32760,75 @@ Public Sub 기별_양식_채우기()
         MsgBox "양식에 「2.기별명세서(신설)」 시트가 없습니다.", vbExclamation, "양식 채우기": Exit Sub
     End If
 
-    ' 원본 양식의 블록 서식 보존 (owner 2026-06-16): 데이터행을 원래 양식처럼.
-    '   샘플 블록(10~13: 시작/경간/종료/소계)·합계행(22)을 스크래치(行 밖)로 복사해 서식 템플릿 확보 →
-    '   각 구간마다 템플릿 블록을 복사(테두리·글꼴·행높이 따라옴) 후 값만 기록. 헤더(1~8) 불변.
-    Const TPL_BLOCK As Long = 900
-    Const TPL_TOTAL As Long = 905
-    wsNew.Rows("10:13").Copy Destination:=wsNew.Rows(TPL_BLOCK)
-    wsNew.Rows("22:22").Copy Destination:=wsNew.Rows(TPL_TOTAL)
-    wsNew.Range(wsNew.Cells(10, 1), wsNew.Cells(880, 275)).ClearContents
-
-    Dim dedup As Object: Set dedup = CreateObject("Scripting.Dictionary")
-    Set mUsedCols = CreateObject("Scripting.Dictionary")
-    Dim subRows As Collection: Set subRows = New Collection
-    Dim rw As Long: rw = 10
-    Dim filled As Long, skippedRem As Long
+    ' === 데이터 영역 채우기 (owner 2026-06-16: 원본 양식 서식·행높이 그대로) ===
+    ' 비-철거 + 케이블 있는 구간만 4행 블록(시작/경간/종료/소계). 단독노드·철거 제외.
+    Dim segs As Collection: Set segs = New Collection
+    Dim skippedRem As Long, skippedSolo As Long
     Dim si As Long
     For si = 1 To mSegList.Count
         Dim rec As Variant: rec = mSegList(si)
+        Dim cblChk As String: cblChk = CStr(rec(1))
+        If Len(cblChk) = 0 Then
+            skippedSolo = skippedSolo + 1
+        Else
+            Dim cgub As String: cgub = ""
+            If mCblGubun.Exists(cblChk) Then cgub = CStr(mCblGubun(cblChk))
+            If InStr(cgub, "철거") > 0 Then
+                skippedRem = skippedRem + 1
+            Else
+                segs.Add rec
+            End If
+        End If
+    Next si
+    Dim nBlk As Long: nBlk = segs.Count
+
+    ' 원본 템플릿 행높이 캡처 (clear 전): 함체10·경간11·소계13·합계22
+    Dim hFac As Double: hFac = wsNew.Rows(10).RowHeight
+    Dim hSpan As Double: hSpan = wsNew.Rows(11).RowHeight
+    Dim hSub As Double: hSub = wsNew.Rows(13).RowHeight
+    Dim hTot As Double: hTot = wsNew.Rows(22).RowHeight
+    Dim totRow As Long: totRow = 10 + 4 * nBlk
+
+    ' (1) 서식 적용 — 원본 템플릿행에서 PasteSpecial(서식만)+행높이. 합계 먼저(원본 22 가 블록에 덮이기 전).
+    '     서식만 복사 → 샘플 수동수식(아연도강연선 =G 등) 안 따라옴 → 장주 없이 조가선 계산되던 문제 동시 해결.
+    Dim bi As Long, br As Long
+    If nBlk > 0 Then 기별_행서식 wsNew, 22, totRow, hTot
+    For bi = 1 To nBlk
+        br = 10 + 4 * (bi - 1)
+        기별_행서식 wsNew, 10, br, hFac
+        기별_행서식 wsNew, 11, br + 1, hSpan
+        기별_행서식 wsNew, 12, br + 2, hFac
+        기별_행서식 wsNew, 13, br + 3, hSub
+    Next bi
+
+    ' (2) 데이터 영역 내용 비우기 (서식 유지)
+    wsNew.Range(wsNew.Cells(10, 1), wsNew.Cells(880, 275)).ClearContents
+
+    ' (3) 값 기입
+    Dim dedup As Object: Set dedup = CreateObject("Scripting.Dictionary")
+    Set mUsedCols = CreateObject("Scripting.Dictionary")
+    Dim subRows As Collection: Set subRows = New Collection
+    For bi = 1 To nBlk
+        rec = segs(bi)
         Dim sFac As String: sFac = CStr(rec(0))
         Dim cbl As String: cbl = CStr(rec(1))
         Dim eFac As String: eFac = CStr(rec(2))
-        Dim cgub As String: cgub = ""
-        If Len(cbl) > 0 Then
-            If mCblGubun.Exists(cbl) Then cgub = CStr(mCblGubun(cbl))
-        End If
-        If InStr(cgub, "철거") > 0 Then
-            skippedRem = skippedRem + 1
-            GoTo NextSeg
-        End If
-        Dim r0 As Long: r0 = rw
-        ' 행별 서식+행높이만 복사 (owner 2026-06-16: 소계/합계 글자·색·굵기·채움·행높이 반영).
-        '   ※ 서식만 복사 → 샘플 수동수식(아연도강연선 =G 등) 안 따라옴 → 장주 없이 조가선 계산되던 문제 동시 해결.
-        기별_행서식복사 wsNew, TPL_BLOCK, r0                ' 시작함체 ← 함체행
-        기별_양식_시설쓰기 wsNew, r0, sFac, dedup
-        If Len(cbl) > 0 Then
-            기별_행서식복사 wsNew, TPL_BLOCK + 1, r0 + 1    ' 경간 ← 경간행
-            기별_행서식복사 wsNew, TPL_BLOCK + 2, r0 + 2    ' 종료함체 ← 함체행
-            기별_행서식복사 wsNew, TPL_BLOCK + 3, r0 + 3    ' 소계 ← 소계행(높이 20.1·채움)
-            기별_양식_경간쓰기 wsNew, r0 + 1, cbl
-            기별_양식_시설쓰기 wsNew, r0 + 2, eFac, dedup
-            wsNew.Range("A" & (r0 + 3)).Value = "소  계"
-            기별_양식_소계 wsNew, r0 + 3, r0, r0 + 2
-            subRows.Add (r0 + 3)
-            rw = r0 + 4
-        Else
-            기별_행서식복사 wsNew, TPL_BLOCK + 3, r0 + 1    ' 소계 ← 소계행
-            wsNew.Range("A" & (r0 + 1)).Value = "소  계"
-            기별_양식_소계 wsNew, r0 + 1, r0, r0
-            subRows.Add (r0 + 1)
-            rw = r0 + 2
-        End If
-        filled = filled + 1
-NextSeg:
-    Next si
+        br = 10 + 4 * (bi - 1)
+        기별_양식_시설쓰기 wsNew, br, sFac, dedup
+        기별_양식_경간쓰기 wsNew, br + 1, cbl
+        기별_양식_시설쓰기 wsNew, br + 2, eFac, dedup
+        wsNew.Range("A" & (br + 3)).Value = "소  계"
+        기별_양식_소계 wsNew, br + 3, br, br + 2
+        subRows.Add (br + 3)
+    Next bi
+    Dim filled As Long: filled = nBlk
+    Dim rw As Long: rw = totRow
 
-    ' 합계 — 합계행 서식+행높이 복사 후 값/수식.
-    '   A열 = "합 계" (공백 1개) — 종합기별명세서 G열 INDEX/MATCH("합 계") 가 이 행을 찾아 연동. (owner 2026-06-16)
-    기별_행서식복사 wsNew, TPL_TOTAL, rw
-    wsNew.Range("A" & rw).Value = "합 계"
-    기별_양식_합계 wsNew, rw, subRows
-
-    ' 스크래치(서식 템플릿) 행 제거 — 데이터 영역(rw) 아래라 위 데이터 영향 없음
-    Application.CutCopyMode = False
-    wsNew.Rows(TPL_BLOCK & ":" & (TPL_TOTAL + 1)).Delete
+    ' 합계 — A="합 계"(공백1) → 종합 G열 INDEX/MATCH("합 계") 연동.
+    If nBlk > 0 Then
+        wsNew.Range("A" & rw).Value = "합 계"
+        기별_양식_합계 wsNew, rw, subRows
+    End If
 
     ' 값 들어간 열 숨김 해제 (owner 2026-06-16: 값 셀이 숨겨지지 않게). 메타열(A~H·JL·JM) 항상 표시.
     Dim alwaysVis As Variant
@@ -32835,6 +32841,18 @@ NextSeg:
     For Each uc In mUsedCols.Keys
         On Error Resume Next: wsNew.Columns(CStr(uc)).Hidden = False: On Error GoTo 0
     Next uc
+
+    ' 종합 재계산 + 선택값(K=1) 필터 재적용 (owner 2026-06-16: 값 채워도 K=1 행 자동 표시)
+    '   종합 G열이 신설 합계행 INDEX/MATCH 로 연동 → 강제 재계산 → K=IF(0<G,1) 갱신 → 필터 재적용.
+    Application.CalculateFull
+    Dim wsSum As Worksheet: Set wsSum = Nothing
+    On Error Resume Next: Set wsSum = wb.Worksheets("1.종합기별명세서"): On Error GoTo 0
+    If Not wsSum Is Nothing Then
+        On Error Resume Next
+        If wsSum.FilterMode Then wsSum.ShowAllData
+        wsSum.Range("K4:M406").AutoFilter Field:=1, Criteria1:="1"
+        On Error GoTo 0
+    End If
 
     ' 5) 복사본 SaveAs (원본 불변)
     Dim outPath As String
@@ -32907,14 +32925,16 @@ Private Sub 기별_셀W(ws As Worksheet, ByVal col As String, ByVal rowNum As Lo
     If Not mUsedCols Is Nothing Then mUsedCols(col) = True
 End Sub
 
-' 한 행의 서식(글자·색·굵기·채움·테두리)만 복사 + 행높이 복사 (내용·수식은 안 따라옴).
-'   owner 2026-06-16: 소계/합계 행높이까지 원본 그대로. 샘플 수동수식 전파 방지.
-Private Sub 기별_행서식복사(ws As Worksheet, ByVal srcRow As Long, ByVal dstRow As Long)
+' 원본 템플릿행 → 대상행 서식(글자·색·굵기·채움·테두리)만 복사 + 행높이(h) 설정. 내용·수식 안 따라옴.
+'   owner 2026-06-16: 소계/합계 글자·색·굵기·채움·행높이 원본 그대로. 샘플 수동수식 전파 방지.
+Private Sub 기별_행서식(ws As Worksheet, ByVal srcRow As Long, ByVal dstRow As Long, ByVal h As Double)
     On Error Resume Next
-    ws.Rows(srcRow).Copy
-    ws.Rows(dstRow).PasteSpecial Paste:=xlPasteFormats
-    Application.CutCopyMode = False
-    ws.Rows(dstRow).RowHeight = ws.Rows(srcRow).RowHeight
+    If srcRow <> dstRow Then
+        ws.Rows(srcRow).Copy
+        ws.Rows(dstRow).PasteSpecial Paste:=xlPasteFormats
+        Application.CutCopyMode = False
+    End If
+    If h > 0 Then ws.Rows(dstRow).RowHeight = h
     On Error GoTo 0
 End Sub
 
