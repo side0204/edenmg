@@ -481,18 +481,18 @@ Public Sub 기별_체인_직렬화_미리보기()
     ' === 공종 집계 (양식에 들어갈 최종 수량 — owner §7-3) ===
     mOutR = mOutR + 1
     mWsOut.Cells(mOutR, 1).Value = "[공종 집계 — 양식 입력 수량]": mOutR = mOutR + 1
-    기별_집계행 "함체작업 주간 (HW)", mSumHW, "개소"
-    기별_집계행 "함체작업 야간 (HX)", mSumHX, "개소"
-    기별_집계행 "FTTH 광탭작업 주간 (IA)", mSumIA, "개소"
-    기별_집계행 "FTTH 광탭작업 야간 (IB)", mSumIB, "개소"
+    기별_집계행 "함체작업 주간 (IR/추가51)", mSumHW, "개소"
+    기별_집계행 "함체작업 야간 (IS/추가52)", mSumHX, "개소"
+    기별_집계행 "FTTH 광탭작업 주간 (IV/추가55)", mSumIA, "개소"
+    기별_집계행 "FTTH 광탭작업 야간 (IW/추가56)", mSumIB, "개소"
     기별_집계행 "FTTH 레벨측정시험 (IJ)", mSumIJ, "개소"
     기별_집계행 "코어접속 주간 (ID)", mSumIDc, "코어"
     기별_집계행 "코어접속 야간 (IE)", mSumIEc, "코어"
     기별_집계행 "코어접속 성단 (IF)", mSumIFc, "코어"
-    기별_집계행 "광케이블 포설 주간 (GQ)", mSumGQ, "m"
+    기별_집계행 "광케이블 포설 (JF/추가65)", mSumGQ, "m"
     mOutR = mOutR + 1
     mWsOut.Cells(mOutR, 1).Value = "※ 주야 판정: 야간코어>0 이면 함체작업/광탭=야간, 아니면 주간 (owner 확인 필요)": mOutR = mOutR + 1
-    mWsOut.Cells(mOutR, 1).Value = "※ 포설: 신설 케이블 거리만 GQ(주간). 철거·기설은 별도/미반영. 야간포설(GS)·이설(GT)은 설계 입력 추가 시 분기": mOutR = mOutR + 1
+    mWsOut.Cells(mOutR, 1).Value = "※ 포설: 신설/미상 케이블 거리 → JF(추가65). 기설은 미반영·철거는 별도시트. 공종 중복 시 추가열 우선(포설 JF·함체작업 IR/IS·광탭 IV/IW)": mOutR = mOutR + 1
 
     ' === 자재 집계 (신설시트 자재열 → 수량 — Phase 3c) ===
     mOutR = mOutR + 1
@@ -522,7 +522,7 @@ Public Sub 기별_체인_직렬화_미리보기()
            "체인 " & compCount & " 개" & vbLf & _
            "함체작업 주/야 " & mSumHW & " / " & mSumHX & " · 광탭 주/야 " & mSumIA & " / " & mSumIB & " · 레벨측정 " & mSumIJ & vbLf & _
            "코어접속 주/야/성단 " & mSumIDc & " / " & mSumIEc & " / " & mSumIFc & vbLf & _
-           "포설(주간) " & mSumGQ & " m" & vbLf & vbLf & _
+           "포설 " & mSumGQ & " m" & vbLf & vbLf & _
            "행 순서·공종 수량을 확인하세요.", vbInformation, "기별 산출"
 End Sub
 
@@ -790,11 +790,11 @@ Private Sub 기별_방출_함체(node As String, segNo As Long, role As String)
         If Len(dv) > 0 And IsNumeric(dv) Then dayN = CLng(dv) Else dayN = total - nightN
         If dayN < 0 Then dayN = 0
         If kd = "RN" Then
-            ' FTTH 광탭작업 + 레벨측정 = RN 1건당 (코어수 무관 — owner 2026-06-16). 코어접속은 코어 있을 때.
+            ' FTTH 광탭작업(IV/IW 추가) + 레벨측정(IJ) = RN 1건당 (코어수 무관). 코어접속은 코어 있을 때.
             If nightN > 0 Then
-                workTxt = "광탭 IB(야간)=1": mSumIB = mSumIB + 1
+                workTxt = "광탭 IW(야간)=1": mSumIB = mSumIB + 1
             Else
-                workTxt = "광탭 IA(주간)=1": mSumIA = mSumIA + 1
+                workTxt = "광탭 IV(주간)=1": mSumIA = mSumIA + 1
             End If
             workTxt = workTxt & " · 레벨측정 IJ=1": mSumIJ = mSumIJ + 1
             If total > 0 Then
@@ -803,11 +803,11 @@ Private Sub 기별_방출_함체(node As String, segNo As Long, role As String)
             End If
         ElseIf kd = "접속함체" Then
             If total > 0 Then
-                ' 함체작업 = 1 (주간 HW / 야간 HX, 하나만), 코어접속 주간 ID / 야간 IE
+                ' 함체작업 = 1 (IR주 / IS야 추가, 하나만), 코어접속 주간 ID / 야간 IE
                 If nightN > 0 Then
-                    workTxt = "함체작업 HX(야간)=1": mSumHX = mSumHX + 1
+                    workTxt = "함체작업 IS(야간)=1": mSumHX = mSumHX + 1
                 Else
-                    workTxt = "함체작업 HW(주간)=1": mSumHW = mSumHW + 1
+                    workTxt = "함체작업 IR(주간)=1": mSumHW = mSumHW + 1
                 End If
                 coreTxt = "ID(주)=" & dayN & " / IE(야)=" & nightN
                 mSumIDc = mSumIDc + dayN: mSumIEc = mSumIEc + nightN
@@ -878,8 +878,8 @@ Private Sub 기별_방출_경간(cblId As String, segNo As Long)
     ElseIf InStr(gb, "기설") > 0 Then
         layTxt = "기설(미반영)"
     Else
-        ' 신설 또는 미상 → 포설(주간)
-        layTxt = "GQ(주간)=" & ds
+        ' 신설 또는 미상 → 포설 (JF/추가65)
+        layTxt = "JF(포설)=" & ds
         mSumGQ = mSumGQ + distN
     End If
     ' 자재열 (Phase 3c) — 신설 케이블만 신설시트 규격열에 거리 누적.
@@ -1348,14 +1348,15 @@ Private Sub 기별_양식_시설쓰기(ws As Worksheet, rowNum As Long, facId As
     If Len(dv) > 0 And IsNumeric(dv) Then dayN = CLng(dv) Else dayN = total - nightN
     If dayN < 0 Then dayN = 0
     If kd = "RN" Then
-        ' FTTH 광탭작업 + 레벨측정 = RN 1건당 (코어수 0 이어도 기입)
-        If nightN > 0 Then 기별_셀W ws, "IB", rowNum, 1 Else 기별_셀W ws, "IA", rowNum, 1
+        ' FTTH 광탭작업(IV주/IW야 추가55·56) + 레벨측정(IJ) = RN 1건당 (코어수 0 이어도 기입)
+        If nightN > 0 Then 기별_셀W ws, "IW", rowNum, 1 Else 기별_셀W ws, "IV", rowNum, 1
         기별_셀W ws, "IJ", rowNum, 1
         If dayN > 0 Then 기별_셀W ws, "ID", rowNum, dayN
         If nightN > 0 Then 기별_셀W ws, "IE", rowNum, nightN
     ElseIf kd = "접속함체" Then
         If total > 0 Then
-            If nightN > 0 Then 기별_셀W ws, "HX", rowNum, 1 Else 기별_셀W ws, "HW", rowNum, 1
+            ' 함체작업 IR주/IS야 (추가51·52). 추가열 우선 (owner 2026-06-16)
+            If nightN > 0 Then 기별_셀W ws, "IS", rowNum, 1 Else 기별_셀W ws, "IR", rowNum, 1
             If dayN > 0 Then 기별_셀W ws, "ID", rowNum, dayN
             If nightN > 0 Then 기별_셀W ws, "IE", rowNum, nightN
         End If
@@ -1379,9 +1380,10 @@ Private Sub 기별_양식_경간쓰기(ws As Worksheet, rowNum As Long, cblId As
     Dim distN As Double: distN = 0: If Len(ds) > 0 And IsNumeric(ds) Then distN = CDbl(ds)
     Dim status As String: status = 기별_신설기설(gb)
     If distN > 0 Then 기별_셀W ws, "G", rowNum, distN
-    ' 기설·철거 아닌 케이블(=신설/미상)은 포설(GQ) + 케이블 자재열. 기설은 거리만(§7-9), 철거는 철거시트.
+    ' 기설·철거 아닌 케이블(=신설/미상)은 포설 + 케이블 자재열. 기설은 거리만(§7-9), 철거는 철거시트.
+    '   포설 공종 = JF(추가65, 광케이블 포설, 2024090007). 구버전 GQ(주간) 대신 추가열 우선 (owner 2026-06-16).
     If InStr(status, "기설") = 0 And InStr(status, "철거") = 0 Then
-        If distN > 0 Then 기별_셀W ws, "GQ", rowNum, distN
+        If distN > 0 Then 기별_셀W ws, "JF", rowNum, distN
         Dim mCol As String, mNote As String: mCol = "": mNote = ""
         기별_케이블열 sp, gb, status, mCol, mNote
         If Len(mCol) > 0 And distN > 0 Then 기별_셀W ws, mCol, rowNum, distN
@@ -1417,5 +1419,5 @@ End Sub
 
 ' 소계·합계 대상 열 (메타 G·H + 케이블 I~AA + 함체 AB~AI + 공종).
 Private Function 기별_양식_합산열() As Variant
-    기별_양식_합산열 = Array("G", "H", "I", "J", "K", "L", "M", "N", "O", "P", "Q", "R", "S", "T", "U", "V", "W", "X", "Y", "Z", "AA", "AB", "AC", "AD", "AE", "AF", "AG", "AH", "AI", "GQ", "HW", "HX", "IA", "IB", "ID", "IE", "IF", "IJ")
+    기별_양식_합산열 = Array("G", "H", "I", "J", "K", "L", "M", "N", "O", "P", "Q", "R", "S", "T", "U", "V", "W", "X", "Y", "Z", "AA", "AB", "AC", "AD", "AE", "AF", "AG", "AH", "AI", "JF", "IR", "IS", "IV", "IW", "ID", "IE", "IF", "IJ")
 End Function
