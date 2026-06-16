@@ -1447,9 +1447,9 @@ Private Sub 기별_양식_시설쓰기(ws As Worksheet, rowNum As Long, facId As
     Else
         If total > 0 Then 기별_셀W ws, "IF", rowNum, total
     End If
-    ' 기설 접속함체 + 코어접속 → 컬러 열수축슬리브(FL) = 접속코어수 (owner 2026-06-16).
-    '   ※ 분기키트(FW)는 시설물 단위가 아니라 신설 케이블 경간(포설 구간)에 기록 — 기별_양식_경간쓰기.
-    If kd = "접속함체" And InStr(no, "기설") > 0 And total > 0 Then
+    ' 기설 접속함체/RN + 코어접속 → 컬러 열수축슬리브(FL) = 접속코어수 (owner 2026-06-16, RN 포함).
+    '   ※ 분기키트(FW)는 신설 케이블 구간의 기설 함체/RN 행에 기록 — 양식 채우기 루프.
+    If (kd = "접속함체" Or kd = "RN") And InStr(no, "기설") > 0 And total > 0 Then
         기별_셀W ws, "FL", rowNum, total
     End If
 End Sub
