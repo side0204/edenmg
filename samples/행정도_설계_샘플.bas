@@ -32906,13 +32906,15 @@ Public Sub 기별_양식_채우기()
     Application.DisplayAlerts = False
     On Error Resume Next
     wb.SaveAs outPath, FileFormat:=51
-    wb.Close SaveChanges:=False
     On Error GoTo 0
     Application.DisplayAlerts = True
     Application.ScreenUpdating = True
+    ' 닫지 않고 열어둠 — 저장본 다시 열 필요 없이 바로 서식 확인 (진단 목적)
+    On Error Resume Next: wsNew.Activate: On Error GoTo 0
 
-    MsgBox "양식 채우기 완료 (신설시트)" & vbLf & vbLf & _
-           "채운 구간 " & filled & " 개" & IIf(skippedRem > 0, " · 철거 케이블 " & skippedRem & " 건 건너뜀(철거시트 후속)", "") & vbLf & _
+    MsgBox "양식 채우기 완료 (신설시트 — 열어둠, 바로 확인)" & vbLf & vbLf & _
+           "채운 구간 " & filled & " 개" & IIf(skippedRem > 0, " · 철거 " & skippedRem & " 건 건너뜀", "") & vbLf & _
+           "[진단] 소계색=" & soFill & " · 합계색=" & totFill & " · 소계행수=" & subRows.Count & " · 합계행=" & rw & vbLf & _
            "저장: " & outPath, vbInformation, "양식 채우기"
 End Sub
 
@@ -32986,6 +32988,8 @@ End Sub
 Private Sub 기별_행채움(ws As Worksheet, ByVal rowNum As Long, ByVal fillColor As Long, ByVal bold As Boolean, ByVal sz As Double, ByVal h As Double)
     On Error Resume Next
     With ws.Range("A" & rowNum & ":JM" & rowNum)
+        .Interior.Pattern = xlSolid
+        .Interior.PatternColorIndex = xlAutomatic
         .Interior.Color = fillColor
         .Font.Bold = bold
         If sz > 0 Then .Font.Size = sz
