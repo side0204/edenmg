@@ -32816,6 +32816,13 @@ Public Sub 기별_양식_채우기()
     Dim hSpan As Double: hSpan = wsNew.Rows(11).RowHeight
     Dim hSub As Double: hSub = wsNew.Rows(13).RowHeight
     Dim hTot As Double: hTot = wsNew.Rows(22).RowHeight
+    ' 소계(13)·합계(22) 행 채움·굵기·폰트 런타임 캡처 (행복사가 안 먹는 환경 대비 — 직접 적용)
+    Dim soFill As Long: soFill = wsNew.Range("A13").Interior.Color
+    Dim soBold As Boolean: soBold = wsNew.Range("A13").Font.Bold
+    Dim soSize As Double: soSize = wsNew.Range("A13").Font.Size
+    Dim totFill As Long: totFill = wsNew.Range("A22").Interior.Color
+    Dim totBold As Boolean: totBold = wsNew.Range("A22").Font.Bold
+    Dim totSize As Double: totSize = wsNew.Range("A22").Font.Size
     Dim totRow As Long: totRow = 10 + 4 * nBlk
 
     ' (1) 서식 적용 — 원본 템플릿행에서 PasteSpecial(서식만)+행높이. 합계 먼저(원본 22 가 블록에 덮이기 전).
@@ -32848,6 +32855,7 @@ Public Sub 기별_양식_채우기()
         기별_양식_시설쓰기 wsNew, br + 2, eFac, dedup
         wsNew.Range("A" & (br + 3)).Value = "소  계"
         기별_양식_소계 wsNew, br + 3, br, br + 2
+        기별_행채움 wsNew, br + 3, soFill, soBold, soSize, hSub   ' 소계행 채움·굵기·폰트·높이 직접 적용
         subRows.Add (br + 3)
     Next bi
     Dim filled As Long: filled = nBlk
@@ -32857,6 +32865,7 @@ Public Sub 기별_양식_채우기()
     If nBlk > 0 Then
         wsNew.Range("A" & rw).Value = "합 계"
         기별_양식_합계 wsNew, rw, subRows
+        기별_행채움 wsNew, rw, totFill, totBold, totSize, hTot   ' 합계행 채움·굵기·폰트·높이 직접 적용
     End If
 
     ' 값 들어간 열 숨김 해제 (owner 2026-06-16: 값 셀이 숨겨지지 않게). 메타열(A~H·JL·JM) 항상 표시.
@@ -32962,6 +32971,18 @@ Private Sub 기별_행서식(ws As Worksheet, ByVal srcRow As Long, ByVal dstRow
     If srcRow <> dstRow Then ws.Rows(srcRow).Copy Destination:=ws.Rows(dstRow)
     If h > 0 Then ws.Rows(dstRow).RowHeight = h
     Application.CutCopyMode = False
+    On Error GoTo 0
+End Sub
+
+' 소계/합계 행 채움색·굵기·폰트·행높이 직접 적용 (A:JM 범위). 행복사가 안 먹는 환경 대비.
+Private Sub 기별_행채움(ws As Worksheet, ByVal rowNum As Long, ByVal fillColor As Long, ByVal bold As Boolean, ByVal sz As Double, ByVal h As Double)
+    On Error Resume Next
+    With ws.Range("A" & rowNum & ":JM" & rowNum)
+        .Interior.Color = fillColor
+        .Font.Bold = bold
+        If sz > 0 Then .Font.Size = sz
+    End With
+    If h > 0 Then ws.Rows(rowNum).RowHeight = h
     On Error GoTo 0
 End Sub
 
