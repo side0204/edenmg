@@ -32857,6 +32857,13 @@ Public Sub 기별_양식_채우기()
         기별_양식_시설쓰기 wsNew, br, sFac, dedup
         기별_양식_경간쓰기 wsNew, br + 1, cbl
         기별_양식_시설쓰기 wsNew, br + 2, eFac, dedup
+        ' 신설 케이블 구간: 양끝 기설 접속함체/RN 「그 함체 행」에 분기키트 1NT(FW) 1개 (owner 2026-06-16).
+        '   경간 아니라 함체 행. 기설 구간 cable 은 제외. 같은 함체가 여러 신설구간이면 각 행 1씩(조수 합).
+        Dim cgSeg As String: cgSeg = "": If mCblGubun.Exists(cbl) Then cgSeg = CStr(mCblGubun(cbl))
+        If InStr(cgSeg, "기설") = 0 And InStr(cgSeg, "철거") = 0 Then
+            If 기별_기설함체(sFac) Then 기별_셀W wsNew, "FW", br, 1
+            If 기별_기설함체(eFac) Then 기별_셀W wsNew, "FW", br + 2, 1
+        End If
         wsNew.Range("A" & (br + 3)).Value = "소  계"
         기별_양식_소계 wsNew, br + 3, br, br + 2
         기별_행채움 wsNew, br + 3, RGB(255, 204, 153), -1, False, 10, hSub   ' 소계: 살구 FFCC99
@@ -33038,14 +33045,6 @@ Private Sub 기별_양식_경간쓰기(ws As Worksheet, rowNum As Long, cblId As
         Dim mCol As String, mNote As String: mCol = "": mNote = ""
         기별_케이블열 sp, gb, status, mCol, mNote
         If Len(mCol) > 0 And distN > 0 Then 기별_셀W ws, mCol, rowNum, distN
-        ' 신설 케이블이 기설 접속함체/RN 에 물리면 분기키트 1NT(FW) — 끝마다 1 (owner: 신설케이블 조수).
-        '   중복자재 추가 우선 → FW(추가31). 신설 구간(포설 있는 곳)에만 기록 → 기설 구간엔 안 들어감.
-        Dim fId As String: fId = "": If mCblFrom.Exists(cblId) Then fId = CStr(mCblFrom(cblId))
-        Dim tId As String: tId = "": If mCblTo.Exists(cblId) Then tId = CStr(mCblTo(cblId))
-        Dim kitN As Long: kitN = 0
-        If 기별_기설함체(fId) Then kitN = kitN + 1
-        If 기별_기설함체(tId) Then kitN = kitN + 1
-        If kitN > 0 Then 기별_셀W ws, "FW", rowNum, kitN
     End If
 End Sub
 
