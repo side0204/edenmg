@@ -155,6 +155,11 @@ Public Const PREFIX_PT_ROUT As String = "_pt_ROUT_"           ' RN OUT 코어 �
 Public Const PREFIX_PT_LINE As String = "_pt_line_"           ' 매핑 연결선
 Public Const PREFIX_PT_BTN As String = "_pt_btn_"             ' 도구 버튼·헤더·UNIT 라벨
 
+' 라이센스 게이트 (owner 2026-06-16) — 캔버스 기능 진입점이 라이센스_게이트() 로 미인증 차단.
+'   Workbook_Open → 라이센스_부팅 이 1회 검증해 캐시. 시트를 펴도 클릭·그리기·코어연결이 막힘.
+Public g_licenseOK As Boolean
+Public g_licenseChecked As Boolean
+
 ' 코어 연결 도구 state (volatile, module-scope)
 Private g_pt_mappings As Object              ' Dictionary: leftCoreNo -> rightCoreNo (이번 세션 신규)
 Private g_pt_count1 As Long                  ' Cable A 총 코어 수
@@ -3222,6 +3227,7 @@ End Sub
 
 ' Delete 키 핸들러 — 도형 선택 시 삭제(cascade), 셀 선택 시 기본 동작(내용 지우기)
 Public Sub 도형_삭제키()
+    If Not 라이센스_게이트() Then Exit Sub        ' owner 2026-06-16: 미인증 시 차단
     Dim ws As Worksheet: Set ws = ActiveSheet
     If ws Is Nothing Then Exit Sub
     Dim shp As Shape: Set shp = Nothing
@@ -4701,6 +4707,7 @@ Public Sub 케이블_추종_디버그()
 End Sub
 
 Public Sub 시트_셀_클릭(Target As Range)
+    If Not 라이센스_게이트() Then Exit Sub      ' owner 2026-06-16: 미인증 시 캔버스 동작 차단
     ' Reentry guard — 핸들러가 자기 자신을 재진입하지 못하게
     Static busy As Boolean
     If busy Then Exit Sub
@@ -4888,6 +4895,7 @@ Done:
 End Sub
 
 Public Function 시트_우클릭_처리() As Boolean
+    If Not 라이센스_게이트() Then Exit Function   ' owner 2026-06-16: 미인증 시 차단
     If g_mode <> "place_cable" Then Exit Function
     If g_cableWaypoints Is Nothing Then Exit Function
     If g_cableWaypoints.Count = 0 Then Exit Function
@@ -17710,6 +17718,7 @@ NextCand:
                     '   좌·우 박스를 같은 행 Y 로 1:1 정렬 + 케이블-가장가까운 짝을 화살표 끝점으로.
                     '   (박스정렬_silent 는 「활성 케이블쌍」만 정렬해 다른 시설물은 안 됐음 → 전 그룹 도는 여기서 정렬.)
                     Dim gPairA(0 To 64) As Shape, gPairB(0 To 64) As Shape, gPairD(0 To 64) As Double
+                    Dim gPairCasc(0 To 64) As Boolean
                     Dim gPairN As Long: gPairN = 0
                     Dim gAnc() As String: gAnc = Split(CStr(ccGroupAnchors(CStr(gKey))), "`")
                     Dim gJ As Long
@@ -17743,6 +17752,7 @@ NextCand:
                                         gdB = (gpB.Left + gpB.Width / 2 - gFcx) * (gpB.Left + gpB.Width / 2 - gFcx) + (gpby - gFcy) * (gpby - gFcy)
                                         Set gPairA(gPairN) = gpA: Set gPairB(gPairN) = gpB
                                         gPairD(gPairN) = IIf(gdA < gdB, gdA, gdB)
+                                        gPairCasc(gPairN) = (InStr(gaAlt, "|cascade=") > 0)
                                         gPairN = gPairN + 1
                                     End If
                                 End If
@@ -17762,21 +17772,77 @@ NextCand:
                         Next gsJ
                     Next gsI
 
-                    ' 1:1 정렬 — 각 짝의 좌·우 박스만 같은 Y(둘 중 위쪽)로 맞춤. 행 위치·순서·간격은 그대로 →
-                    '   re-stack 안 하므로 셀 클릭마다 드리프트 없음(idempotent). gTopA/gTopB = 시설물 최근접 짝(화살표 끝점).
+                    ' === 캐스케이드 수직 스택 (canon 기준) — owner 2026-06-16 ===
+                    '   박스정렬_silent 은 「활성 케이블쌍」만 스택 정렬 → 활성 페어가 없거나(예: 다른 작업
+                    '   직후) 다른 시설물이면 캐스케이드 박스가 같은 Y 로 포개져 보임(owner 「2번쪽 틀어짐」:
+                    '   '1' 과 '13~24' 가 동일 Y=1284/1285). 여기서 전 그룹을 canon 기준으로 스택 → active 무관 유지.
+                    '   canon(비-cascade 앵커) 위치 고정 + Y순 보존 → idempotent(드리프트 없음). 이전 드리프트는
+                    '   facility-거리 기준 re-stack 이 원인이었고, canon 기준은 안정적. canon 없으면 최상단(min Y).
+                    '   화살표 끝점은 기존대로 facility 최근접(gPairA(0)/gPairB(0)) 유지. 각 이동은 lastPos 동기
+                    '   (다음 셀 클릭의 Cable_Chain_평행이동_처리 가 「사용자 드래그」로 오인 안 하도록).
                     Dim gTopA As Shape: Set gTopA = Nothing
                     Dim gTopB As Shape: Set gTopB = Nothing
                     If gPairN > 0 Then
                         Set gTopA = gPairA(0): Set gTopB = gPairB(0)
+
+                        ' canon 짝(비-cascade) 인덱스. 없으면 최상단(min Top) 짝.
+                        Dim gCanIdx As Long: gCanIdx = -1
                         Dim gk As Long
                         For gk = 0 To gPairN - 1
-                            Dim gTy As Double: gTy = gPairA(gk).Top
-                            If gPairB(gk).Top < gTy Then gTy = gPairB(gk).Top
-                            On Error Resume Next
-                            gPairA(gk).Top = gTy
-                            gPairB(gk).Top = gTy
-                            On Error GoTo 0
+                            If Not gPairCasc(gk) Then gCanIdx = gk: Exit For
                         Next gk
+                        If gCanIdx < 0 Then
+                            Dim gMinY As Double: gMinY = 1E+30
+                            For gk = 0 To gPairN - 1
+                                Dim gTopOf As Double: gTopOf = gPairA(gk).Top
+                                If gPairB(gk).Top < gTopOf Then gTopOf = gPairB(gk).Top
+                                If gTopOf < gMinY Then gMinY = gTopOf: gCanIdx = gk
+                            Next gk
+                        End If
+
+                        ' canon 좌·우 박스 같은 Y(둘 중 위쪽). canon 은 기준점이라 X 안 옮김.
+                        Dim gCanA As Shape, gCanB As Shape
+                        Set gCanA = gPairA(gCanIdx): Set gCanB = gPairB(gCanIdx)
+                        Dim gCanY As Double: gCanY = gCanA.Top
+                        If gCanB.Top < gCanY Then gCanY = gCanB.Top
+                        On Error Resume Next
+                        gCanA.Top = gCanY: gCanB.Top = gCanY
+                        AltSetLastPos gCanA, gCanA.Left, gCanA.Top
+                        AltSetLastPos gCanB, gCanB.Left, gCanB.Top
+                        On Error GoTo 0
+
+                        ' 나머지 짝을 현재 Y 순으로 정렬(시각 순서 보존) → canon 아래로 스택
+                        Dim gOrd(0 To 64) As Long, gOrdN As Long: gOrdN = 0
+                        For gk = 0 To gPairN - 1
+                            If gk <> gCanIdx Then gOrd(gOrdN) = gk: gOrdN = gOrdN + 1
+                        Next gk
+                        Dim goI As Long, goJ As Long
+                        For goI = 0 To gOrdN - 2
+                            For goJ = 0 To gOrdN - 2 - goI
+                                If gPairA(gOrd(goJ)).Top > gPairA(gOrd(goJ + 1)).Top Then
+                                    Dim gtO As Long: gtO = gOrd(goJ): gOrd(goJ) = gOrd(goJ + 1): gOrd(goJ + 1) = gtO
+                                End If
+                            Next goJ
+                        Next goI
+
+                        ' canon 아래로 스택 — X = canon 좌·우 X(열 정렬), Y = 누적 rowY(겹침 제거)
+                        Dim gRowY As Double: gRowY = gCanA.Top + gCanA.Height
+                        Dim gCanBBot As Double: gCanBBot = gCanB.Top + gCanB.Height
+                        If gCanBBot > gRowY Then gRowY = gCanBBot
+                        Dim goK As Long
+                        For goK = 0 To gOrdN - 1
+                            Dim gscA As Shape, gscB As Shape
+                            Set gscA = gPairA(gOrd(goK)): Set gscB = gPairB(gOrd(goK))
+                            On Error Resume Next
+                            gscA.Left = gCanA.Left: gscA.Top = gRowY
+                            gscB.Left = gCanB.Left: gscB.Top = gRowY
+                            AltSetLastPos gscA, gscA.Left, gscA.Top
+                            AltSetLastPos gscB, gscB.Left, gscB.Top
+                            On Error GoTo 0
+                            Dim gRowH As Double: gRowH = gscA.Height
+                            If gscB.Height > gRowH Then gRowH = gscB.Height
+                            gRowY = gRowY + gRowH
+                        Next goK
                     End If
 
                     If Not gTopA Is Nothing And Not gTopB Is Nothing Then
@@ -23943,6 +24009,7 @@ End Function
 '   Step 2 일 때만 작동. Step 1 또는 1개 셀 선택은 무시 (네이티브 셀 클릭 자유).
 '   잠금 코어(g_pt_existingA/B) 는 토글 대상에서 제외.
 Public Sub 선번연결_도구_셀선택(target As Range)
+    If Not 라이센스_게이트() Then Exit Sub        ' owner 2026-06-16: 미인증 시 차단
     On Error Resume Next
     If g_pt_step <> 2 Then Exit Sub
     If target Is Nothing Then Exit Sub
@@ -27797,7 +27864,8 @@ Public Function MetaLookupGyuk(legendShapeName As String) As String
     Dim r As Long
     For r = 2 To last
         If CStr(ws.Cells(r, 1).Value) = legendShapeName Then
-            MetaLookupGyuk = Trim(CStr(ws.Cells(r, 5).Value))
+            ' owner 2026-06-16: 규격 콜론비율(1:4 등) Excel 시간값 변환 표시 문제 - 양식_셀_텍스트 로 원문 복원
+            MetaLookupGyuk = 양식_셀_텍스트(ws.Cells(r, 5))
             Exit Function
         End If
     Next r
@@ -27938,7 +28006,7 @@ Public Sub InjectEventHandlers()
            "End Sub" & vbCrLf & vbCrLf & _
            "Private Sub Workbook_Open()" & vbCrLf & _
            "    On Error Resume Next" & vbCrLf & _
-           "    만료_검사" & vbCrLf & _
+           "    라이센스_부팅" & vbCrLf & _
            "    리본_등록" & vbCrLf & _
            "End Sub" & vbCrLf & vbCrLf & _
            "Private Sub Workbook_BeforeClose(Cancel As Boolean)" & vbCrLf & _
@@ -29373,6 +29441,21 @@ End Function
 '      코드의 SALT 가 노출되면 라이센스 우회 가능. 암호 설정으로 1차 차단 필수.
 '   ※ 모든 Private Const 는 파일 상단 declarations 섹션 (~line 208) 에 정의됨 (VBA 규칙).
 
+' owner 2026-06-16: 라이센스 게이트 — 캔버스 기능 진입점이 이 함수를 거쳐 미인증 시 동작 차단.
+'   Workbook_Open 이 라이센스_부팅 으로 1회 검증 후 g_licenseOK 캐시 → 시트를 강제로 펴도
+'   클릭·그리기·코어연결이 막혀 우회 무의미. DEV master·HW 일치 배포본은 통과.
+Public Sub 라이센스_부팅()
+    On Error Resume Next
+    g_licenseOK = 라이센스_검증()
+    g_licenseChecked = True
+    On Error GoTo 0
+End Sub
+
+Public Function 라이센스_게이트() As Boolean
+    If Not g_licenseChecked Then 라이센스_부팅       ' 미검사(VBA 리셋 등) 시 1회 재검증
+    라이센스_게이트 = g_licenseOK
+End Function
+
 ' Entry point — Workbook_Open 에서 호출.
 Public Function 라이센스_검증() As Boolean
     라이센스_검증 = False
@@ -29380,7 +29463,9 @@ Public Function 라이센스_검증() As Boolean
 
     ' DEV mode (owner master 파일)
     If 라이센스_DEV모드() Then
-        라이센스_시트_표시
+        ' owner 2026-06-16: 시트 강제 표시 제거 — master/정상 파일의 「의도적으로 숨긴 시트」 보존.
+        '   (라이센스_시트_표시 가 splash 빼고 전 시트를 펼쳐 → master 숨긴 시트가 펼쳐진 채 SaveCopyAs
+        '    되어 배포본에 노출되던 문제. 보호는 캔버스 게이트가 담당하므로 시트 표시 불필요.)
         라이센스_검증 = True
         Exit Function
     End If
@@ -29418,18 +29503,20 @@ Public Function 라이센스_검증() As Boolean
     End If
 
     Dim currentHW As String: currentHW = 라이센스_현재_HW()
+    ' owner 2026-06-16: 빈 HW 자동 바인딩 폐지 — 발급 시 HW 가 박혀 있어야만 실행.
+    '   기존 자동 바인딩은 첫 launch 저장 실패(보호된 보기·읽기전용·OneDrive)면 잠금이 파일에
+    '   안 박혀 어느 PC 에서도 열리던 약점이 있었음. 이제 빈 값 = 차단 + 현재 HW 안내.
     If Len(hwid) = 0 Then
-        라이센스_속성_쓰기 LICENSE_HWID_PROP, currentHW
-        On Error Resume Next: ThisWorkbook.Save: On Error GoTo Failed
-        Application.StatusBar = "라이센스 활성화 (" & user & ") — 이 PC 에 바인딩됨."
-    Else
-        If hwid <> currentHW Then
-            라이센스_차단 "이 라이센스는 다른 PC 전용입니다." & vbLf & _
-                          "등록된 HW: " & hwid & vbLf & _
-                          "현재 HW: " & currentHW & vbLf & vbLf & _
-                          "관리자에게 재발급 요청 바랍니다."
-            Exit Function
-        End If
+        라이센스_차단 "이 라이센스에 바인딩된 PC 가 없습니다 (HW 미지정)." & vbLf & vbLf & _
+                      "현재 HW: " & currentHW & vbLf & vbLf & _
+                      "위 HW ID 를 관리자에게 전달해 HW 바인딩 재발급을 요청하세요."
+        Exit Function
+    ElseIf hwid <> currentHW Then
+        라이센스_차단 "이 라이센스는 다른 PC 전용입니다." & vbLf & _
+                      "등록된 HW: " & hwid & vbLf & _
+                      "현재 HW: " & currentHW & vbLf & vbLf & _
+                      "관리자에게 재발급 요청 바랍니다."
+        Exit Function
     End If
 
     If daysLeft <= LICENSE_WARN_DAYS And daysLeft >= 0 Then
@@ -29438,7 +29525,7 @@ Public Function 라이센스_검증() As Boolean
         Application.StatusBar = "라이센스 유예 기간 — " & (LICENSE_GRACE_DAYS + daysLeft) & " 일 후 차단. 즉시 갱신 요청."
     End If
 
-    라이센스_시트_표시
+    ' owner 2026-06-16: 시트 강제 표시 제거 (위 DEV 경로 주석 참조) — 저장된 시트 가시성 보존.
     라이센스_검증 = True
     Exit Function
 
@@ -29538,9 +29625,12 @@ End Function
 ' === 관리자용 ===
 
 Public Sub 라이센스_발급()
+    ' owner 2026-06-16: 관리자(master·DEV 모드) 전용 — 배포본에서 일반 사용자가 자기 HW 로
+    '   라이센스를 만드는 우회 차단. (이전엔 경고 후 계속 가능했음.)
     If Not 라이센스_DEV모드() Then
-        If MsgBox("이 워크북은 DEV 모드가 아닙니다. 발급은 master 파일에서 해야 정확합니다." & vbLf & vbLf & _
-                  "계속하면 현재 워크북의 라이센스가 덮어쓰입니다. 계속?", vbYesNo + vbExclamation, "라이센스 발급") <> vbYes Then Exit Sub
+        MsgBox "라이센스 발급은 관리자(master·DEV 모드) 파일에서만 가능합니다." & vbLf & _
+               "배포본에서는 사용할 수 없습니다.", vbExclamation, "라이센스 발급"
+        Exit Sub
     End If
 
     Dim user As String
@@ -29556,8 +29646,13 @@ Public Sub 라이센스_발급()
 
     Dim bindHW As String
     bindHW = InputBox("사용자 PC 의 HW ID (예: PC01|USER1)" & vbLf & _
-                       "비워두면 첫 launch 시 자동 바인딩 (단, 첫 launch 가 의도한 PC 에서 되어야 함)", _
+                       "※ 필수 — 이 값이 있어야만 사용자 PC 에서 실행됩니다 (빈 값 = 어느 PC 에서도 차단).", _
                        "라이센스 발급 — 3/3", "")
+    If Len(Trim(bindHW)) = 0 Then
+        If MsgBox("HW ID 가 비어 있습니다. 이대로 발급하면 이 배포본은 어느 PC 에서도 차단됩니다." & vbLf & _
+                  "(사용자에게 라이센스_내_HW_ID_보기 로 HW 를 먼저 받아 입력하세요.)" & vbLf & vbLf & _
+                  "그래도 계속할까요?", vbYesNo + vbExclamation, "라이센스 발급") <> vbYes Then Exit Sub
+    End If
 
     Dim issued As String: issued = Format(Date, "yyyy-mm-dd")
     Dim expires As String: expires = Format(Date + CLng(daysStr), "yyyy-mm-dd")
@@ -29614,6 +29709,13 @@ Public Sub 라이센스_발급()
 End Sub
 
 Public Sub 라이센스_갱신()
+    ' owner 2026-06-16: 관리자(master·DEV 모드) 전용 — 배포본에서 사용자가 자기 만료일을
+    '   직접 연장하는 우회 차단.
+    If Not 라이센스_DEV모드() Then
+        MsgBox "라이센스 갱신은 관리자(master·DEV 모드) 파일에서만 가능합니다." & vbLf & _
+               "배포본 갱신은 master 에서 재발급하거나, 받은 파일에 DEV 모드를 임시로 켠 뒤 갱신하세요.", vbExclamation, "라이센스 갱신"
+        Exit Sub
+    End If
     Dim curUser As String: curUser = 라이센스_속성_읽기(LICENSE_USER_PROP)
     Dim curIssued As String: curIssued = 라이센스_속성_읽기(LICENSE_ISSUED_PROP)
     Dim curExpires As String: curExpires = 라이센스_속성_읽기(LICENSE_EXPIRES_PROP)
@@ -29661,10 +29763,10 @@ End Sub
 
 Public Sub 라이센스_내_HW_ID_보기()
     Dim hw As String: hw = 라이센스_현재_HW()
-    Dim msg As String
-    msg = "현재 PC HW ID:" & vbLf & vbLf & "  " & hw & vbLf & vbLf
-    msg = msg & "이 값을 관리자에게 전달하여 라이센스 발급/재발급 요청 바랍니다."
-    MsgBox msg, vbInformation, "내 HW ID"
+    ' owner 2026-06-16: MsgBox → InputBox. 값이 편집창에 들어가 Ctrl+A → Ctrl+C 로 복사 가능
+    '   (MsgBox 는 텍스트 선택/복사가 불편). 반환값은 사용 안 함 — 표시·복사 전용.
+    InputBox "아래 칸의 HW ID 를 복사(칸 클릭 → Ctrl+A → Ctrl+C)해서 관리자에게 전달하세요." & vbLf & vbLf & _
+             "라이센스 발급/재발급 요청용입니다.", "내 HW ID — 복사해서 전달", hw
 End Sub
 
 Private Sub 라이센스_워터마크_추가(user As String, issued As String)
@@ -31430,3 +31532,335 @@ Public Sub 범례_양식_보호_복원(ws As Worksheet)
     On Error GoTo 0
 End Sub
 
+
+
+' ============================================================================
+'  기별명세서 자동 산출 — Phase 1: 추출 미리보기 (읽기 전용 진단)
+'  계획: samples/기별명세서_산출_계획.md  ·  owner 확정 규칙 §7
+'
+'  설계(행정도+네트웍구성도)를 스캔 → 시설물·케이블·코어접속·주야 집계를
+'  「_기별_미리보기」 시트에 덤프. ※ 행정도·네트웍 도형은 절대 변경 안 함(읽기 전용).
+'  Phase 3(양식 채우기) 전에 추출 숫자/매핑이 맞는지 owner 가 눈으로 검증하는 단계.
+'
+'  실행: Alt+F8 → 기별_추출_미리보기
+'
+'  데이터 출처 (조사 확정):
+'   - _시설물: col1=facId · col2=구분라벨("신설/가공/72C" 등) · col3=명칭 · col5=배지
+'   - _케이블: col1=id · col2=from · col3=to · col4=규격 · col7=구분(신설/철거/기설) · col8=거리(m)
+'   - 상태박스(_fac_status_): AltText "day=N;night=M" (주간/야간) — 상태박스_값_읽기
+'   - 연결코어수: 시설물_연결코어수_계산(ws, facId)
+'   - RN 판별: 시설물_isRN(ws, facId)
+' ============================================================================
+
+' 구분라벨("신설/가공/72C") 첫 토큰 → 신설/기설/철거.
+Public Function 기별_신설기설(ByVal label As String) As String
+    Dim s As String: s = Trim(label)
+    Dim p As Long: p = InStr(s, "/")
+    Dim first As String
+    If p > 0 Then first = Trim(Left(s, p - 1)) Else first = s
+    If InStr(first, "신설") > 0 Then
+        기별_신설기설 = "신설"
+    ElseIf InStr(first, "기설") > 0 Then
+        기별_신설기설 = "기설"
+    ElseIf InStr(first, "철거") > 0 Then
+        기별_신설기설 = "철거"
+    Else
+        기별_신설기설 = first        ' 그대로 노출 — 라벨 형식 진단용
+    End If
+End Function
+
+' 시설물 구분(label) → 범례(_범례) col3 매칭 → 명칭(col9) 반환.
+'   owner 2026-06-16: 종류는 「범례 명칭」 으로 판정 (설치장소/시설물/접속함체/RN/광케이블이 명칭에 구분됨).
+'   기존 시설물_isRN 의 느슨한 fallback 이 접속함체를 RN 으로 오판 → 명칭 직접 판정으로 교체.
+' 구분 문자열의 첫 두 토큰 ("신설/가공/72C" → "신설/가공", "간이국사" → "간이국사").
+Public Function 기별_토큰2(ByVal s As String) As String
+    Dim parts() As String: parts = Split(Trim(s), "/")
+    If UBound(parts) >= 1 Then
+        기별_토큰2 = Trim(parts(0)) & "/" & Trim(parts(1))
+    Else
+        기별_토큰2 = Trim(s)
+    End If
+End Function
+
+' 규격 문자열 복원 — "4.44E-02"(시간직렬) → "1:4". 그 외(72C 등)는 그대로.
+Public Function 기별_규격복원(ByVal s As String) As String
+    기별_규격복원 = Trim(s)
+    Dim t As String: t = Trim(s)
+    If Len(t) = 0 Then Exit Function
+    If IsNumeric(t) Then
+        Dim v As Double: v = 0
+        On Error Resume Next: v = CDbl(t): On Error GoTo 0
+        If v > 0 And v < 1 Then
+            On Error Resume Next
+            기별_규격복원 = Format(CDate(v), "h:m")
+            On Error GoTo 0
+        End If
+    End If
+End Function
+
+' 시설물 명칭(접속함체/RN/…) 판정 — owner 2026-06-16.
+'   문제: 구분 "신설/가공" 이 접속함체(closure)·RN(rn) 양쪽에 있어 구분만으론 구별 불가.
+'   해결: 시설물 callout("lbl_"&facId) 첫 줄 = "구분/규격"(예 신설/가공/72C) 을 읽어, _범례 를
+'         (구분 토큰2 + 규격) 쌍으로 매칭 → col9 명칭. 규격이 접속함체(72C)·RN(1:4) 으로 달라 구별됨.
+'         규격 매칭 실패 시 구분 토큰2 만으로 폴백(비충돌 구분: 신설/외벽 등).
+Public Function 기별_시설명칭(ws As Worksheet, ByVal facId As String, ByVal fallbackGubun As String) As String
+    기별_시설명칭 = ""
+    Dim gubun As String, gyuk As String
+    gubun = Trim(fallbackGubun): gyuk = ""
+    ' 1) callout 첫 줄에서 구분/규격 파싱
+    If Not ws Is Nothing And Len(facId) > 0 Then
+        Dim lbl As Shape: Set lbl = Nothing
+        On Error Resume Next: Set lbl = ws.Shapes(PREFIX_LABEL & facId): On Error GoTo 0
+        If Not lbl Is Nothing Then
+            Dim tx As String: tx = ""
+            On Error Resume Next: tx = lbl.TextFrame2.TextRange.Text: On Error GoTo 0
+            tx = Replace(Replace(tx, vbCrLf, vbCr), vbLf, vbCr)
+            Dim p As Long: p = InStr(tx, vbCr)
+            Dim line1 As String
+            If p > 0 Then line1 = Left(tx, p - 1) Else line1 = tx
+            line1 = Trim(line1)
+            If Len(line1) > 0 Then
+                Dim lp As Long: lp = InStrRev(line1, "/")
+                If lp > 0 Then
+                    gyuk = 기별_규격복원(Mid(line1, lp + 1))
+                    gubun = Trim(Left(line1, lp - 1))
+                Else
+                    gubun = line1
+                End If
+            End If
+        End If
+    End If
+    ' 2) _범례 매칭 — (구분 토큰2 + 규격) 우선, 없으면 (구분 토큰2)만 폴백
+    Dim wsLeg As Worksheet
+    On Error Resume Next: Set wsLeg = ThisWorkbook.Worksheets(SHEET_META_LEG): On Error GoTo 0
+    If wsLeg Is Nothing Then Exit Function
+    Dim fk2 As String: fk2 = 기별_토큰2(gubun)
+    Dim lastR As Long: lastR = wsLeg.Cells(wsLeg.Rows.Count, 1).End(xlUp).Row
+    Dim r As Long
+    Dim pairName As String: pairName = ""
+    Dim gubunName As String: gubunName = ""
+    For r = 2 To lastR
+        If LCase(CStr(wsLeg.Cells(r, 2).Value)) <> "cable" Then
+            Dim g As String: g = Trim(CStr(wsLeg.Cells(r, 3).Value))
+            If Len(g) > 0 Then
+                If 기별_토큰2(g) = fk2 Then
+                    Dim nm9 As String: nm9 = Trim(CStr(wsLeg.Cells(r, 9).Value))
+                    If Len(nm9) > 0 Then
+                        If Len(gubunName) = 0 Then gubunName = nm9
+                        If Len(gyuk) > 0 Then
+                            Dim lg As String: lg = 양식_셀_텍스트(wsLeg.Cells(r, 5))
+                            If lg = gyuk Then pairName = nm9
+                        End If
+                    End If
+                End If
+            End If
+        End If
+    Next r
+    If Len(pairName) > 0 Then
+        기별_시설명칭 = pairName
+    Else
+        기별_시설명칭 = gubunName
+    End If
+End Function
+
+' 시설물 종류 분류 — 범례 명칭(col9) 기준. RN / 접속함체 / 설치장소 / 케이블 / 그외.
+Public Function 기별_시설종류(ws As Worksheet, ByVal facId As String, ByVal label As String) As String
+    Dim nm As String: nm = 기별_시설명칭(ws, facId, label)
+    If InStr(UCase(nm), "RN") > 0 Then
+        기별_시설종류 = "RN"
+    ElseIf InStr(nm, "접속함체") > 0 Then
+        기별_시설종류 = "접속함체"
+    ElseIf InStr(nm, "설치장소") > 0 Then
+        기별_시설종류 = "설치장소"
+    ElseIf InStr(nm, "광케이블") > 0 Then
+        기별_시설종류 = "케이블"
+    Else
+        기별_시설종류 = "그외"        ' 국사·일반 시설물 등
+    End If
+End Function
+
+' 케이블 거리 반영 여부 (owner 2026-06-16): 기설 케이블은 거리(경간) 제외 — 공종만.
+'   신설→신설시트 거리 반영, 철거→철거시트 거리 반영, 기설→거리 X(공종만).
+Public Function 기별_거리반영(ByVal gubun As String) As String
+    If InStr(gubun, "기설") > 0 Then
+        기별_거리반영 = "X(기설)"
+    ElseIf InStr(gubun, "철거") > 0 Then
+        기별_거리반영 = "O(철거)"
+    ElseIf InStr(gubun, "신설") > 0 Then
+        기별_거리반영 = "O(신설)"
+    Else
+        기별_거리반영 = "?(" & gubun & ")"
+    End If
+End Function
+
+Public Function 기별_미리보기_시트확보() As Worksheet
+    Const NM As String = "_기별_미리보기"
+    Dim ws As Worksheet: Set ws = Nothing
+    On Error Resume Next: Set ws = ThisWorkbook.Worksheets(NM): On Error GoTo 0
+    If ws Is Nothing Then
+        Set ws = ThisWorkbook.Worksheets.Add
+        On Error Resume Next: ws.Name = NM: On Error GoTo 0
+    End If
+    On Error Resume Next: ws.Visible = xlSheetVisible: On Error GoTo 0
+    Set 기별_미리보기_시트확보 = ws
+End Function
+
+Public Sub 기별_추출_미리보기()
+    Dim wsFac As Worksheet, wsCbl As Worksheet, wsNw As Worksheet
+    On Error Resume Next
+    Set wsFac = ThisWorkbook.Worksheets(SHEET_META_FAC)
+    Set wsCbl = ThisWorkbook.Worksheets(SHEET_META_CBL)
+    Set wsNw = ThisWorkbook.Worksheets(SHEET_NETWORK)
+    On Error GoTo 0
+    If wsFac Is Nothing Then MsgBox "_시설물 메타 시트가 없습니다.", vbExclamation, "기별 추출": Exit Sub
+
+    Application.ScreenUpdating = False
+
+    Dim facName As Object: Set facName = CreateObject("Scripting.Dictionary")
+
+    Dim wsOut As Worksheet: Set wsOut = 기별_미리보기_시트확보()
+    wsOut.Cells.Clear
+
+    Dim outR As Long: outR = 1
+    wsOut.Cells(outR, 1).Value = "■ 기별 추출 미리보기 (Phase 1 · 읽기전용 · 행정도/네트웍 미변경)": outR = outR + 2
+
+    ' === 시설물 ===
+    wsOut.Cells(outR, 1).Value = "[시설물]": outR = outR + 1
+    Dim fh As Variant: fh = Array("ID(끝5)", "구분라벨", "명칭", "배지", "신설/기설", "종류", "주간(day)", "야간(night)", "연결코어수", "범례명칭")
+    Dim c As Long
+    For c = 0 To UBound(fh): wsOut.Cells(outR, c + 1).Value = fh(c): Next c
+    outR = outR + 1
+
+    Dim facCount As Long, nNew As Long, nOld As Long, nRN As Long, nClo As Long, coreSum As Long
+    Dim lastF As Long: lastF = wsFac.Cells(wsFac.Rows.Count, 1).End(xlUp).Row
+    Dim r As Long
+    For r = 2 To lastF
+        Dim facId As String: facId = CStr(wsFac.Cells(r, 1).Value)
+        If Len(facId) = 0 Then GoTo NextFac
+        Dim label As String: label = CStr(wsFac.Cells(r, 2).Value)
+        Dim nm As String: nm = CStr(wsFac.Cells(r, 3).Value)
+        Dim badge As String: badge = CStr(wsFac.Cells(r, 5).Value)
+        facName(facId) = nm
+
+        Dim no As String: no = 기별_신설기설(label)
+        Dim kind As String: kind = 기별_시설종류(wsNw, facId, label)
+        Dim dayV As String, nightV As String: dayV = "": nightV = ""
+        On Error Resume Next: 상태박스_값_읽기 wsNw, facId, dayV, nightV: On Error GoTo 0
+        Dim cores As Long: cores = 0
+        On Error Resume Next: cores = 시설물_연결코어수_계산(wsNw, facId): On Error GoTo 0
+
+        wsOut.Cells(outR, 1).Value = Right(facId, 5)
+        wsOut.Cells(outR, 2).Value = label
+        wsOut.Cells(outR, 3).Value = nm
+        wsOut.Cells(outR, 4).Value = badge
+        wsOut.Cells(outR, 5).Value = no
+        wsOut.Cells(outR, 6).Value = kind
+        wsOut.Cells(outR, 7).Value = dayV
+        wsOut.Cells(outR, 8).Value = nightV
+        wsOut.Cells(outR, 9).Value = cores
+        wsOut.Cells(outR, 10).Value = 기별_시설명칭(wsNw, facId, label)
+        outR = outR + 1
+
+        facCount = facCount + 1: coreSum = coreSum + cores
+        If no = "신설" Then
+            nNew = nNew + 1
+        ElseIf no = "기설" Then
+            nOld = nOld + 1
+        End If
+        If kind = "RN" Then
+            nRN = nRN + 1
+        ElseIf kind = "접속함체" Then
+            nClo = nClo + 1
+        End If
+NextFac:
+    Next r
+
+    outR = outR + 1
+    ' === 케이블 ===
+    wsOut.Cells(outR, 1).Value = "[케이블]": outR = outR + 1
+    Dim ch As Variant: ch = Array("ID(끝5)", "시작", "끝", "규격", "구분(상태)", "거리(m)", "거리반영")
+    For c = 0 To UBound(ch): wsOut.Cells(outR, c + 1).Value = ch(c): Next c
+    outR = outR + 1
+
+    Dim cblCount As Long, nCNew As Long, nCRem As Long, nCOld As Long
+    Dim distSum As Double: distSum = 0
+    If Not wsCbl Is Nothing Then
+        Dim lastC As Long: lastC = wsCbl.Cells(wsCbl.Rows.Count, 1).End(xlUp).Row
+        For r = 2 To lastC
+            Dim cblId As String: cblId = CStr(wsCbl.Cells(r, 1).Value)
+            If Len(cblId) = 0 Then GoTo NextCbl
+            Dim fId As String: fId = CStr(wsCbl.Cells(r, 2).Value)
+            Dim tId As String: tId = CStr(wsCbl.Cells(r, 3).Value)
+            Dim spec As String: spec = CStr(wsCbl.Cells(r, 4).Value)
+            Dim gubun As String: gubun = CStr(wsCbl.Cells(r, 7).Value)
+            Dim distS As String: distS = CStr(wsCbl.Cells(r, 8).Value)
+
+            Dim fNm As String: fNm = fId
+            If facName.Exists(fId) Then fNm = CStr(facName(fId))
+            Dim tNm As String: tNm = tId
+            If facName.Exists(tId) Then tNm = CStr(facName(tId))
+
+            Dim reflect As String: reflect = 기별_거리반영(gubun)
+
+            wsOut.Cells(outR, 1).Value = Right(cblId, 5)
+            wsOut.Cells(outR, 2).Value = fNm
+            wsOut.Cells(outR, 3).Value = tNm
+            wsOut.Cells(outR, 4).Value = spec
+            wsOut.Cells(outR, 5).Value = gubun
+            wsOut.Cells(outR, 6).Value = distS
+            wsOut.Cells(outR, 7).Value = reflect
+            outR = outR + 1
+
+            cblCount = cblCount + 1
+            ' 거리 합계는 「거리 반영」 케이블만 (기설 제외 — owner 2026-06-16)
+            If IsNumeric(distS) And InStr(gubun, "기설") = 0 Then distSum = distSum + CDbl(distS)
+            If InStr(gubun, "신설") > 0 Then
+                nCNew = nCNew + 1
+            ElseIf InStr(gubun, "철거") > 0 Then
+                nCRem = nCRem + 1
+            ElseIf InStr(gubun, "기설") > 0 Then
+                nCOld = nCOld + 1
+            End If
+NextCbl:
+        Next r
+    End If
+
+    ' === 집계 ===
+    outR = outR + 1
+    wsOut.Cells(outR, 1).Value = "[집계]": outR = outR + 1
+    wsOut.Cells(outR, 1).Value = "시설물": wsOut.Cells(outR, 2).Value = facCount: outR = outR + 1
+    wsOut.Cells(outR, 1).Value = "  신설 / 기설": wsOut.Cells(outR, 2).Value = nNew & " / " & nOld: outR = outR + 1
+    wsOut.Cells(outR, 1).Value = "  RN / 접속함체": wsOut.Cells(outR, 2).Value = nRN & " / " & nClo: outR = outR + 1
+    wsOut.Cells(outR, 1).Value = "케이블": wsOut.Cells(outR, 2).Value = cblCount: outR = outR + 1
+    wsOut.Cells(outR, 1).Value = "  신설 / 철거 / 기설": wsOut.Cells(outR, 2).Value = nCNew & " / " & nCRem & " / " & nCOld: outR = outR + 1
+    wsOut.Cells(outR, 1).Value = "  반영거리 합(m, 기설제외)": wsOut.Cells(outR, 2).Value = distSum: outR = outR + 1
+    wsOut.Cells(outR, 1).Value = "총 연결코어수": wsOut.Cells(outR, 2).Value = coreSum: outR = outR + 1
+
+    ' === 범례 (검증용 — kind/구분/명칭. 종류 판정은 명칭 기준) ===
+    outR = outR + 1
+    wsOut.Cells(outR, 1).Value = "[범례 _범례 (kind·구분·명칭)]": outR = outR + 1
+    Dim lh As Variant: lh = Array("도형명(끝5)", "kind", "구분", "명칭")
+    For c = 0 To UBound(lh): wsOut.Cells(outR, c + 1).Value = lh(c): Next c
+    outR = outR + 1
+    Dim wsLeg As Worksheet: Set wsLeg = Nothing
+    On Error Resume Next: Set wsLeg = ThisWorkbook.Worksheets(SHEET_META_LEG): On Error GoTo 0
+    If Not wsLeg Is Nothing Then
+        Dim lastL As Long: lastL = wsLeg.Cells(wsLeg.Rows.Count, 1).End(xlUp).Row
+        For r = 2 To lastL
+            wsOut.Cells(outR, 1).Value = Right(CStr(wsLeg.Cells(r, 1).Value), 5)
+            wsOut.Cells(outR, 2).Value = CStr(wsLeg.Cells(r, 2).Value)
+            wsOut.Cells(outR, 3).Value = CStr(wsLeg.Cells(r, 3).Value)
+            wsOut.Cells(outR, 4).Value = CStr(wsLeg.Cells(r, 9).Value)
+            outR = outR + 1
+        Next r
+    End If
+
+    On Error Resume Next: wsOut.Columns("A:J").AutoFit: On Error GoTo 0
+    Application.ScreenUpdating = True
+    On Error Resume Next: wsOut.Activate: On Error GoTo 0
+
+    MsgBox "기별 추출 미리보기 생성 완료 (시트: _기별_미리보기)" & vbLf & vbLf & _
+           "시설물 " & facCount & " (신설 " & nNew & " / 기설 " & nOld & ", RN " & nRN & " / 접속함체 " & nClo & ")" & vbLf & _
+           "케이블 " & cblCount & " (신설 " & nCNew & " / 철거 " & nCRem & " / 기설 " & nCOld & ")" & vbLf & _
+           "반영거리 합 " & distSum & " m (기설 제외), 총 연결코어수 " & coreSum, vbInformation, "기별 추출 미리보기"
+End Sub

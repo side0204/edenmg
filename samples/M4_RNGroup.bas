@@ -3860,6 +3860,7 @@ End Function
 '   Step 2 일 때만 작동. Step 1 또는 1개 셀 선택은 무시 (네이티브 셀 클릭 자유).
 '   잠금 코어(g_pt_existingA/B) 는 토글 대상에서 제외.
 Public Sub 선번연결_도구_셀선택(target As Range)
+    If Not 라이센스_게이트() Then Exit Sub        ' owner 2026-06-16: 미인증 시 차단
     On Error Resume Next
     If g_pt_step <> 2 Then Exit Sub
     If target Is Nothing Then Exit Sub

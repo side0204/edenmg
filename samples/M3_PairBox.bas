@@ -3480,6 +3480,7 @@ NextCand:
                     '   좌·우 박스를 같은 행 Y 로 1:1 정렬 + 케이블-가장가까운 짝을 화살표 끝점으로.
                     '   (박스정렬_silent 는 「활성 케이블쌍」만 정렬해 다른 시설물은 안 됐음 → 전 그룹 도는 여기서 정렬.)
                     Dim gPairA(0 To 64) As Shape, gPairB(0 To 64) As Shape, gPairD(0 To 64) As Double
+                    Dim gPairCasc(0 To 64) As Boolean
                     Dim gPairN As Long: gPairN = 0
                     Dim gAnc() As String: gAnc = Split(CStr(ccGroupAnchors(CStr(gKey))), "`")
                     Dim gJ As Long
@@ -3513,6 +3514,7 @@ NextCand:
                                         gdB = (gpB.Left + gpB.Width / 2 - gFcx) * (gpB.Left + gpB.Width / 2 - gFcx) + (gpby - gFcy) * (gpby - gFcy)
                                         Set gPairA(gPairN) = gpA: Set gPairB(gPairN) = gpB
                                         gPairD(gPairN) = IIf(gdA < gdB, gdA, gdB)
+                                        gPairCasc(gPairN) = (InStr(gaAlt, "|cascade=") > 0)
                                         gPairN = gPairN + 1
                                     End If
                                 End If
@@ -3532,21 +3534,77 @@ NextCand:
                         Next gsJ
                     Next gsI
 
-                    ' 1:1 정렬 — 각 짝의 좌·우 박스만 같은 Y(둘 중 위쪽)로 맞춤. 행 위치·순서·간격은 그대로 →
-                    '   re-stack 안 하므로 셀 클릭마다 드리프트 없음(idempotent). gTopA/gTopB = 시설물 최근접 짝(화살표 끝점).
+                    ' === 캐스케이드 수직 스택 (canon 기준) — owner 2026-06-16 ===
+                    '   박스정렬_silent 은 「활성 케이블쌍」만 스택 정렬 → 활성 페어가 없거나(예: 다른 작업
+                    '   직후) 다른 시설물이면 캐스케이드 박스가 같은 Y 로 포개져 보임(owner 「2번쪽 틀어짐」:
+                    '   '1' 과 '13~24' 가 동일 Y=1284/1285). 여기서 전 그룹을 canon 기준으로 스택 → active 무관 유지.
+                    '   canon(비-cascade 앵커) 위치 고정 + Y순 보존 → idempotent(드리프트 없음). 이전 드리프트는
+                    '   facility-거리 기준 re-stack 이 원인이었고, canon 기준은 안정적. canon 없으면 최상단(min Y).
+                    '   화살표 끝점은 기존대로 facility 최근접(gPairA(0)/gPairB(0)) 유지. 각 이동은 lastPos 동기
+                    '   (다음 셀 클릭의 Cable_Chain_평행이동_처리 가 「사용자 드래그」로 오인 안 하도록).
                     Dim gTopA As Shape: Set gTopA = Nothing
                     Dim gTopB As Shape: Set gTopB = Nothing
                     If gPairN > 0 Then
                         Set gTopA = gPairA(0): Set gTopB = gPairB(0)
+
+                        ' canon 짝(비-cascade) 인덱스. 없으면 최상단(min Top) 짝.
+                        Dim gCanIdx As Long: gCanIdx = -1
                         Dim gk As Long
                         For gk = 0 To gPairN - 1
-                            Dim gTy As Double: gTy = gPairA(gk).Top
-                            If gPairB(gk).Top < gTy Then gTy = gPairB(gk).Top
-                            On Error Resume Next
-                            gPairA(gk).Top = gTy
-                            gPairB(gk).Top = gTy
-                            On Error GoTo 0
+                            If Not gPairCasc(gk) Then gCanIdx = gk: Exit For
                         Next gk
+                        If gCanIdx < 0 Then
+                            Dim gMinY As Double: gMinY = 1E+30
+                            For gk = 0 To gPairN - 1
+                                Dim gTopOf As Double: gTopOf = gPairA(gk).Top
+                                If gPairB(gk).Top < gTopOf Then gTopOf = gPairB(gk).Top
+                                If gTopOf < gMinY Then gMinY = gTopOf: gCanIdx = gk
+                            Next gk
+                        End If
+
+                        ' canon 좌·우 박스 같은 Y(둘 중 위쪽). canon 은 기준점이라 X 안 옮김.
+                        Dim gCanA As Shape, gCanB As Shape
+                        Set gCanA = gPairA(gCanIdx): Set gCanB = gPairB(gCanIdx)
+                        Dim gCanY As Double: gCanY = gCanA.Top
+                        If gCanB.Top < gCanY Then gCanY = gCanB.Top
+                        On Error Resume Next
+                        gCanA.Top = gCanY: gCanB.Top = gCanY
+                        AltSetLastPos gCanA, gCanA.Left, gCanA.Top
+                        AltSetLastPos gCanB, gCanB.Left, gCanB.Top
+                        On Error GoTo 0
+
+                        ' 나머지 짝을 현재 Y 순으로 정렬(시각 순서 보존) → canon 아래로 스택
+                        Dim gOrd(0 To 64) As Long, gOrdN As Long: gOrdN = 0
+                        For gk = 0 To gPairN - 1
+                            If gk <> gCanIdx Then gOrd(gOrdN) = gk: gOrdN = gOrdN + 1
+                        Next gk
+                        Dim goI As Long, goJ As Long
+                        For goI = 0 To gOrdN - 2
+                            For goJ = 0 To gOrdN - 2 - goI
+                                If gPairA(gOrd(goJ)).Top > gPairA(gOrd(goJ + 1)).Top Then
+                                    Dim gtO As Long: gtO = gOrd(goJ): gOrd(goJ) = gOrd(goJ + 1): gOrd(goJ + 1) = gtO
+                                End If
+                            Next goJ
+                        Next goI
+
+                        ' canon 아래로 스택 — X = canon 좌·우 X(열 정렬), Y = 누적 rowY(겹침 제거)
+                        Dim gRowY As Double: gRowY = gCanA.Top + gCanA.Height
+                        Dim gCanBBot As Double: gCanBBot = gCanB.Top + gCanB.Height
+                        If gCanBBot > gRowY Then gRowY = gCanBBot
+                        Dim goK As Long
+                        For goK = 0 To gOrdN - 1
+                            Dim gscA As Shape, gscB As Shape
+                            Set gscA = gPairA(gOrd(goK)): Set gscB = gPairB(gOrd(goK))
+                            On Error Resume Next
+                            gscA.Left = gCanA.Left: gscA.Top = gRowY
+                            gscB.Left = gCanB.Left: gscB.Top = gRowY
+                            AltSetLastPos gscA, gscA.Left, gscA.Top
+                            AltSetLastPos gscB, gscB.Left, gscB.Top
+                            On Error GoTo 0
+                            Dim gRowH As Double: gRowH = gscA.Height
+                            If gscB.Height > gRowH Then gRowH = gscB.Height
+                            gRowY = gRowY + gRowH
+                        Next goK
                     End If
 
                     If Not gTopA Is Nothing And Not gTopB Is Nothing Then

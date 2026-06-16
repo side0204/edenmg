@@ -3784,7 +3784,9 @@ Public Function MetaLookupGyuk(legendShapeName As String) As String
     Dim r As Long
     For r = 2 To last
         If CStr(ws.Cells(r, 1).Value) = legendShapeName Then
-            MetaLookupGyuk = Trim(CStr(ws.Cells(r, 5).Value))
+            ' owner 2026-06-16: 콜아웃 규격 "1:4"/"2:16" 등 콜론 비율이 Excel 시간값(0.0444)으로
+            '   변환돼 "4.44E-02" 로 표시되던 문제 — 콤보와 동일하게 양식_셀_텍스트 로 원문 복원.
+            MetaLookupGyuk = 양식_셀_텍스트(ws.Cells(r, 5))
             Exit Function
         End If
     Next r
@@ -3925,7 +3927,7 @@ Public Sub InjectEventHandlers()
            "End Sub" & vbCrLf & vbCrLf & _
            "Private Sub Workbook_Open()" & vbCrLf & _
            "    On Error Resume Next" & vbCrLf & _
-           "    만료_검사" & vbCrLf & _
+           "    라이센스_부팅" & vbCrLf & _
            "    리본_등록" & vbCrLf & _
            "End Sub" & vbCrLf & vbCrLf & _
            "Private Sub Workbook_BeforeClose(Cancel As Boolean)" & vbCrLf & _
@@ -5360,6 +5362,21 @@ End Function
 '      코드의 SALT 가 노출되면 라이센스 우회 가능. 암호 설정으로 1차 차단 필수.
 '   ※ 모든 Private Const 는 파일 상단 declarations 섹션 (~line 208) 에 정의됨 (VBA 규칙).
 
+' owner 2026-06-16: 라이센스 게이트 — 캔버스 기능 진입점이 이 함수를 거쳐 미인증 시 동작 차단.
+'   Workbook_Open 이 라이센스_부팅 으로 1회 검증 후 g_licenseOK 캐시 → 시트를 강제로 펴도
+'   클릭·그리기·코어연결이 막혀 우회 무의미. DEV master·HW 일치 배포본은 통과.
+Public Sub 라이센스_부팅()
+    On Error Resume Next
+    g_licenseOK = 라이센스_검증()
+    g_licenseChecked = True
+    On Error GoTo 0
+End Sub
+
+Public Function 라이센스_게이트() As Boolean
+    If Not g_licenseChecked Then 라이센스_부팅       ' 미검사(VBA 리셋 등) 시 1회 재검증
+    라이센스_게이트 = g_licenseOK
+End Function
+
 ' Entry point — Workbook_Open 에서 호출.
 Public Function 라이센스_검증() As Boolean
     라이센스_검증 = False
@@ -5367,7 +5384,9 @@ Public Function 라이센스_검증() As Boolean
 
     ' DEV mode (owner master 파일)
     If 라이센스_DEV모드() Then
-        라이센스_시트_표시
+        ' owner 2026-06-16: 시트 강제 표시 제거 — master/정상 파일의 「의도적으로 숨긴 시트」 보존.
+        '   (라이센스_시트_표시 가 splash 빼고 전 시트를 펼쳐 → master 숨긴 시트가 펼쳐진 채 SaveCopyAs
+        '    되어 배포본에 노출되던 문제. 보호는 캔버스 게이트가 담당하므로 시트 표시 불필요.)
         라이센스_검증 = True
         Exit Function
     End If
@@ -5405,18 +5424,20 @@ Public Function 라이센스_검증() As Boolean
     End If
 
     Dim currentHW As String: currentHW = 라이센스_현재_HW()
+    ' owner 2026-06-16: 빈 HW 자동 바인딩 폐지 — 발급 시 HW 가 박혀 있어야만 실행.
+    '   기존 자동 바인딩은 첫 launch 저장 실패(보호된 보기·읽기전용·OneDrive)면 잠금이 파일에
+    '   안 박혀 어느 PC 에서도 열리던 약점이 있었음. 이제 빈 값 = 차단 + 현재 HW 안내.
     If Len(hwid) = 0 Then
-        라이센스_속성_쓰기 LICENSE_HWID_PROP, currentHW
-        On Error Resume Next: ThisWorkbook.Save: On Error GoTo Failed
-        Application.StatusBar = "라이센스 활성화 (" & user & ") — 이 PC 에 바인딩됨."
-    Else
-        If hwid <> currentHW Then
-            라이센스_차단 "이 라이센스는 다른 PC 전용입니다." & vbLf & _
-                          "등록된 HW: " & hwid & vbLf & _
-                          "현재 HW: " & currentHW & vbLf & vbLf & _
-                          "관리자에게 재발급 요청 바랍니다."
-            Exit Function
-        End If
+        라이센스_차단 "이 라이센스에 바인딩된 PC 가 없습니다 (HW 미지정)." & vbLf & vbLf & _
+                      "현재 HW: " & currentHW & vbLf & vbLf & _
+                      "위 HW ID 를 관리자에게 전달해 HW 바인딩 재발급을 요청하세요."
+        Exit Function
+    ElseIf hwid <> currentHW Then
+        라이센스_차단 "이 라이센스는 다른 PC 전용입니다." & vbLf & _
+                      "등록된 HW: " & hwid & vbLf & _
+                      "현재 HW: " & currentHW & vbLf & vbLf & _
+                      "관리자에게 재발급 요청 바랍니다."
+        Exit Function
     End If
 
     If daysLeft <= LICENSE_WARN_DAYS And daysLeft >= 0 Then
@@ -5425,7 +5446,7 @@ Public Function 라이센스_검증() As Boolean
         Application.StatusBar = "라이센스 유예 기간 — " & (LICENSE_GRACE_DAYS + daysLeft) & " 일 후 차단. 즉시 갱신 요청."
     End If
 
-    라이센스_시트_표시
+    ' owner 2026-06-16: 시트 강제 표시 제거 (위 DEV 경로 주석 참조) — 저장된 시트 가시성 보존.
     라이센스_검증 = True
     Exit Function
 
@@ -5525,9 +5546,12 @@ End Function
 ' === 관리자용 ===
 
 Public Sub 라이센스_발급()
+    ' owner 2026-06-16: 관리자(master·DEV 모드) 전용 — 배포본에서 일반 사용자가 자기 HW 로
+    '   라이센스를 만드는 우회 차단. (이전엔 경고 후 계속 가능했음.)
     If Not 라이센스_DEV모드() Then
-        If MsgBox("이 워크북은 DEV 모드가 아닙니다. 발급은 master 파일에서 해야 정확합니다." & vbLf & vbLf & _
-                  "계속하면 현재 워크북의 라이센스가 덮어쓰입니다. 계속?", vbYesNo + vbExclamation, "라이센스 발급") <> vbYes Then Exit Sub
+        MsgBox "라이센스 발급은 관리자(master·DEV 모드) 파일에서만 가능합니다." & vbLf & _
+               "배포본에서는 사용할 수 없습니다.", vbExclamation, "라이센스 발급"
+        Exit Sub
     End If
 
     Dim user As String
@@ -5543,8 +5567,13 @@ Public Sub 라이센스_발급()
 
     Dim bindHW As String
     bindHW = InputBox("사용자 PC 의 HW ID (예: PC01|USER1)" & vbLf & _
-                       "비워두면 첫 launch 시 자동 바인딩 (단, 첫 launch 가 의도한 PC 에서 되어야 함)", _
+                       "※ 필수 — 이 값이 있어야만 사용자 PC 에서 실행됩니다 (빈 값 = 어느 PC 에서도 차단).", _
                        "라이센스 발급 — 3/3", "")
+    If Len(Trim(bindHW)) = 0 Then
+        If MsgBox("HW ID 가 비어 있습니다. 이대로 발급하면 이 배포본은 어느 PC 에서도 차단됩니다." & vbLf & _
+                  "(사용자에게 라이센스_내_HW_ID_보기 로 HW 를 먼저 받아 입력하세요.)" & vbLf & vbLf & _
+                  "그래도 계속할까요?", vbYesNo + vbExclamation, "라이센스 발급") <> vbYes Then Exit Sub
+    End If
 
     Dim issued As String: issued = Format(Date, "yyyy-mm-dd")
     Dim expires As String: expires = Format(Date + CLng(daysStr), "yyyy-mm-dd")
@@ -5601,6 +5630,13 @@ Public Sub 라이센스_발급()
 End Sub
 
 Public Sub 라이센스_갱신()
+    ' owner 2026-06-16: 관리자(master·DEV 모드) 전용 — 배포본에서 사용자가 자기 만료일을
+    '   직접 연장하는 우회 차단.
+    If Not 라이센스_DEV모드() Then
+        MsgBox "라이센스 갱신은 관리자(master·DEV 모드) 파일에서만 가능합니다." & vbLf & _
+               "배포본 갱신은 master 에서 재발급하거나, 받은 파일에 DEV 모드를 임시로 켠 뒤 갱신하세요.", vbExclamation, "라이센스 갱신"
+        Exit Sub
+    End If
     Dim curUser As String: curUser = 라이센스_속성_읽기(LICENSE_USER_PROP)
     Dim curIssued As String: curIssued = 라이센스_속성_읽기(LICENSE_ISSUED_PROP)
     Dim curExpires As String: curExpires = 라이센스_속성_읽기(LICENSE_EXPIRES_PROP)
@@ -5648,10 +5684,10 @@ End Sub
 
 Public Sub 라이센스_내_HW_ID_보기()
     Dim hw As String: hw = 라이센스_현재_HW()
-    Dim msg As String
-    msg = "현재 PC HW ID:" & vbLf & vbLf & "  " & hw & vbLf & vbLf
-    msg = msg & "이 값을 관리자에게 전달하여 라이센스 발급/재발급 요청 바랍니다."
-    MsgBox msg, vbInformation, "내 HW ID"
+    ' owner 2026-06-16: MsgBox → InputBox. 값이 편집창에 들어가 Ctrl+A → Ctrl+C 로 복사 가능
+    '   (MsgBox 는 텍스트 선택/복사가 불편). 반환값은 사용 안 함 — 표시·복사 전용.
+    InputBox "아래 칸의 HW ID 를 복사(칸 클릭 → Ctrl+A → Ctrl+C)해서 관리자에게 전달하세요." & vbLf & vbLf & _
+             "라이센스 발급/재발급 요청용입니다.", "내 HW ID — 복사해서 전달", hw
 End Sub
 
 Public Sub 라이센스_워터마크_추가(user As String, issued As String)

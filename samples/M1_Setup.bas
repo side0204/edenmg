@@ -136,6 +136,11 @@ Public Const PREFIX_PT_ROUT As String = "_pt_ROUT_"           ' RN OUT 코어 �
 Public Const PREFIX_PT_LINE As String = "_pt_line_"           ' 매핑 연결선
 Public Const PREFIX_PT_BTN As String = "_pt_btn_"             ' 도구 버튼·헤더·UNIT 라벨
 
+' 라이센스 게이트 (owner 2026-06-16) — 캔버스 기능 진입점이 라이센스_게이트() 로 미인증 차단.
+'   Workbook_Open → 라이센스_부팅 이 1회 검증해 캐시. 시트를 펴도 클릭·그리기·코어연결이 막힘.
+Public g_licenseOK As Boolean
+Public g_licenseChecked As Boolean
+
 ' 코어 연결 도구 state (volatile, module-scope)
 Public g_pt_mappings As Object              ' Dictionary: leftCoreNo -> rightCoreNo (이번 세션 신규)
 Public g_pt_count1 As Long                  ' Cable A 총 코어 수
@@ -3164,6 +3169,7 @@ End Sub
 
 ' Delete 키 핸들러 — 도형 선택 시 삭제(cascade), 셀 선택 시 기본 동작(내용 지우기)
 Public Sub 도형_삭제키()
+    If Not 라이센스_게이트() Then Exit Sub        ' owner 2026-06-16: 미인증 시 차단
     Dim ws As Worksheet: Set ws = ActiveSheet
     If ws Is Nothing Then Exit Sub
     Dim shp As Shape: Set shp = Nothing
@@ -4678,6 +4684,7 @@ Public Sub 케이블_추종_디버그()
 End Sub
 
 Public Sub 시트_셀_클릭(Target As Range)
+    If Not 라이센스_게이트() Then Exit Sub      ' owner 2026-06-16: 미인증 시 캔버스 동작 차단
     ' Reentry guard — 핸들러가 자기 자신을 재진입하지 못하게
     Static busy As Boolean
     If busy Then Exit Sub
@@ -4865,6 +4872,7 @@ Done:
 End Sub
 
 Public Function 시트_우클릭_처리() As Boolean
+    If Not 라이센스_게이트() Then Exit Function   ' owner 2026-06-16: 미인증 시 차단
     If g_mode <> "place_cable" Then Exit Function
     If g_cableWaypoints Is Nothing Then Exit Function
     If g_cableWaypoints.Count = 0 Then Exit Function
