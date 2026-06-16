@@ -1290,10 +1290,8 @@ Public Sub 기별_양식_채우기()
     ' 원본 템플릿 행높이 캡처 (clear 전): 함체10·경간11·소계13·합계22
     Dim hFac As Double: hFac = wsNew.Rows(10).RowHeight
     Dim hSpan As Double: hSpan = wsNew.Rows(11).RowHeight
-    Dim hSub As Double: hSub = wsNew.Rows(13).RowHeight
-    Dim hTot As Double: hTot = wsNew.Rows(22).RowHeight
-    If hSub < 1 Then hSub = 20.1
-    If hTot < 1 Then hTot = 27
+    Dim hSub As Double: hSub = 19.8    ' 소계 행높이 (owner 2026-06-16)
+    Dim hTot As Double: hTot = 27.6    ' 합계 행높이 (owner 2026-06-16)
     ' 소계·합계 채움색 (owner 2026-06-16: .Interior.Color 읽기는 흰색 반환 → 하드코딩 설정).
     '   소계=FFCC99(살구, 직접 RGB) · 합계=인덱스 색 11(원본 양식 동일).
     Dim totRow As Long: totRow = 10 + 4 * nBlk
@@ -1350,8 +1348,16 @@ Public Sub 기별_양식_채우기()
     Next av
     Dim uc As Variant
     For Each uc In mUsedCols.Keys
-        On Error Resume Next: wsNew.Columns(CStr(uc)).Hidden = False: On Error GoTo 0
+        On Error Resume Next
+        wsNew.Columns(CStr(uc)).Hidden = False
+        wsNew.Columns(CStr(uc)).AutoFit          ' ### 방지 — 값이 열폭보다 커서 잘리는 것 자동맞춤
+        On Error GoTo 0
     Next uc
+    ' 거리(G)·여장(H) 도 자동맞춤 (큰 숫자 ### 방지)
+    On Error Resume Next
+    wsNew.Columns("G").AutoFit
+    wsNew.Columns("H").AutoFit
+    On Error GoTo 0
 
     ' 종합 재계산 + 선택값(K=1) 필터 재적용 (owner 2026-06-16: 값 채워도 K=1 행 자동 표시)
     '   종합 G열이 신설 합계행 INDEX/MATCH 로 연동 → 강제 재계산 → K=IF(0<G,1) 갱신 → 필터 재적용.
