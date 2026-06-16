@@ -1292,13 +1292,10 @@ Public Sub 기별_양식_채우기()
     Dim hSpan As Double: hSpan = wsNew.Rows(11).RowHeight
     Dim hSub As Double: hSub = wsNew.Rows(13).RowHeight
     Dim hTot As Double: hTot = wsNew.Rows(22).RowHeight
-    ' 소계(13)·합계(22) 행 채움·굵기·폰트 런타임 캡처 (행복사가 안 먹는 환경 대비 — 직접 적용)
-    Dim soFill As Long: soFill = wsNew.Range("A13").Interior.Color
-    Dim soBold As Boolean: soBold = wsNew.Range("A13").Font.Bold
-    Dim soSize As Double: soSize = wsNew.Range("A13").Font.Size
-    Dim totFill As Long: totFill = wsNew.Range("A22").Interior.Color
-    Dim totBold As Boolean: totBold = wsNew.Range("A22").Font.Bold
-    Dim totSize As Double: totSize = wsNew.Range("A22").Font.Size
+    If hSub < 1 Then hSub = 20.1
+    If hTot < 1 Then hTot = 27
+    ' 소계·합계 채움색 (owner 2026-06-16: .Interior.Color 읽기는 흰색 반환 → 하드코딩 설정).
+    '   소계=FFCC99(살구, 직접 RGB) · 합계=인덱스 색 11(원본 양식 동일).
     Dim totRow As Long: totRow = 10 + 4 * nBlk
 
     ' (1) 서식 적용 — 원본 템플릿행에서 PasteSpecial(서식만)+행높이. 합계 먼저(원본 22 가 블록에 덮이기 전).
@@ -1331,7 +1328,7 @@ Public Sub 기별_양식_채우기()
         기별_양식_시설쓰기 wsNew, br + 2, eFac, dedup
         wsNew.Range("A" & (br + 3)).Value = "소  계"
         기별_양식_소계 wsNew, br + 3, br, br + 2
-        기별_행채움 wsNew, br + 3, soFill, soBold, soSize, hSub   ' 소계행 채움·굵기·폰트·높이 직접 적용
+        기별_행채움 wsNew, br + 3, RGB(255, 204, 153), -1, False, 10, hSub   ' 소계: 살구 FFCC99
         subRows.Add (br + 3)
     Next bi
     Dim filled As Long: filled = nBlk
@@ -1341,7 +1338,7 @@ Public Sub 기별_양식_채우기()
     If nBlk > 0 Then
         wsNew.Range("A" & rw).Value = "합 계"
         기별_양식_합계 wsNew, rw, subRows
-        기별_행채움 wsNew, rw, totFill, totBold, totSize, hTot   ' 합계행 채움·굵기·폰트·높이 직접 적용
+        기별_행채움 wsNew, rw, RGB(0, 255, 0), -1, True, 11, hTot   ' 합계: 초록 RGB(0,255,0) · 굵게 · 폰트11
     End If
 
     ' 값 들어간 열 숨김 해제 (owner 2026-06-16: 값 셀이 숨겨지지 않게). 메타열(A~H·JL·JM) 항상 표시.
@@ -1382,7 +1379,7 @@ Public Sub 기별_양식_채우기()
 
     MsgBox "양식 채우기 완료 (신설시트 — 열어둠, 바로 확인)" & vbLf & vbLf & _
            "채운 구간 " & filled & " 개" & IIf(skippedRem > 0, " · 철거 " & skippedRem & " 건 건너뜀", "") & vbLf & _
-           "[진단] 소계색=" & soFill & " · 합계색=" & totFill & " · 소계행수=" & subRows.Count & " · 합계행=" & rw & vbLf & _
+           "소계 " & subRows.Count & " 행 · 합계행 " & rw & " (소계 살구·합계 초록 적용)" & vbLf & _
            "저장: " & outPath, vbInformation, "양식 채우기"
 End Sub
 
@@ -1453,14 +1450,17 @@ Private Sub 기별_행서식(ws As Worksheet, ByVal srcRow As Long, ByVal dstRow
 End Sub
 
 ' 소계/합계 행 채움색·굵기·폰트·행높이 직접 적용 (A:JM 범위). 행복사가 안 먹는 환경 대비.
-Private Sub 기별_행채움(ws As Worksheet, ByVal rowNum As Long, ByVal fillColor As Long, ByVal bold As Boolean, ByVal sz As Double, ByVal h As Double)
+' 소계/합계 행 채움·굵기·폰트·행높이 직접 적용 (A:JM). colorIdx>=0 면 ColorIndex, 아니면 RGB(fillColor).
+Private Sub 기별_행채움(ws As Worksheet, ByVal rowNum As Long, ByVal fillColor As Long, ByVal colorIdx As Long, ByVal bold As Boolean, ByVal sz As Double, ByVal h As Double)
     On Error Resume Next
-    With ws.Range("A" & rowNum & ":JM" & rowNum)
-        .Interior.Pattern = xlSolid
-        .Interior.PatternColorIndex = xlAutomatic
-        .Interior.Color = fillColor
-        .Font.Bold = bold
-        If sz > 0 Then .Font.Size = sz
+    With ws.Range("A" & rowNum & ":JM" & rowNum).Interior
+        .Pattern = xlSolid
+        .PatternColorIndex = xlAutomatic
+        If colorIdx >= 0 Then .ColorIndex = colorIdx Else .Color = fillColor
+    End With
+    With ws.Range("A" & rowNum & ":JM" & rowNum).Font
+        .Bold = bold
+        If sz > 0 Then .Size = sz
     End With
     If h > 0 Then ws.Rows(rowNum).RowHeight = h
     On Error GoTo 0
