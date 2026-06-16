@@ -1269,7 +1269,8 @@ Public Sub 기별_양식_채우기()
     ' === 데이터 영역 채우기 (owner 2026-06-16: 원본 양식 서식·행높이 그대로) ===
     ' 비-철거 + 케이블 있는 구간만 4행 블록(시작/경간/종료/소계). 단독노드·철거 제외.
     Dim segs As Collection: Set segs = New Collection
-    Dim skippedRem As Long, skippedSolo As Long
+    Dim segsRem As Collection: Set segsRem = New Collection
+    Dim skippedSolo As Long
     Dim si As Long
     For si = 1 To mSegList.Count
         Dim rec As Variant: rec = mSegList(si)
@@ -1280,13 +1281,14 @@ Public Sub 기별_양식_채우기()
             Dim cgub As String: cgub = ""
             If mCblGubun.Exists(cblChk) Then cgub = CStr(mCblGubun(cblChk))
             If InStr(cgub, "철거") > 0 Then
-                skippedRem = skippedRem + 1
+                segsRem.Add rec        ' 철거 케이블 → 철거시트 (3.기별명세서(철거))
             Else
                 segs.Add rec
             End If
         End If
     Next si
     Dim nBlk As Long: nBlk = segs.Count
+    Dim nBlkRem As Long: nBlkRem = segsRem.Count
 
     ' 원본 템플릿 행높이 캡처 (clear 전): 함체10·경간11·소계13·합계22
     Dim hFac As Double: hFac = wsNew.Rows(10).RowHeight
@@ -1333,7 +1335,7 @@ Public Sub 기별_양식_채우기()
             If 기별_기설함체(eFac) Then 기별_셀W wsNew, "FW", br + 2, 1
         End If
         wsNew.Range("A" & (br + 3)).Value = "소  계"
-        기별_양식_소계 wsNew, br + 3, br, br + 2
+        기별_양식_소계 wsNew, br + 3, br, br + 2, 기별_양식_합산열()
         기별_행채움 wsNew, br + 3, RGB(255, 204, 153), -1, False, 10, hSub   ' 소계: 살구 FFCC99
         subRows.Add (br + 3)
     Next bi
@@ -1343,7 +1345,7 @@ Public Sub 기별_양식_채우기()
     ' 합계 — A="합 계"(공백1) → 종합 G열 INDEX/MATCH("합 계") 연동.
     If nBlk > 0 Then
         wsNew.Range("A" & rw).Value = "합 계"
-        기별_양식_합계 wsNew, rw, subRows
+        기별_양식_합계 wsNew, rw, subRows, 기별_양식_합산열()
         기별_행채움 wsNew, rw, RGB(0, 255, 0), -1, True, 11, hTot   ' 합계: 초록 RGB(0,255,0) · 굵게 · 폰트11
     End If
 
@@ -1365,6 +1367,73 @@ Public Sub 기별_양식_채우기()
     On Error Resume Next
     wsNew.Columns("G").AutoFit
     On Error GoTo 0
+
+    ' === 철거시트 채우기 (owner 2026-06-16: 철거 케이블 → 3.기별명세서(철거)) ===
+    '   구조는 신설과 동일(4행 블록: 시작함체/경간/종료함체/소계 + 합계). 단 자재·공종 열 레이아웃 다름.
+    '   시설 행: 명칭(A)·배지(EK)·비고(EL) 만 — 코어확인 공종 미반영(owner). 자재·공종은 경간 행에.
+    '   경간 행: 거리(G) + 광케이블 철거(DR 폐기/DS 재사용, owner 규칙) + 규격 자재열(I~AL).
+    '   합계 A="합 계(철거)" → 종합 G273+ INDEX/MATCH 자동 연동(×-1).
+    Dim remFilled As Long: remFilled = 0
+    Dim subRowsRem As Collection: Set subRowsRem = New Collection
+    If nBlkRem > 0 And Not wsRem Is Nothing Then
+        Dim remCols As Variant: remCols = 기별_철거_합산열()
+        Dim hFacR As Double: hFacR = wsRem.Rows(10).RowHeight
+        Dim hSpanR As Double: hSpanR = wsRem.Rows(11).RowHeight
+        Dim totRowR As Long: totRowR = 10 + 4 * nBlkRem
+
+        ' (1) 서식 — 원본 템플릿(블록 10-13·합계 18)에서 행복사. 합계 먼저.
+        Dim biR As Long, brR As Long
+        기별_행서식 wsRem, 18, totRowR, hTot
+        For biR = 1 To nBlkRem
+            brR = 10 + 4 * (biR - 1)
+            기별_행서식 wsRem, 10, brR, hFacR
+            기별_행서식 wsRem, 11, brR + 1, hSpanR
+            기별_행서식 wsRem, 12, brR + 2, hFacR
+            기별_행서식 wsRem, 13, brR + 3, hSub
+        Next biR
+
+        ' (2) 데이터 영역 비우기 (철거시트 145열)
+        wsRem.Range(wsRem.Cells(10, 1), wsRem.Cells(880, 145)).ClearContents
+
+        ' (3) 값 기입 (철거 시설 행은 dedup 불필요 — 자재·공종 누적 없이 명칭/배지/비고만)
+        Set mUsedCols = CreateObject("Scripting.Dictionary")    ' 철거시트 전용 사용열 (신설과 별개)
+        For biR = 1 To nBlkRem
+            rec = segsRem(biR)
+            Dim sFacR As String: sFacR = CStr(rec(0))
+            Dim cblR As String: cblR = CStr(rec(1))
+            Dim eFacR As String: eFacR = CStr(rec(2))
+            brR = 10 + 4 * (biR - 1)
+            기별_양식_시설쓰기_철거 wsRem, brR, sFacR
+            기별_양식_경간쓰기_철거 wsRem, brR + 1, cblR
+            기별_양식_시설쓰기_철거 wsRem, brR + 2, eFacR
+            wsRem.Range("A" & (brR + 3)).Value = "소  계"
+            기별_양식_소계 wsRem, brR + 3, brR, brR + 2, remCols
+            기별_행채움 wsRem, brR + 3, RGB(255, 204, 153), -1, False, 10, hSub
+            subRowsRem.Add (brR + 3)
+        Next biR
+        remFilled = nBlkRem
+
+        ' 합계 — A="합 계(철거)" (공백1+(철거)) → 종합 철거 INDEX/MATCH 연동.
+        wsRem.Range("A" & totRowR).Value = "합 계(철거)"
+        기별_양식_합계 wsRem, totRowR, subRowsRem, remCols
+        기별_행채움 wsRem, totRowR, RGB(0, 255, 0), -1, True, 11, hTot
+
+        ' 철거시트 숨김 해제 + AutoFit. 메타(A~H)·배지(EK)·비고(EL) 항상 표시.
+        Dim remVis As Variant
+        remVis = Array("A", "B", "C", "D", "E", "F", "G", "H", "EK", "EL")
+        Dim rv As Long
+        For rv = LBound(remVis) To UBound(remVis)
+            On Error Resume Next: wsRem.Columns(CStr(remVis(rv))).Hidden = False: On Error GoTo 0
+        Next rv
+        Dim ucR As Variant
+        For Each ucR In mUsedCols.Keys
+            On Error Resume Next
+            wsRem.Columns(CStr(ucR)).Hidden = False
+            wsRem.Columns(CStr(ucR)).AutoFit
+            On Error GoTo 0
+        Next ucR
+        On Error Resume Next: wsRem.Columns("G").AutoFit: On Error GoTo 0
+    End If
 
     ' 종합 재계산 + 선택값(K=1) 필터 재적용 (owner 2026-06-16: 값 채워도 K=1 행 자동 표시)
     '   종합 G열이 신설 합계행 INDEX/MATCH 로 연동 → 강제 재계산 → K=IF(0<G,1) 갱신 → 필터 재적용.
@@ -1390,9 +1459,10 @@ Public Sub 기별_양식_채우기()
     ' 닫지 않고 열어둠 — 저장본 다시 열 필요 없이 바로 서식 확인 (진단 목적)
     On Error Resume Next: wsNew.Activate: On Error GoTo 0
 
-    MsgBox "양식 채우기 완료 (신설시트 — 열어둠, 바로 확인)" & vbLf & vbLf & _
-           "채운 구간 " & filled & " 개" & IIf(skippedRem > 0, " · 철거 " & skippedRem & " 건 건너뜀", "") & vbLf & _
-           "소계 " & subRows.Count & " 행 · 합계행 " & rw & " (소계 살구·합계 초록 적용)" & vbLf & _
+    MsgBox "양식 채우기 완료 (신설·철거 — 열어둠, 바로 확인)" & vbLf & vbLf & _
+           "신설 구간 " & filled & " 개 (소계 " & subRows.Count & " · 합계행 " & rw & ")" & vbLf & _
+           "철거 구간 " & remFilled & " 개 (소계 " & subRowsRem.Count & ")" & vbLf & _
+           "소계 살구·합계 초록 · 종합 연동(신설/철거 ×-1)" & vbLf & _
            "저장: " & outPath, vbInformation, "양식 채우기"
 End Sub
 
@@ -1516,9 +1586,8 @@ Private Sub 기별_양식_경간쓰기(ws As Worksheet, rowNum As Long, cblId As
     End If
 End Sub
 
-' 소계 행 — 합산열별 =SUM(블록 3행).
-Private Sub 기별_양식_소계(ws As Worksheet, subRow As Long, r1 As Long, r2 As Long)
-    Dim cols As Variant: cols = 기별_양식_합산열()
+' 소계 행 — 합산열별 =SUM(블록 3행). cols = 대상 열 배열(신설/철거 시트별).
+Private Sub 기별_양식_소계(ws As Worksheet, subRow As Long, r1 As Long, r2 As Long, cols As Variant)
     Dim k As Long
     For k = LBound(cols) To UBound(cols)
         Dim cl As String: cl = CStr(cols(k))
@@ -1526,10 +1595,9 @@ Private Sub 기별_양식_소계(ws As Worksheet, subRow As Long, r1 As Long, r2
     Next k
 End Sub
 
-' 합계 행 — 합산열별 소계행들의 합.
-Private Sub 기별_양식_합계(ws As Worksheet, totRow As Long, subRows As Collection)
+' 합계 행 — 합산열별 소계행들의 합. cols = 대상 열 배열.
+Private Sub 기별_양식_합계(ws As Worksheet, totRow As Long, subRows As Collection, cols As Variant)
     If subRows.Count = 0 Then Exit Sub
-    Dim cols As Variant: cols = 기별_양식_합산열()
     Dim k As Long
     For k = LBound(cols) To UBound(cols)
         Dim cl As String: cl = CStr(cols(k))
@@ -1546,4 +1614,129 @@ End Sub
 ' 소계·합계 대상 열 (메타 G·H + 케이블 I~AA + 함체 AB~AI + 공종).
 Private Function 기별_양식_합산열() As Variant
     기별_양식_합산열 = Array("G", "H", "I", "J", "K", "L", "M", "N", "O", "P", "Q", "R", "S", "T", "U", "V", "W", "X", "Y", "Z", "AA", "AB", "AC", "AD", "AE", "AF", "AG", "AH", "AI", "FW", "FL", "JF", "IR", "IS", "IV", "IW", "ID", "IE", "IF", "IJ")
+End Function
+
+' ============================================================================
+'  철거시트 (3.기별명세서(철거)) 전용 — owner 2026-06-16
+'   시설 행: 명칭(A)·배지(EK)·비고(EL) 만. 코어확인 공종·조가선 철거 미반영(owner).
+'   경간 행: 거리(G) + 광케이블 철거(DR 폐기/DS 재사용) + 규격 자재열(I~AL).
+' ============================================================================
+
+' 철거시트 소계·합계 대상 열 (메타 G·H + 케이블 규격 I~AL + 광케이블 철거 DR·DS).
+Private Function 기별_철거_합산열() As Variant
+    기별_철거_합산열 = Array("G", "H", "I", "J", "K", "L", "M", "N", "O", "P", "Q", "R", "S", "T", "U", "V", "W", "X", "Y", "Z", "AA", "AB", "AC", "AD", "AE", "AF", "AG", "AH", "AI", "AJ", "AK", "AL", "DR", "DS")
+End Function
+
+' 철거 시설 행 — 명칭(A)·배지(EK)·비고(EL). 자재·공종 없음(owner: 코어확인 미반영).
+Private Sub 기별_양식_시설쓰기_철거(ws As Worksheet, rowNum As Long, facId As String)
+    Dim nm As String: nm = "": If mFacName.Exists(facId) Then nm = CStr(mFacName(facId))
+    Dim bg As String: bg = "": If mFacBadge.Exists(facId) Then bg = CStr(mFacBadge(facId))
+    Dim no As String: no = "": If mFacNo.Exists(facId) Then no = CStr(mFacNo(facId))
+    Dim kd As String: kd = "": If mFacKind.Exists(facId) Then kd = CStr(mFacKind(facId))
+    ws.Range("A" & rowNum).Value = nm
+    If Len(bg) > 0 Then ws.Range("EK" & rowNum).Value = bg      ' 철거시트 배지열 = EK
+    ws.Range("EL" & rowNum).Value = 기별_비고(no, kd)            ' 철거시트 비고열 = EL
+    ' 철거이면 글자색 빨강 (신설시트 비고 신설=빨강 패턴 준용).
+    If InStr(no, "철거") > 0 Then
+        On Error Resume Next: ws.Range("EL" & rowNum).Font.Color = RGB(255, 0, 0): On Error GoTo 0
+    End If
+End Sub
+
+' 철거 경간 행 — A="경간거리", G=거리, 광케이블 철거(DR/DS)=거리, 규격 자재열(I~AL)=거리.
+Private Sub 기별_양식_경간쓰기_철거(ws As Worksheet, rowNum As Long, cblId As String)
+    ws.Range("A" & rowNum).Value = "경간거리"
+    Dim sp As String: sp = "": If mCblSpec.Exists(cblId) Then sp = CStr(mCblSpec(cblId))
+    Dim gb As String: gb = "": If mCblGubun.Exists(cblId) Then gb = CStr(mCblGubun(cblId))
+    Dim ds As String: ds = "": If mCblDist.Exists(cblId) Then ds = CStr(mCblDist(cblId))
+    Dim distN As Double: distN = 0: If Len(ds) > 0 And IsNumeric(ds) Then distN = CDbl(ds)
+    If distN > 0 Then 기별_셀W ws, "G", rowNum, distN
+    If distN > 0 Then
+        ' 광케이블 철거 공종 — 12C이하 폐기·12C초과는 200m미만 폐기/200m이상 재사용 (owner).
+        Dim lay As String: lay = 기별_철거포설열(sp, distN)
+        기별_셀W ws, lay, rowNum, distN
+        ' 규격 자재열 (I~AL) — 철거시트 전용 레이아웃.
+        Dim mCol As String: mCol = 기별_철거케이블열(sp, gb)
+        If Len(mCol) > 0 Then 기별_셀W ws, mCol, rowNum, distN
+    End If
+End Sub
+
+' 광케이블 철거 공종 열 (owner 2026-06-16): 12C이하→폐기(DR). 12C초과→200m미만 폐기(DR)/200m이상 재사용(DS).
+Private Function 기별_철거포설열(ByVal spec As String, ByVal distN As Double) As String
+    Dim core As Long: core = 기별_규격코어수(spec)
+    If core <= 12 Then
+        기별_철거포설열 = "DR"          ' 폐기
+    ElseIf distN < 200 Then
+        기별_철거포설열 = "DR"          ' 폐기 (200m 미만)
+    Else
+        기별_철거포설열 = "DS"          ' 재사용 (200m 이상)
+    End If
+End Function
+
+' 규격 → 코어수 (정수). "광케이블,72C,가공" / "12C" → 72 / 12. 미상 0.
+Private Function 기별_규격코어수(ByVal spec As String) As Long
+    Dim code As String: code = 기별_규격코드(spec)     ' "72C" 등
+    Dim n As String: n = ""
+    Dim i As Long, ch As String
+    For i = 1 To Len(code)
+        ch = Mid(code, i, 1)
+        If ch >= "0" And ch <= "9" Then n = n & ch Else Exit For
+    Next i
+    If Len(n) > 0 Then 기별_규격코어수 = CLng(n) Else 기별_규격코어수 = 0
+End Function
+
+' 철거 케이블 규격 자재열 (철거시트 I~AL). 규격+설치구분+세경여부 → 열문자. 미매핑 "".
+Private Function 기별_철거케이블열(ByVal spec As String, ByVal gubun As String) As String
+    Dim sp As String: sp = 기별_규격코드(spec)
+    Dim inst As String: inst = 기별_설치(gubun)
+    Dim slim As Boolean: slim = (InStr(gubun, "세경") > 0)
+    기별_철거케이블열 = ""
+    Select Case sp
+        Case "2C": 기별_철거케이블열 = "Q"                         ' 세경2C인입용
+        Case "4C"
+            If inst = "관로" Then
+                If slim Then 기별_철거케이블열 = "S" Else 기별_철거케이블열 = "T"
+            Else
+                기별_철거케이블열 = "R"                            ' 세경4C가공
+            End If
+        Case "12C"
+            If slim Then 기별_철거케이블열 = "U" Else 기별_철거케이블열 = "V"
+        Case "24C"
+            If inst = "관로" Then 기별_철거케이블열 = "X" Else 기별_철거케이블열 = "W"
+        Case "36C"
+            If inst = "일반" Then
+                기별_철거케이블열 = "Z"
+            ElseIf inst = "관로" Then
+                기별_철거케이블열 = "AA"
+            Else
+                기별_철거케이블열 = "Y"
+            End If
+        Case "48C"
+            If inst = "일반" Then
+                기별_철거케이블열 = "AC"
+            ElseIf inst = "관로" Then
+                기별_철거케이블열 = "AD"
+            Else
+                기별_철거케이블열 = "AB"
+            End If
+        Case "72C"
+            If inst = "일반" Then
+                기별_철거케이블열 = "AF"
+            ElseIf inst = "관로" Then
+                기별_철거케이블열 = "AG"
+            Else
+                기별_철거케이블열 = "AE"
+            End If
+        Case "144C"
+            If inst = "일반" Then
+                기별_철거케이블열 = "AI"
+            ElseIf inst = "관로" Then
+                기별_철거케이블열 = "AJ"
+            Else
+                기별_철거케이블열 = "AH"
+            End If
+        Case "288C"
+            If inst = "일반" Then 기별_철거케이블열 = "AL" Else 기별_철거케이블열 = "AK"
+        Case Else
+            기별_철거케이블열 = ""                                 ' 1C/576C 등 미매핑
+    End Select
 End Function
