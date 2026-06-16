@@ -194,11 +194,12 @@ Public Function 기별_미리보기_시트확보() As Worksheet
 End Function
 
 Public Sub 기별_추출_미리보기()
-    Dim wsFac As Worksheet, wsCbl As Worksheet, wsNw As Worksheet
+    Dim wsFac As Worksheet, wsCbl As Worksheet, wsNw As Worksheet, wsAdmin As Worksheet
     On Error Resume Next
     Set wsFac = ThisWorkbook.Worksheets(SHEET_META_FAC)
     Set wsCbl = ThisWorkbook.Worksheets(SHEET_META_CBL)
     Set wsNw = ThisWorkbook.Worksheets(SHEET_NETWORK)
+    Set wsAdmin = ThisWorkbook.Worksheets(SHEET_ADMIN)
     On Error GoTo 0
     If wsFac Is Nothing Then MsgBox "_시설물 메타 시트가 없습니다.", vbExclamation, "기별 추출": Exit Sub
 
@@ -362,11 +363,12 @@ End Sub
 '  ※ 이원화/우회로의 여분 간선은 spanning tree 로 1개만 채택(미리보기 단계).
 ' ============================================================================
 Public Sub 기별_체인_직렬화_미리보기()
-    Dim wsFac As Worksheet, wsCbl As Worksheet, wsNw As Worksheet
+    Dim wsFac As Worksheet, wsCbl As Worksheet, wsNw As Worksheet, wsAdmin As Worksheet
     On Error Resume Next
     Set wsFac = ThisWorkbook.Worksheets(SHEET_META_FAC)
     Set wsCbl = ThisWorkbook.Worksheets(SHEET_META_CBL)
     Set wsNw = ThisWorkbook.Worksheets(SHEET_NETWORK)
+    Set wsAdmin = ThisWorkbook.Worksheets(SHEET_ADMIN)
     On Error GoTo 0
     If wsFac Is Nothing Then MsgBox "_시설물 메타 시트가 없습니다.", vbExclamation, "기별 직렬화": Exit Sub
     If wsCbl Is Nothing Then MsgBox "_케이블 메타 시트가 없습니다.", vbExclamation, "기별 직렬화": Exit Sub
@@ -390,7 +392,7 @@ Public Sub 기별_체인_직렬화_미리보기()
         Dim fId As String: fId = CStr(wsFac.Cells(r, 1).Value)
         If Len(fId) > 0 Then
             Dim lbl As String: lbl = CStr(wsFac.Cells(r, 2).Value)
-            mFacName(fId) = CStr(wsFac.Cells(r, 3).Value)
+            mFacName(fId) = 기별_시설명(wsAdmin, wsNw, fId, CStr(wsFac.Cells(r, 3).Value))
             mFacBadge(fId) = CStr(wsFac.Cells(r, 5).Value)
             mFacNo(fId) = 기별_신설기설(lbl)
             mFacKind(fId) = 기별_시설종류(wsNw, fId, lbl)
@@ -969,6 +971,33 @@ Private Function 기별_설치(ByVal gubun As String) As String
     End If
 End Function
 
+' 시설물 명칭 (함체명/시설물/RN명) — owner 2026-06-16: _시설물 col3 는 빈칸(placeholder).
+'   실제 명칭은 콜아웃 2번째 줄(사용자 입력). 행정도 우선 → 네트웍 → col3 폴백.
+Private Function 기별_시설명(wsA As Worksheet, wsN As Worksheet, ByVal facId As String, ByVal fallback As String) As String
+    Dim nm As String
+    nm = 기별_콜아웃_라인2(wsA, facId)
+    If Len(nm) = 0 Then nm = 기별_콜아웃_라인2(wsN, facId)
+    If Len(nm) = 0 Then nm = Trim(fallback)
+    기별_시설명 = nm
+End Function
+
+' 시설물 콜아웃(lbl_) 2번째 줄 = 함체명. placeholder/ID 면 빈 문자열.
+Private Function 기별_콜아웃_라인2(ws As Worksheet, ByVal facId As String) As String
+    기별_콜아웃_라인2 = ""
+    If ws Is Nothing Or Len(facId) = 0 Then Exit Function
+    Dim lbl As Shape: Set lbl = Nothing
+    On Error Resume Next: Set lbl = ws.Shapes(PREFIX_LABEL & facId): On Error GoTo 0
+    If lbl Is Nothing Then Exit Function
+    Dim tx As String: tx = ""
+    On Error Resume Next: tx = lbl.TextFrame2.TextRange.Text: On Error GoTo 0
+    tx = Replace(Replace(tx, vbCrLf, vbCr), vbLf, vbCr)
+    Dim parts() As String: parts = Split(tx, vbCr)
+    If UBound(parts) >= 1 Then
+        Dim ln2 As String: ln2 = Trim(parts(1))
+        If ln2 <> "함체명을 입력하세요" And ln2 <> "ID" And ln2 <> "" Then 기별_콜아웃_라인2 = ln2
+    End If
+End Function
+
 ' 시설물 콜아웃 규격 (line1 = "구분/규격" 의 마지막 토큰, 시간직렬 복원).
 Private Function 기별_시설규격(ws As Worksheet, ByVal facId As String) As String
     기별_시설규격 = ""
@@ -1128,11 +1157,12 @@ End Function
 '  실행: Alt+F8 → 기별_양식_채우기
 ' ============================================================================
 Public Sub 기별_양식_채우기()
-    Dim wsFac As Worksheet, wsCbl As Worksheet, wsNw As Worksheet
+    Dim wsFac As Worksheet, wsCbl As Worksheet, wsNw As Worksheet, wsAdmin As Worksheet
     On Error Resume Next
     Set wsFac = ThisWorkbook.Worksheets(SHEET_META_FAC)
     Set wsCbl = ThisWorkbook.Worksheets(SHEET_META_CBL)
     Set wsNw = ThisWorkbook.Worksheets(SHEET_NETWORK)
+    Set wsAdmin = ThisWorkbook.Worksheets(SHEET_ADMIN)
     On Error GoTo 0
     If wsFac Is Nothing Or wsCbl Is Nothing Then MsgBox "_시설물/_케이블 메타가 없습니다.", vbExclamation, "양식 채우기": Exit Sub
 
@@ -1161,7 +1191,7 @@ Public Sub 기별_양식_채우기()
         Dim fId As String: fId = CStr(wsFac.Cells(r, 1).Value)
         If Len(fId) > 0 Then
             Dim lbl As String: lbl = CStr(wsFac.Cells(r, 2).Value)
-            mFacName(fId) = CStr(wsFac.Cells(r, 3).Value)
+            mFacName(fId) = 기별_시설명(wsAdmin, wsNw, fId, CStr(wsFac.Cells(r, 3).Value))
             mFacBadge(fId) = CStr(wsFac.Cells(r, 5).Value)
             mFacNo(fId) = 기별_신설기설(lbl)
             mFacKind(fId) = 기별_시설종류(wsNw, fId, lbl)
@@ -1392,16 +1422,14 @@ Private Sub 기별_셀W(ws As Worksheet, ByVal col As String, ByVal rowNum As Lo
     If Not mUsedCols Is Nothing Then mUsedCols(col) = True
 End Sub
 
-' 원본 템플릿행 → 대상행 서식(글자·색·굵기·채움·테두리)만 복사 + 행높이(h) 설정. 내용·수식 안 따라옴.
-'   owner 2026-06-16: 소계/합계 글자·색·굵기·채움·행높이 원본 그대로. 샘플 수동수식 전파 방지.
+' 원본 템플릿행 → 대상행 「전체 복사」(서식·채움·굵기·테두리·행높이 모두) + 행높이(h) 명시.
+'   owner 2026-06-16: 행복사 방식. 내용(수식)도 따라오지만, 이후 내용비우기+값기입으로 덮어씀.
+'   ※ PasteSpecial(서식만)은 채움·행높이 누락되던 문제 → 전체 행 Copy Destination 으로 변경.
 Private Sub 기별_행서식(ws As Worksheet, ByVal srcRow As Long, ByVal dstRow As Long, ByVal h As Double)
     On Error Resume Next
-    If srcRow <> dstRow Then
-        ws.Rows(srcRow).Copy
-        ws.Rows(dstRow).PasteSpecial Paste:=xlPasteFormats
-        Application.CutCopyMode = False
-    End If
+    If srcRow <> dstRow Then ws.Rows(srcRow).Copy Destination:=ws.Rows(dstRow)
     If h > 0 Then ws.Rows(dstRow).RowHeight = h
+    Application.CutCopyMode = False
     On Error GoTo 0
 End Sub
 
