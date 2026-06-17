@@ -1711,14 +1711,18 @@ Public Function 기별_라벨값(ByVal s As String) As String
     If p > 0 Then 기별_라벨값 = Trim(Mid(s, p + 1)) Else 기별_라벨값 = Trim(s)
 End Function
 
-' 파일명 금지문자 제거 → 공백 + 연속공백 축약 + trim.
+' 파일명 금지문자 제거 + 공백 → "_" (owner 2026-06-16: 공백대신 언더스코어).
 '   Windows 금지: \ / : * ? " < > | · Excel 추가 금지: [ ] (외부참조 문법). 탭·줄바꿈도 제거.
 Public Function 기별_파일명_정리(ByVal s As String) As String
     Dim bad As Variant: bad = Array("\", "/", ":", "*", "?", """", "<", ">", "|", "[", "]", vbTab, vbCr, vbLf)
     Dim i As Long
     For i = LBound(bad) To UBound(bad): s = Replace(s, CStr(bad(i)), " "): Next i
-    Do While InStr(s, "  ") > 0: s = Replace(s, "  ", " "): Loop
-    기별_파일명_정리 = Trim(s)
+    s = Trim(s)
+    s = Replace(s, " ", "_")                       ' 공백 → "_"
+    Do While InStr(s, "__") > 0: s = Replace(s, "__", "_"): Loop   ' 연속 "_" 축약
+    Do While Len(s) > 0 And Left(s, 1) = "_": s = Mid(s, 2): Loop  ' 앞 "_" 제거
+    Do While Len(s) > 0 And Right(s, 1) = "_": s = Left(s, Len(s) - 1): Loop   ' 뒤 "_" 제거
+    기별_파일명_정리 = s
 End Function
 
 ' 시설물 행 — A·JL·JM 항상, 공종·자재는 첫 등장(dedup) 1회.

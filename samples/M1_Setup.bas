@@ -3637,13 +3637,28 @@ Public Sub 새파일_내보내기()
 
     Dim newWb As Workbook: Set newWb = ActiveWorkbook
 
-    ' 행정도/네트웍 → (후) 리네임 (그룹화·zorder 위해 객체 캐시)
+    ' 행정도/네트웍 → 4./5. (후) 리네임 (그룹화·zorder 위해 객체 캐시)
     Dim wsAdminNew As Worksheet: Set wsAdminNew = Nothing
     Dim wsNetworkNew As Worksheet: Set wsNetworkNew = Nothing
     On Error Resume Next
-    Set wsAdminNew = newWb.Worksheets(SHEET_ADMIN): If Not wsAdminNew Is Nothing Then wsAdminNew.Name = SHEET_ADMIN & "(후)"
-    Set wsNetworkNew = newWb.Worksheets(SHEET_NETWORK): If Not wsNetworkNew Is Nothing Then wsNetworkNew.Name = SHEET_NETWORK & "(후)"
+    Set wsAdminNew = newWb.Worksheets(SHEET_ADMIN): If Not wsAdminNew Is Nothing Then wsAdminNew.Name = "4." & SHEET_ADMIN & "(후)"
+    Set wsNetworkNew = newWb.Worksheets(SHEET_NETWORK): If Not wsNetworkNew Is Nothing Then wsNetworkNew.Name = "5." & SHEET_NETWORK & "(후)"
     On Error GoTo 0
+
+    ' 시트 순서 정렬 (owner 2026-06-16): 1.종합·2.신설·3.철거·4.행정도(후)·5.네트웍구성도(후).
+    '   ※ Worksheets(Array()).Copy 는 배열 순서가 아니라 원본 워크북 순서를 따르므로 명시적 재정렬 필요.
+    Dim ordNames As Variant
+    ordNames = Array("1.종합기별명세서", "2.기별명세서(신설)", "3.기별명세서(철거)", "4." & SHEET_ADMIN & "(후)", "5." & SHEET_NETWORK & "(후)")
+    Dim oi As Long
+    For oi = LBound(ordNames) To UBound(ordNames)
+        On Error Resume Next
+        If oi = LBound(ordNames) Then
+            newWb.Worksheets(CStr(ordNames(oi))).Move Before:=newWb.Worksheets(1)
+        Else
+            newWb.Worksheets(CStr(ordNames(oi))).Move After:=newWb.Worksheets(CStr(ordNames(oi - 1)))
+        End If
+        On Error GoTo 0
+    Next oi
 
     ' 정리(범례·버튼·격자색 제거) — 행정도(후)·네트웍(후) 만. 기별 3시트는 양식 서식 보존 위해 건너뜀.
     Dim ws As Worksheet, i As Long, nm As String
