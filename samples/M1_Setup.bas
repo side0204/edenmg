@@ -3710,17 +3710,21 @@ Public Sub 새파일_내보내기()
     If Len(fname) = 0 Then fname = "기별명세서_" & Format(Now, "yyyymmdd_hhnn")
     Dim outPath As String: outPath = ThisWorkbook.Path & "\" & fname & ".xlsx"
 
+    ' 저장만 하고 창은 열지 않음 (owner 2026-06-16): SaveAs 후 닫음.
     Application.DisplayAlerts = False
-    On Error Resume Next: newWb.SaveAs outPath, FileFormat:=51: On Error GoTo 0
+    Dim saveOk As Boolean: saveOk = False
+    On Error Resume Next
+    newWb.SaveAs outPath, FileFormat:=51
+    saveOk = (Err.Number = 0)
+    newWb.Close SaveChanges:=False
+    On Error GoTo 0
     Application.DisplayAlerts = True
-
     Application.ScreenUpdating = True
-    On Error Resume Next: newWb.Activate: On Error GoTo 0
 
-    MsgBox "기별명세서 내보내기 완료." & vbLf & vbLf & _
+    MsgBox "기별명세서 내보내기 완료 (파일로 저장만 — 창 안 열림)." & vbLf & vbLf & _
            "기별 작성: 신설 " & f & " 구간 · 철거 " & rf & " 구간" & IIf(filledOk, "", " (⚠ 기별 시트 확인 필요)") & vbLf & _
            "네트웍 라벨 " & groupedCount & " 그룹 · 케이블ID " & zCount & " 맨앞" & vbLf & _
-           "저장: " & outPath, vbInformation, "기별명세서 내보내기"
+           IIf(saveOk, "저장: " & outPath, "⚠ 저장 실패 — 같은 이름 파일이 열려있는지 확인: " & outPath), vbInformation, "기별명세서 내보내기"
 End Sub
 
 ' owner 2026-06-07 (8-55): 원본 네트웍구성도 도형 Placement 분기 + 케이블 선로ID 맨 앞.

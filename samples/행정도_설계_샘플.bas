@@ -3789,17 +3789,21 @@ Public Sub 새파일_내보내기()
     If Len(fname) = 0 Then fname = "기별명세서_" & Format(Now, "yyyymmdd_hhnn")
     Dim outPath As String: outPath = ThisWorkbook.Path & "\" & fname & ".xlsx"
 
+    ' 저장만 하고 창은 열지 않음 (owner 2026-06-16): SaveAs 후 닫음.
     Application.DisplayAlerts = False
-    On Error Resume Next: newWb.SaveAs outPath, FileFormat:=51: On Error GoTo 0
+    Dim saveOk As Boolean: saveOk = False
+    On Error Resume Next
+    newWb.SaveAs outPath, FileFormat:=51
+    saveOk = (Err.Number = 0)
+    newWb.Close SaveChanges:=False
+    On Error GoTo 0
     Application.DisplayAlerts = True
-
     Application.ScreenUpdating = True
-    On Error Resume Next: newWb.Activate: On Error GoTo 0
 
-    MsgBox "기별명세서 내보내기 완료." & vbLf & vbLf & _
+    MsgBox "기별명세서 내보내기 완료 (파일로 저장만 — 창 안 열림)." & vbLf & vbLf & _
            "기별 작성: 신설 " & f & " 구간 · 철거 " & rf & " 구간" & IIf(filledOk, "", " (⚠ 기별 시트 확인 필요)") & vbLf & _
            "네트웍 라벨 " & groupedCount & " 그룹 · 케이블ID " & zCount & " 맨앞" & vbLf & _
-           "저장: " & outPath, vbInformation, "기별명세서 내보내기"
+           IIf(saveOk, "저장: " & outPath, "⚠ 저장 실패 — 같은 이름 파일이 열려있는지 확인: " & outPath), vbInformation, "기별명세서 내보내기"
 End Sub
 
 ' owner 2026-06-07 (8-55): 원본 네트웍구성도 도형 Placement 분기 + 케이블 선로ID 맨 앞.
@@ -33149,7 +33153,7 @@ Public Function 기별_채우기_코어(wb As Workbook, ByRef outFilled As Long,
     If nBlk > 0 Then
         wsNew.Range("A" & rw).Value = "합 계"
         기별_양식_합계 wsNew, rw, subRows, 기별_양식_합산열()
-        기별_행채움 wsNew, rw, RGB(0, 255, 0), -1, True, 11, hTot   ' 합계: 초록 RGB(0,255,0) · 굵게 · 폰트11
+        기별_행채움 wsNew, rw, RGB(0, 255, 0), -1, True, 11, hTot, True   ' 합계: 초록·굵게·폰트11 + 가운데정렬·모든 테두리
     End If
 
     ' 값 들어간 열 숨김 해제 (owner 2026-06-16: 값 셀이 숨겨지지 않게). 메타열(A~H·JL·JM) 항상 표시.
@@ -33219,7 +33223,7 @@ Public Function 기별_채우기_코어(wb As Workbook, ByRef outFilled As Long,
         ' 합계 — A="합 계(철거)" (공백1+(철거)) → 종합 철거 INDEX/MATCH 연동.
         wsRem.Range("A" & totRowR).Value = "합 계(철거)"
         기별_양식_합계 wsRem, totRowR, subRowsRem, remCols
-        기별_행채움 wsRem, totRowR, RGB(0, 255, 0), -1, True, 11, hTot
+        기별_행채움 wsRem, totRowR, RGB(0, 255, 0), -1, True, 11, hTot, True   ' 합계: 가운데정렬·모든 테두리
 
         ' 철거시트 숨김 해제 + AutoFit. 메타(A~H)·배지(EK)·비고(EL) 항상 표시.
         Dim remVis As Variant
@@ -33353,9 +33357,9 @@ Private Sub 기별_행서식(ws As Worksheet, ByVal srcRow As Long, ByVal dstRow
     On Error GoTo 0
 End Sub
 
-' 소계/합계 행 채움색·굵기·폰트·행높이 직접 적용 (A:JM 범위). 행복사가 안 먹는 환경 대비.
 ' 소계/합계 행 채움·굵기·폰트·행높이 직접 적용 (A:JM). colorIdx>=0 면 ColorIndex, 아니면 RGB(fillColor).
-Private Sub 기별_행채움(ws As Worksheet, ByVal rowNum As Long, ByVal fillColor As Long, ByVal colorIdx As Long, ByVal bold As Boolean, ByVal sz As Double, ByVal h As Double)
+' allBorder=True(합계용): 가운데정렬(가로·세로) + 모든 테두리 (owner 2026-06-16).
+Private Sub 기별_행채움(ws As Worksheet, ByVal rowNum As Long, ByVal fillColor As Long, ByVal colorIdx As Long, ByVal bold As Boolean, ByVal sz As Double, ByVal h As Double, Optional ByVal allBorder As Boolean = False)
     On Error Resume Next
     With ws.Range("A" & rowNum & ":JM" & rowNum).Interior
         .Pattern = xlSolid
@@ -33366,6 +33370,18 @@ Private Sub 기별_행채움(ws As Worksheet, ByVal rowNum As Long, ByVal fillCo
         .Bold = bold
         If sz > 0 Then .Size = sz
     End With
+    If allBorder Then
+        With ws.Range("A" & rowNum & ":JM" & rowNum)
+            .HorizontalAlignment = xlCenter
+            .VerticalAlignment = xlCenter
+            .Borders(xlEdgeTop).LineStyle = xlContinuous
+            .Borders(xlEdgeBottom).LineStyle = xlContinuous
+            .Borders(xlEdgeLeft).LineStyle = xlContinuous
+            .Borders(xlEdgeRight).LineStyle = xlContinuous
+            .Borders(xlInsideVertical).LineStyle = xlContinuous
+            .Borders(xlInsideHorizontal).LineStyle = xlContinuous
+        End With
+    End If
     If h > 0 Then ws.Rows(rowNum).RowHeight = h
     On Error GoTo 0
 End Sub

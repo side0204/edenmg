@@ -1600,7 +1600,7 @@ Public Function 기별_채우기_코어(wb As Workbook, ByRef outFilled As Long,
     If nBlk > 0 Then
         wsNew.Range("A" & rw).Value = "합 계"
         기별_양식_합계 wsNew, rw, subRows, 기별_양식_합산열()
-        기별_행채움 wsNew, rw, RGB(0, 255, 0), -1, True, 11, hTot   ' 합계: 초록 RGB(0,255,0) · 굵게 · 폰트11
+        기별_행채움 wsNew, rw, RGB(0, 255, 0), -1, True, 11, hTot, True   ' 합계: 초록·굵게·폰트11 + 가운데정렬·모든 테두리
     End If
 
     ' 값 들어간 열 숨김 해제 (owner 2026-06-16: 값 셀이 숨겨지지 않게). 메타열(A~H·JL·JM) 항상 표시.
@@ -1670,7 +1670,7 @@ Public Function 기별_채우기_코어(wb As Workbook, ByRef outFilled As Long,
         ' 합계 — A="합 계(철거)" (공백1+(철거)) → 종합 철거 INDEX/MATCH 연동.
         wsRem.Range("A" & totRowR).Value = "합 계(철거)"
         기별_양식_합계 wsRem, totRowR, subRowsRem, remCols
-        기별_행채움 wsRem, totRowR, RGB(0, 255, 0), -1, True, 11, hTot
+        기별_행채움 wsRem, totRowR, RGB(0, 255, 0), -1, True, 11, hTot, True   ' 합계: 가운데정렬·모든 테두리
 
         ' 철거시트 숨김 해제 + AutoFit. 메타(A~H)·배지(EK)·비고(EL) 항상 표시.
         Dim remVis As Variant
@@ -1804,9 +1804,9 @@ Private Sub 기별_행서식(ws As Worksheet, ByVal srcRow As Long, ByVal dstRow
     On Error GoTo 0
 End Sub
 
-' 소계/합계 행 채움색·굵기·폰트·행높이 직접 적용 (A:JM 범위). 행복사가 안 먹는 환경 대비.
 ' 소계/합계 행 채움·굵기·폰트·행높이 직접 적용 (A:JM). colorIdx>=0 면 ColorIndex, 아니면 RGB(fillColor).
-Private Sub 기별_행채움(ws As Worksheet, ByVal rowNum As Long, ByVal fillColor As Long, ByVal colorIdx As Long, ByVal bold As Boolean, ByVal sz As Double, ByVal h As Double)
+' allBorder=True(합계용): 가운데정렬(가로·세로) + 모든 테두리 (owner 2026-06-16).
+Private Sub 기별_행채움(ws As Worksheet, ByVal rowNum As Long, ByVal fillColor As Long, ByVal colorIdx As Long, ByVal bold As Boolean, ByVal sz As Double, ByVal h As Double, Optional ByVal allBorder As Boolean = False)
     On Error Resume Next
     With ws.Range("A" & rowNum & ":JM" & rowNum).Interior
         .Pattern = xlSolid
@@ -1817,6 +1817,18 @@ Private Sub 기별_행채움(ws As Worksheet, ByVal rowNum As Long, ByVal fillCo
         .Bold = bold
         If sz > 0 Then .Size = sz
     End With
+    If allBorder Then
+        With ws.Range("A" & rowNum & ":JM" & rowNum)
+            .HorizontalAlignment = xlCenter
+            .VerticalAlignment = xlCenter
+            .Borders(xlEdgeTop).LineStyle = xlContinuous
+            .Borders(xlEdgeBottom).LineStyle = xlContinuous
+            .Borders(xlEdgeLeft).LineStyle = xlContinuous
+            .Borders(xlEdgeRight).LineStyle = xlContinuous
+            .Borders(xlInsideVertical).LineStyle = xlContinuous
+            .Borders(xlInsideHorizontal).LineStyle = xlContinuous
+        End With
+    End If
     If h > 0 Then ws.Rows(rowNum).RowHeight = h
     On Error GoTo 0
 End Sub
