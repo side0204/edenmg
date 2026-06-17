@@ -3786,24 +3786,49 @@ Public Sub 새파일_내보내기()
     If Len(ordNo) > 0 And Len(prjNm) > 0 Then fname = fname & "_"
     fname = fname & prjNm
     fname = 기별_파일명_정리(fname)
-    If Len(fname) = 0 Then fname = "기별명세서_" & Format(Now, "yyyymmdd_hhnn")
-    Dim outPath As String: outPath = ThisWorkbook.Path & "\" & fname & ".xlsx"
-
-    ' 저장만 하고 창은 열지 않음 (owner 2026-06-16): SaveAs 후 닫음.
+    If Len(fname) = 0 Then fname = "기별명세서_채움_" & Format(Now, "yyyymmdd_hhnn")
+    Dim baseName As String: baseName = fname & ".xlsx"
+    ' 저장 — 도구 폴더 우선, 실패 시 바탕화면. 성공=창 닫음(저장만), 실패=창 열어둠(수동 저장).
+    '   ThisWorkbook.Path 가 OneDrive URL(http) 이거나 같은 이름 파일이 열려 있으면 첫 시도 실패 가능 → 폴백.
+    Dim cand(1 To 2) As String
+    cand(1) = ThisWorkbook.Path & "\" & baseName
+    cand(2) = Environ$("USERPROFILE") & "\Desktop\" & baseName
+    Dim savedPath As String: savedPath = ""
+    Dim lastErr As Long: lastErr = 0
+    Dim lastDesc As String: lastDesc = ""
     Application.DisplayAlerts = False
-    Dim saveOk As Boolean: saveOk = False
-    On Error Resume Next
-    newWb.SaveAs outPath, FileFormat:=51
-    saveOk = (Err.Number = 0)
-    newWb.Close SaveChanges:=False
-    On Error GoTo 0
+    Dim ti As Long
+    For ti = 1 To 2
+        If InStr(cand(ti), "://") = 0 Then          ' URL 경로(http)는 로컬 SaveAs 불가 → 건너뜀
+            Err.Clear
+            On Error Resume Next
+            newWb.SaveAs cand(ti), FileFormat:=51
+            If Err.Number = 0 Then
+                savedPath = cand(ti)
+            Else
+                lastErr = Err.Number
+                lastDesc = Err.Description
+            End If
+            On Error GoTo 0
+            If Len(savedPath) > 0 Then Exit For
+        End If
+    Next ti
     Application.DisplayAlerts = True
     Application.ScreenUpdating = True
 
-    MsgBox "기별명세서 내보내기 완료 (파일로 저장만 — 창 안 열림)." & vbLf & vbLf & _
-           "기별 작성: 신설 " & f & " 구간 · 철거 " & rf & " 구간" & IIf(filledOk, "", " (⚠ 기별 시트 확인 필요)") & vbLf & _
-           "네트웍 라벨 " & groupedCount & " 그룹 · 케이블ID " & zCount & " 맨앞" & vbLf & _
-           IIf(saveOk, "저장: " & outPath, "⚠ 저장 실패 — 같은 이름 파일이 열려있는지 확인: " & outPath), vbInformation, "기별명세서 내보내기"
+    If Len(savedPath) > 0 Then
+        On Error Resume Next: newWb.Close SaveChanges:=False: On Error GoTo 0
+        MsgBox "기별명세서 내보내기 완료 (저장만 — 창 안 열림)." & vbLf & vbLf & _
+               "기별 작성: 신설 " & f & " 구간 · 철거 " & rf & " 구간" & IIf(filledOk, "", " (⚠ 기별 시트 확인 필요)") & vbLf & _
+               "저장: " & savedPath, vbInformation, "기별명세서 내보내기"
+    Else
+        On Error Resume Next: newWb.Activate: On Error GoTo 0
+        MsgBox "⚠ 자동 저장 실패 (오류 " & lastErr & ": " & lastDesc & ")." & vbLf & vbLf & _
+               "도구 폴더: [" & ThisWorkbook.Path & "]" & vbLf & _
+               "파일명: " & baseName & vbLf & vbLf & _
+               "새로 열린 이 창에서 직접 「다른 이름으로 저장」 하세요." & vbLf & _
+               "(같은 이름 파일이 이미 열려 있으면 닫고 다시 시도)", vbExclamation, "기별명세서 내보내기"
+    End If
 End Sub
 
 ' owner 2026-06-07 (8-55): 원본 네트웍구성도 도형 Placement 분기 + 케이블 선로ID 맨 앞.
