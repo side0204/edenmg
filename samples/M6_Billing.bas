@@ -1361,14 +1361,13 @@ End Function
 '  실행: Alt+F8 → 기별_양식_채우기
 ' ============================================================================
 Public Sub 기별_양식_채우기()
-    Dim wsFac As Worksheet, wsCbl As Worksheet, wsNw As Worksheet, wsAdmin As Worksheet
+    ' 표준 양식 파일(기별명세서양식.xlsx) 복사본을 열어 채운 뒤 별도 파일로 SaveAs (단독 실행용).
+    Dim wsFacChk As Worksheet, wsCblChk As Worksheet
     On Error Resume Next
-    Set wsFac = ThisWorkbook.Worksheets(SHEET_META_FAC)
-    Set wsCbl = ThisWorkbook.Worksheets(SHEET_META_CBL)
-    Set wsNw = ThisWorkbook.Worksheets(SHEET_NETWORK)
-    Set wsAdmin = ThisWorkbook.Worksheets(SHEET_ADMIN)
+    Set wsFacChk = ThisWorkbook.Worksheets(SHEET_META_FAC)
+    Set wsCblChk = ThisWorkbook.Worksheets(SHEET_META_CBL)
     On Error GoTo 0
-    If wsFac Is Nothing Or wsCbl Is Nothing Then MsgBox "_시설물/_케이블 메타가 없습니다.", vbExclamation, "양식 채우기": Exit Sub
+    If wsFacChk Is Nothing Or wsCblChk Is Nothing Then MsgBox "_시설물/_케이블 메타가 없습니다.", vbExclamation, "양식 채우기": Exit Sub
 
     Dim formPath As String: formPath = ThisWorkbook.Path & "\기별명세서양식.xlsx"
     If Len(Dir(formPath)) = 0 Then
@@ -1378,6 +1377,54 @@ Public Sub 기별_양식_채우기()
     End If
 
     Application.ScreenUpdating = False
+    Dim wb As Workbook: Set wb = Workbooks.Open(formPath)
+    Dim f As Long, rf As Long
+    If Not 기별_채우기_코어(wb, f, rf) Then
+        On Error Resume Next: wb.Close SaveChanges:=False: On Error GoTo 0
+        Application.ScreenUpdating = True
+        MsgBox "양식에 기별 시트(2.기별명세서(신설) 등)가 없습니다.", vbExclamation, "양식 채우기": Exit Sub
+    End If
+
+    Dim outPath As String
+    outPath = ThisWorkbook.Path & "\기별명세서_채움_" & Format(Now, "yyyymmdd_hhnn") & ".xlsx"
+    Application.DisplayAlerts = False
+    On Error Resume Next: wb.SaveAs outPath, FileFormat:=51: On Error GoTo 0
+    Application.DisplayAlerts = True
+    Application.ScreenUpdating = True
+    On Error Resume Next: wb.Worksheets("2.기별명세서(신설)").Activate: On Error GoTo 0
+
+    MsgBox "양식 채우기 완료 (신설·철거)" & vbLf & vbLf & _
+           "신설 구간 " & f & " 개 · 철거 구간 " & rf & " 개" & vbLf & _
+           "저장: " & outPath, vbInformation, "양식 채우기"
+End Sub
+
+' 기별 채우기 코어 — wb 의 기별 3시트(1.종합·2.신설·3.철거)를 채운다. 메타는 ThisWorkbook 에서 읽음.
+'   단독 양식 파일·내보내기(도구 내 시트 복사본) 양쪽에서 재사용. SaveAs/MsgBox 는 호출자 책임.
+'   ScreenUpdating 은 호출자 관리. 반환 True=성공. outFilled/outRemFilled = 신설/철거 구간 수.
+Public Function 기별_채우기_코어(wb As Workbook, ByRef outFilled As Long, ByRef outRemFilled As Long) As Boolean
+    기별_채우기_코어 = False: outFilled = 0: outRemFilled = 0
+    Dim wsFac As Worksheet, wsCbl As Worksheet, wsNw As Worksheet, wsAdmin As Worksheet
+    On Error Resume Next
+    Set wsFac = ThisWorkbook.Worksheets(SHEET_META_FAC)
+    Set wsCbl = ThisWorkbook.Worksheets(SHEET_META_CBL)
+    Set wsNw = ThisWorkbook.Worksheets(SHEET_NETWORK)
+    Set wsAdmin = ThisWorkbook.Worksheets(SHEET_ADMIN)
+    On Error GoTo 0
+    If wsFac Is Nothing Or wsCbl Is Nothing Then Exit Function
+
+    Dim wsNew As Worksheet, wsRem As Worksheet, wsSumP As Worksheet
+    On Error Resume Next
+    Set wsNew = wb.Worksheets("2.기별명세서(신설)")
+    Set wsRem = wb.Worksheets("3.기별명세서(철거)")
+    Set wsSumP = wb.Worksheets("1.종합기별명세서")
+    On Error GoTo 0
+    If wsNew Is Nothing Then Exit Function
+    On Error Resume Next
+    wsNew.Unprotect
+    If Not wsRem Is Nothing Then wsRem.Unprotect
+    If Not wsSumP Is Nothing Then wsSumP.Unprotect
+    On Error GoTo 0
+
 
     ' 1) 시설물 메타 적재 (미리보기와 동일)
     Set mFacName = CreateObject("Scripting.Dictionary")
@@ -1451,24 +1498,6 @@ Public Sub 기별_양식_채우기()
         End If
     Next startKey
     mCollectOnly = False
-
-    ' 4) 양식 복사본 열기 + 신설시트 채우기
-    Dim wb As Workbook: Set wb = Workbooks.Open(formPath)
-    Dim wsNew As Worksheet: Set wsNew = Nothing
-    On Error Resume Next: Set wsNew = wb.Worksheets("2.기별명세서(신설)"): On Error GoTo 0
-    If wsNew Is Nothing Then
-        wb.Close SaveChanges:=False
-        Application.ScreenUpdating = True
-        MsgBox "양식에 「2.기별명세서(신설)」 시트가 없습니다.", vbExclamation, "양식 채우기": Exit Sub
-    End If
-    ' 시트 보호 해제 (owner 2026-06-16: 값은 되는데 채움·행높이 등 서식 변경이 보호로 막힘).
-    On Error Resume Next
-    wsNew.Unprotect
-    Dim wsSumP As Worksheet: Set wsSumP = wb.Worksheets("1.종합기별명세서")
-    If Not wsSumP Is Nothing Then wsSumP.Unprotect
-    Dim wsRem As Worksheet: Set wsRem = wb.Worksheets("3.기별명세서(철거)")
-    If Not wsRem Is Nothing Then wsRem.Unprotect
-    On Error GoTo 0
 
     ' === 데이터 영역 채우기 (owner 2026-06-16: 원본 양식 서식·행높이 그대로) ===
     ' 비-철거 + 케이블 있는 구간만 4행 블록(시작/경간/종료/소계). 단독노드·철거 제외.
@@ -1672,24 +1701,24 @@ Public Sub 기별_양식_채우기()
         On Error GoTo 0
     End If
 
-    ' 5) 복사본 SaveAs (원본 불변)
-    Dim outPath As String
-    outPath = ThisWorkbook.Path & "\기별명세서_채움_" & Format(Now, "yyyymmdd_hhnn") & ".xlsx"
-    Application.DisplayAlerts = False
-    On Error Resume Next
-    wb.SaveAs outPath, FileFormat:=51
-    On Error GoTo 0
-    Application.DisplayAlerts = True
-    Application.ScreenUpdating = True
-    ' 닫지 않고 열어둠 — 저장본 다시 열 필요 없이 바로 서식 확인 (진단 목적)
-    On Error Resume Next: wsNew.Activate: On Error GoTo 0
+    outFilled = filled: outRemFilled = remFilled
+    기별_채우기_코어 = True
+End Function
 
-    MsgBox "양식 채우기 완료 (신설·철거 — 열어둠, 바로 확인)" & vbLf & vbLf & _
-           "신설 구간 " & filled & " 개 (소계 " & subRows.Count & " · 합계행 " & rw & ")" & vbLf & _
-           "철거 구간 " & remFilled & " 개 (소계 " & subRowsRem.Count & ")" & vbLf & _
-           "소계 살구·합계 초록 · 종합 연동(신설/철거 ×-1)" & vbLf & _
-           "저장: " & outPath, vbInformation, "양식 채우기"
-End Sub
+' 라벨 셀("■ 공사번호 : 12345") → 콜론 뒤 값("12345"). 콜론 없으면 전체 trim.
+Public Function 기별_라벨값(ByVal s As String) As String
+    Dim p As Long: p = InStrRev(s, ":")
+    If p > 0 Then 기별_라벨값 = Trim(Mid(s, p + 1)) Else 기별_라벨값 = Trim(s)
+End Function
+
+' 파일명 금지문자 제거(\ / : * ? " < > | 탭·줄바꿈 → 공백) + 연속공백 축약 + trim.
+Public Function 기별_파일명_정리(ByVal s As String) As String
+    Dim bad As Variant: bad = Array("\", "/", ":", "*", "?", """", "<", ">", "|", vbTab, vbCr, vbLf)
+    Dim i As Long
+    For i = LBound(bad) To UBound(bad): s = Replace(s, CStr(bad(i)), " "): Next i
+    Do While InStr(s, "  ") > 0: s = Replace(s, "  ", " "): Loop
+    기별_파일명_정리 = Trim(s)
+End Function
 
 ' 시설물 행 — A·JL·JM 항상, 공종·자재는 첫 등장(dedup) 1회.
 Private Sub 기별_양식_시설쓰기(ws As Worksheet, rowNum As Long, facId As String, dedup As Object)

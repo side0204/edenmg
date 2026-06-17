@@ -3682,28 +3682,41 @@ End Sub
 '   - 새 파일은 보호 해제 상태. 사용자가 .xlsx 로 저장.
 Public Sub 새파일_내보내기()
     Dim ans As VbMsgBoxResult
-    ans = MsgBox("행정도·네트웍구성도를 매크로 없는 새 파일로 복사합니다." & vbLf & _
-                 "(새 파일의 행정도에서 범례·버튼은 모두 제거됩니다)" & vbLf & vbLf & _
-                 "계속할까요?", vbOKCancel + vbQuestion, "새 파일로 내보내기")
+    ans = MsgBox("기별명세서(신설·철거)를 작성하고, 행정도(후)·네트웍구성도(후)와 함께" & vbLf & _
+                 "5개 시트로 새 파일을 내보냅니다." & vbLf & _
+                 "(순서: 1.종합 · 2.신설 · 3.철거 · 4.행정도(후) · 5.네트웍구성도(후))" & vbLf & _
+                 "파일명은 「공사번호_공사명」(신설 기별시트 A2·B2) 으로 저장됩니다." & vbLf & vbLf & _
+                 "계속할까요?", vbOKCancel + vbQuestion, "기별명세서 내보내기")
     If ans <> vbOK Then Exit Sub
+
+    ' 공사번호·공사명 (신설 기별시트 A2/B2) — 파일명용. 채우기는 row10+ 만 지워 헤더값 보존.
+    Dim ordNo As String: ordNo = ""
+    Dim prjNm As String: prjNm = ""
+    Dim wsBill As Worksheet: Set wsBill = Nothing
+    On Error Resume Next: Set wsBill = ThisWorkbook.Worksheets("2.기별명세서(신설)"): On Error GoTo 0
+    If Not wsBill Is Nothing Then
+        ordNo = 기별_라벨값(CStr(wsBill.Range("A2").Value))
+        prjNm = 기별_라벨값(CStr(wsBill.Range("B2").Value))
+    End If
 
     Application.ScreenUpdating = False
 
+    ' 5시트 복사 (순서: 종합·신설·철거·행정도·네트웍 — Array 순서대로 새 워크북 생성)
     Dim okCopy As Boolean: okCopy = False
     On Error Resume Next
-    ThisWorkbook.Worksheets(Array(SHEET_ADMIN, SHEET_NETWORK)).Copy   ' 인수 없는 Copy → 새 워크북
+    ThisWorkbook.Worksheets(Array("1.종합기별명세서", "2.기별명세서(신설)", "3.기별명세서(철거)", SHEET_ADMIN, SHEET_NETWORK)).Copy
     okCopy = (Err.Number = 0)
     On Error GoTo 0
     If Not okCopy Then
         Application.ScreenUpdating = True
-        MsgBox "시트 복사에 실패했습니다. 행정도·네트웍구성도 시트가 있는지 확인하세요.", vbExclamation
+        MsgBox "시트 복사 실패. 도구에 기별 3시트(1.종합기별명세서·2.기별명세서(신설)·3.기별명세서(철거))와" & vbLf & _
+               "행정도·네트웍구성도 시트가 모두 있는지 확인하세요.", vbExclamation, "기별명세서 내보내기"
         Exit Sub
     End If
 
     Dim newWb As Workbook: Set newWb = ActiveWorkbook
 
-    ' owner 2026-06-07 (8-52): 내보낸 파일의 시트명에 「(후)」 suffix — 설계본과 시각 구분.
-    '   rename 후 SHEET_NETWORK 로 룩업하면 못 찾으므로 객체 참조를 캐시해서 8-51 그룹화에 그대로 사용.
+    ' 행정도/네트웍 → (후) 리네임 (그룹화·zorder 위해 객체 캐시)
     Dim wsAdminNew As Worksheet: Set wsAdminNew = Nothing
     Dim wsNetworkNew As Worksheet: Set wsNetworkNew = Nothing
     On Error Resume Next
@@ -3711,53 +3724,44 @@ Public Sub 새파일_내보내기()
     Set wsNetworkNew = newWb.Worksheets(SHEET_NETWORK): If Not wsNetworkNew Is Nothing Then wsNetworkNew.Name = SHEET_NETWORK & "(후)"
     On Error GoTo 0
 
+    ' 정리(범례·버튼·격자색 제거) — 행정도(후)·네트웍(후) 만. 기별 3시트는 양식 서식 보존 위해 건너뜀.
     Dim ws As Worksheet, i As Long, nm As String
     For Each ws In newWb.Worksheets
-        On Error Resume Next
-        ws.Unprotect
-        On Error GoTo 0
-        ' owner 요구 — 노랑 격자 (cell 배경색) 제거. 사용된 영역만 안전하게 처리.
-        On Error Resume Next
-        ws.UsedRange.Interior.ColorIndex = xlNone
-        On Error GoTo 0
-        For i = ws.Shapes.Count To 1 Step -1
-            nm = ws.Shapes(i).Name
-            If Left(nm, Len(PREFIX_LEG_FAC)) = PREFIX_LEG_FAC _
-               Or Left(nm, Len(PREFIX_LEG_CBL)) = PREFIX_LEG_CBL _
-               Or Left(nm, Len(PREFIX_LEG_LABEL)) = PREFIX_LEG_LABEL _
-               Or Left(nm, Len(PANEL_PREFIX)) = PANEL_PREFIX _
-               Or Left(nm, Len(PANEL_LEGEND_DD_LABEL_PREFIX)) = PANEL_LEGEND_DD_LABEL_PREFIX _
-               Or Left(nm, Len(PANEL_LEGEND_DD_PREFIX)) = PANEL_LEGEND_DD_PREFIX _
-               Or Left(nm, Len(PANEL_LEGEND_OPT_PREFIX)) = PANEL_LEGEND_OPT_PREFIX _
-               Or Left(nm, Len(PREFIX_FAC_TAG_DD)) = PREFIX_FAC_TAG_DD _
-               Or Left(nm, Len(PREFIX_WP_TMP)) = PREFIX_WP_TMP _
-               Or Left(nm, Len(PREFIX_ADMIN_COMBO)) = PREFIX_ADMIN_COMBO _
-               Or Left(nm, Len(PREFIX_ADMIN_SEARCH_BTN)) = PREFIX_ADMIN_SEARCH_BTN _
-               Or Left(nm, Len(PREFIX_NW_SEARCH_BTN)) = PREFIX_NW_SEARCH_BTN _
-               Or nm = "_mode_indicator" Then
-                On Error Resume Next
-                ws.Shapes(i).Delete                 ' 범례·콤보·검색버튼·모드표시 제거 (owner 2026-06-15: 내보낸 파일에 버튼 안 남게)
-                On Error GoTo 0
-            Else
-                On Error Resume Next
-                ws.Shapes(i).OnAction = ""           ' 매크로 연결 제거
-                On Error GoTo 0
-            End If
-        Next i
+        If InStr(ws.Name, "기별명세서") = 0 Then
+            On Error Resume Next
+            ws.Unprotect
+            ws.UsedRange.Interior.ColorIndex = xlNone
+            On Error GoTo 0
+            For i = ws.Shapes.Count To 1 Step -1
+                nm = ws.Shapes(i).Name
+                If Left(nm, Len(PREFIX_LEG_FAC)) = PREFIX_LEG_FAC _
+                   Or Left(nm, Len(PREFIX_LEG_CBL)) = PREFIX_LEG_CBL _
+                   Or Left(nm, Len(PREFIX_LEG_LABEL)) = PREFIX_LEG_LABEL _
+                   Or Left(nm, Len(PANEL_PREFIX)) = PANEL_PREFIX _
+                   Or Left(nm, Len(PANEL_LEGEND_DD_LABEL_PREFIX)) = PANEL_LEGEND_DD_LABEL_PREFIX _
+                   Or Left(nm, Len(PANEL_LEGEND_DD_PREFIX)) = PANEL_LEGEND_DD_PREFIX _
+                   Or Left(nm, Len(PANEL_LEGEND_OPT_PREFIX)) = PANEL_LEGEND_OPT_PREFIX _
+                   Or Left(nm, Len(PREFIX_FAC_TAG_DD)) = PREFIX_FAC_TAG_DD _
+                   Or Left(nm, Len(PREFIX_WP_TMP)) = PREFIX_WP_TMP _
+                   Or Left(nm, Len(PREFIX_ADMIN_COMBO)) = PREFIX_ADMIN_COMBO _
+                   Or Left(nm, Len(PREFIX_ADMIN_SEARCH_BTN)) = PREFIX_ADMIN_SEARCH_BTN _
+                   Or Left(nm, Len(PREFIX_NW_SEARCH_BTN)) = PREFIX_NW_SEARCH_BTN _
+                   Or nm = "_mode_indicator" Then
+                    On Error Resume Next
+                    ws.Shapes(i).Delete
+                    On Error GoTo 0
+                Else
+                    On Error Resume Next
+                    ws.Shapes(i).OnAction = ""
+                    On Error GoTo 0
+                End If
+            Next i
+        End If
     Next ws
 
-    ' owner 2026-06-07 (8-51): 네트웍구성도 시설물별 라벨 3 종 (배지·주간야간·시설물명) 그룹화.
-    '   내보낸 파일에서 라벨을 한 덩어리로 이동 가능. 시설물 도형 자체·설명선(LEADER) 는 그룹 외 (owner 결정).
-    '   8-52 의 시트명 변경 이후라 SHEET_NETWORK 로 룩업 불가 — 위 캐시된 객체 참조 사용.
     Dim groupedCount As Long: groupedCount = 0
     If Not wsNetworkNew Is Nothing Then groupedCount = 네트웍_라벨_그룹화(wsNetworkNew)
 
-    ' owner 2026-06-07 (8-53) → (8-55) → (8-55-revert): Placement 분기 설정은 원본 네트웍구성도에
-    '   적용하는 별도 유틸 「네트웍_위치속성_설정」 으로 이동. 내보내기 복제본은 원본의 Placement 를 그대로 상속.
-
-    ' owner 2026-06-07 (8-54): 네트웍구성도 케이블 선로ID 박스 (lbl_cbl_*) 를 맨 앞으로.
-    '   PREFIX_LABEL "lbl_" 은 시설물명(lbl_fac_*)·케이블ID(lbl_cbl_*) 공유. "lbl_cbl_" prefix 로 정확 필터링.
-    '   배경 지도·케이블 선 위에 항상 노출되도록.
     Dim zCount As Long: zCount = 0
     If Not wsNetworkNew Is Nothing Then
         Const LBL_CBL_PREFIX As String = "lbl_cbl_"
@@ -3773,17 +3777,29 @@ Public Sub 새파일_내보내기()
         Next zShp
     End If
 
-    Application.ScreenUpdating = True
-    On Error Resume Next
-    newWb.Activate
-    On Error GoTo 0
+    ' 기별 3시트 채우기 (newWb) — 메타는 ThisWorkbook 에서 읽음. 신설/철거 + 종합 연동.
+    Dim f As Long, rf As Long
+    Dim filledOk As Boolean: filledOk = 기별_채우기_코어(newWb, f, rf)
 
-    MsgBox "매크로 없는 새 통합문서로 복사 완료." & vbLf & _
-           "행정도의 범례·버튼·모드표시는 모두 제거되었습니다." & vbLf & _
-           "네트웍구성도 시설물 " & groupedCount & " 개의 라벨이 그룹화되었습니다." & vbLf & _
-           "네트웍구성도 케이블 선로ID " & zCount & " 개를 맨 앞으로 설정했습니다." & vbLf & vbLf & _
-           "이 새 창에서 「다른 이름으로 저장」 → 「Excel 통합 문서(*.xlsx)」 로 저장하세요.", _
-           vbInformation, "새 파일로 내보내기"
+    ' 파일명 = 공사번호_공사명 (둘 다 없으면 타임스탬프)
+    Dim fname As String: fname = ordNo
+    If Len(ordNo) > 0 And Len(prjNm) > 0 Then fname = fname & "_"
+    fname = fname & prjNm
+    fname = 기별_파일명_정리(fname)
+    If Len(fname) = 0 Then fname = "기별명세서_" & Format(Now, "yyyymmdd_hhnn")
+    Dim outPath As String: outPath = ThisWorkbook.Path & "\" & fname & ".xlsx"
+
+    Application.DisplayAlerts = False
+    On Error Resume Next: newWb.SaveAs outPath, FileFormat:=51: On Error GoTo 0
+    Application.DisplayAlerts = True
+
+    Application.ScreenUpdating = True
+    On Error Resume Next: newWb.Activate: On Error GoTo 0
+
+    MsgBox "기별명세서 내보내기 완료." & vbLf & vbLf & _
+           "기별 작성: 신설 " & f & " 구간 · 철거 " & rf & " 구간" & IIf(filledOk, "", " (⚠ 기별 시트 확인 필요)") & vbLf & _
+           "네트웍 라벨 " & groupedCount & " 그룹 · 케이블ID " & zCount & " 맨앞" & vbLf & _
+           "저장: " & outPath, vbInformation, "기별명세서 내보내기"
 End Sub
 
 ' owner 2026-06-07 (8-55): 원본 네트웍구성도 도형 Placement 분기 + 케이블 선로ID 맨 앞.
@@ -32894,14 +32910,13 @@ End Function
 '  실행: Alt+F8 → 기별_양식_채우기
 ' ============================================================================
 Public Sub 기별_양식_채우기()
-    Dim wsFac As Worksheet, wsCbl As Worksheet, wsNw As Worksheet, wsAdmin As Worksheet
+    ' 표준 양식 파일(기별명세서양식.xlsx) 복사본을 열어 채운 뒤 별도 파일로 SaveAs (단독 실행용).
+    Dim wsFacChk As Worksheet, wsCblChk As Worksheet
     On Error Resume Next
-    Set wsFac = ThisWorkbook.Worksheets(SHEET_META_FAC)
-    Set wsCbl = ThisWorkbook.Worksheets(SHEET_META_CBL)
-    Set wsNw = ThisWorkbook.Worksheets(SHEET_NETWORK)
-    Set wsAdmin = ThisWorkbook.Worksheets(SHEET_ADMIN)
+    Set wsFacChk = ThisWorkbook.Worksheets(SHEET_META_FAC)
+    Set wsCblChk = ThisWorkbook.Worksheets(SHEET_META_CBL)
     On Error GoTo 0
-    If wsFac Is Nothing Or wsCbl Is Nothing Then MsgBox "_시설물/_케이블 메타가 없습니다.", vbExclamation, "양식 채우기": Exit Sub
+    If wsFacChk Is Nothing Or wsCblChk Is Nothing Then MsgBox "_시설물/_케이블 메타가 없습니다.", vbExclamation, "양식 채우기": Exit Sub
 
     Dim formPath As String: formPath = ThisWorkbook.Path & "\기별명세서양식.xlsx"
     If Len(Dir(formPath)) = 0 Then
@@ -32911,6 +32926,54 @@ Public Sub 기별_양식_채우기()
     End If
 
     Application.ScreenUpdating = False
+    Dim wb As Workbook: Set wb = Workbooks.Open(formPath)
+    Dim f As Long, rf As Long
+    If Not 기별_채우기_코어(wb, f, rf) Then
+        On Error Resume Next: wb.Close SaveChanges:=False: On Error GoTo 0
+        Application.ScreenUpdating = True
+        MsgBox "양식에 기별 시트(2.기별명세서(신설) 등)가 없습니다.", vbExclamation, "양식 채우기": Exit Sub
+    End If
+
+    Dim outPath As String
+    outPath = ThisWorkbook.Path & "\기별명세서_채움_" & Format(Now, "yyyymmdd_hhnn") & ".xlsx"
+    Application.DisplayAlerts = False
+    On Error Resume Next: wb.SaveAs outPath, FileFormat:=51: On Error GoTo 0
+    Application.DisplayAlerts = True
+    Application.ScreenUpdating = True
+    On Error Resume Next: wb.Worksheets("2.기별명세서(신설)").Activate: On Error GoTo 0
+
+    MsgBox "양식 채우기 완료 (신설·철거)" & vbLf & vbLf & _
+           "신설 구간 " & f & " 개 · 철거 구간 " & rf & " 개" & vbLf & _
+           "저장: " & outPath, vbInformation, "양식 채우기"
+End Sub
+
+' 기별 채우기 코어 — wb 의 기별 3시트(1.종합·2.신설·3.철거)를 채운다. 메타는 ThisWorkbook 에서 읽음.
+'   단독 양식 파일·내보내기(도구 내 시트 복사본) 양쪽에서 재사용. SaveAs/MsgBox 는 호출자 책임.
+'   ScreenUpdating 은 호출자 관리. 반환 True=성공. outFilled/outRemFilled = 신설/철거 구간 수.
+Public Function 기별_채우기_코어(wb As Workbook, ByRef outFilled As Long, ByRef outRemFilled As Long) As Boolean
+    기별_채우기_코어 = False: outFilled = 0: outRemFilled = 0
+    Dim wsFac As Worksheet, wsCbl As Worksheet, wsNw As Worksheet, wsAdmin As Worksheet
+    On Error Resume Next
+    Set wsFac = ThisWorkbook.Worksheets(SHEET_META_FAC)
+    Set wsCbl = ThisWorkbook.Worksheets(SHEET_META_CBL)
+    Set wsNw = ThisWorkbook.Worksheets(SHEET_NETWORK)
+    Set wsAdmin = ThisWorkbook.Worksheets(SHEET_ADMIN)
+    On Error GoTo 0
+    If wsFac Is Nothing Or wsCbl Is Nothing Then Exit Function
+
+    Dim wsNew As Worksheet, wsRem As Worksheet, wsSumP As Worksheet
+    On Error Resume Next
+    Set wsNew = wb.Worksheets("2.기별명세서(신설)")
+    Set wsRem = wb.Worksheets("3.기별명세서(철거)")
+    Set wsSumP = wb.Worksheets("1.종합기별명세서")
+    On Error GoTo 0
+    If wsNew Is Nothing Then Exit Function
+    On Error Resume Next
+    wsNew.Unprotect
+    If Not wsRem Is Nothing Then wsRem.Unprotect
+    If Not wsSumP Is Nothing Then wsSumP.Unprotect
+    On Error GoTo 0
+
 
     ' 1) 시설물 메타 적재 (미리보기와 동일)
     Set mFacName = CreateObject("Scripting.Dictionary")
@@ -32984,24 +33047,6 @@ Public Sub 기별_양식_채우기()
         End If
     Next startKey
     mCollectOnly = False
-
-    ' 4) 양식 복사본 열기 + 신설시트 채우기
-    Dim wb As Workbook: Set wb = Workbooks.Open(formPath)
-    Dim wsNew As Worksheet: Set wsNew = Nothing
-    On Error Resume Next: Set wsNew = wb.Worksheets("2.기별명세서(신설)"): On Error GoTo 0
-    If wsNew Is Nothing Then
-        wb.Close SaveChanges:=False
-        Application.ScreenUpdating = True
-        MsgBox "양식에 「2.기별명세서(신설)」 시트가 없습니다.", vbExclamation, "양식 채우기": Exit Sub
-    End If
-    ' 시트 보호 해제 (owner 2026-06-16: 값은 되는데 채움·행높이 등 서식 변경이 보호로 막힘).
-    On Error Resume Next
-    wsNew.Unprotect
-    Dim wsSumP As Worksheet: Set wsSumP = wb.Worksheets("1.종합기별명세서")
-    If Not wsSumP Is Nothing Then wsSumP.Unprotect
-    Dim wsRem As Worksheet: Set wsRem = wb.Worksheets("3.기별명세서(철거)")
-    If Not wsRem Is Nothing Then wsRem.Unprotect
-    On Error GoTo 0
 
     ' === 데이터 영역 채우기 (owner 2026-06-16: 원본 양식 서식·행높이 그대로) ===
     ' 비-철거 + 케이블 있는 구간만 4행 블록(시작/경간/종료/소계). 단독노드·철거 제외.
@@ -33205,24 +33250,24 @@ Public Sub 기별_양식_채우기()
         On Error GoTo 0
     End If
 
-    ' 5) 복사본 SaveAs (원본 불변)
-    Dim outPath As String
-    outPath = ThisWorkbook.Path & "\기별명세서_채움_" & Format(Now, "yyyymmdd_hhnn") & ".xlsx"
-    Application.DisplayAlerts = False
-    On Error Resume Next
-    wb.SaveAs outPath, FileFormat:=51
-    On Error GoTo 0
-    Application.DisplayAlerts = True
-    Application.ScreenUpdating = True
-    ' 닫지 않고 열어둠 — 저장본 다시 열 필요 없이 바로 서식 확인 (진단 목적)
-    On Error Resume Next: wsNew.Activate: On Error GoTo 0
+    outFilled = filled: outRemFilled = remFilled
+    기별_채우기_코어 = True
+End Function
 
-    MsgBox "양식 채우기 완료 (신설·철거 — 열어둠, 바로 확인)" & vbLf & vbLf & _
-           "신설 구간 " & filled & " 개 (소계 " & subRows.Count & " · 합계행 " & rw & ")" & vbLf & _
-           "철거 구간 " & remFilled & " 개 (소계 " & subRowsRem.Count & ")" & vbLf & _
-           "소계 살구·합계 초록 · 종합 연동(신설/철거 ×-1)" & vbLf & _
-           "저장: " & outPath, vbInformation, "양식 채우기"
-End Sub
+' 라벨 셀("■ 공사번호 : 12345") → 콜론 뒤 값("12345"). 콜론 없으면 전체 trim.
+Public Function 기별_라벨값(ByVal s As String) As String
+    Dim p As Long: p = InStrRev(s, ":")
+    If p > 0 Then 기별_라벨값 = Trim(Mid(s, p + 1)) Else 기별_라벨값 = Trim(s)
+End Function
+
+' 파일명 금지문자 제거(\ / : * ? " < > | 탭·줄바꿈 → 공백) + 연속공백 축약 + trim.
+Public Function 기별_파일명_정리(ByVal s As String) As String
+    Dim bad As Variant: bad = Array("\", "/", ":", "*", "?", """", "<", ">", "|", vbTab, vbCr, vbLf)
+    Dim i As Long
+    For i = LBound(bad) To UBound(bad): s = Replace(s, CStr(bad(i)), " "): Next i
+    Do While InStr(s, "  ") > 0: s = Replace(s, "  ", " "): Loop
+    기별_파일명_정리 = Trim(s)
+End Function
 
 ' 시설물 행 — A·JL·JM 항상, 공종·자재는 첫 등장(dedup) 1회.
 Private Sub 기별_양식_시설쓰기(ws As Worksheet, rowNum As Long, facId As String, dedup As Object)
