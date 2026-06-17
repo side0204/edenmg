@@ -33168,7 +33168,7 @@ Public Function 기별_채우기_코어(wb As Workbook, ByRef outFilled As Long,
         End If
         wsNew.Range("A" & (br + 3)).Value = "소  계"
         기별_양식_소계 wsNew, br + 3, br, br + 2, 기별_양식_합산열()
-        기별_행채움 wsNew, br + 3, RGB(255, 204, 153), -1, False, 10, hSub   ' 소계: 살구 FFCC99
+        기별_행채움 wsNew, br + 3, RGB(255, 204, 153), -1, False, 10, hSub, False, "JO", "JM", "JO"   ' 소계: 살구 FFCC99 · 비고 JM:JO 병합
         subRows.Add (br + 3)
     Next bi
     Dim filled As Long: filled = nBlk
@@ -33178,7 +33178,7 @@ Public Function 기별_채우기_코어(wb As Workbook, ByRef outFilled As Long,
     If nBlk > 0 Then
         wsNew.Range("A" & rw).Value = "합 계"
         기별_양식_합계 wsNew, rw, subRows, 기별_양식_합산열()
-        기별_행채움 wsNew, rw, RGB(0, 255, 0), -1, True, 11, hTot, True   ' 합계: 초록·굵게·폰트11 + 가운데정렬·모든 테두리
+        기별_행채움 wsNew, rw, RGB(0, 255, 0), -1, True, 11, hTot, True, "JO", "JM", "JO"   ' 합계: 가운데·테두리·비고 JM:JO 병합
     End If
 
     ' 값 들어간 열 숨김 해제 (owner 2026-06-16: 값 셀이 숨겨지지 않게). 메타열(A~H·JL·JM) 항상 표시.
@@ -33240,7 +33240,7 @@ Public Function 기별_채우기_코어(wb As Workbook, ByRef outFilled As Long,
             기별_양식_시설쓰기_철거 wsRem, brR + 2, eFacR
             wsRem.Range("A" & (brR + 3)).Value = "소  계"
             기별_양식_소계 wsRem, brR + 3, brR, brR + 2, remCols
-            기별_행채움 wsRem, brR + 3, RGB(255, 204, 153), -1, False, 10, hSub
+            기별_행채움 wsRem, brR + 3, RGB(255, 204, 153), -1, False, 10, hSub, False, "EN", "EL", "EN"   ' 소계: 살구 · 비고 EL:EN 병합
             subRowsRem.Add (brR + 3)
         Next biR
         remFilled = nBlkRem
@@ -33248,7 +33248,7 @@ Public Function 기별_채우기_코어(wb As Workbook, ByRef outFilled As Long,
         ' 합계 — A="합 계(철거)" (공백1+(철거)) → 종합 철거 INDEX/MATCH 연동.
         wsRem.Range("A" & totRowR).Value = "합 계(철거)"
         기별_양식_합계 wsRem, totRowR, subRowsRem, remCols
-        기별_행채움 wsRem, totRowR, RGB(0, 255, 0), -1, True, 11, hTot, True   ' 합계: 가운데정렬·모든 테두리
+        기별_행채움 wsRem, totRowR, RGB(0, 255, 0), -1, True, 11, hTot, True, "EN", "EL", "EN"   ' 합계: 가운데·테두리·비고 EL:EN 병합
 
         ' 철거시트 숨김 해제 + AutoFit. 메타(A~H)·배지(EK)·비고(EL) 항상 표시.
         Dim remVis As Variant
@@ -33383,21 +33383,25 @@ Private Sub 기별_행서식(ws As Worksheet, ByVal srcRow As Long, ByVal dstRow
     On Error GoTo 0
 End Sub
 
-' 소계/합계 행 채움·굵기·폰트·행높이 직접 적용 (A:JM). colorIdx>=0 면 ColorIndex, 아니면 RGB(fillColor).
-' allBorder=True(합계용): 가운데정렬(가로·세로) + 모든 테두리 (owner 2026-06-16).
-Private Sub 기별_행채움(ws As Worksheet, ByVal rowNum As Long, ByVal fillColor As Long, ByVal colorIdx As Long, ByVal bold As Boolean, ByVal sz As Double, ByVal h As Double, Optional ByVal allBorder As Boolean = False)
+' 소계/합계 행 채움·굵기·폰트·행높이 직접 적용. colorIdx>=0 면 ColorIndex, 아니면 RGB(fillColor).
+'   lastCol = 채움/테두리 끝열 (신설 "JO" · 철거 "EN" — 시트 폭·비고 병합에 맞춤. owner 2026-06-16).
+'   allBorder=True(합계용): 가운데정렬(가로·세로) + 모든 테두리.
+'   bigoL/bigoR 주어지면 그 행의 비고 셀 병합 (신설 JM:JO · 철거 EL:EN).
+Private Sub 기별_행채움(ws As Worksheet, ByVal rowNum As Long, ByVal fillColor As Long, ByVal colorIdx As Long, ByVal bold As Boolean, ByVal sz As Double, ByVal h As Double, Optional ByVal allBorder As Boolean = False, Optional ByVal lastCol As String = "JM", Optional ByVal bigoL As String = "", Optional ByVal bigoR As String = "")
     On Error Resume Next
-    With ws.Range("A" & rowNum & ":JM" & rowNum).Interior
+    ' 비고 병합 먼저 (테두리가 병합셀을 한 칸으로 감싸도록)
+    If Len(bigoL) > 0 And Len(bigoR) > 0 Then ws.Range(bigoL & rowNum & ":" & bigoR & rowNum).Merge
+    With ws.Range("A" & rowNum & ":" & lastCol & rowNum).Interior
         .Pattern = xlSolid
         .PatternColorIndex = xlAutomatic
         If colorIdx >= 0 Then .ColorIndex = colorIdx Else .Color = fillColor
     End With
-    With ws.Range("A" & rowNum & ":JM" & rowNum).Font
+    With ws.Range("A" & rowNum & ":" & lastCol & rowNum).Font
         .Bold = bold
         If sz > 0 Then .Size = sz
     End With
     If allBorder Then
-        With ws.Range("A" & rowNum & ":JM" & rowNum)
+        With ws.Range("A" & rowNum & ":" & lastCol & rowNum)
             .HorizontalAlignment = xlCenter
             .VerticalAlignment = xlCenter
             .Borders(xlEdgeTop).LineStyle = xlContinuous
