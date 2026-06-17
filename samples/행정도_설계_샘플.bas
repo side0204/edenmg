@@ -33289,9 +33289,10 @@ Public Function 기별_라벨값(ByVal s As String) As String
     If p > 0 Then 기별_라벨값 = Trim(Mid(s, p + 1)) Else 기별_라벨값 = Trim(s)
 End Function
 
-' 파일명 금지문자 제거(\ / : * ? " < > | 탭·줄바꿈 → 공백) + 연속공백 축약 + trim.
+' 파일명 금지문자 제거 → 공백 + 연속공백 축약 + trim.
+'   Windows 금지: \ / : * ? " < > | · Excel 추가 금지: [ ] (외부참조 문법). 탭·줄바꿈도 제거.
 Public Function 기별_파일명_정리(ByVal s As String) As String
-    Dim bad As Variant: bad = Array("\", "/", ":", "*", "?", """", "<", ">", "|", vbTab, vbCr, vbLf)
+    Dim bad As Variant: bad = Array("\", "/", ":", "*", "?", """", "<", ">", "|", "[", "]", vbTab, vbCr, vbLf)
     Dim i As Long
     For i = LBound(bad) To UBound(bad): s = Replace(s, CStr(bad(i)), " "): Next i
     Do While InStr(s, "  ") > 0: s = Replace(s, "  ", " "): Loop
