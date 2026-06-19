@@ -3407,8 +3407,9 @@ Public Function IsCalloutTemplate(t As String) As Boolean
     Dim s As String
     s = Replace(Replace(Replace(t, vbCr, ""), vbLf, ""), " ", "")
     If Len(s) = 0 Then IsCalloutTemplate = True: Exit Function
-    ' 새 패턴 — 「함체명을입력하세요」 substring 있으면 템플릿 (범례명 자동 입력 후에도 인식)
-    If InStr(s, "함체명을입력하세요") > 0 Then IsCalloutTemplate = True: Exit Function
+    ' 새 패턴 — 「…명을입력하세요」 substring 있으면 템플릿 (owner 2026-06-19: 명칭 기반 동적 placeholder
+    '   「설치장소명을입력하세요」·「시설물명을입력하세요」 등 모두 인식. 범례명 자동 입력 후에도 인식)
+    If InStr(s, "명을입력하세요") > 0 Then IsCalloutTemplate = True: Exit Function
     If s = "ID함체명구분" Then IsCalloutTemplate = True: Exit Function                ' 레거시 — 「을 입력하세요」 전
     If Left(s, Len("선로ID")) = "선로ID" And Right(s, Len("거리")) = "거리" Then
         IsCalloutTemplate = True: Exit Function
@@ -5432,10 +5433,11 @@ Public Function 라이센스_검증() As Boolean
                       "현재 HW: " & currentHW & vbLf & vbLf & _
                       "위 HW ID 를 관리자에게 전달해 HW 바인딩 재발급을 요청하세요."
         Exit Function
-    ElseIf hwid <> currentHW Then
-        라이센스_차단 "이 라이센스는 다른 PC 전용입니다." & vbLf & _
-                      "등록된 HW: " & hwid & vbLf & _
-                      "현재 HW: " & currentHW & vbLf & vbLf & _
+    ElseIf LCase(라이센스_사용자ID_추출(hwid)) <> LCase(라이센스_사용자ID_추출(currentHW)) Then
+        ' owner 2026-06-19: HW 전체일치 → 사용자ID(USERNAME)만 일치로 완화 (아래 추출 함수 주석).
+        라이센스_차단 "이 라이센스는 다른 사용자 전용입니다." & vbLf & _
+                      "등록 사용자ID: " & 라이센스_사용자ID_추출(hwid) & vbLf & _
+                      "현재 사용자ID: " & 라이센스_사용자ID_추출(currentHW) & vbLf & vbLf & _
                       "관리자에게 재발급 요청 바랍니다."
         Exit Function
     End If
@@ -5466,6 +5468,19 @@ End Function
 
 Public Function 라이센스_현재_HW() As String
     라이센스_현재_HW = Environ("COMPUTERNAME") & "|" & Environ("USERNAME")
+End Function
+
+' owner 2026-06-19: HW 전체일치 → 사용자ID(USERNAME)만 일치로 완화.
+'   COMPUTERNAME(앞부분)이 매일 갱신되는 환경 대응. 「COMPUTERNAME|USERNAME」 에서
+'   마지막 '|' 뒤 사용자ID 부분만 비교(라이센스_검증 에서 LCase 로 대소문자 무시).
+'   '|' 없으면 전체를 사용자ID 로 간주 → 관리자가 사용자ID 만 박아 발급해도 동작.
+Public Function 라이센스_사용자ID_추출(hwFull As String) As String
+    Dim p As Long: p = InStrRev(hwFull, "|")
+    If p > 0 Then
+        라이센스_사용자ID_추출 = Trim(Mid(hwFull, p + 1))
+    Else
+        라이센스_사용자ID_추출 = Trim(hwFull)
+    End If
 End Function
 
 Public Function 라이센스_해시_계산(user As String, issued As String, expires As String) As String
@@ -5569,11 +5584,6 @@ Public Sub 라이센스_발급()
     bindHW = InputBox("사용자 PC 의 HW ID (예: PC01|USER1)" & vbLf & _
                        "※ 필수 — 이 값이 있어야만 사용자 PC 에서 실행됩니다 (빈 값 = 어느 PC 에서도 차단).", _
                        "라이센스 발급 — 3/3", "")
-    If Len(Trim(bindHW)) = 0 Then
-        If MsgBox("HW ID 가 비어 있습니다. 이대로 발급하면 이 배포본은 어느 PC 에서도 차단됩니다." & vbLf & _
-                  "(사용자에게 라이센스_내_HW_ID_보기 로 HW 를 먼저 받아 입력하세요.)" & vbLf & vbLf & _
-                  "그래도 계속할까요?", vbYesNo + vbExclamation, "라이센스 발급") <> vbYes Then Exit Sub
-    End If
 
     Dim issued As String: issued = Format(Date, "yyyy-mm-dd")
     Dim expires As String: expires = Format(Date + CLng(daysStr), "yyyy-mm-dd")
@@ -6661,7 +6671,8 @@ Private Function 시설물_표시명(facId As String) As String
             Dim parts() As String: parts = Split(t, vbCr)
             If UBound(parts) >= 1 Then
                 Dim nm1 As String: nm1 = Trim(parts(1))
-                If Len(nm1) > 0 And nm1 <> "함체명을 입력하세요" Then nm = nm1
+                ' owner 2026-06-19: 동적 placeholder("…명을 입력하세요") 는 미입력으로 간주.
+                If Len(nm1) > 0 And InStr(nm1, "명을 입력하세요") = 0 Then nm = nm1
             End If
             If Len(nm) = 0 And UBound(parts) >= 0 Then nm = Trim(parts(0))
             If Len(nm) > 0 Then Exit For

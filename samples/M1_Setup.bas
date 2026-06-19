@@ -2333,8 +2333,13 @@ Public Sub FinalizeDrawnFacility(shp As Shape)
     Dim facGyuk As String: facGyuk = MetaLookupGyuk(legendName)
     Dim dispLab As String: dispLab = legLab
     If Len(facGyuk) > 0 Then dispLab = legLab & "/" & facGyuk
+    ' owner 2026-06-19: 2번째 줄 placeholder = 명칭 기반 ("설치장소명을 입력하세요"·"시설물명을 입력하세요" 등).
+    '   명칭(MetaLookupCategory) 없으면 "함체명을 입력하세요" 폴백.
+    Dim namePrompt As String: namePrompt = MetaLookupCategory(legendName)
+    If Len(namePrompt) = 0 Then namePrompt = "함체"
+    namePrompt = namePrompt & "명을 입력하세요"
     Dim calloutText As String
-    calloutText = dispLab & vbCr & "함체명을 입력하세요" & vbCr & "ID"
+    calloutText = dispLab & vbCr & namePrompt & vbCr & "ID"
 
     Dim facId As String: facId = PREFIX_FAC & NewId8()
 
@@ -2363,6 +2368,8 @@ Public Sub FinalizeDrawnFacility(shp As Shape)
     If Not noBadge Then AddBadge ws, newShp, facId, CStr(badgeNo)
 
     ' 네트웍구성도 복제 — 행정도 좌표를 20x20 격자 셀 「중앙」 으로 자동 스냅 (시설물이 항상 격자 안에 들어가게)
+    ' owner 2026-06-19: 명칭="시설물" 범례(자사IP·전주 등 단순 마커)는 네트웍구성도에 그리지 않음 — 행정도만.
+    If Not noBadge Then
     Dim wsNw As Worksheet: Set wsNw = ThisWorkbook.Worksheets(SHEET_NETWORK)
     Dim wasProtNw As Boolean
     wasProtNw = wsNw.ProtectContents Or wsNw.ProtectDrawingObjects
@@ -2397,17 +2404,16 @@ Public Sub FinalizeDrawnFacility(shp As Shape)
         On Error GoTo 0
     End If
     ' 네트웍구성도 시설물 — 설명선 + 배지 + 상태 박스 + 태그 콤보 부착 (행정도와 같은 번호)
-    '   legLab 은 calloutText 생성 시 이미 계산됨
+    '   legLab 은 calloutText 생성 시 이미 계산됨. (noBadge=False 인 경우만 이 블록 진입)
     If Not shNw Is Nothing Then
         AddFacilityCallout wsNw, shNw, facId, calloutText, legLab
-        If Not noBadge Then
-            AddBadge wsNw, shNw, facId, CStr(badgeNo)
-            AddFacilityStatusBox wsNw, facId
-            AddFacilityTagCombo wsNw, facId
-            시설물_태그_위치_동기화 wsNw, facId
-        End If
+        AddBadge wsNw, shNw, facId, CStr(badgeNo)
+        AddFacilityStatusBox wsNw, facId
+        AddFacilityTagCombo wsNw, facId
+        시설물_태그_위치_동기화 wsNw, facId
     End If
     If wasProtNw Then ApplySheetProtection wsNw
+    End If
 
     ' 설명선(박스 + 연결선) 자동 부착 (행정도). callout 생성 후 배지를 callout 좌상단으로 이동
     AddFacilityCallout ws, newShp, facId, calloutText, legLab
@@ -3660,6 +3666,12 @@ Public Sub 새파일_내보내기()
         On Error GoTo 0
     Next oi
 
+    ' 내보내기 파일은 5시트 모두 표시 (작업 파일에서 시트정리_숨기기 로 숨겨둔 기별 시트도 결과물엔 보이게) — owner 2026-06-19
+    Dim vws As Worksheet
+    For Each vws In newWb.Worksheets
+        On Error Resume Next: vws.Visible = xlSheetVisible: On Error GoTo 0
+    Next vws
+
     ' 정리(범례·버튼·격자색 제거) — 행정도(후)·네트웍(후) 만. 기별 3시트는 양식 서식 보존 위해 건너뜀.
     Dim ws As Worksheet, i As Long, nm As String
     For Each ws In newWb.Worksheets
@@ -3717,6 +3729,13 @@ Public Sub 새파일_내보내기()
     Dim f As Long, rf As Long
     Dim filledOk As Boolean: filledOk = 기별_채우기_코어(newWb, f, rf)
 
+    ' 자재_공종 템플릿 별도 내보내기 (owner 2026-06-19) — 종합에서 지입 자재·노무 공종 추출 →
+    '   「공사번호_템플릿.xlsx」. 5시트 내보내기와 독립 — 실패해도 본 흐름 영향 없음.
+    Dim tmplPath As String: tmplPath = ""
+    On Error Resume Next
+    tmplPath = 기별_템플릿_내보내기(newWb, ordNo, prjNm)
+    On Error GoTo 0
+
     ' 파일명 = 공사번호_공사명 (둘 다 없으면 타임스탬프)
     Dim fname As String: fname = ordNo
     If Len(ordNo) > 0 And Len(prjNm) > 0 Then fname = fname & "_"
@@ -3756,7 +3775,8 @@ Public Sub 새파일_내보내기()
         On Error Resume Next: newWb.Close SaveChanges:=False: On Error GoTo 0
         MsgBox "기별명세서 내보내기 완료 (저장만 — 창 안 열림)." & vbLf & vbLf & _
                "기별 작성: 신설 " & f & " 구간 · 철거 " & rf & " 구간" & IIf(filledOk, "", " (⚠ 기별 시트 확인 필요)") & vbLf & _
-               "저장: " & savedPath, vbInformation, "기별명세서 내보내기"
+               "저장: " & savedPath & _
+               IIf(Len(tmplPath) > 0, vbLf & "자재_공종 템플릿: " & tmplPath, ""), vbInformation, "기별명세서 내보내기"
     Else
         On Error Resume Next: newWb.Activate: On Error GoTo 0
         MsgBox "⚠ 자동 저장 실패 (오류 " & lastErr & ": " & lastDesc & ")." & vbLf & vbLf & _
@@ -3765,6 +3785,48 @@ Public Sub 새파일_내보내기()
                "새로 열린 이 창에서 직접 「다른 이름으로 저장」 하세요." & vbLf & _
                "(같은 이름 파일이 이미 열려 있으면 닫고 다시 시도)", vbExclamation, "기별명세서 내보내기"
     End If
+End Sub
+
+' owner 2026-06-19: 양식 파일(작업 .xlsm)에서 행정도·네트웍구성도 외 「보이는」 시트 숨기기 (탭바 정리).
+'   기별 3시트·자재_공종 등 템플릿 시트를 xlSheetHidden (탭 우클릭 「숨기기 취소」로 복원 가능).
+'   이미 veryHidden 인 helper 시트(_시설물·_케이블·splash 등)는 건드리지 않음. 내보내기엔 영향 없음(숨겨도 복사됨).
+Public Sub 시트정리_숨기기()
+    Dim cnt As Long: cnt = 0
+    Dim ws As Worksheet
+    For Each ws In ThisWorkbook.Worksheets
+        If ws.Visible = xlSheetVisible Then
+            If ws.Name <> SHEET_ADMIN And ws.Name <> SHEET_NETWORK Then
+                On Error Resume Next
+                ws.Visible = xlSheetHidden
+                If Err.Number = 0 Then cnt = cnt + 1
+                Err.Clear
+                On Error GoTo 0
+            End If
+        End If
+    Next ws
+    ' 두 설계 시트는 항상 표시 보장
+    On Error Resume Next
+    ThisWorkbook.Worksheets(SHEET_ADMIN).Visible = xlSheetVisible
+    ThisWorkbook.Worksheets(SHEET_NETWORK).Visible = xlSheetVisible
+    On Error GoTo 0
+    MsgBox cnt & " 개 시트를 숨겼습니다 (행정도·네트웍구성도만 표시)." & vbLf & vbLf & _
+           "복원: 시트 탭 우클릭 → 「숨기기 취소」 또는 Alt+F8 → 시트정리_표시", vbInformation, "시트 정리"
+End Sub
+
+' owner 2026-06-19: 시트정리_숨기기 로 숨긴 시트 다시 표시 (xlSheetHidden 만 — veryHidden helper 는 그대로).
+Public Sub 시트정리_표시()
+    Dim cnt As Long: cnt = 0
+    Dim ws As Worksheet
+    For Each ws In ThisWorkbook.Worksheets
+        If ws.Visible = xlSheetHidden Then
+            On Error Resume Next
+            ws.Visible = xlSheetVisible
+            If Err.Number = 0 Then cnt = cnt + 1
+            Err.Clear
+            On Error GoTo 0
+        End If
+    Next ws
+    MsgBox cnt & " 개 시트를 다시 표시했습니다.", vbInformation, "시트 정리"
 End Sub
 
 ' owner 2026-06-07 (8-55): 원본 네트웍구성도 도형 Placement 분기 + 케이블 선로ID 맨 앞.
@@ -5045,27 +5107,31 @@ Public Sub PlaceFacility(ptLeft As Double, ptTop As Double, _
     shAd.OnAction = ""            ' OnAction 없음 → 네이티브 선택·이동
     shAd.Locked = False
 
-    ' 네트웍구성도 — owner 2026-06-08 (8-118): forceNwLeft/Top 명시되면 그대로, 아니면 자동 스냅.
-    Dim nwLeft2 As Double, nwTop2 As Double
-    If forceNwLeft > -1E+29 And forceNwTop > -1E+29 Then
-        nwLeft2 = forceNwLeft
-        nwTop2 = forceNwTop
-    Else
-        Dim nwCenterX2 As Double, nwCenterY2 As Double
-        SnapToNetworkGrid wsNw, ptLeft + FAC_DEFAULT_W / 2, ptTop + FAC_DEFAULT_H / 2, nwCenterX2, nwCenterY2
-        네트웍_빈격자_찾기 wsNw, nwCenterX2, nwCenterY2, FAC_DEFAULT_W, FAC_DEFAULT_H, facId, _
-                           ptLeft + FAC_DEFAULT_W / 2, ptTop + FAC_DEFAULT_H / 2, wsAd
-        nwLeft2 = nwCenterX2 - FAC_DEFAULT_W / 2
-        nwTop2 = nwCenterY2 - FAC_DEFAULT_H / 2
-    End If
-    Dim shNw As Shape
-    Set shNw = CloneLegendShape(leg, wsNw, nwLeft2, nwTop2, FAC_DEFAULT_W, FAC_DEFAULT_H, label)
-    shNw.Name = facId
-    shNw.OnAction = ""            ' OnAction 없음 → 네이티브 선택·이동
-    shNw.Locked = False
-
     ' owner 2026-06-15: 명칭="시설물" 범례는 배지·상태박스·태그콤보 없는 깔끔한 마커.
+    ' owner 2026-06-19: 명칭="시설물"(자사IP·전주 등 단순 마커)는 네트웍구성도에 그리지 않음 — 행정도만.
     Dim noBadge2 As Boolean: noBadge2 = (MetaLookupCategory(legendName) = "시설물")
+
+    ' 네트웍구성도 — owner 2026-06-08 (8-118): forceNwLeft/Top 명시되면 그대로, 아니면 자동 스냅.
+    Dim shNw As Shape
+    If Not noBadge2 Then
+        Dim nwLeft2 As Double, nwTop2 As Double
+        If forceNwLeft > -1E+29 And forceNwTop > -1E+29 Then
+            nwLeft2 = forceNwLeft
+            nwTop2 = forceNwTop
+        Else
+            Dim nwCenterX2 As Double, nwCenterY2 As Double
+            SnapToNetworkGrid wsNw, ptLeft + FAC_DEFAULT_W / 2, ptTop + FAC_DEFAULT_H / 2, nwCenterX2, nwCenterY2
+            네트웍_빈격자_찾기 wsNw, nwCenterX2, nwCenterY2, FAC_DEFAULT_W, FAC_DEFAULT_H, facId, _
+                               ptLeft + FAC_DEFAULT_W / 2, ptTop + FAC_DEFAULT_H / 2, wsAd
+            nwLeft2 = nwCenterX2 - FAC_DEFAULT_W / 2
+            nwTop2 = nwCenterY2 - FAC_DEFAULT_H / 2
+        End If
+        Set shNw = CloneLegendShape(leg, wsNw, nwLeft2, nwTop2, FAC_DEFAULT_W, FAC_DEFAULT_H, label)
+        shNw.Name = facId
+        shNw.OnAction = ""            ' OnAction 없음 → 네이티브 선택·이동
+        shNw.Locked = False
+    End If
+
     Dim badgeNo2 As Long, badgeNo2Meta As Variant
     If noBadge2 Then
         badgeNo2 = 0: badgeNo2Meta = ""
@@ -5080,18 +5146,22 @@ Public Sub PlaceFacility(ptLeft As Double, ptTop As Double, _
         AddBadge wsNw, shNw, facId, CStr(badgeNo2)
     End If
 
-    ' 설명선 자동 부착 — 양 시트. 첫 줄 = 구분/규격 (owner 2026-06-15). 색 판정용 label 은 구분 그대로.
+    ' 설명선 자동 부착 — 행정도 항상, 네트웍은 noBadge2 아닐 때만. 첫 줄 = 구분/규격 (owner 2026-06-15).
     Dim facGyuk2 As String: facGyuk2 = MetaLookupGyuk(legendName)
     Dim dispLab2 As String: dispLab2 = label
     If Len(facGyuk2) > 0 Then dispLab2 = label & "/" & facGyuk2
+    ' owner 2026-06-19: 2번째 줄 placeholder = 명칭 기반 ("설치장소명을 입력하세요" 등). 명칭 없으면 함체명 폴백.
+    Dim namePromptP As String: namePromptP = MetaLookupCategory(legendName)
+    If Len(namePromptP) = 0 Then namePromptP = "함체"
+    namePromptP = namePromptP & "명을 입력하세요"
     Dim calloutTextP As String
-    calloutTextP = dispLab2 & vbCr & "함체명을 입력하세요" & vbCr & "ID"
+    calloutTextP = dispLab2 & vbCr & namePromptP & vbCr & "ID"
     AddFacilityCallout wsAd, shAd, facId, calloutTextP, label
-    AddFacilityCallout wsNw, shNw, facId, calloutTextP, label
+    If Not noBadge2 Then AddFacilityCallout wsNw, shNw, facId, calloutTextP, label
 
     ' callout 생성 후 배지를 callout 좌상단으로 재정렬
     배지_위치_동기화 wsAd
-    배지_위치_동기화 wsNw
+    If Not noBadge2 Then 배지_위치_동기화 wsNw
 
     ' 네트웍구성도 시설물 callout 위 상태 박스 + 태그 콤보 (noBadge2 면 생략 — owner 2026-06-15)
     If Not noBadge2 Then

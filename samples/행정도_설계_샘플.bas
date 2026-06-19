@@ -26,6 +26,7 @@ Private mFacNo As Object, mFacCore As Object, mFacDay As Object, mFacNight As Ob
 Private mCblFrom As Object, mCblTo As Object, mCblSpec As Object, mCblGubun As Object, mCblDist As Object
 Private mChildren As Object, mWeight As Object
 Private mFacLegend As Object, mFacGyuk As Object  ' 범례명칭(직선형 등)·규격(콜아웃)
+Private mFacLbl As Object                          ' 구분라벨(col2 "신설/자사IP" 등) — 자사IP 판별용 (owner 2026-06-19)
 Private mSeq As Long, mOutR As Long, mSeg As Long
 Private mWsOut As Worksheet
 Private mCounted As Object                   ' 공종 집계 중복방지 (시설물 1회만)
@@ -2380,8 +2381,13 @@ Public Sub FinalizeDrawnFacility(shp As Shape)
     Dim facGyuk As String: facGyuk = MetaLookupGyuk(legendName)
     Dim dispLab As String: dispLab = legLab
     If Len(facGyuk) > 0 Then dispLab = legLab & "/" & facGyuk
+    ' owner 2026-06-19: 2번째 줄 placeholder = 명칭 기반 ("설치장소명을 입력하세요"·"시설물명을 입력하세요" 등).
+    '   명칭(MetaLookupCategory) 없으면 "함체명을 입력하세요" 폴백.
+    Dim namePrompt As String: namePrompt = MetaLookupCategory(legendName)
+    If Len(namePrompt) = 0 Then namePrompt = "함체"
+    namePrompt = namePrompt & "명을 입력하세요"
     Dim calloutText As String
-    calloutText = dispLab & vbCr & "함체명을 입력하세요" & vbCr & "ID"
+    calloutText = dispLab & vbCr & namePrompt & vbCr & "ID"
 
     Dim facId As String: facId = PREFIX_FAC & NewId8()
 
@@ -2410,6 +2416,8 @@ Public Sub FinalizeDrawnFacility(shp As Shape)
     If Not noBadge Then AddBadge ws, newShp, facId, CStr(badgeNo)
 
     ' 네트웍구성도 복제 — 행정도 좌표를 20x20 격자 셀 「중앙」 으로 자동 스냅 (시설물이 항상 격자 안에 들어가게)
+    ' owner 2026-06-19: 명칭="시설물" 범례(자사IP·전주 등 단순 마커)는 네트웍구성도에 그리지 않음 — 행정도만.
+    If Not noBadge Then
     Dim wsNw As Worksheet: Set wsNw = ThisWorkbook.Worksheets(SHEET_NETWORK)
     Dim wasProtNw As Boolean
     wasProtNw = wsNw.ProtectContents Or wsNw.ProtectDrawingObjects
@@ -2444,17 +2452,16 @@ Public Sub FinalizeDrawnFacility(shp As Shape)
         On Error GoTo 0
     End If
     ' 네트웍구성도 시설물 — 설명선 + 배지 + 상태 박스 + 태그 콤보 부착 (행정도와 같은 번호)
-    '   legLab 은 calloutText 생성 시 이미 계산됨
+    '   legLab 은 calloutText 생성 시 이미 계산됨. (noBadge=False 인 경우만 이 블록 진입)
     If Not shNw Is Nothing Then
         AddFacilityCallout wsNw, shNw, facId, calloutText, legLab
-        If Not noBadge Then
-            AddBadge wsNw, shNw, facId, CStr(badgeNo)
-            AddFacilityStatusBox wsNw, facId
-            AddFacilityTagCombo wsNw, facId
-            시설물_태그_위치_동기화 wsNw, facId
-        End If
+        AddBadge wsNw, shNw, facId, CStr(badgeNo)
+        AddFacilityStatusBox wsNw, facId
+        AddFacilityTagCombo wsNw, facId
+        시설물_태그_위치_동기화 wsNw, facId
     End If
     If wasProtNw Then ApplySheetProtection wsNw
+    End If
 
     ' 설명선(박스 + 연결선) 자동 부착 (행정도). callout 생성 후 배지를 callout 좌상단으로 이동
     AddFacilityCallout ws, newShp, facId, calloutText, legLab
@@ -3739,6 +3746,12 @@ Public Sub 새파일_내보내기()
         On Error GoTo 0
     Next oi
 
+    ' 내보내기 파일은 5시트 모두 표시 (작업 파일에서 시트정리_숨기기 로 숨겨둔 기별 시트도 결과물엔 보이게) — owner 2026-06-19
+    Dim vws As Worksheet
+    For Each vws In newWb.Worksheets
+        On Error Resume Next: vws.Visible = xlSheetVisible: On Error GoTo 0
+    Next vws
+
     ' 정리(범례·버튼·격자색 제거) — 행정도(후)·네트웍(후) 만. 기별 3시트는 양식 서식 보존 위해 건너뜀.
     Dim ws As Worksheet, i As Long, nm As String
     For Each ws In newWb.Worksheets
@@ -3796,6 +3809,13 @@ Public Sub 새파일_내보내기()
     Dim f As Long, rf As Long
     Dim filledOk As Boolean: filledOk = 기별_채우기_코어(newWb, f, rf)
 
+    ' 자재_공종 템플릿 별도 내보내기 (owner 2026-06-19) — 종합에서 지입 자재·노무 공종 추출 →
+    '   「공사번호_템플릿.xlsx」. 5시트 내보내기와 독립 — 실패해도 본 흐름 영향 없음.
+    Dim tmplPath As String: tmplPath = ""
+    On Error Resume Next
+    tmplPath = 기별_템플릿_내보내기(newWb, ordNo, prjNm)
+    On Error GoTo 0
+
     ' 파일명 = 공사번호_공사명 (둘 다 없으면 타임스탬프)
     Dim fname As String: fname = ordNo
     If Len(ordNo) > 0 And Len(prjNm) > 0 Then fname = fname & "_"
@@ -3835,7 +3855,8 @@ Public Sub 새파일_내보내기()
         On Error Resume Next: newWb.Close SaveChanges:=False: On Error GoTo 0
         MsgBox "기별명세서 내보내기 완료 (저장만 — 창 안 열림)." & vbLf & vbLf & _
                "기별 작성: 신설 " & f & " 구간 · 철거 " & rf & " 구간" & IIf(filledOk, "", " (⚠ 기별 시트 확인 필요)") & vbLf & _
-               "저장: " & savedPath, vbInformation, "기별명세서 내보내기"
+               "저장: " & savedPath & _
+               IIf(Len(tmplPath) > 0, vbLf & "자재_공종 템플릿: " & tmplPath, ""), vbInformation, "기별명세서 내보내기"
     Else
         On Error Resume Next: newWb.Activate: On Error GoTo 0
         MsgBox "⚠ 자동 저장 실패 (오류 " & lastErr & ": " & lastDesc & ")." & vbLf & vbLf & _
@@ -3844,6 +3865,48 @@ Public Sub 새파일_내보내기()
                "새로 열린 이 창에서 직접 「다른 이름으로 저장」 하세요." & vbLf & _
                "(같은 이름 파일이 이미 열려 있으면 닫고 다시 시도)", vbExclamation, "기별명세서 내보내기"
     End If
+End Sub
+
+' owner 2026-06-19: 양식 파일(작업 .xlsm)에서 행정도·네트웍구성도 외 「보이는」 시트 숨기기 (탭바 정리).
+'   기별 3시트·자재_공종 등 템플릿 시트를 xlSheetHidden (탭 우클릭 「숨기기 취소」로 복원 가능).
+'   이미 veryHidden 인 helper 시트(_시설물·_케이블·splash 등)는 건드리지 않음. 내보내기엔 영향 없음(숨겨도 복사됨).
+Public Sub 시트정리_숨기기()
+    Dim cnt As Long: cnt = 0
+    Dim ws As Worksheet
+    For Each ws In ThisWorkbook.Worksheets
+        If ws.Visible = xlSheetVisible Then
+            If ws.Name <> SHEET_ADMIN And ws.Name <> SHEET_NETWORK Then
+                On Error Resume Next
+                ws.Visible = xlSheetHidden
+                If Err.Number = 0 Then cnt = cnt + 1
+                Err.Clear
+                On Error GoTo 0
+            End If
+        End If
+    Next ws
+    ' 두 설계 시트는 항상 표시 보장
+    On Error Resume Next
+    ThisWorkbook.Worksheets(SHEET_ADMIN).Visible = xlSheetVisible
+    ThisWorkbook.Worksheets(SHEET_NETWORK).Visible = xlSheetVisible
+    On Error GoTo 0
+    MsgBox cnt & " 개 시트를 숨겼습니다 (행정도·네트웍구성도만 표시)." & vbLf & vbLf & _
+           "복원: 시트 탭 우클릭 → 「숨기기 취소」 또는 Alt+F8 → 시트정리_표시", vbInformation, "시트 정리"
+End Sub
+
+' owner 2026-06-19: 시트정리_숨기기 로 숨긴 시트 다시 표시 (xlSheetHidden 만 — veryHidden helper 는 그대로).
+Public Sub 시트정리_표시()
+    Dim cnt As Long: cnt = 0
+    Dim ws As Worksheet
+    For Each ws In ThisWorkbook.Worksheets
+        If ws.Visible = xlSheetHidden Then
+            On Error Resume Next
+            ws.Visible = xlSheetVisible
+            If Err.Number = 0 Then cnt = cnt + 1
+            Err.Clear
+            On Error GoTo 0
+        End If
+    Next ws
+    MsgBox cnt & " 개 시트를 다시 표시했습니다.", vbInformation, "시트 정리"
 End Sub
 
 ' owner 2026-06-07 (8-55): 원본 네트웍구성도 도형 Placement 분기 + 케이블 선로ID 맨 앞.
@@ -5136,27 +5199,31 @@ Public Sub PlaceFacility(ptLeft As Double, ptTop As Double, _
     shAd.OnAction = ""            ' OnAction 없음 → 네이티브 선택·이동
     shAd.Locked = False
 
-    ' 네트웍구성도 — owner 2026-06-08 (8-118): forceNwLeft/Top 명시되면 그대로, 아니면 자동 스냅.
-    Dim nwLeft2 As Double, nwTop2 As Double
-    If forceNwLeft > -1E+29 And forceNwTop > -1E+29 Then
-        nwLeft2 = forceNwLeft
-        nwTop2 = forceNwTop
-    Else
-        Dim nwCenterX2 As Double, nwCenterY2 As Double
-        SnapToNetworkGrid wsNw, ptLeft + FAC_DEFAULT_W / 2, ptTop + FAC_DEFAULT_H / 2, nwCenterX2, nwCenterY2
-        네트웍_빈격자_찾기 wsNw, nwCenterX2, nwCenterY2, FAC_DEFAULT_W, FAC_DEFAULT_H, facId, _
-                           ptLeft + FAC_DEFAULT_W / 2, ptTop + FAC_DEFAULT_H / 2, wsAd
-        nwLeft2 = nwCenterX2 - FAC_DEFAULT_W / 2
-        nwTop2 = nwCenterY2 - FAC_DEFAULT_H / 2
-    End If
-    Dim shNw As Shape
-    Set shNw = CloneLegendShape(leg, wsNw, nwLeft2, nwTop2, FAC_DEFAULT_W, FAC_DEFAULT_H, label)
-    shNw.Name = facId
-    shNw.OnAction = ""            ' OnAction 없음 → 네이티브 선택·이동
-    shNw.Locked = False
-
     ' owner 2026-06-15: 명칭="시설물" 범례는 배지·상태박스·태그콤보 없는 깔끔한 마커.
+    ' owner 2026-06-19: 명칭="시설물"(자사IP·전주 등 단순 마커)는 네트웍구성도에 그리지 않음 — 행정도만.
     Dim noBadge2 As Boolean: noBadge2 = (MetaLookupCategory(legendName) = "시설물")
+
+    ' 네트웍구성도 — owner 2026-06-08 (8-118): forceNwLeft/Top 명시되면 그대로, 아니면 자동 스냅.
+    Dim shNw As Shape
+    If Not noBadge2 Then
+        Dim nwLeft2 As Double, nwTop2 As Double
+        If forceNwLeft > -1E+29 And forceNwTop > -1E+29 Then
+            nwLeft2 = forceNwLeft
+            nwTop2 = forceNwTop
+        Else
+            Dim nwCenterX2 As Double, nwCenterY2 As Double
+            SnapToNetworkGrid wsNw, ptLeft + FAC_DEFAULT_W / 2, ptTop + FAC_DEFAULT_H / 2, nwCenterX2, nwCenterY2
+            네트웍_빈격자_찾기 wsNw, nwCenterX2, nwCenterY2, FAC_DEFAULT_W, FAC_DEFAULT_H, facId, _
+                               ptLeft + FAC_DEFAULT_W / 2, ptTop + FAC_DEFAULT_H / 2, wsAd
+            nwLeft2 = nwCenterX2 - FAC_DEFAULT_W / 2
+            nwTop2 = nwCenterY2 - FAC_DEFAULT_H / 2
+        End If
+        Set shNw = CloneLegendShape(leg, wsNw, nwLeft2, nwTop2, FAC_DEFAULT_W, FAC_DEFAULT_H, label)
+        shNw.Name = facId
+        shNw.OnAction = ""            ' OnAction 없음 → 네이티브 선택·이동
+        shNw.Locked = False
+    End If
+
     Dim badgeNo2 As Long, badgeNo2Meta As Variant
     If noBadge2 Then
         badgeNo2 = 0: badgeNo2Meta = ""
@@ -5171,18 +5238,22 @@ Public Sub PlaceFacility(ptLeft As Double, ptTop As Double, _
         AddBadge wsNw, shNw, facId, CStr(badgeNo2)
     End If
 
-    ' 설명선 자동 부착 — 양 시트. 첫 줄 = 구분/규격 (owner 2026-06-15). 색 판정용 label 은 구분 그대로.
+    ' 설명선 자동 부착 — 행정도 항상, 네트웍은 noBadge2 아닐 때만. 첫 줄 = 구분/규격 (owner 2026-06-15).
     Dim facGyuk2 As String: facGyuk2 = MetaLookupGyuk(legendName)
     Dim dispLab2 As String: dispLab2 = label
     If Len(facGyuk2) > 0 Then dispLab2 = label & "/" & facGyuk2
+    ' owner 2026-06-19: 2번째 줄 placeholder = 명칭 기반 ("설치장소명을 입력하세요" 등). 명칭 없으면 함체명 폴백.
+    Dim namePromptP As String: namePromptP = MetaLookupCategory(legendName)
+    If Len(namePromptP) = 0 Then namePromptP = "함체"
+    namePromptP = namePromptP & "명을 입력하세요"
     Dim calloutTextP As String
-    calloutTextP = dispLab2 & vbCr & "함체명을 입력하세요" & vbCr & "ID"
+    calloutTextP = dispLab2 & vbCr & namePromptP & vbCr & "ID"
     AddFacilityCallout wsAd, shAd, facId, calloutTextP, label
-    AddFacilityCallout wsNw, shNw, facId, calloutTextP, label
+    If Not noBadge2 Then AddFacilityCallout wsNw, shNw, facId, calloutTextP, label
 
     ' callout 생성 후 배지를 callout 좌상단으로 재정렬
     배지_위치_동기화 wsAd
-    배지_위치_동기화 wsNw
+    If Not noBadge2 Then 배지_위치_동기화 wsNw
 
     ' 네트웍구성도 시설물 callout 위 상태 박스 + 태그 콤보 (noBadge2 면 생략 — owner 2026-06-15)
     If Not noBadge2 Then
@@ -27568,8 +27639,9 @@ Private Function IsCalloutTemplate(t As String) As Boolean
     Dim s As String
     s = Replace(Replace(Replace(t, vbCr, ""), vbLf, ""), " ", "")
     If Len(s) = 0 Then IsCalloutTemplate = True: Exit Function
-    ' 새 패턴 — 「함체명을입력하세요」 substring 있으면 템플릿 (범례명 자동 입력 후에도 인식)
-    If InStr(s, "함체명을입력하세요") > 0 Then IsCalloutTemplate = True: Exit Function
+    ' 새 패턴 — 「…명을입력하세요」 substring 있으면 템플릿 (owner 2026-06-19: 명칭 기반 동적 placeholder
+    '   「설치장소명을입력하세요」·「시설물명을입력하세요」 등 모두 인식. 범례명 자동 입력 후에도 인식)
+    If InStr(s, "명을입력하세요") > 0 Then IsCalloutTemplate = True: Exit Function
     If s = "ID함체명구분" Then IsCalloutTemplate = True: Exit Function                ' 레거시 — 「을 입력하세요」 전
     If Left(s, Len("선로ID")) = "선로ID" And Right(s, Len("거리")) = "거리" Then
         IsCalloutTemplate = True: Exit Function
@@ -29592,10 +29664,11 @@ Public Function 라이센스_검증() As Boolean
                       "현재 HW: " & currentHW & vbLf & vbLf & _
                       "위 HW ID 를 관리자에게 전달해 HW 바인딩 재발급을 요청하세요."
         Exit Function
-    ElseIf hwid <> currentHW Then
-        라이센스_차단 "이 라이센스는 다른 PC 전용입니다." & vbLf & _
-                      "등록된 HW: " & hwid & vbLf & _
-                      "현재 HW: " & currentHW & vbLf & vbLf & _
+    ElseIf LCase(라이센스_사용자ID_추출(hwid)) <> LCase(라이센스_사용자ID_추출(currentHW)) Then
+        ' owner 2026-06-19: HW 전체일치 → 사용자ID(USERNAME)만 일치로 완화 (아래 추출 함수 주석).
+        라이센스_차단 "이 라이센스는 다른 사용자 전용입니다." & vbLf & _
+                      "등록 사용자ID: " & 라이센스_사용자ID_추출(hwid) & vbLf & _
+                      "현재 사용자ID: " & 라이센스_사용자ID_추출(currentHW) & vbLf & vbLf & _
                       "관리자에게 재발급 요청 바랍니다."
         Exit Function
     End If
@@ -29626,6 +29699,19 @@ End Function
 
 Private Function 라이센스_현재_HW() As String
     라이센스_현재_HW = Environ("COMPUTERNAME") & "|" & Environ("USERNAME")
+End Function
+
+' owner 2026-06-19: HW 전체일치 → 사용자ID(USERNAME)만 일치로 완화.
+'   COMPUTERNAME(앞부분)이 매일 갱신되는 환경 대응. 「COMPUTERNAME|USERNAME」 에서
+'   마지막 '|' 뒤 사용자ID 부분만 비교(라이센스_검증 에서 LCase 로 대소문자 무시).
+'   '|' 없으면 전체를 사용자ID 로 간주 → 관리자가 사용자ID 만 박아 발급해도 동작.
+Private Function 라이센스_사용자ID_추출(hwFull As String) As String
+    Dim p As Long: p = InStrRev(hwFull, "|")
+    If p > 0 Then
+        라이센스_사용자ID_추출 = Trim(Mid(hwFull, p + 1))
+    Else
+        라이센스_사용자ID_추출 = Trim(hwFull)
+    End If
 End Function
 
 Private Function 라이센스_해시_계산(user As String, issued As String, expires As String) As String
@@ -29729,11 +29815,6 @@ Public Sub 라이센스_발급()
     bindHW = InputBox("사용자 PC 의 HW ID (예: PC01|USER1)" & vbLf & _
                        "※ 필수 — 이 값이 있어야만 사용자 PC 에서 실행됩니다 (빈 값 = 어느 PC 에서도 차단).", _
                        "라이센스 발급 — 3/3", "")
-    If Len(Trim(bindHW)) = 0 Then
-        If MsgBox("HW ID 가 비어 있습니다. 이대로 발급하면 이 배포본은 어느 PC 에서도 차단됩니다." & vbLf & _
-                  "(사용자에게 라이센스_내_HW_ID_보기 로 HW 를 먼저 받아 입력하세요.)" & vbLf & vbLf & _
-                  "그래도 계속할까요?", vbYesNo + vbExclamation, "라이센스 발급") <> vbYes Then Exit Sub
-    End If
 
     Dim issued As String: issued = Format(Date, "yyyy-mm-dd")
     Dim expires As String: expires = Format(Date + CLng(daysStr), "yyyy-mm-dd")
@@ -30821,7 +30902,8 @@ Private Function 시설물_표시명(facId As String) As String
             Dim parts() As String: parts = Split(t, vbCr)
             If UBound(parts) >= 1 Then
                 Dim nm1 As String: nm1 = Trim(parts(1))
-                If Len(nm1) > 0 And nm1 <> "함체명을 입력하세요" Then nm = nm1
+                ' owner 2026-06-19: 동적 placeholder("…명을 입력하세요") 는 미입력으로 간주.
+                If Len(nm1) > 0 And InStr(nm1, "명을 입력하세요") = 0 Then nm = nm1
             End If
             If Len(nm) = 0 And UBound(parts) >= 0 Then nm = Trim(parts(0))
             If Len(nm) > 0 Then Exit For
@@ -32648,7 +32730,7 @@ Private Sub 기별_방출_함체(node As String, segNo As Long, role As String)
     mWsOut.Cells(mOutR, 9).Value = ccS
     mWsOut.Cells(mOutR, 10).Value = dv
     mWsOut.Cells(mOutR, 11).Value = nv
-    mWsOut.Cells(mOutR, 15).Value = 기별_비고(no, kd)
+    mWsOut.Cells(mOutR, 15).Value = 기별_비고(no, kd, node)
     mWsOut.Cells(mOutR, 16).Value = workTxt
     mWsOut.Cells(mOutR, 17).Value = coreTxt
     mWsOut.Cells(mOutR, 19).Value = matTxt
@@ -32713,7 +32795,14 @@ Private Function 기별_disp(facId As String) As String
 End Function
 
 ' 비고(JM) = 신설/기설 + 종류 → 신설함체·기설RN 등.
-Private Function 기별_비고(no As String, kind As String) As String
+'   owner 2026-06-19: 자사IP 시설은 "IP주 신설"/"IP주 철거" 로 표기 (신설그외/철거그외 대신).
+Private Function 기별_비고(no As String, kind As String, Optional ByVal facId As String = "") As String
+    If Len(facId) > 0 Then
+        If 기별_IP시설(facId) Then
+            기별_비고 = "IP주 " & no
+            Exit Function
+        End If
+    End If
     Dim t As String
     If kind = "RN" Then
         t = "RN"
@@ -32791,7 +32880,8 @@ Private Function 기별_콜아웃_라인2(ws As Worksheet, ByVal facId As String
     Dim parts() As String: parts = Split(tx, vbCr)
     If UBound(parts) >= 1 Then
         Dim ln2 As String: ln2 = Trim(parts(1))
-        If ln2 <> "함체명을 입력하세요" And ln2 <> "ID" And ln2 <> "" Then 기별_콜아웃_라인2 = ln2
+        ' owner 2026-06-19: 동적 placeholder("…명을 입력하세요") 는 미입력으로 간주.
+        If InStr(ln2, "명을 입력하세요") = 0 And ln2 <> "ID" And ln2 <> "" Then 기별_콜아웃_라인2 = ln2
     End If
 End Function
 
@@ -33029,12 +33119,14 @@ Public Function 기별_채우기_코어(wb As Workbook, ByRef outFilled As Long,
     Set mFacNight = CreateObject("Scripting.Dictionary")
     Set mFacLegend = CreateObject("Scripting.Dictionary")
     Set mFacGyuk = CreateObject("Scripting.Dictionary")
+    Set mFacLbl = CreateObject("Scripting.Dictionary")
     Dim lastF As Long: lastF = wsFac.Cells(wsFac.Rows.Count, 1).End(xlUp).Row
     Dim r As Long
     For r = 2 To lastF
         Dim fId As String: fId = CStr(wsFac.Cells(r, 1).Value)
         If Len(fId) > 0 Then
             Dim lbl As String: lbl = CStr(wsFac.Cells(r, 2).Value)
+            mFacLbl(fId) = lbl
             mFacName(fId) = 기별_시설명(wsAdmin, wsNw, fId, CStr(wsFac.Cells(r, 3).Value))
             mFacBadge(fId) = CStr(wsFac.Cells(r, 5).Value)
             mFacNo(fId) = 기별_신설기설(lbl)
@@ -33142,61 +33234,15 @@ Public Function 기별_채우기_코어(wb As Workbook, ByRef outFilled As Long,
     Dim hSpan As Double: hSpan = wsNew.Rows(11).RowHeight
     Dim hSub As Double: hSub = 19.8    ' 소계 행높이 (owner 2026-06-16)
     Dim hTot As Double: hTot = 27.6    ' 합계 행높이 (owner 2026-06-16)
-    ' 소계·합계 채움색 (owner 2026-06-16: .Interior.Color 읽기는 흰색 반환 → 하드코딩 설정).
-    '   소계=FFCC99(살구, 직접 RGB) · 합계=인덱스 색 11(원본 양식 동일).
-    Dim totRow As Long: totRow = 10 + 4 * nBlk
 
-    ' (1) 서식 적용 — 원본 템플릿행에서 PasteSpecial(서식만)+행높이. 합계 먼저(원본 22 가 블록에 덮이기 전).
-    '     서식만 복사 → 샘플 수동수식(아연도강연선 =G 등) 안 따라옴 → 장주 없이 조가선 계산되던 문제 동시 해결.
-    Dim bi As Long, br As Long
-    If nBlk > 0 Then 기별_행서식 wsNew, 22, totRow, hTot
-    For bi = 1 To nBlk
-        br = 10 + 4 * (bi - 1)
-        기별_행서식 wsNew, 10, br, hFac
-        기별_행서식 wsNew, 11, br + 1, hSpan
-        기별_행서식 wsNew, 12, br + 2, hFac
-        기별_행서식 wsNew, 13, br + 3, hSub
-    Next bi
-
-    ' (2) 데이터 영역 내용 비우기 (서식 유지)
-    wsNew.Range(wsNew.Cells(10, 1), wsNew.Cells(880, 275)).ClearContents
-
-    ' (3) 값 기입
-    Dim dedup As Object: Set dedup = CreateObject("Scripting.Dictionary")
+    ' === 신설 시트 채우기 (owner 2026-06-19: 소계 1행 + 자사IP 별도 IP신설 구간) ===
     Set mUsedCols = CreateObject("Scripting.Dictionary")
-    Dim subRows As Collection: Set subRows = New Collection
-    For bi = 1 To nBlk
-        rec = segs(bi)
-        Dim sFac As String: sFac = CStr(rec(0))
-        Dim cbl As String: cbl = CStr(rec(1))
-        Dim eFac As String: eFac = CStr(rec(2))
-        br = 10 + 4 * (bi - 1)
-        기별_양식_시설쓰기 wsNew, br, sFac, dedup
-        기별_양식_경간쓰기 wsNew, br + 1, cbl
-        기별_양식_시설쓰기 wsNew, br + 2, eFac, dedup
-        ' 신설 케이블 구간: 양끝 기설 접속함체/RN 「그 함체 행」에 분기키트 1NT(FW) 1개 (owner 2026-06-16).
-        '   경간 아니라 함체 행. 기설 구간 cable 은 제외. 같은 함체가 여러 신설구간이면 각 행 1씩(조수 합).
-        Dim cgSeg As String: cgSeg = "": If mCblGubun.Exists(cbl) Then cgSeg = CStr(mCblGubun(cbl))
-        If InStr(cgSeg, "기설") = 0 And InStr(cgSeg, "철거") = 0 Then
-            If 기별_기설함체(sFac) Then 기별_셀W wsNew, "FW", br, 1
-            If 기별_기설함체(eFac) Then 기별_셀W wsNew, "FW", br + 2, 1
-        End If
-        wsNew.Range("A" & (br + 3)).Value = "소  계"
-        기별_양식_소계 wsNew, br + 3, br, br + 2, 기별_양식_합산열()
-        기별_행채움 wsNew, br + 3, RGB(255, 204, 153), -1, False, 10, hSub, False, "JO", "JM", "JO"   ' 소계: 살구 FFCC99 · 비고 JM:JO 병합
-        subRows.Add (br + 3)
-    Next bi
-    Dim filled As Long: filled = nBlk
-    Dim rw As Long: rw = totRow
+    Dim filled As Long
+    filled = 기별_한시트_채우기(wsNew, segs, False, hFac, hSpan, hSub, hTot, _
+                              10, 11, 13, 22, 9, 기별_양식_합산열(), "JO", "JM", "JO", _
+                              "IP 신 설", "합 계", 275)
 
-    ' 합계 — A="합 계"(공백1) → 종합 G열 INDEX/MATCH("합 계") 연동.
-    If nBlk > 0 Then
-        wsNew.Range("A" & rw).Value = "합 계"
-        기별_양식_합계 wsNew, rw, subRows, 기별_양식_합산열()
-        기별_행채움 wsNew, rw, RGB(0, 255, 0), -1, True, 11, hTot, True, "JO", "JM", "JO"   ' 합계: 가운데·테두리·비고 JM:JO 병합
-    End If
-
-    ' 값 들어간 열 숨김 해제 (owner 2026-06-16: 값 셀이 숨겨지지 않게). 메타열(A~H·JL·JM) 항상 표시.
+    ' 값 들어간 열 숨김 해제 (owner 2026-06-16). 메타열(A~H·JL·JM) 항상 표시.
     Dim alwaysVis As Variant
     alwaysVis = Array("A", "B", "C", "D", "E", "F", "G", "H", "JL", "JM")
     Dim av As Long
@@ -33210,60 +33256,17 @@ Public Function 기별_채우기_코어(wb As Workbook, ByRef outFilled As Long,
         wsNew.Columns(CStr(uc)).AutoFit          ' ### 방지 — 값이 열폭보다 커서 잘리는 것 자동맞춤
         On Error GoTo 0
     Next uc
-    ' 거리(G) 만 자동맞춤 (큰 숫자 ### 방지). H(여장)은 헤더 병합영역이 넓어 AutoFit 시 과확장 → 제외.
-    On Error Resume Next
-    wsNew.Columns("G").AutoFit
-    On Error GoTo 0
+    On Error Resume Next: wsNew.Columns("G").AutoFit: On Error GoTo 0
 
-    ' === 철거시트 채우기 (owner 2026-06-16: 철거 케이블 → 3.기별명세서(철거)) ===
-    '   구조는 신설과 동일(4행 블록: 시작함체/경간/종료함체/소계 + 합계). 단 자재·공종 열 레이아웃 다름.
-    '   시설 행: 명칭(A)·배지(EK)·비고(EL) 만 — 코어확인 공종 미반영(owner). 자재·공종은 경간 행에.
-    '   경간 행: 거리(G) + 광케이블 철거(DR 폐기/DS 재사용, owner 규칙) + 규격 자재열(I~AL).
-    '   합계 A="합 계(철거)" → 종합 G273+ INDEX/MATCH 자동 연동(×-1).
+    ' === 철거시트 채우기 (owner 2026-06-19: 소계 1행 + 자사IP 별도 IP철거 구간) ===
     Dim remFilled As Long: remFilled = 0
-    Dim subRowsRem As Collection: Set subRowsRem = New Collection
-    If nBlkRem > 0 And Not wsRem Is Nothing Then
-        Dim remCols As Variant: remCols = 기별_철거_합산열()
+    If Not wsRem Is Nothing Then
         Dim hFacR As Double: hFacR = wsRem.Rows(10).RowHeight
         Dim hSpanR As Double: hSpanR = wsRem.Rows(11).RowHeight
-        Dim totRowR As Long: totRowR = 10 + 4 * nBlkRem
-
-        ' (1) 서식 — 원본 템플릿(블록 10-13·합계 18)에서 행복사. 합계 먼저.
-        Dim biR As Long, brR As Long
-        기별_행서식 wsRem, 18, totRowR, hTot
-        For biR = 1 To nBlkRem
-            brR = 10 + 4 * (biR - 1)
-            기별_행서식 wsRem, 10, brR, hFacR
-            기별_행서식 wsRem, 11, brR + 1, hSpanR
-            기별_행서식 wsRem, 12, brR + 2, hFacR
-            기별_행서식 wsRem, 13, brR + 3, hSub
-        Next biR
-
-        ' (2) 데이터 영역 비우기 (철거시트 145열)
-        wsRem.Range(wsRem.Cells(10, 1), wsRem.Cells(880, 145)).ClearContents
-
-        ' (3) 값 기입 (철거 시설 행은 dedup 불필요 — 자재·공종 누적 없이 명칭/배지/비고만)
         Set mUsedCols = CreateObject("Scripting.Dictionary")    ' 철거시트 전용 사용열 (신설과 별개)
-        For biR = 1 To nBlkRem
-            rec = segsRem(biR)
-            Dim sFacR As String: sFacR = CStr(rec(0))
-            Dim cblR As String: cblR = CStr(rec(1))
-            Dim eFacR As String: eFacR = CStr(rec(2))
-            brR = 10 + 4 * (biR - 1)
-            기별_양식_시설쓰기_철거 wsRem, brR, sFacR
-            기별_양식_경간쓰기_철거 wsRem, brR + 1, cblR
-            기별_양식_시설쓰기_철거 wsRem, brR + 2, eFacR
-            wsRem.Range("A" & (brR + 3)).Value = "소  계"
-            기별_양식_소계 wsRem, brR + 3, brR, brR + 2, remCols
-            기별_행채움 wsRem, brR + 3, RGB(255, 204, 153), -1, False, 10, hSub, False, "EN", "EL", "EN"   ' 소계: 살구 · 비고 EL:EN 병합
-            subRowsRem.Add (brR + 3)
-        Next biR
-        remFilled = nBlkRem
-
-        ' 합계 — A="합 계(철거)" (공백1+(철거)) → 종합 철거 INDEX/MATCH 연동.
-        wsRem.Range("A" & totRowR).Value = "합 계(철거)"
-        기별_양식_합계 wsRem, totRowR, subRowsRem, remCols
-        기별_행채움 wsRem, totRowR, RGB(0, 255, 0), -1, True, 11, hTot, True, "EN", "EL", "EN"   ' 합계: 가운데·테두리·비고 EL:EN 병합
+        remFilled = 기별_한시트_채우기(wsRem, segsRem, True, hFacR, hSpanR, hSub, hTot, _
+                                    10, 11, 13, 18, 9, 기별_철거_합산열(), "EN", "EL", "EN", _
+                                    "IP 철 거", "합 계(철거)", 145)
 
         ' 철거시트 숨김 해제 + AutoFit. 메타(A~H)·배지(EK)·비고(EL) 항상 표시.
         Dim remVis As Variant
@@ -33298,6 +33301,194 @@ Public Function 기별_채우기_코어(wb As Workbook, ByRef outFilled As Long,
     기별_채우기_코어 = True
 End Function
 
+' ============================================================================
+'  owner 2026-06-19: 한 시트(신설 or 철거) 채우기 — 일반 구간 소계 1행 + 자사IP 별도 구간.
+'   변경 전: 구간(블록 4행)마다 소계. 변경 후: 일반 구간 통틀어 소계 1행, 자사IP 시설은
+'   IP신설/IP철거 구간으로 분리(경간은 일반 구간에 그대로 둠). IP 시설 0건이면 IP 구간 생략.
+'   segs = Array(시작facId, cblId, 끝facId) 리스트. cols = 합산열. lastCol/bigoL/bigoR = 시트별.
+'   srcFac/srcSpan/srcSub/srcTot/srcHdr = 원본 템플릿 행번호(함체/경간/소계/합계/섹션헤더).
+' ============================================================================
+Private Function 기별_한시트_채우기(ws As Worksheet, segs As Collection, ByVal isRemoval As Boolean, _
+        ByVal hFac As Double, ByVal hSpan As Double, ByVal hSub As Double, ByVal hTot As Double, _
+        ByVal srcFac As Long, ByVal srcSpan As Long, ByVal srcSub As Long, ByVal srcTot As Long, ByVal srcHdr As Long, _
+        cols As Variant, ByVal lastCol As String, ByVal bigoL As String, ByVal bigoR As String, _
+        ByVal ipLabel As String, ByVal totLabel As String, ByVal clearLastColNum As Long) As Long
+    기별_한시트_채우기 = 0
+    Dim statusWant As String: statusWant = IIf(isRemoval, "철거", "신설")
+
+    ' --- 1) 일반 구간 행 계획 (자사IP 시설은 일반 구간에서 제외) ---
+    Dim regPlan As Collection: Set regPlan = New Collection   ' Array("F"/"S", id, cblForFW)
+    Dim i As Long
+    For i = 1 To segs.Count
+        Dim rc As Variant: rc = segs(i)
+        Dim cb As String: cb = CStr(rc(1))
+        기별_IP분류 CStr(rc(0)), statusWant, cb, regPlan
+        regPlan.Add Array("S", cb, "")
+        기별_IP분류 CStr(rc(2)), statusWant, cb, regPlan
+    Next i
+
+    ' --- 1b) 자사IP 시설 = 전체 시설 메타 스캔 (케이블 없는 단독 IP 마커도 포함, owner 2026-06-19) ---
+    '   끝점 수집만 하면 케이블 미연결 IP 시설이 누락됨 → mFacLbl 전체를 훑어 상태 일치 IP 수집.
+    Dim ipList As Collection: Set ipList = New Collection
+    If Not mFacLbl Is Nothing Then
+        Dim fkey As Variant
+        For Each fkey In mFacLbl.Keys
+            Dim fId2 As String: fId2 = CStr(fkey)
+            If 기별_IP시설(fId2) Then
+                Dim no2 As String: no2 = "": If mFacNo.Exists(fId2) Then no2 = CStr(mFacNo(fId2))
+                If InStr(no2, statusWant) > 0 Then ipList.Add fId2
+            End If
+        Next fkey
+    End If
+    Dim nReg As Long: nReg = regPlan.Count
+    Dim nIP As Long: nIP = ipList.Count
+    If nReg = 0 And nIP = 0 Then Exit Function
+
+    ' --- 2) 행 위치 계산 ---
+    Dim rowReg1 As Long: rowReg1 = 10
+    Dim rowRegLast As Long: rowRegLast = 9 + nReg
+    Dim hasReg As Boolean: hasReg = (nReg > 0)
+    Dim rowRegSub As Long: rowRegSub = 0
+    Dim cur As Long: cur = 9
+    If hasReg Then
+        rowRegSub = rowRegLast + 1
+        cur = rowRegSub
+    End If
+    Dim hasIP As Boolean: hasIP = (nIP > 0)
+    Dim rowIPHdr As Long, rowIP1 As Long, rowIPLast As Long, rowIPSub As Long
+    If hasIP Then
+        rowIPHdr = cur + 1
+        rowIP1 = cur + 2
+        rowIPLast = cur + 1 + nIP
+        rowIPSub = rowIPLast + 1
+        cur = rowIPSub
+    End If
+    Dim rowTot As Long: rowTot = cur + 1
+
+    ' --- 3) 서식 — 템플릿행을 scratch(990~994)에 백업 후 dest 에 복사 (원본행 덮어쓰기 순서문제 회피) ---
+    '   소계/합계 dest 가 작은 행번호에 올 수 있어 원본 13/22 가 먼저 덮이는 문제 → scratch 우회.
+    '   데이터 영역(~880)보다 충분히 아래라 충돌 없음.
+    Const SC_FAC As Long = 990
+    Const SC_SPAN As Long = 991
+    Const SC_SUB As Long = 992
+    Const SC_TOT As Long = 993
+    Const SC_HDR As Long = 994
+    기별_행서식 ws, srcFac, SC_FAC, 0
+    기별_행서식 ws, srcSpan, SC_SPAN, 0
+    기별_행서식 ws, srcSub, SC_SUB, 0
+    기별_행서식 ws, srcTot, SC_TOT, 0
+    기별_행서식 ws, srcHdr, SC_HDR, 0
+    기별_행서식 ws, SC_TOT, rowTot, hTot
+    Dim rp As Long
+    For rp = 1 To nReg
+        Dim dF As Variant: dF = regPlan(rp)
+        If CStr(dF(0)) = "S" Then 기별_행서식 ws, SC_SPAN, 9 + rp, hSpan Else 기별_행서식 ws, SC_FAC, 9 + rp, hFac
+    Next rp
+    If hasReg Then 기별_행서식 ws, SC_SUB, rowRegSub, hSub
+    If hasIP Then
+        기별_행서식 ws, SC_HDR, rowIPHdr, 0
+        Dim ipi As Long
+        For ipi = 1 To nIP
+            기별_행서식 ws, SC_FAC, rowIP1 + ipi - 1, hFac
+        Next ipi
+        기별_행서식 ws, SC_SUB, rowIPSub, hSub
+    End If
+    On Error Resume Next: ws.Rows(SC_FAC & ":" & SC_HDR).Clear: On Error GoTo 0
+
+    ' --- 4) 데이터 영역 내용 비우기 (서식 유지) ---
+    ws.Range(ws.Cells(10, 1), ws.Cells(880, clearLastColNum)).ClearContents
+
+    ' --- 5) 값 기입 ---
+    Dim dedup As Object: Set dedup = CreateObject("Scripting.Dictionary")
+    For rp = 1 To nReg
+        Dim d2 As Variant: d2 = regPlan(rp)
+        Dim dr As Long: dr = 9 + rp
+        If CStr(d2(0)) = "S" Then
+            If isRemoval Then 기별_양식_경간쓰기_철거 ws, dr, CStr(d2(1)) Else 기별_양식_경간쓰기 ws, dr, CStr(d2(1))
+        Else
+            Dim fid As String: fid = CStr(d2(1))
+            If isRemoval Then
+                기별_양식_시설쓰기_철거 ws, dr, fid
+            Else
+                기별_양식_시설쓰기 ws, dr, fid, dedup
+                ' 신설 케이블 구간 양끝 기설 함체/RN → 분기키트 FW=1 (기설/철거 케이블 제외)
+                Dim cbW As String: cbW = CStr(d2(2))
+                Dim cg As String: cg = "": If mCblGubun.Exists(cbW) Then cg = CStr(mCblGubun(cbW))
+                If InStr(cg, "기설") = 0 And InStr(cg, "철거") = 0 Then
+                    If 기별_기설함체(fid) Then 기별_셀W ws, "FW", dr, 1
+                End If
+            End If
+        End If
+    Next rp
+
+    Dim subRows As Collection: Set subRows = New Collection
+    ' 일반 소계 1행
+    If hasReg Then
+        ws.Range("A" & rowRegSub).Value = "소  계"
+        기별_양식_소계 ws, rowRegSub, rowReg1, rowRegLast, cols
+        기별_행채움 ws, rowRegSub, RGB(255, 204, 153), -1, False, 10, hSub, False, lastCol, bigoL, bigoR
+        subRows.Add rowRegSub
+    End If
+    ' IP 구간 (자사IP 시설 행만 + 소계 1행) — 0건이면 통째 생략
+    If hasIP Then
+        기별_IP헤더 ws, rowIPHdr, ipLabel, lastCol
+        Dim ipDedup As Object: Set ipDedup = CreateObject("Scripting.Dictionary")
+        Dim k As Long
+        For k = 1 To nIP
+            Dim ipRow As Long: ipRow = rowIP1 + k - 1
+            If isRemoval Then 기별_양식_시설쓰기_철거 ws, ipRow, CStr(ipList(k)) Else 기별_양식_시설쓰기 ws, ipRow, CStr(ipList(k)), ipDedup
+        Next k
+        ws.Range("A" & rowIPSub).Value = "소  계"
+        기별_양식_소계 ws, rowIPSub, rowIP1, rowIPLast, cols
+        기별_행채움 ws, rowIPSub, RGB(255, 204, 153), -1, False, 10, hSub, False, lastCol, bigoL, bigoR
+        subRows.Add rowIPSub
+    End If
+
+    ' 합계 = 일반 소계 + IP 소계
+    ws.Range("A" & rowTot).Value = totLabel
+    기별_양식_합계 ws, rowTot, subRows, cols
+    기별_행채움 ws, rowTot, RGB(0, 255, 0), -1, True, 11, hTot, True, lastCol, bigoL, bigoR
+
+    기별_한시트_채우기 = nReg + nIP
+End Function
+
+' 자사IP(상태 일치) 시설이면 일반 구간에서 제외(IP 구간서 별도 처리), 아니면 일반 구간에 함체행 추가. owner 2026-06-19.
+Private Sub 기별_IP분류(ByVal facId As String, ByVal statusWant As String, ByVal cbl As String, regPlan As Collection)
+    If 기별_IP시설(facId) Then
+        Dim no As String: no = "": If mFacNo.Exists(facId) Then no = CStr(mFacNo(facId))
+        If InStr(no, statusWant) > 0 Then Exit Sub   ' IP 시설은 일반 구간 제외
+    End If
+    regPlan.Add Array("F", facId, cbl)
+End Sub
+
+' 자사IP 시설 여부 — 구분라벨(col2)에 "IP" 포함 (신설/자사IP·기설/IP·철거/자사IP). owner 2026-06-19.
+Private Function 기별_IP시설(ByVal facId As String) As Boolean
+    기별_IP시설 = False
+    If Len(facId) = 0 Then Exit Function
+    If mFacLbl Is Nothing Then Exit Function
+    Dim lbl As String: lbl = "": If mFacLbl.Exists(facId) Then lbl = CStr(mFacLbl(facId))
+    기별_IP시설 = (InStr(UCase(lbl), "IP") > 0)
+End Function
+
+' IP 구간 헤더 행 (owner 2026-06-19): A:E 병합 + 채움 RGB(204,255,204) + 글자 10 굵게.
+Private Sub 기별_IP헤더(ws As Worksheet, ByVal rowNum As Long, ByVal label As String, ByVal lastCol As String)
+    On Error Resume Next
+    ws.Range("A" & rowNum & ":" & lastCol & rowNum).UnMerge   ' 헤더 템플릿 복사로 따라온 병합 해제
+    With ws.Range("A" & rowNum & ":" & lastCol & rowNum).Interior
+        .Pattern = xlSolid
+        .Color = RGB(204, 255, 204)
+    End With
+    ws.Range("A" & rowNum & ":E" & rowNum).Merge
+    ws.Range("A" & rowNum).Value = label
+    With ws.Range("A" & rowNum & ":E" & rowNum).Font
+        .Bold = True
+        .Size = 10
+    End With
+    ws.Range("A" & rowNum & ":E" & rowNum).HorizontalAlignment = xlCenter
+    ws.Range("A" & rowNum & ":E" & rowNum).VerticalAlignment = xlCenter
+    On Error GoTo 0
+End Sub
+
 ' 라벨 셀("■ 공사번호 : 12345") → 콜론 뒤 값("12345"). 콜론 없으면 전체 trim.
 Public Function 기별_라벨값(ByVal s As String) As String
     Dim p As Long: p = InStrRev(s, ":")
@@ -33318,6 +33509,119 @@ Public Function 기별_파일명_정리(ByVal s As String) As String
     기별_파일명_정리 = s
 End Function
 
+' ============================================================================
+'  owner 2026-06-19: 자재_공종 템플릿 내보내기 — 종합기별명세서(srcWb, 계산완료)에서
+'   「선로지입」(→자재)·「선로노무」(→공종) 만 추출해 ThisWorkbook 「자재_공종」 시트 복사본에
+'   채우고 「공사번호_템플릿.xlsx」 로 별도 저장 (5시트 파일과 독립).
+'   - 사급(선로사급) 제외 · 투자=신설구간/제각=철거구간 · 수량=정산수량 그대로(음수 포함)
+'   - 단가구분: 공종이면 신설/철거(구간), 자재는 공란
+'   - 헤더 1·2행 보존, 데이터는 3행부터. 반환=저장경로("" 면 실패/시트없음).
+'   실패해도 호출측(5시트 내보내기) 흐름엔 영향 없음.
+' ============================================================================
+Public Function 기별_템플릿_내보내기(srcWb As Workbook, ByVal ordNo As String, ByVal prjNm As String) As String
+    기별_템플릿_내보내기 = ""
+    Dim wsSum As Worksheet: Set wsSum = Nothing
+    On Error Resume Next: Set wsSum = srcWb.Worksheets("1.종합기별명세서"): On Error GoTo 0
+    If wsSum Is Nothing Then Exit Function
+    Dim wsTmplSrc As Worksheet: Set wsTmplSrc = Nothing
+    On Error Resume Next: Set wsTmplSrc = ThisWorkbook.Worksheets("자재_공종"): On Error GoTo 0
+    If wsTmplSrc Is Nothing Then Exit Function
+
+    Dim lastR As Long: lastR = wsSum.Cells(wsSum.Rows.Count, 2).End(xlUp).Row
+
+    ' 행 추출 — 섹션 헤더(C 구분: "선로 ◯◯자재/공종수량 (철거)")를 따라가며 분류.
+    '   ⚠ 대분류(L)는 197/395 행만 채워져 추가NN 등 누락 → L 금지, 섹션 헤더로 판정 (owner 2026-06-19).
+    '   섹션: 사급자재(제외) / 지입자재(→자재 포함) / 공종수량(→공종 포함). "(철거)" 포함 시 제각.
+    Dim outRows As Collection: Set outRows = New Collection
+    Dim curCat As String: curCat = ""          ' "사급" / "지입" / "공종"
+    Dim curRemove As Boolean: curRemove = False
+    Dim r As Long
+    For r = 5 To lastR
+        Dim c As String: c = Trim(CStr(wsSum.Cells(r, 3).Value))     ' C 구분
+        Dim isHeader As Boolean: isHeader = True
+        If InStr(c, "사급자재") > 0 Then
+            curCat = "사급": curRemove = (InStr(c, "철거") > 0)
+        ElseIf InStr(c, "지입자재") > 0 Then
+            curCat = "지입": curRemove = (InStr(c, "철거") > 0)
+        ElseIf InStr(c, "공종수량") > 0 Then
+            curCat = "공종": curRemove = (InStr(c, "철거") > 0)
+        Else
+            isHeader = False
+        End If
+        If Not isHeader Then
+            If curCat = "지입" Or curCat = "공종" Then
+                Dim code As String: code = Trim(CStr(wsSum.Cells(r, 9).Value))   ' I 자재/공종코드
+                Dim qtyV As Variant: qtyV = wsSum.Cells(r, 7).Value              ' G 정산수량
+                Dim qty As Double: qty = 0
+                If IsNumeric(qtyV) Then qty = CDbl(qtyV)
+                If Len(code) > 0 And qty <> 0 Then
+                    Dim isGongjong As Boolean: isGongjong = (curCat = "공종")
+                    Dim tuja As String: tuja = IIf(curRemove, "제각", "투자")
+                    Dim jg As String: jg = IIf(isGongjong, "공종", "자재")
+                    Dim dangga As String: dangga = ""
+                    If isGongjong Then dangga = IIf(curRemove, "철거", "신설")
+                    outRows.Add Array(tuja, jg, code, qty, dangga)
+                End If
+            End If
+        End If
+    Next r
+
+    ' 「자재_공종」 시트를 새 워크북으로 복사 → 채움 → 저장 (헤더 1·2행 보존)
+    '   owner 2026-06-19: 작업 파일에서 자재_공종 시트가 숨겨져 있으면 .Copy 가 실패(또는 숨김 복제)함 →
+    '   복사 동안만 원본을 표시했다가 복원, 복사본은 표시 강제.
+    Dim prevVis As Long: prevVis = wsTmplSrc.Visible
+    On Error Resume Next: wsTmplSrc.Visible = xlSheetVisible: On Error GoTo 0
+    wsTmplSrc.Copy                          ' 새 워크북(자재_공종 1시트) 활성화
+    On Error Resume Next: wsTmplSrc.Visible = prevVis: On Error GoTo 0   ' 작업 파일 원본 가시성 복원
+    Dim tWb As Workbook: Set tWb = ActiveWorkbook
+    Dim tWs As Worksheet: Set tWs = tWb.Worksheets(1)
+    On Error Resume Next: tWs.Visible = xlSheetVisible: On Error GoTo 0
+    On Error Resume Next: tWs.Unprotect: On Error GoTo 0
+    On Error Resume Next: tWs.Range(tWs.Cells(3, 1), tWs.Cells(10000, 5)).ClearContents: On Error GoTo 0
+
+    Dim outR As Long: outR = 3
+    Dim k As Long
+    For k = 1 To outRows.Count
+        Dim rec As Variant: rec = outRows(k)
+        tWs.Cells(outR, 1).Value = rec(0)
+        tWs.Cells(outR, 2).Value = rec(1)
+        tWs.Cells(outR, 3).Value = rec(2)
+        tWs.Cells(outR, 4).Value = rec(3)
+        tWs.Cells(outR, 5).Value = rec(4)
+        outR = outR + 1
+    Next k
+
+    ' 파일명 = 공사번호_템플릿
+    Dim fn As String: fn = 기별_파일명_정리(ordNo)
+    If Len(fn) = 0 Then fn = "기별"
+    fn = fn & "_템플릿"
+    Dim baseName As String: baseName = fn & ".xlsx"
+    Dim cand(1 To 2) As String
+    cand(1) = ThisWorkbook.Path & "\" & baseName
+    cand(2) = Environ$("USERPROFILE") & "\Desktop\" & baseName
+    Dim saved As String: saved = ""
+    Dim prevAlerts As Boolean: prevAlerts = Application.DisplayAlerts
+    Application.DisplayAlerts = False
+    Dim ti As Long
+    For ti = 1 To 2
+        If InStr(cand(ti), "://") = 0 Then
+            Err.Clear
+            On Error Resume Next
+            tWb.SaveAs cand(ti), FileFormat:=51
+            If Err.Number = 0 Then saved = cand(ti)
+            On Error GoTo 0
+            If Len(saved) > 0 Then Exit For
+        End If
+    Next ti
+    If Len(saved) > 0 Then
+        On Error Resume Next: tWb.Close SaveChanges:=False: On Error GoTo 0
+    Else
+        On Error Resume Next: tWb.Activate: On Error GoTo 0   ' 저장 실패 시 창 남겨 수동 저장
+    End If
+    Application.DisplayAlerts = prevAlerts
+    기별_템플릿_내보내기 = saved
+End Function
+
 ' 시설물 행 — A·JL·JM 항상, 공종·자재는 첫 등장(dedup) 1회.
 Private Sub 기별_양식_시설쓰기(ws As Worksheet, rowNum As Long, facId As String, dedup As Object)
     Dim nm As String: nm = "": If mFacName.Exists(facId) Then nm = CStr(mFacName(facId))
@@ -33326,7 +33630,7 @@ Private Sub 기별_양식_시설쓰기(ws As Worksheet, rowNum As Long, facId As
     Dim kd As String: kd = "": If mFacKind.Exists(facId) Then kd = CStr(mFacKind(facId))
     ws.Range("A" & rowNum).Value = nm
     If Len(bg) > 0 Then ws.Range("JL" & rowNum).Value = bg
-    ws.Range("JM" & rowNum).Value = 기별_비고(no, kd)
+    ws.Range("JM" & rowNum).Value = 기별_비고(no, kd, facId)
     ' 비고: 신설이면 글자색 빨강 (owner 2026-06-16). 기설은 기본(검정).
     If InStr(no, "신설") > 0 Then
         On Error Resume Next: ws.Range("JM" & rowNum).Font.Color = RGB(255, 0, 0): On Error GoTo 0
@@ -33503,7 +33807,7 @@ Private Sub 기별_양식_시설쓰기_철거(ws As Worksheet, rowNum As Long, f
     Dim kd As String: kd = "": If mFacKind.Exists(facId) Then kd = CStr(mFacKind(facId))
     ws.Range("A" & rowNum).Value = nm
     If Len(bg) > 0 Then ws.Range("EK" & rowNum).Value = bg      ' 철거시트 배지열 = EK
-    ws.Range("EL" & rowNum).Value = 기별_비고(no, kd)            ' 철거시트 비고열 = EL
+    ws.Range("EL" & rowNum).Value = 기별_비고(no, kd, facId)            ' 철거시트 비고열 = EL
     ' 철거이면 글자색 빨강 (신설시트 비고 신설=빨강 패턴 준용).
     If InStr(no, "철거") > 0 Then
         On Error Resume Next: ws.Range("EL" & rowNum).Font.Color = RGB(255, 0, 0): On Error GoTo 0
