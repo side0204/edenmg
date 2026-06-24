@@ -219,3 +219,42 @@
 | 환경변수 | 불필요 | WEBHOOK_URL·시크릿 B 필요 |
 
 > 나중에 "즉시" 가 꼭 필요해지면 유료 웹훅 방식으로 전환 가능 (앱은 그대로, PA 구성만 변경).
+
+---
+
+## 부록 C — 연결 테스트용 최소 흐름 (실제 등록 전 검증)
+
+엑셀·등록시스템 입력을 붙이기 전에, **"앱에서 요청하면 PAD 가 가져오는지"** 만 먼저 확인하는 흐름입니다. 받은 데이터를 메시지 창으로 띄워 눈으로 보고, 한 건 잡으면 멈춥니다.
+
+### 흐름 구조
+```
+루프 조건 (1 = 1)
+    웹 서비스 호출 (claim_pending)          ← 본문 인코딩 OFF
+    만약(If)  %WebServiceResponse%  포함(Contains)  requester_name
+        메시지 표시  →  %WebServiceResponse%
+        반복 종료(Exit loop)
+    End
+    대기  10초
+End
+```
+
+### 만드는 순서
+1. **루프 조건(Loop condition)** 추가 → 첫 피연산자 `1`, 연산자 `같음(=)`, 둘째 `1` → 저장 (무한 반복)
+2. **웹 서비스 호출(Invoke web service)** 을 루프 안으로. 설정:
+   - URL `https://alhsklyqsbekfgwnyzap.supabase.co/rest/v1/rpc/station_access_claim_pending`
+   - 메서드 `POST` · 콘텐츠 형식 `application/json`
+   - 헤더 2줄: `apikey: {ANON_KEY}` / `Authorization: Bearer {ANON_KEY}`
+   - 요청 본문 `{"_secret":"{시크릿 A}"}`
+   - **⚠️ `고급` → 「요청 본문 인코딩」 OFF** (이걸 안 끄면 PGRST102 오류)
+3. **만약(If)** 추가 → 첫 피연산자 `%WebServiceResponse%`, 연산자 `포함(Contains)`, 둘째 `requester_name`
+4. **메시지 표시(Display message)** → 표시할 메시지 `%WebServiceResponse%`
+5. **반복 종료(Exit loop)** (메시지 다음, If 안)
+6. **대기(Wait)** `10` 초 (If 밖, End 위)
+
+### 실행 & 확인
+1. **▶ 실행** (요청 들어올 때까지 대기 상태로 돎)
+2. 앱에서 **출입요청 1건** 만들기 (또는 기존 건 「다시 전송(재시도)」 로 `대기` 로)
+3. 10초 안에 **메시지 창**이 뜨고 `requester_name`·`station_name`·`access_start`·`access_end` 가 보이면 ✅ 검증 완료
+4. 확인 후 **「만약·메시지·반복 종료」 3개는 삭제** — 그 자리에 실제 처리(JSON 변환 → 엑셀 → 등록시스템 입력 → `set_result` 회신)를 넣으면 본 흐름(부록 A·Part 1)이 됩니다.
+
+> 메시지로 한 번 본 요청은 이미 `등록중` 으로 바뀌어 있습니다. 다시 테스트하려면 앱에서 「다시 전송(재시도)」.
