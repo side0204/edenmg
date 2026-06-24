@@ -157,7 +157,7 @@ export default async function EmployeesPage() {
                       {emp.vehicle_plate && ` · 차량 ${emp.vehicle_plate}`}
                     </p>
                     <p className="text-[10px] text-slate-400">
-                      신청일시: {emp.invited_at ? new Date(emp.invited_at).toLocaleString('ko-KR') : '-'}
+                      신청일시: {emp.invited_at ? new Date(emp.invited_at).toLocaleString('ko-KR', { timeZone: 'Asia/Seoul' }) : '-'}
                     </p>
                   </div>
 

@@ -363,7 +363,7 @@ export default function MigrationsTab({
                       {to?.cable_code ?? '(삭제됨)'}
                     </span>
                     <span className="text-[10px] text-slate-400">
-                      · {new Date(m.created_at).toLocaleString('ko-KR')}
+                      · {new Date(m.created_at).toLocaleString('ko-KR', { timeZone: 'Asia/Seoul' })}
                     </span>
                   </div>
                   <div className="ml-2 text-xs text-slate-600 space-y-0.5">

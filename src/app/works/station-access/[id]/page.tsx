@@ -5,6 +5,7 @@ import { createClient } from '@/lib/supabase/server'
 import {
   ACCESS_STATUS_COLOR,
   formatAccessPeriod,
+  formatKstDateTime,
   isAccessStatus,
   type AccessStatus,
 } from '@/lib/station-access'
@@ -119,7 +120,7 @@ export default async function StationAccessDetailPage({
             {req!.rpa_result && <p className="mt-1 text-sm text-slate-900">{req!.rpa_result}</p>}
             {req!.rpa_completed_at && (
               <p className="mt-1 text-xs text-slate-500">
-                처리시각 {new Date(req!.rpa_completed_at).toLocaleString('ko-KR')}
+                처리시각 {formatKstDateTime(req!.rpa_completed_at)}
               </p>
             )}
           </section>
@@ -154,7 +155,7 @@ export default async function StationAccessDetailPage({
         </div>
 
         <p className="text-center text-xs text-slate-400">
-          요청일시 {new Date(req!.created_at).toLocaleString('ko-KR')}
+          요청일시 {formatKstDateTime(req!.created_at)}
         </p>
       </div>
     </main>

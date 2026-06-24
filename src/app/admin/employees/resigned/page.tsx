@@ -114,7 +114,7 @@ export default async function ResignedEmployeesPage() {
                   <div>
                     <span className="font-medium text-slate-700">가입일</span>
                     <span className="ml-1">
-                      {new Date(emp.created_at).toLocaleDateString('ko-KR')}
+                      {new Date(emp.created_at).toLocaleDateString('ko-KR', { timeZone: 'Asia/Seoul' })}
                     </span>
                   </div>
                 </div>
