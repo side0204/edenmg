@@ -1,6 +1,6 @@
 import Link from 'next/link'
 import { redirect } from 'next/navigation'
-import { BarChart3, Bell, CalendarDays, ChevronLeft, ChevronRight, FileText, Hammer, ListTodo, Plus, Search, Users } from 'lucide-react'
+import { BarChart3, Bell, CalendarDays, ChevronLeft, ChevronRight, DoorOpen, FileText, Hammer, ListTodo, Plus, Search, Users } from 'lucide-react'
 import { createClient } from '@/lib/supabase/server'
 import { EmptyState } from '@/components/EmptyState'
 import {
@@ -442,6 +442,13 @@ export default async function WorksPage({
             >
               <BarChart3 className="h-3.5 w-3.5" />
               통계
+            </Link>
+            <Link
+              href="/works/station-access"
+              className="inline-flex items-center gap-1 rounded-lg border border-slate-300 px-3 py-1.5 text-xs font-medium text-slate-700 hover:bg-slate-50"
+            >
+              <DoorOpen className="h-3.5 w-3.5" />
+              국사출입등록
             </Link>
           </div>
         </header>
