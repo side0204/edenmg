@@ -15,13 +15,10 @@ type RequestDetail = {
   company_id: string
   requested_by: string | null
   station_name: string
-  station_address: string | null
   access_start_date: string
   access_end_date: string
-  purpose: string | null
   visitor_name: string
   visitor_phone: string | null
-  visitor_vehicle_plate: string | null
   status: string
   rpa_result: string | null
   rpa_completed_at: string | null
@@ -60,7 +57,7 @@ export default async function StationAccessDetailPage({
   const { data: row } = await supabase
     .from('station_access_requests')
     .select(
-      'id, company_id, requested_by, station_name, station_address, access_start_date, access_end_date, purpose, visitor_name, visitor_phone, visitor_vehicle_plate, status, rpa_result, rpa_completed_at, created_at',
+      'id, company_id, requested_by, station_name, access_start_date, access_end_date, visitor_name, visitor_phone, status, rpa_result, rpa_completed_at, created_at',
     )
     .eq('id', id)
     .maybeSingle()
@@ -98,17 +95,12 @@ export default async function StationAccessDetailPage({
 
         <section className="rounded-2xl border border-slate-200 bg-white p-4 divide-y divide-slate-100">
           <InfoRow label="국사" value={req!.station_name} />
-          <InfoRow label="주소" value={req!.station_address} />
           <InfoRow
             label="출입기간"
             value={formatAccessPeriod(req!.access_start_date, req!.access_end_date)}
           />
-          <InfoRow label="출입목적" value={req!.purpose} />
           <InfoRow label="출입자" value={req!.visitor_name} />
-          <InfoRow
-            label="연락처·차량"
-            value={[req!.visitor_phone, req!.visitor_vehicle_plate].filter(Boolean).join(' · ')}
-          />
+          <InfoRow label="연락처" value={req!.visitor_phone} />
         </section>
 
         {/* RPA 결과 */}

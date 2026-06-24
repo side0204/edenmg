@@ -2,10 +2,10 @@ import Link from 'next/link'
 import { redirect } from 'next/navigation'
 import { ChevronLeft, MapPin } from 'lucide-react'
 import { createClient } from '@/lib/supabase/server'
-import { todayInSeoul } from '@/lib/work'
+import { nowKstInput } from '@/lib/station-access'
 import { createAccessRequest } from '../actions'
 
-type Station = { id: string; name: string; address: string | null }
+type Station = { id: string; name: string }
 
 export default async function NewStationAccessPage() {
   const supabase = await createClient()
@@ -16,7 +16,7 @@ export default async function NewStationAccessPage() {
 
   const { data: meRow } = await supabase
     .from('employees')
-    .select('id, name, phone, vehicle_plate, company_id, is_active')
+    .select('id, name, phone, company_id, is_active')
     .eq('auth_user_id', user.id)
     .maybeSingle()
   const me = meRow as
@@ -24,7 +24,6 @@ export default async function NewStationAccessPage() {
         id: string
         name: string
         phone: string | null
-        vehicle_plate: string | null
         company_id: string
         is_active: boolean
       }
@@ -33,12 +32,12 @@ export default async function NewStationAccessPage() {
 
   const { data: stationsData } = await supabase
     .from('field_stations')
-    .select('id, name, address')
+    .select('id, name')
     .eq('company_id', me.company_id)
     .order('name')
   const stations = (stationsData ?? []) as Station[]
 
-  const today = todayInSeoul()
+  const nowLocal = nowKstInput()
 
   const LABEL = 'block text-sm font-medium text-slate-700'
   const INPUT =
@@ -74,7 +73,7 @@ export default async function NewStationAccessPage() {
               <p className="text-xs text-slate-500">출입자</p>
               <p className="mt-0.5 text-sm font-semibold text-slate-900">{me.name}</p>
               <p className="text-xs text-slate-500">
-                {[me.phone, me.vehicle_plate].filter(Boolean).join(' · ') || '연락처·차량 미등록'}
+                {me.phone || '연락처 미등록'}
               </p>
             </div>
 
@@ -89,7 +88,6 @@ export default async function NewStationAccessPage() {
                 {stations.map((s) => (
                   <option key={s.id} value={s.id}>
                     {s.name}
-                    {s.address ? ` (${s.address})` : ''}
                   </option>
                 ))}
               </select>
@@ -98,44 +96,31 @@ export default async function NewStationAccessPage() {
             <div className="grid grid-cols-2 gap-3">
               <div>
                 <label htmlFor="access_start_date" className={LABEL}>
-                  출입 시작일 *
+                  출입 시작일시 *
                 </label>
                 <input
                   id="access_start_date"
                   name="access_start_date"
-                  type="date"
+                  type="datetime-local"
                   required
-                  defaultValue={today}
+                  defaultValue={nowLocal}
                   className={INPUT}
                 />
               </div>
               <div>
                 <label htmlFor="access_end_date" className={LABEL}>
-                  출입 종료일
+                  출입 종료일시
                 </label>
                 <input
                   id="access_end_date"
                   name="access_end_date"
-                  type="date"
-                  defaultValue={today}
+                  type="datetime-local"
+                  defaultValue={nowLocal}
                   className={INPUT}
                 />
               </div>
             </div>
-            <p className="-mt-2 text-xs text-slate-400">하루만 출입하면 시작·종료일을 같게 두세요.</p>
-
-            <div>
-              <label htmlFor="purpose" className={LABEL}>
-                출입 목적
-              </label>
-              <textarea
-                id="purpose"
-                name="purpose"
-                rows={3}
-                placeholder="예: 광케이블 접속작업"
-                className={INPUT}
-              />
-            </div>
+            <p className="-mt-2 text-xs text-slate-400">짧게 출입하면 시작·종료 시각을 같게 두세요.</p>
 
             <div className="flex items-start gap-2 rounded-lg border border-slate-200 bg-white p-3 text-xs text-slate-500">
               <MapPin className="mt-0.5 h-4 w-4 shrink-0 text-slate-400" />

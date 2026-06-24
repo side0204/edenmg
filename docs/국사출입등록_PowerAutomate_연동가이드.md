@@ -94,9 +94,8 @@
    - 요청 id = `%CurrentItem['id']%`
    - 이름 = `%CurrentItem['requester_name']%`
    - 국사 = `%CurrentItem['station_name']%`
-   - 시작 = `%CurrentItem['access_start']%`
-   - 종료 = `%CurrentItem['access_end']%`
-   - 목적 = `%CurrentItem['purpose']%`
+   - 시작일시 = `%CurrentItem['access_start']%`  (날짜+시간, 예: `2026-06-25T14:30:00+09:00`)
+   - 종료일시 = `%CurrentItem['access_end']%`
 
 ### 2-5. 엑셀에서 인적사항 찾기 (For each 안)
 1. **Excel 시작** → 출입자 엑셀 열기
@@ -108,7 +107,7 @@
 ### 2-6. 등록시스템에 입력 (For each 안)
 > owner 의 등록시스템 화면에 맞춰 만드는 부분.
 1. 브라우저/프로그램 실행 → 등록시스템 열기
-2. **UI 요소에 텍스트 채우기** 로 칸마다 입력 (국사·이름·인적사항·기간·목적)
+2. **UI 요소에 텍스트 채우기** 로 칸마다 입력 (국사·이름·인적사항·기간 — 목적 등 나머지는 엑셀/고정값)
 3. **버튼 클릭** 으로 제출
 
 ### 2-7. 결과 회신 — 완료 (For each 안)
@@ -198,7 +197,7 @@
 ```json
 [
   { "id": "...", "requester_name": "홍길동", "station_name": "종로국사",
-    "access_start": "2026-06-25", "access_end": "2026-06-26", "purpose": "광케이블 접속작업" }
+    "access_start": "2026-06-25T14:30:00+09:00", "access_end": "2026-06-25T17:00:00+09:00" }
 ]
 ```
 

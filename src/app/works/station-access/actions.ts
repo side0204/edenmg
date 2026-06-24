@@ -10,7 +10,6 @@ type Me = {
   company_id: string
   permission: string
   phone: string | null
-  vehicle_plate: string | null
   is_active: boolean
 }
 
@@ -22,7 +21,7 @@ async function loadMe() {
   if (!user) redirect('/login')
   const { data: meRow } = await supabase
     .from('employees')
-    .select('id, name, company_id, permission, phone, vehicle_plate, is_active')
+    .select('id, name, company_id, permission, phone, is_active')
     .eq('auth_user_id', user.id)
     .maybeSingle()
   const me = meRow as Me | null
@@ -40,8 +39,14 @@ type AccessRow = {
   station_name: string
   access_start_date: string
   access_end_date: string
-  purpose: string | null
   status: string
+}
+
+// datetime-local 'YYYY-MM-DDTHH:mm' → KST timestamptz 문자열.
+const DT_LOCAL = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}$/
+function toKstTimestamp(local: string): string | null {
+  if (!DT_LOCAL.test(local)) return null
+  return `${local}:00+09:00`
 }
 
 // 앱 → Power Automate 전송 (실패해도 요청 자체는 보존 → 상세에서 재시도).
@@ -59,7 +64,6 @@ async function triggerPowerAutomate(
     station_name: req.station_name,
     access_start: req.access_start_date,
     access_end: req.access_end_date,
-    purpose: req.purpose ?? '',
   }
 
   try {
@@ -87,23 +91,24 @@ export async function createAccessRequest(formData: FormData) {
   const { supabase, me } = await loadMe()
 
   const stationId = String(formData.get('station_id') ?? '').trim()
-  const start = String(formData.get('access_start_date') ?? '').trim()
-  const end = String(formData.get('access_end_date') ?? '').trim() || start
-  const purpose = String(formData.get('purpose') ?? '').trim() || null
+  const startLocal = String(formData.get('access_start_date') ?? '').trim()
+  const endLocal = String(formData.get('access_end_date') ?? '').trim() || startLocal
 
   if (!stationId) redirect(`${BASE}/new?err=` + encodeURIComponent('국사를 선택하세요'))
-  if (!start) redirect(`${BASE}/new?err=` + encodeURIComponent('출입 시작일을 입력하세요'))
-  if (end < start) redirect(`${BASE}/new?err=` + encodeURIComponent('종료일이 시작일보다 빠릅니다'))
+  if (!startLocal) redirect(`${BASE}/new?err=` + encodeURIComponent('출입 시작일시를 입력하세요'))
+  if (endLocal < startLocal) redirect(`${BASE}/new?err=` + encodeURIComponent('종료일시가 시작일시보다 빠릅니다'))
 
-  // 국사 마스터 조회 (회사 스코프) → 이름·주소 스냅샷
+  const start = toKstTimestamp(startLocal)
+  const end = toKstTimestamp(endLocal)
+  if (!start || !end) redirect(`${BASE}/new?err=` + encodeURIComponent('출입일시 형식이 올바르지 않습니다'))
+
+  // 국사 마스터 조회 (회사 스코프) → 이름 스냅샷
   const { data: stationRow } = await supabase
     .from('field_stations')
-    .select('id, name, address, company_id')
+    .select('id, name, company_id')
     .eq('id', stationId)
     .maybeSingle()
-  const station = stationRow as
-    | { id: string; name: string; address: string | null; company_id: string }
-    | null
+  const station = stationRow as { id: string; name: string; company_id: string } | null
   if (!station || station.company_id !== me.company_id) {
     redirect(`${BASE}/new?err=` + encodeURIComponent('국사를 찾을 수 없습니다'))
   }
@@ -114,17 +119,14 @@ export async function createAccessRequest(formData: FormData) {
       company_id: me.company_id,
       station_id: station!.id,
       station_name: station!.name,
-      station_address: station!.address,
       access_start_date: start,
       access_end_date: end,
-      purpose,
       requested_by: me.id,
       visitor_name: me.name,
       visitor_phone: me.phone,
-      visitor_vehicle_plate: me.vehicle_plate,
       status: '대기',
     })
-    .select('id, requested_by, visitor_name, station_name, access_start_date, access_end_date, purpose, status')
+    .select('id, requested_by, visitor_name, station_name, access_start_date, access_end_date, status')
     .single()
 
   if (error || !inserted) {
@@ -155,7 +157,7 @@ export async function retryAccessRequest(formData: FormData) {
 
   const { data: row } = await supabase
     .from('station_access_requests')
-    .select('id, requested_by, visitor_name, station_name, access_start_date, access_end_date, purpose, status')
+    .select('id, requested_by, visitor_name, station_name, access_start_date, access_end_date, status')
     .eq('id', id)
     .maybeSingle()
   const req = row as AccessRow | null
