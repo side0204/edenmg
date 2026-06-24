@@ -93,7 +93,7 @@ export default async function NewStationAccessPage() {
               </select>
             </div>
 
-            <div className="grid grid-cols-2 gap-3">
+            <div className="space-y-4">
               <div>
                 <label htmlFor="access_start_date" className={LABEL}>
                   출입 시작일시 *
