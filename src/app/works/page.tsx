@@ -414,7 +414,7 @@ export default async function WorksPage({
                     : `작업 카드를 탭하면 바로 일보 작성 · ${rows.length}건`}
             </p>
           </div>
-          <div className="flex flex-col items-end gap-1.5">
+          <div className="flex flex-wrap items-center gap-1.5 sm:justify-end">
             {canManage && (
               <Link
                 href="/works/new"
