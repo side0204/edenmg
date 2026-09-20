@@ -5,7 +5,7 @@ import {
   ATTACHMENT_ALLOWED_TYPES,
   LEAVE_TYPE_LABEL,
   LEAVE_TYPE_META,
-  LEAVE_TYPE_VALUES,
+  LEAVE_TYPE_SELECTABLE,
   type LeaveType,
 } from '@/lib/leave'
 import { submitRequest } from '../actions'
@@ -53,7 +53,7 @@ export function RequestForm({
           onChange={(e) => handleType(e.currentTarget.value as LeaveType)}
           className={inputClass}
         >
-          {LEAVE_TYPE_VALUES.map((v) => (
+          {LEAVE_TYPE_SELECTABLE.map((v) => (
             <option key={v} value={v}>
               {LEAVE_TYPE_LABEL[v]}
             </option>

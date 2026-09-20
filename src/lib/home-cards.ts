@@ -2,12 +2,13 @@
 // employees.home_card_prefs jsonb 컬럼에 저장.
 // 형식: { order: HomeCardId[], hidden: HomeCardId[] }
 
-// 'relocation' 카드는 2026-05-25 BottomNav 「공사설계」 탭으로 이동 (홈 카드에서 제거).
-//   기존 사용자 home_card_prefs 에 남아있어도 ALL_IDS 에 없으므로 resolve 시 자동 무시.
+// 'relocation' 카드는 2026-05-25 BottomNav 탭으로 갔다가 2026-09-20 하단 탭이 「외근·차량」 으로
+//   바뀌면서 홈 카드로 복귀. 'vehicles' 카드는 「외근·차량」 통합 카드로 의미 확장 (id 는 prefs 호환 위해 유지).
 export type HomeCardId =
   | 'attendance'
   | 'today_works'
   | 'vehicles'
+  | 'relocation'
   | 'my_materials'
   | 'stock_approvals'
   | 'my_works'
@@ -23,6 +24,7 @@ export const HOME_CARD_DEFAULT_ORDER: HomeCardId[] = [
   'attendance',
   'today_works',
   'vehicles',
+  'relocation',
   'my_materials',
   'stock_approvals',
   'my_works',
@@ -37,14 +39,15 @@ export const HOME_CARD_DEFAULT_ORDER: HomeCardId[] = [
 export const HOME_CARD_LABEL: Record<HomeCardId, string> = {
   attendance: '오늘 근태',
   today_works: '오늘 작업',
-  vehicles: '업무용 차량',
+  vehicles: '외근·차량',
+  relocation: '공사 설계',
   my_materials: '내 자재',
   stock_approvals: '자재 사용 승인 대기',
   my_works: '내 작업 진행 목록',
   schedule_changes: '일정변경 요청 대기',
   approvals: '결재',
   annual_leave: '내 연차 잔여',
-  leaves: '휴가·외근 현황',
+  leaves: '휴가 현황',
   admin: '관리 메뉴',
   reports: '리포트',
 }
@@ -52,14 +55,15 @@ export const HOME_CARD_LABEL: Record<HomeCardId, string> = {
 export const HOME_CARD_DESCRIPTION: Record<HomeCardId, string> = {
   attendance: '출퇴근 / 오늘 근무 상태',
   today_works: '오늘 진행할 작업 시작·마감',
-  vehicles: '업무용 차량 출고·반납 (본사 직원만 노출 대상)',
+  vehicles: '내 외근 상태 + 오늘 외근 중 인원 + 차량 현황',
+  relocation: '청약·계획·지장이설 공사 목록 진입 (하단 탭에서 이동)',
   my_materials: '보유 자재 (보유 시에만 자동 노출)',
   stock_approvals: '자재 사용 승인 대기 (자재담당자만 노출 대상)',
   my_works: '본인 배정된 작업 진행 목록',
   schedule_changes: '담당 작업의 일정변경 요청 대기 (요청 시에만 노출)',
   approvals: '내 신청 + 결재함 (본사 직원만 노출 대상)',
   annual_leave: '본인 연차 잔여·사용 (입사일 등록 시 노출)',
-  leaves: '회사 직원 오늘 휴가·외근 현황',
+  leaves: '회사 직원 오늘 휴가 현황',
   admin: '직원·현장·마스터·리포트 관리 (관리자만 노출 대상)',
   reports: '월별 리포트 (팀장 권한자 노출 대상)',
 }

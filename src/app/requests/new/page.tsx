@@ -131,7 +131,7 @@ export default async function NewRequestPage() {
             내 신청
           </Link>
           <h1 className="mt-1 text-3xl font-bold text-slate-900 tracking-tight">신청 작성</h1>
-          <p className="mt-1 text-sm text-slate-500">휴가·외근·기타 결재 신청서를 작성합니다.</p>
+          <p className="mt-1 text-sm text-slate-500">휴가·기타 결재 신청서를 작성합니다. 외근은 「외근·차량」 탭에서 바로 시작합니다.</p>
         </header>
 
 

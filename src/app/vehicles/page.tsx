@@ -103,6 +103,7 @@ export default async function VehiclesPage() {
   const { data: activeData } = await supabase
     .from('vehicle_trips')
     .select('id, vehicle_id, driver_employee_id, departed_at, start_odometer_km, purpose')
+    .not('vehicle_id', 'is', null)
     .is('returned_at', null)
 
   const activeByVehicleId = new Map<string, ActiveTripRow>()
@@ -116,6 +117,7 @@ export default async function VehiclesPage() {
     .select(
       'id, vehicle_id, driver_employee_id, departed_at, returned_at, start_odometer_km, end_odometer_km, purpose, refueled, refuel_amount_krw, return_location',
     )
+    .not('vehicle_id', 'is', null)
     .order('departed_at', { ascending: false })
     .limit(10)
 
@@ -125,6 +127,7 @@ export default async function VehiclesPage() {
   const { data: lastReturnedData } = await supabase
     .from('vehicle_trips')
     .select('vehicle_id, driver_employee_id, returned_at, return_location')
+    .not('vehicle_id', 'is', null)
     .not('returned_at', 'is', null)
     .order('returned_at', { ascending: false })
     .limit(100)
@@ -178,13 +181,13 @@ export default async function VehiclesPage() {
       <div className="mx-auto max-w-3xl space-y-5">
         <header className="space-y-3 sm:space-y-0 sm:flex sm:items-center sm:justify-between sm:gap-3">
           <div>
-            <Link href="/" className="inline-flex items-center gap-1 text-sm text-slate-500 hover:text-slate-900">
+            <Link href="/trips" className="inline-flex items-center gap-1 text-sm text-slate-500 hover:text-slate-900">
               <ChevronLeft className="h-4 w-4" />
-              홈
+              외근·차량
             </Link>
-            <h1 className="mt-1 text-3xl font-bold text-slate-900 tracking-tight">업무용 차량</h1>
+            <h1 className="mt-1 text-3xl font-bold text-slate-900 tracking-tight">차량 관리</h1>
             <p className="mt-1 text-sm text-slate-500">
-              {isAdmin ? '회사 전체 차량 · 운행 현황' : '회사 차량 출고·반납'}
+              {isAdmin ? '업무용 차량 등록·수정·사용 종료 · 운행 현황' : '업무용 차량 목록 · 운행 현황'}
             </p>
           </div>
           <div className="flex flex-wrap items-center gap-2 sm:shrink-0">

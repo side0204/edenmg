@@ -2,7 +2,7 @@
 
 import Link from 'next/link'
 import { usePathname } from 'next/navigation'
-import { Briefcase, ClipboardList, MapPin, Hammer, Package } from 'lucide-react'
+import { Briefcase, Car, MapPin, Hammer, Package } from 'lucide-react'
 
 type Tab = {
   href: string
@@ -13,20 +13,21 @@ type Tab = {
   isExact?: boolean
 }
 
-// 최상위 탭. 홈은 상단바(TopBar)로 이동 — 하단은 5개 (사무·공사·현장관리·작업·자재).
-// 사무 그룹은 자체 서브탭(근태·차량·결재) 으로 세분화한다.
+// 최상위 탭. 홈은 상단바(TopBar)로 이동 — 하단은 5개 (사무·외근·차량·현장관리·작업·자재).
+// 사무 그룹은 자체 서브탭(근태·결재) 으로 세분화한다.
+// 「공사」 탭은 2026-09-20 「외근·차량」 으로 교체 — 공사 목록 진입점은 홈 카드 「공사 설계」 로 복귀.
 const TABS: Tab[] = [
   {
     href: '/attendance',
     label: '사무',
     icon: Briefcase,
-    matchPrefixes: ['/attendance', '/vehicles', '/requests', '/approvals'],
+    matchPrefixes: ['/attendance', '/requests', '/approvals'],
   },
   {
-    href: '/relocation',
-    label: '공사',
-    icon: ClipboardList,
-    matchPrefixes: ['/relocation'],
+    href: '/trips',
+    label: '외근·차량',
+    icon: Car,
+    matchPrefixes: ['/trips', '/vehicles'],
   },
   {
     href: '/field',

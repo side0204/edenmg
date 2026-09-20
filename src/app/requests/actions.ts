@@ -6,7 +6,7 @@ import { createClient } from '@/lib/supabase/server'
 import {
   ATTACHMENT_ALLOWED_TYPES,
   LEAVE_TYPE_META,
-  LEAVE_TYPE_VALUES,
+  LEAVE_TYPE_SELECTABLE,
   type LeaveType,
 } from '@/lib/leave'
 // R2 (S3-compatible) 클라이언트 — 2026-05-25 owner 요청으로 Supabase Storage → R2 이전
@@ -73,7 +73,7 @@ function parseSubmitForm(formData: FormData) {
 }
 
 function validateSubmit(p: ReturnType<typeof parseSubmitForm>): string | null {
-  if (!LEAVE_TYPE_VALUES.includes(p.type)) return '신청 종류를 선택하세요.'
+  if (!LEAVE_TYPE_SELECTABLE.includes(p.type)) return '신청 종류를 선택하세요. (외근은 「외근·차량」 탭에서 시작합니다)'
   if (!p.start_date) return '시작일을 선택하세요.'
   if (!p.end_date) return '종료일을 선택하세요.'
   if (p.end_date < p.start_date) return '종료일은 시작일 이후여야 합니다.'

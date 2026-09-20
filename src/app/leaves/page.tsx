@@ -44,7 +44,7 @@ export default async function LeavesPage() {
   const monthFirst = `${yearStr}-${monthStr}-01`
   const monthLast = `${yearStr}-${monthStr}-${String(lastDayOfMonth).padStart(2, '0')}`
 
-  // 이번 달에 일부라도 걸치는 승인된 휴가·외근
+  // 이번 달에 일부라도 걸치는 승인된 휴가
   const { data: leavesData } = await supabase
     .from('leave_requests')
     .select(
@@ -52,6 +52,7 @@ export default async function LeavesPage() {
     )
     .eq('company_id', me.company_id)
     .eq('status', '승인')
+    .neq('type', '외근')
     .lte('start_date', monthLast)
     .gte('end_date', monthFirst)
     .order('start_date', { ascending: true })
@@ -94,18 +95,18 @@ export default async function LeavesPage() {
             홈
           </Link>
           <h1 className="mt-1 text-3xl font-bold text-slate-900 tracking-tight">
-            휴가·외근 현황
+            휴가 현황
           </h1>
           <p className="mt-1 text-sm text-slate-500">
-            {yearStr}년 {monthNum}월 · 회사 전체 승인된 휴가·외근
+            {yearStr}년 {monthNum}월 · 회사 전체 승인된 휴가
           </p>
         </header>
 
         {leaves.length === 0 ? (
           <EmptyState
             icon={CalendarDays}
-            title="이번 달 휴가·외근 없음"
-            description="승인된 휴가·외근이 아직 없습니다."
+            title="이번 달 휴가 없음"
+            description="승인된 휴가이 아직 없습니다."
           />
         ) : (
           <>

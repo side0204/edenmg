@@ -77,10 +77,12 @@ export async function GET(request: NextRequest) {
     .from('vehicle_trips')
     .select(
       `
-        id, departed_at, returned_at,
+        id, departed_at, returned_at, expected_arrival_at,
         start_odometer_km, end_odometer_km,
-        purpose, refueled, refuel_amount_krw,
+        purpose, place, transport, personal_plate, other_note,
+        refueled, refuel_amount_krw,
         vehicles:vehicle_id ( plate_number, name ),
+        vehicle_trip_companions ( employees ( name ) ),
         employees:driver_employee_id ( name, permission, position, team, work_type )
       `,
     )
@@ -99,12 +101,18 @@ export async function GET(request: NextRequest) {
   type Row = {
     departed_at: string
     returned_at: string | null
+    expected_arrival_at: string | null
     start_odometer_km: number | null
     end_odometer_km: number | null
     purpose: string | null
+    place: string | null
+    transport: string | null
+    personal_plate: string | null
+    other_note: string | null
     refueled: boolean
     refuel_amount_krw: number | null
     vehicles: { plate_number: string | null; name: string | null } | null
+    vehicle_trip_companions: { employees: { name: string | null } | { name: string | null }[] | null }[] | null
     employees: {
       name: string | null
       permission: string | null
@@ -120,13 +128,22 @@ export async function GET(request: NextRequest) {
       r.start_odometer_km !== null && r.end_odometer_km !== null
         ? r.end_odometer_km - r.start_odometer_km
         : ''
+    const transport = r.transport ?? '업무용'
+    const plate = transport === '업무용' ? r.vehicles?.plate_number ?? '' : transport === '자차' ? r.personal_plate ?? '' : r.other_note ?? ''
+    const companions = (r.vehicle_trip_companions ?? [])
+      .map((c) => (Array.isArray(c.employees) ? c.employees[0]?.name : c.employees?.name) ?? '')
+      .filter(Boolean)
+      .join(', ')
     return [
       dateTimeKST(r.departed_at),
+      dateTimeKST(r.expected_arrival_at),
       dateTimeKST(r.returned_at),
       durationMinutes(r.departed_at, r.returned_at),
-      r.vehicles?.plate_number ?? '',
-      r.vehicles?.name ?? '',
+      transport,
+      plate,
+      transport === '업무용' ? r.vehicles?.name ?? '' : '',
       r.employees?.name ?? '',
+      companions,
       PERMISSION_LABEL[r.employees?.permission as keyof typeof PERMISSION_LABEL] ?? '',
       r.employees?.position ?? '',
       r.employees?.team ?? '',
@@ -135,6 +152,7 @@ export async function GET(request: NextRequest) {
       r.end_odometer_km ?? '',
       distance,
       r.purpose ?? '',
+      r.place ?? '',
       r.refueled ? 'O' : 'X',
       r.refueled && r.refuel_amount_krw !== null ? r.refuel_amount_krw : '',
     ]
@@ -147,12 +165,15 @@ export async function GET(request: NextRequest) {
 }
 
 const VEHICLE_TRIP_HEADERS = [
-  '출고일시',
-  '반납일시',
+  '출발일시',
+  '도착예정',
+  '도착일시',
   '운행시간',
+  '구분',
   '차량번호',
   '차명',
   '운전자',
+  '동행인',
   '권한',
   '직급',
   '팀',
@@ -160,7 +181,8 @@ const VEHICLE_TRIP_HEADERS = [
   '출발km',
   '도착km',
   '주행km',
-  '목적',
+  '업무목적',
+  '외근장소',
   '주유',
   '주유금액',
 ]

@@ -3,7 +3,6 @@ import Link from 'next/link'
 import {
   Bell,
   Clock,
-  Car,
   ClipboardCheck,
   Hammer,
   Settings,
@@ -12,6 +11,8 @@ import {
   CalendarDays,
   Package,
   BookOpen,
+  MapPin,
+  Plus,
 } from 'lucide-react'
 import { createClient } from '@/lib/supabase/server'
 import { LEAVE_TYPE_LABEL, formatPeriod, type LeaveType } from '@/lib/leave'
@@ -31,7 +32,7 @@ import {
   type HomeCardId,
 } from '@/lib/home-cards'
 import { signOut } from './login/actions'
-import VehicleStatusList from './VehicleStatusList'
+import TripHomeCard from './TripHomeCard'
 import TodayWorksCard, {
   type ActiveCheckRow,
   type ClosedCheckRow,
@@ -163,7 +164,6 @@ export default async function Home() {
     todayAttRes,
     vehiclesRes,
     activeTripsRes,
-    recentReturnedRes,
     myAssignsRes,
     todayChecksRes,
     myHoldingsCountRes,
@@ -173,6 +173,7 @@ export default async function Home() {
     approvalsCountRes,
     myPendingCountRes,
     todayLeavesRes,
+    relocationRes,
   ] = await Promise.all([
     supabase
       .from('attendances')
@@ -190,19 +191,10 @@ export default async function Home() {
     supabase
       .from('vehicle_trips')
       .select(
-        'id, vehicle_id, departed_at, driver_employee_id, start_odometer_km, purpose, employees!driver_employee_id(name)',
+        'id, vehicle_id, departed_at, expected_arrival_at, driver_employee_id, start_odometer_km, purpose, place, transport, personal_plate, other_note, employees!driver_employee_id(name)',
       )
       .eq('company_id', employee.company_id)
       .is('returned_at', null),
-    supabase
-      .from('vehicle_trips')
-      .select(
-        'vehicle_id, end_odometer_km, returned_at, return_location, driver_employee_id, employees!driver_employee_id(name)',
-      )
-      .eq('company_id', employee.company_id)
-      .not('returned_at', 'is', null)
-      .order('returned_at', { ascending: false })
-      .limit(50),
     supabase
       .from('work_assignments')
       .select(
@@ -268,9 +260,16 @@ export default async function Home() {
       )
       .eq('company_id', employee.company_id)
       .eq('status', '승인')
+      .neq('type', '외근')
       .lte('start_date', workDate)
       .gte('end_date', workDate)
       .order('start_date', { ascending: true }),
+    supabase
+      .from('relocation_projects')
+      .select('category')
+      .eq('company_id', employee.company_id)
+      .neq('status', '완료')
+      .limit(2000),
   ])
 
   // === 오늘 근태 ===
@@ -284,19 +283,16 @@ export default async function Home() {
   type EmbeddedEmployee = { name: string } | { name: string }[] | null
   type ActiveTrip = {
     id: string
-    vehicle_id: string
+    vehicle_id: string | null
     departed_at: string
+    expected_arrival_at: string | null
     driver_employee_id: string
     start_odometer_km: number | null
     purpose: string | null
-    employees: EmbeddedEmployee
-  }
-  type RecentReturned = {
-    vehicle_id: string
-    end_odometer_km: number | null
-    returned_at: string
-    return_location: string | null
-    driver_employee_id: string | null
+    place: string | null
+    transport: '업무용' | '자차' | '기타'
+    personal_plate: string | null
+    other_note: string | null
     employees: EmbeddedEmployee
   }
   const pickEmbeddedName = (emp: EmbeddedEmployee): string | null => {
@@ -306,45 +302,7 @@ export default async function Home() {
   }
   const vehicles = (vehiclesRes.data ?? []) as VehicleRow[]
   const activeTrips = (activeTripsRes.data ?? []) as unknown as ActiveTrip[]
-  const tripByVehicleId = new Map(activeTrips.map((t) => [t.vehicle_id, t]))
-
-  // 차량별 가장 최근 반납 정보 — km + 반납위치 + 마지막 운전자
-  const lastEndKmByVehicleId = new Map<string, number | null>()
-  const lastReturnByVehicleId = new Map<
-    string,
-    { driverName: string | null; returnedAt: string | null; returnLocation: string | null }
-  >()
-  for (const t of (recentReturnedRes.data ?? []) as unknown as RecentReturned[]) {
-    if (!lastEndKmByVehicleId.has(t.vehicle_id)) {
-      lastEndKmByVehicleId.set(t.vehicle_id, t.end_odometer_km)
-      lastReturnByVehicleId.set(t.vehicle_id, {
-        driverName: pickEmbeddedName(t.employees),
-        returnedAt: t.returned_at,
-        returnLocation: t.return_location,
-      })
-    }
-  }
-
-  const myVehicleTrip = activeTrips.find((t) => t.driver_employee_id === employee.id) ?? null
-  const myVehicle = myVehicleTrip ? vehicles.find((v) => v.id === myVehicleTrip.vehicle_id) ?? null : null
-  const myVehicleName = myVehicle ? `${myVehicle.plate_number} · ${myVehicle.name}` : null
-
-  // 정렬: 사용중 → 대기 → 비활성, 그 안에서 plate_number
-  const vehicleStatusRows = vehicles
-    .map((v) => {
-      const trip = tripByVehicleId.get(v.id) ?? null
-      const status: 'in_use' | 'idle' | 'inactive' = !v.is_active
-        ? 'inactive'
-        : trip
-          ? 'in_use'
-          : 'idle'
-      return { vehicle: v, trip, status }
-    })
-    .sort((a, b) => {
-      const order = { in_use: 0, idle: 1, inactive: 2 } as const
-      if (order[a.status] !== order[b.status]) return order[a.status] - order[b.status]
-      return a.vehicle.plate_number.localeCompare(b.vehicle.plate_number)
-    })
+  const tripByVehicleId = new Map(activeTrips.filter((t) => t.vehicle_id).map((t) => [t.vehicle_id as string, t]))
 
   // ===== 내 작업 (배정자 알림용) =====
   type MyAssignJoined = {
@@ -515,14 +473,23 @@ export default async function Home() {
     ),
   )
 
-  // ===== 2차 배치 (1차 결과에 의존) — 현장명 + 휴가 인원명 병렬 =====
-  const [siteRes, leavePersonsRes] = await Promise.all([
+  // ===== 2차 배치 (1차 결과에 의존) — 현장명 + 휴가 인원명 + 외근 동행인 병렬 =====
+  const [siteRes, leavePersonsRes, companionsRes] = await Promise.all([
     today?.site_id
       ? supabase.from('sites').select('name').eq('id', today.site_id).maybeSingle()
       : Promise.resolve({ data: null }),
     leavePersonIds.length > 0
       ? supabase.from('employees').select('id, name').in('id', leavePersonIds)
       : Promise.resolve({ data: [] as { id: string; name: string }[] }),
+    activeTrips.length > 0
+      ? supabase
+          .from('vehicle_trip_companions')
+          .select('trip_id, employee_id, employees(name)')
+          .in(
+            'trip_id',
+            activeTrips.map((t) => t.id),
+          )
+      : Promise.resolve({ data: [] as unknown[] }),
   ])
   const todaySiteName: string | null =
     siteRes.data && typeof siteRes.data === 'object' && 'name' in siteRes.data
@@ -581,58 +548,47 @@ export default async function Home() {
         />
       ) : undefined,
 
-    vehicles: !isFieldWorker ? (
-      <section className="rounded-2xl bg-white shadow-sm border border-slate-200 dark:bg-slate-900 dark:border-slate-800 p-6 space-y-4">
-        <h2 className="flex items-center gap-2 text-base font-semibold text-slate-700 tracking-tight dark:text-slate-300">
-          <Car className="h-5 w-5 text-slate-400" />
-          업무용 차량
-        </h2>
-        {myVehicleTrip && (
-          <div className="space-y-2">
-            <p className="text-base text-slate-900">
-              사용 중: <span className="font-semibold">{myVehicleName ?? '?'}</span>
-              <span className="ml-2 text-sm text-slate-500">
-                출고 {fmtHourMin(myVehicleTrip.departed_at)}
-              </span>
-            </p>
-            <Link
-              href={`/vehicles/${myVehicleTrip.vehicle_id}/return`}
-              className="block rounded-xl bg-emerald-600 hover:bg-emerald-700 active:bg-emerald-800 px-4 py-4 text-lg font-bold text-white text-center"
-            >
-              반납하기 →
-            </Link>
-          </div>
-        )}
-        <VehicleStatusList
-          rows={vehicleStatusRows.map(({ vehicle, trip, status }) => {
-            const lastReturn = lastReturnByVehicleId.get(vehicle.id) ?? null
-            return {
-              vehicleId: vehicle.id,
-              plateNumber: vehicle.plate_number,
-              name: vehicle.name,
-              status,
-              driverName: trip ? pickEmbeddedName(trip.employees) : null,
-              departedAt: trip?.departed_at ?? null,
-              startOdometerKm: trip?.start_odometer_km ?? null,
-              purpose: trip?.purpose ?? null,
-              isMine: trip?.driver_employee_id === employee.id,
-              tripId: trip?.id ?? null,
-              lastEndOdometerKm: lastEndKmByVehicleId.get(vehicle.id) ?? null,
-              lastDriverName: lastReturn?.driverName ?? null,
-              lastReturnedAt: lastReturn?.returnedAt ?? null,
-              lastReturnLocation: lastReturn?.returnLocation ?? null,
-            }
-          })}
-          hasMyActive={!!myVehicleTrip}
+    vehicles: (() => {
+      type CompanionRow = { trip_id: string; employee_id: string; employees: EmbeddedEmployee }
+      const companionsByTrip = new Map<string, { id: string; name: string }[]>()
+      for (const c of ((companionsRes.data ?? []) as unknown) as CompanionRow[]) {
+        const arr = companionsByTrip.get(c.trip_id) ?? []
+        arr.push({ id: c.employee_id, name: pickEmbeddedName(c.employees) ?? '?' })
+        companionsByTrip.set(c.trip_id, arr)
+      }
+      const vehicleLabel = (id: string | null) => {
+        const v = id ? vehicles.find((x) => x.id === id) ?? null : null
+        return v ? `${v.plate_number} ${v.name}` : null
+      }
+      const toRow = (t: ActiveTrip) => ({
+        id: t.id,
+        driverId: t.driver_employee_id,
+        driverName: pickEmbeddedName(t.employees) ?? '?',
+        purpose: t.purpose,
+        place: t.place,
+        departedAt: t.departed_at,
+        expectedArrivalAt: t.expected_arrival_at,
+        transport: t.transport,
+        transportLabel:
+          t.transport === '업무용'
+            ? vehicleLabel(t.vehicle_id) ?? '업무용'
+            : t.transport === '자차'
+              ? t.personal_plate ?? '자차'
+              : t.other_note ?? '기타',
+        companions: (companionsByTrip.get(t.id) ?? []).map((c) => c.name),
+        isMine: t.driver_employee_id === employee.id,
+        isRiding: (companionsByTrip.get(t.id) ?? []).some((c) => c.id === employee.id),
+      })
+      const idleVehicles = vehicles.filter((v) => v.is_active && !tripByVehicleId.has(v.id))
+      return (
+        <TripHomeCard
+          trips={activeTrips.map(toRow)}
+          vehicleTotal={vehicles.filter((v) => v.is_active).length}
+          vehicleInUse={vehicles.filter((v) => v.is_active && tripByVehicleId.has(v.id)).length}
+          idleLabel={idleVehicles.map((v) => v.plate_number).slice(0, 2).join(' · ') || null}
         />
-        <Link
-          href="/vehicles"
-          className="block rounded-lg border border-slate-200 hover:border-slate-900 px-4 py-3 text-base font-medium text-slate-900 dark:border-slate-800 dark:hover:border-slate-100 dark:text-slate-100 text-center"
-        >
-          전체 차량 관리 →
-        </Link>
-      </section>
-    ) : undefined,
+      )
+    })(),
 
     my_materials:
       (myHoldingsCount ?? 0) > 0 ? (
@@ -826,12 +782,12 @@ export default async function Home() {
       <section className="rounded-2xl bg-white shadow-sm border border-slate-200 dark:bg-slate-900 dark:border-slate-800 p-6 space-y-3">
         <h2 className="flex items-center gap-2 text-base font-semibold text-slate-700 tracking-tight dark:text-slate-300">
           <CalendarDays className="h-5 w-5 text-slate-400" />
-          휴가·외근 현황
+          휴가 현황
           <span className="ml-auto text-xs font-normal text-slate-400">오늘</span>
         </h2>
         {todayLeaves.length === 0 ? (
           <p className="rounded-lg bg-slate-50 px-4 py-6 text-center text-sm text-slate-500">
-            오늘 휴가·외근 중인 직원이 없습니다.
+            오늘 휴가 중인 직원이 없습니다.
           </p>
         ) : (
           <ul className="divide-y divide-slate-100 rounded-lg border border-slate-200">
@@ -873,7 +829,46 @@ export default async function Home() {
       </section>
     ),
 
-    // 'relocation' 카드는 BottomNav 「공사설계」 탭으로 이동 (owner 2026-05-25)
+    relocation: (() => {
+      const counts: Record<string, number> = { 청약: 0, 계획: 0, 지장이설: 0 }
+      for (const r of (relocationRes.data ?? []) as { category: string }[]) {
+        counts[r.category] = (counts[r.category] ?? 0) + 1
+      }
+      return (
+        <section className="rounded-2xl bg-white shadow-sm border border-slate-200 dark:bg-slate-900 dark:border-slate-800 p-6 space-y-3">
+          <h2 className="flex items-center gap-2 text-base font-semibold text-slate-700 tracking-tight dark:text-slate-300">
+            <MapPin className="h-5 w-5 text-slate-400" />
+            공사 설계
+            <span className="ml-auto text-xs font-normal text-slate-400">진행 중</span>
+          </h2>
+          <div className="grid grid-cols-3 gap-2">
+            {(
+              [
+                ['청약', 'subscription'],
+                ['계획', 'planning'],
+                ['지장이설', 'relocation'],
+              ] as const
+            ).map(([label, slug]) => (
+              <Link
+                key={slug}
+                href={`/relocation/category/${slug}`}
+                className="rounded-xl bg-slate-50 px-3 py-2.5 hover:bg-slate-100 dark:bg-slate-800 dark:hover:bg-slate-700"
+              >
+                <p className="text-[11px] text-slate-500">{label}</p>
+                <p className="text-lg font-bold tracking-tight text-slate-900 dark:text-slate-100">{counts[label] ?? 0}</p>
+              </Link>
+            ))}
+          </div>
+          <Link
+            href="/relocation/new?cat=subscription"
+            className="flex items-center justify-center gap-1 rounded-lg border border-slate-200 hover:border-slate-900 px-4 py-3 text-base font-medium text-slate-900 dark:border-slate-800 dark:hover:border-slate-100 dark:text-slate-100"
+          >
+            <Plus className="h-4 w-4" />
+            프로젝트 생성
+          </Link>
+        </section>
+      )
+    })(),
 
     admin: isAdmin ? (
       <section className="rounded-2xl bg-white shadow-sm border border-slate-200 dark:bg-slate-900 dark:border-slate-800 p-6 space-y-3">

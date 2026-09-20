@@ -15,7 +15,7 @@ export default function Page() {
     <ScenarioFrame scenario={scenario}>
       <SectionTitle>한 줄로</SectionTitle>
       <p>
-        연차·반차·반반차·병가·공가·외근을 모바일에서 신청. <b>대무자</b> 와{' '}
+        연차·반차·반반차·병가·공가를 모바일에서 신청. (외근은 결재 없이 「외근·차량」 탭에서 바로 시작) <b>대무자</b> 와{' '}
         <b>1차 결재자(팀장)</b> 를 지정하면 결재함으로 자동 전달됩니다.
       </p>
 
@@ -40,11 +40,10 @@ export default function Page() {
           <ul className="list-disc pl-5 text-sm text-slate-600 space-y-0.5">
             <li>연차 — 시작일·종료일 (반차는 오전/오후, 반반차는 시간 선택)</li>
             <li>병가·공가 — 시작/종료일 + 증빙 첨부 (선택)</li>
-            <li>외근 — 시작/종료 시각, 사유, 장소</li>
           </ul>
           <Screenshot
             file="leave-request-01-form.png"
-            caption="신청 폼 전체 — 종류 select 펼친 모습 (6가지 종류와 동적 분기 칸)"
+            caption="신청 폼 전체 — 종류 select 펼친 모습 (5가지 종류와 동적 분기 칸)"
             priority="must"
           />
         </Step>

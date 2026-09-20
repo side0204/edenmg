@@ -19,8 +19,12 @@ type EmployeeOpt = { id: string; name: string }
 
 type TripRow = {
   id: string
-  vehicle_id: string
+  vehicle_id: string | null
   driver_employee_id: string
+  transport: '업무용' | '자차' | '기타' | null
+  place: string | null
+  personal_plate: string | null
+  other_note: string | null
   departed_at: string
   returned_at: string | null
   start_odometer_km: number | null
@@ -123,7 +127,7 @@ export default async function VehicleTripsPage({
     let q = supabase
       .from('vehicle_trips')
       .select(
-        'id, vehicle_id, driver_employee_id, departed_at, returned_at, start_odometer_km, end_odometer_km, purpose, refueled, refuel_amount_krw',
+        'id, vehicle_id, driver_employee_id, departed_at, returned_at, start_odometer_km, end_odometer_km, purpose, refueled, refuel_amount_krw, transport, place, personal_plate, other_note',
       )
       .eq('company_id', me.company_id)
       .gte('departed_at', startIso)
@@ -365,10 +369,11 @@ export default async function VehicleTripsPage({
               <table className="w-full text-xs">
                 <thead className="bg-slate-50 text-slate-600">
                   <tr>
-                    <Th>출고</Th>
-                    <Th>반납</Th>
-                    <Th>차량</Th>
+                    <Th>출발</Th>
+                    <Th>도착</Th>
+                    <Th>이동수단</Th>
                     <Th>운전자</Th>
+                    <Th>장소</Th>
                     <Th className="text-right">출발km</Th>
                     <Th className="text-right">도착km</Th>
                     <Th className="text-right">주행km</Th>
@@ -390,11 +395,18 @@ export default async function VehicleTripsPage({
                           {t.returned_at ? (
                             TIME_FMT.format(new Date(t.returned_at))
                           ) : (
-                            <span className="text-emerald-700 font-medium">사용 중</span>
+                            <span className="text-emerald-700 font-medium">외근 중</span>
                           )}
                         </Td>
-                        <Td>{vehicleNameById.get(t.vehicle_id) ?? '?'}</Td>
+                        <Td>
+                          {t.transport === '자차'
+                            ? `자차 ${t.personal_plate ?? ''}`.trim()
+                            : t.transport === '기타'
+                              ? t.other_note ?? '기타'
+                              : (t.vehicle_id ? vehicleNameById.get(t.vehicle_id) : null) ?? '?'}
+                        </Td>
                         <Td>{employeeNameById.get(t.driver_employee_id) ?? '?'}</Td>
+                        <Td className="max-w-[160px] truncate">{t.place ?? '-'}</Td>
                         <Td className="text-right tabular-nums">
                           {t.start_odometer_km !== null ? t.start_odometer_km.toLocaleString() : '-'}
                         </Td>

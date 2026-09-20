@@ -53,6 +53,9 @@ export const LEAVE_TYPE_META: Record<LeaveType, { multiDay: boolean; needsTime: 
   '외근':       { multiDay: false, needsTime: true  },
 }
 
+// 신규 신청 가능 종류. '외근' 은 2026-09-20 외근·차량 모듈(/trips)로 이동 — 기존 데이터 표시용으로만 enum 유지.
+export const LEAVE_TYPE_SELECTABLE: readonly LeaveType[] = LEAVE_TYPE_VALUES.filter((t) => t !== '외근')
+
 // 첨부파일 가능 종류 — 폼/상세에서 분기.
 export const ATTACHMENT_ALLOWED_TYPES: readonly LeaveType[] = ['병가', '공가']
 

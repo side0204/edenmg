@@ -1329,6 +1329,34 @@ owner 요구: "어느 메뉴를 많이 쓰는지" 페이지 단위 분석. 접�
 - **이벤트 클릭 → 일정 변경 요청 모달** ([ScheduleChangeRequestModal](./src/app/works/schedule/ScheduleChangeRequestModal.tsx)): 본인 배정 작업이면 사유·새 일자 입력 → `createScheduleChangeRequest`. 본인 담당 작업이면 「대기 중 요청」 섹션에서 승인(`approveScheduleChangeRequest` — 승인 시 `works.start_date/end_date` 자동 갱신)/반려 가능.
 - **알림 (인앱 배지)** — `work_schedule_change_requests` 테이블 (append-only, RLS 3개). 홈 카드 [`schedule_changes`](./src/lib/home-cards.ts) (담당자 본인의 pending 카운트만 노출) + `/works` 헤더 「작업 캘린더」 버튼에 amber 배지.
 
+### ✅ 완료 (외근·차량 통합 — 외근 = 이동 1건 + 동행인 + 차계부 + 최상위 탭, 2026-09-20)
+
+owner 요구: 외근과 차량관리를 한 화면에서. 업무용/자차 구분, 동행 최대 4인, 목적·장소·출발·도착 표시, 차계부 통합, 공사 탭 대신 외근·차량을 하단 탭으로. 디자인은 목업 캔버스에서 방향 A(차분한 정돈) + 방향 B 의 큰 시각 표기 채택.
+
+| 항목 | 결정 | 비고 |
+|---|---|---|
+| **개념** | 외근 1건 = `vehicle_trips` 1행. 차량 출고·반납은 외근의 이동수단(transport) | 새 테이블 대신 기존 테이블 확장 — 기존 운행 이력·RPC·CSV 그대로 |
+| **이동수단** | 업무용(vehicle_id) / 자차(personal_plate 스냅샷) / 기타(도보·대중교통·동승) | `vehicle_id` NOT NULL 해제 + CHECK `(transport='업무용') = (vehicle_id is not null)` |
+| **외근 결재** | 없음 — 기록만 (차량 출고와 동일 정책) | 휴가 신청서의 '외근' 종류는 신규 입력 차단(`LEAVE_TYPE_SELECTABLE`), 기존 데이터 보존 |
+| **동행인** | 최대 4명, `vehicle_trip_companions` (트리거 강제). 동행인 홈에는 「외근 중 (동승)」 표시만 | 동행인별 별도 외근 행 X. 도착 처리는 운전자만 |
+| **공개 범위** | 회사 전원 (기존 `vehicle_trips_select` 그대로) | 「오늘 외근」 표에 전 직원 |
+| **차계부** | `vehicle_logs` — 업무용(vehicle_id) XOR 자차(personal_employee_id). 수동 항목 8종(주유·정비·보험·검사·세금·통행·주차·기타) 회사 누구나 입력, 수정·삭제 작성자 OR admin | 운행·주유(자동)는 vehicle_trips 원본 그대로 타임라인에 합쳐 표시 (중복 저장 X) |
+| **취소** | 출발 후 10분 내 본인 — 0084 RPC 재사용 (동행인 cascade) | |
+| **한 사람 동시 1건** | partial unique `vehicle_trips_active_per_driver` | 기존 데이터에 중복 있으면 NOTICE 후 건너뜀 |
+
+- **마이그** [`0095_trips_companions_vehicle_logs.sql`](./supabase/migrations/0095_trips_companions_vehicle_logs.sql) — vehicle_trips 확장(transport·place·expected_arrival_at·personal_plate·other_note·notes) + `vehicle_trip_companions` + `vehicle_logs` + RLS + GRANT
+- **공통 lib** [`src/lib/trips.ts`](./src/lib/trips.ts) — transport/log kind 상수·점 색·KST 시간 헬퍼(`kstDateTimeToIso`·`todayRangeKST`·`monthRangeKSTLocal`)·`transportText`
+- **server actions** [`src/app/trips/actions.ts`](./src/app/trips/actions.ts) — `startTrip`·`endTrip`·`cancelTrip`·`addVehicleLog`·`deleteVehicleLog`
+- **화면** (디자인 A: 연회색 바탕 + 테두리 없는 흰 면(`ring-slate-900/5`) + 점 상태 + 가로선만 있는 표. 공용 프리미티브 [`src/app/trips/ui.tsx`](./src/app/trips/ui.tsx))
+  - [`/trips`](./src/app/trips/page.tsx) — 한 페이지 3구역: 내 외근(큰 출발→도착 시각 + 진행선 + 도착 버튼) / 오늘 외근 표(모바일 4열 · md+ 11열) / 차량 표(업무용 + 자차, 모바일 5열 · md+ 12열: 누적·이달 주행·이달 주유·다음 정비 D-day·보험사·차계부)
+  - [`/trips/new`](./src/app/trips/new/page.tsx) + [`TripStartForm`](./src/app/trips/new/TripStartForm.tsx) — 목적·장소(최근 장소 칩)·출발/도착예정·이동수단 세그먼트·차량 라디오(사용 중은 흐리게)·출발 km·[`CompanionPicker`](./src/app/trips/new/CompanionPicker.tsx)(풀스크린 모달, 항상 mount + hidden 토글)
+  - [`/trips/[id]/end`](./src/app/trips/[id]/end/page.tsx) + `TripEndForm` — 도착시간·도착 km(주행거리 라이브)·주유 토글·반납 위치(업무용만)·메모
+  - [`/trips/logbook/[kind]/[id]`](./src/app/trips/logbook/[kind]/[id]/page.tsx) — kind=vehicle|personal. 월 이동, 통계 3칸, 정비 알림, 종류 칩 필터, 타임라인(운행·주유 자동 + 수동), `LogEntryForm` 모달, 삭제
+  - 시각 갱신은 [`useNow`](./src/app/trips/useNow.ts) (`useSyncExternalStore`, 서버 스냅샷 0) — effect 안 setState 린트 회피
+- **탭 개편**: BottomNav `사무 · 외근·차량 · 현장관리 · 작업 · 자재` (공사 탭 제거). OfficeSubTabs `근태 · 결재`. 홈 카드 `relocation`(공사 설계: 카테고리별 진행 건수 + 프로젝트 생성) 복귀, `vehicles` 카드는 [`TripHomeCard`](./src/app/TripHomeCard.tsx)(내 상태 + 외근 중 표 + 차량 한 줄) 로 교체, `leaves` 카드는 「휴가 현황」(외근 제외). `VehicleStatusList.tsx` 삭제
+- **기존 차량 화면**: `/vehicles` = 「차량 관리」(등록·수정·사용 종료·운행 현황, 뒤로가기 → /trips). `/vehicles/[id]/checkout` → `/trips/new?vehicle=`, `/vehicles/[id]/return` → `/trips/[tripId]/end` 리다이렉트. 운행 이력 검색·CSV 에 구분·장소·도착예정·동행인 열 추가
+- **후속 후보**: 차계부 영수증 사진(R2), PC 표 열 설정 저장(공사 목록 패턴), 자차 정산 월 CSV(단가 미정), 외근 수정(관리자)
+
 ### 🟡 미완 / 후속
 
 - **운영 작업 (owner 가 Supabase Dashboard 에서 SQL 실행 필요)** ⚠️
@@ -1395,6 +1423,7 @@ owner 요구: "어느 메뉴를 많이 쓰는지" 페이지 단위 분석. 접�
   - [`0087_field_note_photo_caption.sql`](./supabase/migrations/0087_field_note_photo_caption.sql) — 현장관리 사진 설명: `relocation_field_note_photos.caption text`
   - [`0088_field_note_photo_update_policy.sql`](./supabase/migrations/0088_field_note_photo_update_policy.sql) — 현장관리 사진 설명 수정 권한: `relocation_field_note_photos` UPDATE GRANT + RLS (0085 에서 누락. 업로더 OR admin). 없으면 caption 수정이 RLS 에 막힘
   - [`0089_field_stations.sql`](./supabase/migrations/0089_field_stations.sql) — 현장관리 국사현황(Phase D): `field_stations` + `field_station_sections` + `field_station_photos` + RLS (등록·수정 회사 누구나, 삭제 본인/admin). 사진은 기존 R2 버킷 재사용
+  - [`0095_trips_companions_vehicle_logs.sql`](./supabase/migrations/0095_trips_companions_vehicle_logs.sql) — 외근·차량 통합: `vehicle_trips` 확장(transport·place·expected_arrival_at·personal_plate·other_note·notes, vehicle_id nullable) + `vehicle_trip_companions`(최대 4 트리거) + `vehicle_logs`(차계부) + RLS. **실행 전 배포 금지** — 새 컬럼 조회하는 /trips·홈 카드가 빈 화면
 - **외선일보 별도 entity (v2)** — 접속일보와 동일 패턴으로 외선팀 전용 모듈. 외선 작업 특성(케이블 포설구간·전주번호 등)에 맞는 구조 별도 설계.
 - **접속일보 후속 (v2)** — segment-level 작업자 태그, 사진 첨부 + EXIF, 국사·함체 마스터 테이블화, 재접속 이력 조회, 지도 시각화
 - **M3 Phase 2 후속** — 사진 첨부 + EXIF·워터마크 (PRD M3-06), 일보 결재함 통합 (현재는 작업 상세에서 진입), 일반 일보 월별 CSV 리포트
