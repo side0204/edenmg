@@ -7,7 +7,7 @@ import { MAX_COMPANIONS } from '@/lib/trips'
 /**
  * 동행인 멀티 picker (최대 4명).
  *  - 트리거 「동행 추가」 → 풀스크린 모달 + 검색
- *  - 항목 탭 = 토글, 「완료」 로 닫음
+ *  - 항목 탭(onClick) = 토글, 「완료」 로 닫음. onPointerDown 금지 — 스크롤 시작 터치가 선택으로 잡힘
  *  - hidden input `companion_ids` 에 JSON id 배열
  *  - 모바일 안전 패턴: 모달 항상 mount + hidden 토글 (unmount 시 state 리셋 회피)
  */
@@ -132,8 +132,9 @@ export function CompanionPicker({
                     role="button"
                     tabIndex={0}
                     aria-disabled={disabled}
-                    onPointerDown={(e) => {
-                      e.preventDefault()
+                    // onClick (표준 탭) — onPointerDown 은 스크롤하려고 누르는 순간에도 토글돼 오선택 발생.
+                    // 모달이 닫히지 않는 토글 UI 라 ghost click 걱정 없음 (WorkersMultiSelect 와 동일).
+                    onClick={() => {
                       if (!disabled) toggle(c)
                     }}
                     onKeyDown={(e) => {
